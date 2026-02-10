@@ -1,0 +1,394 @@
+/* ============================================================================
+ * App Layout Styles
+ * ============================================================================ */
+
+.app-layout {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    background: var(--color-bg);
+}
+
+/* ============================================================================
+ * Chat Panel
+ * ============================================================================ */
+
+.chat-panel {
+    width: var(--chat-width);
+    min-width: var(--chat-width);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+}
+
+.chat-header {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.chat-header h2 {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-text);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.chat-header .logo {
+    width: 24px;
+    height: 24px;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+    border-radius: var(--radius-sm);
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.chat-message {
+    padding: var(--space-3);
+    border-radius: var(--radius-lg);
+    max-width: 100%;
+    word-wrap: break-word;
+}
+
+.chat-message.user {
+    background: var(--color-primary);
+    color: white;
+    align-self: flex-end;
+}
+
+.chat-message.assistant {
+    background: var(--color-surface-elevated);
+    color: var(--color-text);
+    align-self: flex-start;
+}
+
+.chat-message.system {
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    text-align: center;
+    align-self: center;
+}
+
+.chat-message.pending::after {
+    content: '...';
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+.chat-input-area {
+    padding: var(--space-4);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.style-controls {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.style-controls select {
+    flex: 1;
+    min-width: 100px;
+    font-size: var(--font-size-sm);
+}
+
+.chat-input-row {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.chat-input-row textarea {
+    flex: 1;
+    min-height: 60px;
+    max-height: 120px;
+    resize: vertical;
+    font-size: var(--font-size-sm);
+}
+
+.chat-input-row button {
+    padding: var(--space-2) var(--space-4);
+    background: var(--color-primary);
+    color: white;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    transition: background 0.15s ease;
+}
+
+.chat-input-row button:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.chat-input-row button:disabled {
+    background: var(--color-border);
+}
+
+.image-upload-btn {
+    padding: var(--space-2);
+    background: var(--color-surface-elevated);
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    transition: all 0.15s ease;
+}
+
+.image-upload-btn:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+}
+
+/* ============================================================================
+ * Canvas Workspace
+ * ============================================================================ */
+
+.canvas-workspace {
+    flex: 1;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    background: var(--color-bg);
+}
+
+.canvas-workspace.panning {
+    cursor: grab;
+}
+
+.canvas-workspace.panning.active {
+    cursor: grabbing;
+}
+
+.canvas-toolbar {
+    position: absolute;
+    top: var(--space-4);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+}
+
+.canvas-toolbar button {
+    padding: var(--space-2) var(--space-3);
+    background: transparent;
+    color: var(--color-text-muted);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    transition: all 0.15s ease;
+}
+
+.canvas-toolbar button:hover {
+    background: var(--color-surface-elevated);
+    color: var(--color-text);
+}
+
+.canvas-toolbar button.active {
+    background: var(--color-primary);
+    color: white;
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 1px solid var(--color-border);
+}
+
+.zoom-controls span {
+    min-width: 50px;
+    text-align: center;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+
+.canvas-empty {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--color-text-muted);
+}
+
+.canvas-empty h3 {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+    color: var(--color-text);
+}
+
+.canvas-empty p {
+    font-size: var(--font-size-base);
+}
+
+/* ============================================================================
+ * Inspector Panel
+ * ============================================================================ */
+
+.inspector-panel {
+    width: var(--inspector-width);
+    min-width: var(--inspector-width);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    border-left: 1px solid var(--color-border);
+}
+
+.inspector-header {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.inspector-header h3 {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.inspector-breadcrumb {
+    display: flex;
+    gap: var(--space-1);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.inspector-breadcrumb span {
+    cursor: pointer;
+}
+
+.inspector-breadcrumb span:hover {
+    color: var(--color-primary);
+}
+
+.inspector-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4);
+}
+
+.inspector-section {
+    margin-bottom: var(--space-5);
+}
+
+.inspector-section h4 {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-3);
+}
+
+.inspector-field {
+    margin-bottom: var(--space-3);
+}
+
+.inspector-field label {
+    display: block;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-1);
+}
+
+.inspector-field input,
+.inspector-field select,
+.inspector-field textarea {
+    width: 100%;
+}
+
+.inspector-field textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.inspector-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--color-text-muted);
+    text-align: center;
+    padding: var(--space-4);
+}
+
+.color-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-2);
+}
+
+.color-swatch {
+    aspect-ratio: 1;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.color-swatch:hover {
+    transform: scale(1.1);
+}
+
+.color-swatch.active {
+    border-color: var(--color-text);
+}
+
+.spacing-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-2);
+}
+
+.spacing-btn {
+    padding: var(--space-2);
+    background: var(--color-surface-elevated);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    transition: all 0.15s ease;
+}
+
+.spacing-btn:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+}
+
+.spacing-btn.active {
+    background: var(--color-primary);
+    color: white;
+}

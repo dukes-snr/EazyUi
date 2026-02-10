@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+dist/
+.next/
+out/
+build/
+.env
+.env*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+data/
+.vscode/
+.idea/
