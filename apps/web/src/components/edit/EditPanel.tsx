@@ -6,6 +6,9 @@ import { ArrowUpLeft, Redo2, Undo2, X } from 'lucide-react';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
+type RGB = { r: number; g: number; b: number };
+type RGBA = { r: number; g: number; b: number; a: number };
+type HSV = { h: number; s: number; v: number };
 
 const GAP_CLASSES = ['gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-6', 'gap-8'];
 const JUSTIFY_CLASSES = ['justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly'];
@@ -30,6 +33,94 @@ function parsePadding(value?: string): PaddingValues {
     if (parts.length === 2) return { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1] };
     if (parts.length === 3) return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1] };
     return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3] };
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function hexToRgb(hex: string): RGB | null {
+    const clean = hex.trim().replace('#', '');
+    if (clean.length !== 3 && clean.length !== 6) return null;
+    const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+    const int = parseInt(full, 16);
+    if (Number.isNaN(int)) return null;
+    return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+}
+
+function colorStringToRgba(color: string): RGBA | null {
+    const normalized = color.trim();
+    if (!normalized) return null;
+
+    const hex = hexToRgb(normalized);
+    if (hex) return { ...hex, a: 1 };
+
+    const match = normalized.match(/rgba?\(([^)]+)\)/i);
+    if (!match) return null;
+    const parts = match[1].split(',').map((x) => parseFloat(x.trim()));
+    if (parts.length < 3 || parts.some((x, idx) => idx < 3 && Number.isNaN(x))) return null;
+    const alpha = parts.length >= 4 && !Number.isNaN(parts[3]) ? clamp(parts[3], 0, 1) : 1;
+    return { r: parts[0], g: parts[1], b: parts[2], a: alpha };
+}
+
+function resolveColorToRgba(color: string): RGBA | null {
+    const direct = colorStringToRgba(color);
+    if (direct) return direct;
+    if (typeof document === 'undefined') return null;
+
+    const probe = document.createElement('span');
+    probe.style.color = color;
+    probe.style.display = 'none';
+    document.body.appendChild(probe);
+    const resolved = window.getComputedStyle(probe).color;
+    document.body.removeChild(probe);
+    return colorStringToRgba(resolved);
+}
+
+function rgbaToCss({ r, g, b, a }: RGBA) {
+    const rr = clamp(Math.round(r), 0, 255);
+    const gg = clamp(Math.round(g), 0, 255);
+    const bb = clamp(Math.round(b), 0, 255);
+    const aa = clamp(a, 0, 1);
+    return `rgba(${rr}, ${gg}, ${bb}, ${aa.toFixed(2)})`;
+}
+
+function rgbToHsv({ r, g, b }: RGB): HSV {
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const delta = max - min;
+    let h = 0;
+    if (delta !== 0) {
+        if (max === rn) h = ((gn - bn) / delta) % 6;
+        else if (max === gn) h = (bn - rn) / delta + 2;
+        else h = (rn - gn) / delta + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+    }
+    const s = max === 0 ? 0 : (delta / max) * 100;
+    const v = max * 100;
+    return { h, s, v };
+}
+
+function hsvToRgb({ h, s, v }: HSV): RGB {
+    const sn = clamp(s, 0, 100) / 100;
+    const vn = clamp(v, 0, 100) / 100;
+    const c = vn * sn;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = vn - c;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
 }
 
 function getIframeByScreenId(screenId: string) {
@@ -69,26 +160,70 @@ function ScrubNumberInput({
     const startXRef = useRef(0);
     const startValueRef = useRef(0);
     const draggingRef = useRef(false);
+    const scrubbingRef = useRef(false);
+    const suppressClickRef = useRef(false);
+    const targetValueRef = useRef(0);
+    const currentValueRef = useRef(0);
+    const rafRef = useRef<number | null>(null);
+    const deadZone = 4;
+    const sensitivity = 0.035;
+
+    const stopAnimation = () => {
+        if (rafRef.current !== null) {
+            window.cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
+    };
+
+    const animate = () => {
+        const delta = targetValueRef.current - currentValueRef.current;
+        if (Math.abs(delta) < 0.001) {
+            stopAnimation();
+            const final = Number.isInteger(step)
+                ? Math.round(currentValueRef.current)
+                : Math.round(currentValueRef.current * 100) / 100;
+            onChangeValue(String(final));
+            return;
+        }
+        currentValueRef.current += delta * 0.24;
+        const rounded = Number.isInteger(step)
+            ? Math.round(currentValueRef.current)
+            : Math.round(currentValueRef.current * 100) / 100;
+        onChangeValue(String(rounded));
+        rafRef.current = window.requestAnimationFrame(animate);
+    };
 
     const onPointerDown = (event: ReactPointerEvent<HTMLInputElement>) => {
         if (event.button !== 0) return;
         const parsed = parseFloat(value || '0');
         startValueRef.current = Number.isNaN(parsed) ? 0 : parsed;
+        currentValueRef.current = startValueRef.current;
+        targetValueRef.current = startValueRef.current;
         startXRef.current = event.clientX;
         draggingRef.current = true;
+        scrubbingRef.current = false;
+        suppressClickRef.current = false;
 
         const onMove = (moveEvent: PointerEvent) => {
             if (!draggingRef.current) return;
             const deltaX = moveEvent.clientX - startXRef.current;
-            let next = startValueRef.current + deltaX * step * 0.1;
+            if (!scrubbingRef.current && Math.abs(deltaX) < deadZone) return;
+            if (!scrubbingRef.current) {
+                scrubbingRef.current = true;
+                suppressClickRef.current = true;
+                document.body.style.userSelect = 'none';
+            }
+            let next = startValueRef.current + deltaX * step * sensitivity;
             if (typeof min === 'number') next = Math.max(min, next);
             if (typeof max === 'number') next = Math.min(max, next);
-            const rounded = Number.isInteger(step) ? Math.round(next) : Math.round(next * 100) / 100;
-            onChangeValue(String(rounded));
+            targetValueRef.current = next;
+            if (rafRef.current === null) rafRef.current = window.requestAnimationFrame(animate);
         };
 
         const onUp = () => {
             draggingRef.current = false;
+            document.body.style.userSelect = '';
+            stopAnimation();
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
         };
@@ -102,11 +237,161 @@ function ScrubNumberInput({
             value={value}
             onChange={(e) => onChangeValue(e.target.value)}
             onPointerDown={onPointerDown}
+            onClick={(e) => {
+                if (!suppressClickRef.current) return;
+                e.preventDefault();
+                e.stopPropagation();
+                suppressClickRef.current = false;
+            }}
             type="number"
             className={`${inputBase} cursor-ew-resize`}
             placeholder={placeholder}
             title="Drag horizontally to scrub value"
         />
+    );
+}
+
+function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+    const [open, setOpen] = useState(false);
+    const [hsv, setHsv] = useState<HSV>({ h: 0, s: 0, v: 100 });
+    const [alpha, setAlpha] = useState(1);
+    const [position, setPosition] = useState({ top: 0, left: 0 });
+    const wheelRef = useRef<HTMLDivElement | null>(null);
+    const triggerRef = useRef<HTMLDivElement | null>(null);
+    const popoverRef = useRef<HTMLDivElement | null>(null);
+    const resolvedColor = useMemo(() => resolveColorToRgba(value), [value]);
+    const displayColor = resolvedColor ? rgbaToCss(resolvedColor) : 'rgba(255, 255, 255, 1)';
+
+    useEffect(() => {
+        const rgba = resolveColorToRgba(value);
+        if (!rgba) return;
+        setHsv(rgbToHsv({ r: rgba.r, g: rgba.g, b: rgba.b }));
+        setAlpha(rgba.a);
+    }, [value]);
+
+    useEffect(() => {
+        if (!open) return;
+        const place = () => {
+            if (!triggerRef.current || !popoverRef.current) return;
+            const rect = triggerRef.current.getBoundingClientRect();
+            const pickerW = popoverRef.current.offsetWidth || 220;
+            const pickerH = popoverRef.current.offsetHeight || 200;
+            const padding = 12;
+            const left = clamp(rect.left, padding, window.innerWidth - pickerW - padding);
+            const top = clamp(rect.bottom + 8, padding, window.innerHeight - pickerH - padding);
+            setPosition({ top, left });
+        };
+        place();
+
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setOpen(false);
+        };
+        const onClickOutside = (e: MouseEvent) => {
+            const target = e.target as Node;
+            if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+            setOpen(false);
+        };
+
+        window.addEventListener('resize', place);
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('keydown', onKey);
+        document.addEventListener('mousedown', onClickOutside);
+        return () => {
+            window.removeEventListener('resize', place);
+            window.removeEventListener('scroll', place, true);
+            window.removeEventListener('keydown', onKey);
+            document.removeEventListener('mousedown', onClickOutside);
+        };
+    }, [open]);
+
+    const updateFromPoint = (clientX: number, clientY: number) => {
+        if (!wheelRef.current) return;
+        const rect = wheelRef.current.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = clientX - cx;
+        const dy = clientY - cy;
+        const radius = rect.width / 2;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const sat = clamp((distance / radius) * 100, 0, 100);
+        let hue = (Math.atan2(dy, dx) * 180) / Math.PI;
+        if (hue < 0) hue += 360;
+        const next = { ...hsv, h: hue, s: sat };
+        setHsv(next);
+        onChange(rgbaToCss({ ...hsvToRgb(next), a: alpha }));
+    };
+
+    const startWheelDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+        updateFromPoint(event.clientX, event.clientY);
+        const onMove = (moveEvent: PointerEvent) => updateFromPoint(moveEvent.clientX, moveEvent.clientY);
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+    };
+
+    const knobAngle = (hsv.h * Math.PI) / 180;
+    const knobRadius = (hsv.s / 100) * 50;
+    const knobX = 50 + Math.cos(knobAngle) * knobRadius;
+    const knobY = 50 + Math.sin(knobAngle) * knobRadius;
+
+    return (
+        <div className="relative">
+            <div ref={triggerRef} className="flex items-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => setOpen((v) => !v)}
+                    className="h-8 w-8 rounded-md border border-white/20 shadow-inner"
+                    style={{ backgroundColor: displayColor }}
+                    title="Open color picker"
+                />
+                <input
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={inputBase}
+                    placeholder="#RRGGBB or rgb(...)"
+                />
+            </div>
+            {open && (
+                <div
+                    ref={popoverRef}
+                    className="fixed z-[999] w-[220px] rounded-xl border border-white/10 bg-[#0f111a] p-3 shadow-2xl"
+                    style={{ top: position.top, left: position.left }}
+                >
+                    <div
+                        ref={wheelRef}
+                        onPointerDown={startWheelDrag}
+                        className="relative mx-auto h-[120px] w-[120px] rounded-full cursor-crosshair"
+                        style={{
+                            backgroundImage:
+                                'conic-gradient(from 90deg, red, yellow, lime, cyan, blue, magenta, red), radial-gradient(circle at center, white 0%, rgba(255,255,255,0) 62%)',
+                        }}
+                    >
+                        <div
+                            className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-black/70"
+                            style={{ left: `${knobX}%`, top: `${knobY}%` }}
+                        />
+                    </div>
+                    <div className="mt-3 space-y-2">
+                        <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Opacity</div>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={Math.round(alpha * 100)}
+                            onChange={(e) => {
+                                const nextAlpha = clamp(Number(e.target.value) / 100, 0, 1);
+                                setAlpha(nextAlpha);
+                                onChange(rgbaToCss({ ...hsvToRgb(hsv), a: nextAlpha }));
+                            }}
+                            className="w-full accent-indigo-400"
+                        />
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -138,6 +423,8 @@ export function EditPanel() {
     const [align, setAlign] = useState('items-start');
     const [gap, setGap] = useState('gap-2');
     const [elementAlign, setElementAlign] = useState<'left' | 'center' | 'right'>('left');
+    const [zIndex, setZIndex] = useState('');
+    const [textFlexAlign, setTextFlexAlign] = useState<'start' | 'center' | 'end' | 'stretch'>('start');
 
     const activeScreen = useMemo(() => {
         if (!spec || !screenId) return null;
@@ -151,6 +438,7 @@ export function EditPanel() {
     const showLink = selected?.tagName === 'A';
     const showLayout = elementType === 'container' || elementType === 'button' || elementType === 'badge';
     const showColor = elementType !== 'image';
+    const showTextFlexAlign = elementType === 'text' || elementType === 'badge' || elementType === 'button';
 
     useEffect(() => {
         const handler = (event: MessageEvent) => {
@@ -183,6 +471,7 @@ export function EditPanel() {
         setImageSrc(selected.attributes?.src || '');
         setLinkHref(selected.attributes?.href || '');
         setDisplay(selected.computedStyle.display === 'flex' ? 'flex' : selected.computedStyle.display === 'grid' ? 'grid' : 'block');
+        setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || ''));
         const ml = selected.computedStyle.marginLeft || '';
         const mr = selected.computedStyle.marginRight || '';
         if (ml === 'auto' && mr === 'auto') setElementAlign('center');
@@ -194,6 +483,11 @@ export function EditPanel() {
         setJustify(JUSTIFY_CLASSES.find((c) => classList.includes(c)) || 'justify-start');
         setAlign(ALIGN_CLASSES.find((c) => classList.includes(c)) || 'items-start');
         setGap(GAP_CLASSES.find((c) => classList.includes(c)) || 'gap-2');
+        const alignSelf = (selected.inlineStyle?.['align-self'] || '').toLowerCase();
+        if (alignSelf === 'center') setTextFlexAlign('center');
+        else if (alignSelf === 'flex-end' || alignSelf === 'end') setTextFlexAlign('end');
+        else if (alignSelf === 'stretch') setTextFlexAlign('stretch');
+        else setTextFlexAlign('start');
     }, [selected]);
 
     const applyPatch = (patch: HtmlPatch) => {
@@ -338,17 +632,35 @@ export function EditPanel() {
                                     <>
                                         <div className="space-y-2">
                                             <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Fill</div>
-                                            <input value={bgColor} onChange={(e) => { setBgColor(e.target.value); patchStyle({ 'background-color': e.target.value }); }} className={inputBase} />
+                                            <ColorWheelInput
+                                                value={bgColor}
+                                                onChange={(next) => {
+                                                    setBgColor(next);
+                                                    patchStyle({ 'background-color': next });
+                                                }}
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Text Color</div>
-                                            <input value={textColor} onChange={(e) => { setTextColor(e.target.value); patchStyle({ color: e.target.value }); }} className={inputBase} />
+                                            <ColorWheelInput
+                                                value={textColor}
+                                                onChange={(next) => {
+                                                    setTextColor(next);
+                                                    patchStyle({ color: next });
+                                                }}
+                                            />
                                         </div>
                                     </>
                                 )}
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Border Color</div>
-                                    <input value={borderColor} onChange={(e) => { setBorderColor(e.target.value); patchStyle({ 'border-color': e.target.value }); }} className={inputBase} />
+                                    <ColorWheelInput
+                                        value={borderColor}
+                                        onChange={(next) => {
+                                            setBorderColor(next);
+                                            patchStyle({ 'border-color': next });
+                                        }}
+                                    />
                                 </div>
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Border Width</div>
@@ -409,6 +721,41 @@ export function EditPanel() {
                                 </div>
                             </section>
 
+                            <section className="space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Z Index</div>
+                                <div className="grid grid-cols-[1fr_auto_auto] gap-2">
+                                    <ScrubNumberInput
+                                        value={zIndex}
+                                        onChangeValue={(next) => {
+                                            setZIndex(next);
+                                            patchStyle({ 'z-index': next || '0', position: selected.inlineStyle?.position || 'relative' });
+                                        }}
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            const current = parseInt(zIndex || '0', 10) || 0;
+                                            const next = String(current - 1);
+                                            setZIndex(next);
+                                            patchStyle({ 'z-index': next, position: selected.inlineStyle?.position || 'relative' });
+                                        }}
+                                        className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
+                                    >
+                                        -
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const current = parseInt(zIndex || '0', 10) || 0;
+                                            const next = String(current + 1);
+                                            setZIndex(next);
+                                            patchStyle({ 'z-index': next, position: selected.inlineStyle?.position || 'relative' });
+                                        }}
+                                        className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                            </section>
+
                             <section className="grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Width</div>
@@ -456,6 +803,49 @@ export function EditPanel() {
                                             Sans Font
                                         </button>
                                     </div>
+                                    {showTextFlexAlign && (
+                                        <div className="col-span-2 space-y-2">
+                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Flex Align</div>
+                                            <div className="grid grid-cols-4 gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setTextFlexAlign('start');
+                                                        patchStyle({ 'align-self': 'flex-start' });
+                                                    }}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                    Start
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setTextFlexAlign('center');
+                                                        patchStyle({ 'align-self': 'center' });
+                                                    }}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                    Center
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setTextFlexAlign('end');
+                                                        patchStyle({ 'align-self': 'flex-end' });
+                                                    }}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                    End
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setTextFlexAlign('stretch');
+                                                        patchStyle({ 'align-self': 'stretch' });
+                                                    }}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                    Stretch
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </section>
                             )}
 
@@ -463,15 +853,17 @@ export function EditPanel() {
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Padding</div>
                                 <div className="grid grid-cols-2 gap-3">
                                     {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                        <ScrubNumberInput
-                                            key={side}
-                                            value={toPxValue(padding[side])}
-                                            onChangeValue={(next) => {
-                                                setPadding((prev) => ({ ...prev, [side]: next }));
-                                                patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
-                                            }}
-                                            placeholder={side}
-                                        />
+                                        <div key={side} className="space-y-1">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">{side}</div>
+                                            <ScrubNumberInput
+                                                value={toPxValue(padding[side])}
+                                                onChangeValue={(next) => {
+                                                    setPadding((prev) => ({ ...prev, [side]: next }));
+                                                    patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
+                                                }}
+                                                placeholder={side}
+                                            />
+                                        </div>
                                     ))}
                                 </div>
                             </section>
@@ -480,15 +872,17 @@ export function EditPanel() {
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Margin</div>
                                 <div className="grid grid-cols-2 gap-3">
                                     {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                        <ScrubNumberInput
-                                            key={side}
-                                            value={toPxValue(margin[side])}
-                                            onChangeValue={(next) => {
-                                                setMargin((prev) => ({ ...prev, [side]: next }));
-                                                patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
-                                            }}
-                                            placeholder={side}
-                                        />
+                                        <div key={side} className="space-y-1">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">{side}</div>
+                                            <ScrubNumberInput
+                                                value={toPxValue(margin[side])}
+                                                onChangeValue={(next) => {
+                                                    setMargin((prev) => ({ ...prev, [side]: next }));
+                                                    patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
+                                                }}
+                                                placeholder={side}
+                                            />
+                                        </div>
                                     ))}
                                 </div>
                             </section>
