@@ -33,13 +33,19 @@ interface DesignState {
 
     // Actions
     setSpec: (spec: HtmlDesignSpec) => void;
-    updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete') => void;
+    updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete', width?: number, height?: number) => void;
     addScreen: (screen: HtmlScreen) => void;
     addScreens: (screens: HtmlScreen[]) => void;
 
     // State management
     setLoading: (loading: boolean) => void;
     setError: (error: string | null) => void;
+
+    // Platform selection
+    selectedPlatform: 'mobile' | 'tablet' | 'desktop';
+    setPlatform: (platform: 'mobile' | 'tablet' | 'desktop') => void;
+
+    removeScreen: (screenId: string) => void;
     reset: () => void;
 }
 
@@ -48,17 +54,26 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     isLoading: false,
     error: null,
 
+    selectedPlatform: 'mobile',
+    setPlatform: (platform) => set({ selectedPlatform: platform }),
+
     setSpec: (spec) => {
         set({ spec, error: null });
     },
 
-    updateScreen: (screenId, html, status) => {
+    updateScreen: (screenId, html, status, width, height) => {
         const { spec } = get();
         if (!spec) return;
 
         const updatedScreens = spec.screens.map(screen =>
             screen.screenId === screenId
-                ? { ...screen, html, status: (status || screen.status) as 'streaming' | 'complete' | undefined }
+                ? {
+                    ...screen,
+                    html,
+                    status: (status || screen.status) as 'streaming' | 'complete' | undefined,
+                    width: width || screen.width,
+                    height: height || screen.height
+                }
                 : screen
         );
 
@@ -117,6 +132,18 @@ export const useDesignStore = create<DesignState>((set, get) => ({
                 }
             });
         }
+    },
+
+    removeScreen: (screenId) => {
+        const { spec } = get();
+        if (!spec) return;
+        set({
+            spec: {
+                ...spec,
+                screens: spec.screens.filter(s => s.screenId !== screenId),
+                updatedAt: new Date().toISOString(),
+            }
+        });
     },
 
     setLoading: (isLoading) => set({ isLoading }),

@@ -12,6 +12,11 @@ export interface ChatMessage {
     timestamp: number;
     images?: string[];
     status?: 'pending' | 'complete' | 'error';
+    screenRef?: {
+        id: string;
+        label: string;
+        type: 'mobile' | 'tablet' | 'desktop';
+    };
 }
 
 interface ChatState {
@@ -19,7 +24,7 @@ interface ChatState {
     isGenerating: boolean;
 
     // Actions
-    addMessage: (role: ChatMessage['role'], content: string, images?: string[]) => string;
+    addMessage: (role: ChatMessage['role'], content: string, images?: string[], screenRef?: ChatMessage['screenRef']) => string;
     updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
     removeMessage: (id: string) => void;
     clearMessages: () => void;
@@ -30,7 +35,7 @@ export const useChatStore = create<ChatState>((set) => ({
     messages: [],
     isGenerating: false,
 
-    addMessage: (role, content, images) => {
+    addMessage: (role, content, images, screenRef) => {
         const id = uuidv4();
         const message: ChatMessage = {
             id,
@@ -38,6 +43,7 @@ export const useChatStore = create<ChatState>((set) => ({
             content,
             timestamp: Date.now(),
             images,
+            screenRef,
             status: role === 'assistant' ? 'pending' : 'complete',
         };
 
