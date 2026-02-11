@@ -1,5 +1,5 @@
 import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
-import { memo, useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { useDesignStore, useChatStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import Grainient from '../ui/Grainient';
@@ -299,7 +299,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
     const { messages, addMessage, updateMessage } = useChatStore();
     const { removeBoard, doc, setFocusNodeId } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, enterEdit } = useEditStore();
+    const { isEditMode, screenId: editScreenId, enterEdit, reloadTick } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -446,10 +446,26 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
     const baseHtml = injectScrollbarHide(data.html as string);
-    const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
+    const withEditor = isEditMode && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
     const injectedHtml = isDesktop && data.screenId
         ? injectHeightScript(withEditor, data.screenId as string)
         : withEditor;
+
+    const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtml);
+    const wasEditingRef = useRef(false);
+    const lastReloadTickRef = useRef(reloadTick);
+    useEffect(() => {
+        if (isEditingScreen) {
+            const reloadRequested = lastReloadTickRef.current !== reloadTick;
+            if (!wasEditingRef.current || reloadRequested) {
+                setStableSrcDoc(injectedHtml);
+            }
+        } else {
+            setStableSrcDoc(injectedHtml);
+        }
+        wasEditingRef.current = isEditingScreen;
+        lastReloadTickRef.current = reloadTick;
+    }, [injectedHtml, isEditingScreen, reloadTick]);
 
     // Frame Configuration
     let borderWidth = 8;
@@ -538,14 +554,14 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
                     <div style={{ position: 'absolute', top: isDesktop && showBrowserHeader ? 40 : 0, left: 0, right: 0, bottom: 0 }}>
                         <iframe
-                            srcDoc={injectedHtml}
+                            srcDoc={stableSrcDoc}
                             title="Preview"
                             data-screen-id={data.screenId}
                             style={{
                                 width: '100%',
                                 height: '100%',
                                 border: 'none',
-                                pointerEvents: isEditingScreen ? 'auto' : 'none',
+                                pointerEvents: isEditMode ? 'auto' : 'none',
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
                             }}

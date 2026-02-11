@@ -50,8 +50,10 @@ interface EditState {
     baseHtml: string | null;
     patches: HtmlPatch[];
     pointer: number;
+    reloadTick: number;
 
     enterEdit: (screenId: string, baseHtml: string) => void;
+    setActiveScreen: (screenId: string, baseHtml: string) => void;
     exitEdit: () => void;
     setSelected: (info: SelectedElementInfo | null) => void;
     pushPatch: (patch: HtmlPatch) => void;
@@ -78,8 +80,10 @@ export const useEditStore = create<EditState>((set, get) => ({
     baseHtml: null,
     patches: [],
     pointer: 0,
+    reloadTick: 0,
 
     enterEdit: (screenId, baseHtml) => set({ isEditMode: true, screenId, selected: null, baseHtml, patches: [], pointer: 0 }),
+    setActiveScreen: (screenId, baseHtml) => set({ screenId, baseHtml, selected: null, patches: [], pointer: 0 }),
     exitEdit: () => set({ isEditMode: false, screenId: null, selected: null, baseHtml: null, patches: [], pointer: 0 }),
     setSelected: (selected) => set({ selected }),
 
@@ -88,8 +92,8 @@ export const useEditStore = create<EditState>((set, get) => ({
         pointer: state.pointer + 1,
     })),
 
-    undo: () => set(state => ({ pointer: Math.max(0, state.pointer - 1) })),
-    redo: () => set(state => ({ pointer: Math.min(state.patches.length, state.pointer + 1) })),
+    undo: () => set(state => ({ pointer: Math.max(0, state.pointer - 1), reloadTick: state.reloadTick + 1 })),
+    redo: () => set(state => ({ pointer: Math.min(state.patches.length, state.pointer + 1), reloadTick: state.reloadTick + 1 })),
     applyPatchAndRebuild: (patch) => {
         const state = get();
         const nextPatches = [...state.patches.slice(0, state.pointer), patch];
@@ -100,13 +104,13 @@ export const useEditStore = create<EditState>((set, get) => ({
     undoAndRebuild: () => {
         const state = get();
         const nextPointer = Math.max(0, state.pointer - 1);
-        set({ pointer: nextPointer });
+        set({ pointer: nextPointer, reloadTick: state.reloadTick + 1 });
         return rebuildFrom(state.baseHtml, state.patches, nextPointer);
     },
     redoAndRebuild: () => {
         const state = get();
         const nextPointer = Math.min(state.patches.length, state.pointer + 1);
-        set({ pointer: nextPointer });
+        set({ pointer: nextPointer, reloadTick: state.reloadTick + 1 });
         return rebuildFrom(state.baseHtml, state.patches, nextPointer);
     },
     rebuildHtml: () => {

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useDesignStore } from '../../stores';
+import { useCanvasStore, useDesignStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { type HtmlPatch } from '../../utils/htmlPatcher';
 import { ArrowUpLeft, Redo2, Undo2, X } from 'lucide-react';
@@ -397,7 +397,8 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
 
 export function EditPanel() {
     const { spec, updateScreen } = useDesignStore();
-    const { isEditMode, screenId, selected, setSelected, applyPatchAndRebuild, undoAndRebuild, redoAndRebuild, exitEdit } = useEditStore();
+    const { setFocusNodeId } = useCanvasStore();
+    const { isEditMode, screenId, selected, setSelected, setActiveScreen, applyPatchAndRebuild, undoAndRebuild, redoAndRebuild, exitEdit } = useEditStore();
 
     const [textValue, setTextValue] = useState('');
     const [bgColor, setBgColor] = useState('');
@@ -443,12 +444,21 @@ export function EditPanel() {
     useEffect(() => {
         const handler = (event: MessageEvent) => {
             if (!event.data || event.data.type !== 'editor/select') return;
-            if (event.data.screenId !== screenId) return;
+            if (!isEditMode) return;
+            const incomingScreenId = event.data.screenId as string | undefined;
+            if (!incomingScreenId) return;
+            if (incomingScreenId !== screenId) {
+                const nextScreen = spec?.screens.find((s) => s.screenId === incomingScreenId);
+                if (nextScreen) {
+                    setActiveScreen(incomingScreenId, nextScreen.html);
+                }
+            }
+            setFocusNodeId(incomingScreenId);
             setSelected(event.data.payload);
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [screenId, setSelected]);
+    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec]);
 
     useEffect(() => {
         if (!selected) return;
