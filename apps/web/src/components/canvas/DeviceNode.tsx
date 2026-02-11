@@ -6,6 +6,38 @@ import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import '../../styles/DeviceFrames.css';
 
+function injectHeightScript(html: string, screenId: string) {
+    const script = `
+<script>
+  const reportHeight = () => {
+    const height = document.documentElement.scrollHeight || document.body.scrollHeight;
+    window.parent.postMessage({ type: 'resize', height, screenId: '${screenId}' }, '*');
+  };
+  window.onload = reportHeight;
+  const resizeObserver = new ResizeObserver(reportHeight);
+  resizeObserver.observe(document.body);
+</script>`;
+
+    if (html.includes('</body>')) {
+        return html.replace('</body>', `${script}\n</body>`);
+    }
+    return `${html}\n${script}`;
+}
+
+function injectScrollbarHide(html: string) {
+    const styleTag = `
+<style>
+  ::-webkit-scrollbar { width: 0; height: 0; }
+  ::-webkit-scrollbar-thumb { background: transparent; }
+  body { -ms-overflow-style: none; scrollbar-width: none; }
+</style>`;
+
+    if (html.includes('</head>')) {
+        return html.replace('</head>', `${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${html}`;
+}
+
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
@@ -145,18 +177,10 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
-    const injectedHtml = isDesktop
-        ? `${data.html}
-           <script>
-             const reportHeight = () => {
-               const height = document.documentElement.scrollHeight || document.body.scrollHeight;
-               window.parent.postMessage({ type: 'resize', height, screenId: '${data.screenId}' }, '*');
-             };
-             window.onload = reportHeight;
-             const resizeObserver = new ResizeObserver(reportHeight);
-             resizeObserver.observe(document.body);
-           </script>`
-        : data.html;
+    const baseHtml = injectScrollbarHide(data.html as string);
+    const injectedHtml = isDesktop && data.screenId
+        ? injectHeightScript(baseHtml, data.screenId as string)
+        : baseHtml;
 
     // Frame Configuration
     let borderWidth = 8;
@@ -245,7 +269,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
                     <div style={{ position: 'absolute', top: isDesktop && showBrowserHeader ? 40 : 0, left: 0, right: 0, bottom: 0 }}>
                         <iframe
-                            srcDoc={injectedHtml + '<style>::-webkit-scrollbar { display: none; } body { -ms-overflow-style: none; scrollbar-width: none; background: #000; color: #fff; }</style>'}
+                            srcDoc={injectedHtml}
                             title="Preview"
                             style={{
                                 width: '100%',

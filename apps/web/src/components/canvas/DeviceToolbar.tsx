@@ -41,7 +41,7 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
                         className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded-full transition-all active:scale-95 group"
                     >
                         <Sparkles size={14} className="text-purple-400 group-hover:animate-pulse" />
-                        <span className="text-[13px] font-medium whitespace-nowrap">Edit </span>
+                        <span className="text-[13px] font-medium whitespace-nowrap">Refine </span>
                     </button>
                 ) : (
                     <div className="flex items-center gap-2 flex-1 px-1 animate-in fade-in slide-in-from-left-2 duration-300">

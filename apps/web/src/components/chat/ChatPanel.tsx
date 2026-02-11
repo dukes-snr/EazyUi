@@ -7,19 +7,57 @@ import { useChatStore, useDesignStore, useCanvasStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import TextType from '../ui/TextType';
+
+const FEEDBACK_BUCKETS = {
+    early: [
+        'Warming up the studio...',
+        'Sharpening pencils...',
+        'Rolling out the canvas...',
+        'Mixing the color palette...',
+        'Tuning the grid...',
+    ],
+    working: [
+        'Blocking the layout...',
+        'Carving the hierarchy...',
+        'Composing the hero...',
+        'Dialing in typography...',
+        'Staging the cards...',
+        'Polishing interactions...',
+        'Balancing the spacing...',
+    ],
+    late: [
+        'Adding finishing touches...',
+        'Refining the micro-details...',
+        'Final pass on contrast...',
+        'Tightening the alignment...',
+        'Sealing the polish...',
+    ],
+    wrap: [
+        'Packaging the screens...',
+        'Putting on the final coat...',
+        'Framing the presentation...',
+        'Wrapping it up...',
+    ],
+};
 
 export function ChatPanel() {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
+    const [showStyleMenu, setShowStyleMenu] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const styleMenuRef = useRef<HTMLDivElement>(null);
+    const abortRef = useRef<AbortController | null>(null);
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating } = useChatStore();
-    const { updateScreen, addScreens, spec, selectedPlatform, setPlatform } = useDesignStore();
-    const { setBoards, doc, setFocusNodeId } = useCanvasStore();
+    const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
+    const { setBoards, doc, setFocusNodeId, removeBoard } = useCanvasStore();
+    const assistantMsgIdRef = useRef<string>('');
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -33,6 +71,31 @@ export function ChatPanel() {
             textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
         }
     }, [prompt]);
+
+    // Close style menu on outside click or Escape
+    useEffect(() => {
+        if (!showStyleMenu) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            if (!styleMenuRef.current) return;
+            if (!styleMenuRef.current.contains(event.target as Node)) {
+                setShowStyleMenu(false);
+            }
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setShowStyleMenu(false);
+            }
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [showStyleMenu]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -56,11 +119,13 @@ export function ChatPanel() {
     const handleGenerate = async () => {
         if (!prompt.trim() || isGenerating) return;
 
+        const requestPrompt = prompt.trim();
         const imagesToSend = [...images];
         setImages([]);
 
         addMessage('user', prompt, imagesToSend);
-        const assistantMsgId = addMessage('assistant', 'Thinking...');
+        const assistantMsgId = addMessage('assistant', 'Warming up the studio...');
+        assistantMsgIdRef.current = assistantMsgId;
 
         setPrompt('');
         setGenerating(true);
@@ -70,134 +135,157 @@ export function ChatPanel() {
             : selectedPlatform === 'tablet'
                 ? { width: 768, height: 1024 }
                 : { width: 375, height: 812 }; // Default mobile
-        let buffer = '';
-        let currentScreenId: string | null = null;
-        let generatedScreenCount = 0;
-        let descriptionBuffer = '';
-        let isParsingDescription = false;
+
+            const placeholderTimers: number[] = [];
 
         try {
-            await apiClient.generateStream({
-                prompt,
-                stylePreset: 'modern',
+            console.info('[UI] generate: start (json)', {
+                prompt: requestPrompt,
+                stylePreset,
                 platform: selectedPlatform,
                 images: imagesToSend,
-            }, (chunk) => {
-                buffer += chunk;
-
-                // 1. Handle Description
-                if (isParsingDescription) {
-                    if (buffer.includes('</description>')) {
-                        const parts = buffer.split('</description>');
-                        descriptionBuffer += parts[0];
-                        isParsingDescription = false;
-                        buffer = parts[1] || '';
-                        updateMessage(assistantMsgId, { content: descriptionBuffer.trim() });
-                    } else {
-                        const currentDescriptionChunk = buffer.replace(/<[^>]*$/, '');
-                        if (currentDescriptionChunk) {
-                            updateMessage(assistantMsgId, { content: (descriptionBuffer + currentDescriptionChunk).trim() });
-                        }
-                    }
-                } else if (buffer.includes('<description>')) {
-                    const parts = buffer.split('<description>');
-                    isParsingDescription = true;
-                    buffer = parts[1] || '';
-                }
-
-                // 2. Handle Screens in a loop
-                let foundMarker = true;
-                while (foundMarker) {
-                    foundMarker = false;
-
-                    // Start of a screen
-                    if (!currentScreenId) {
-                        const startMatch = buffer.match(/<screen name="([^"]+)">/);
-                        if (startMatch) {
-                            const screenName = startMatch[1];
-                            const screenId = uuidv4();
-                            currentScreenId = screenId;
-                            generatedScreenCount++;
-
-                            addScreens([{
-                                screenId,
-                                name: screenName,
-                                html: '',
-                                width: dimensions.width,
-                                height: dimensions.height,
-                                status: 'streaming'
-                            }]);
-
-                            const existingBoards = useCanvasStore.getState().doc.boards;
-                            const startX = existingBoards.length > 0
-                                ? Math.max(...existingBoards.map(b => b.x + (b.width || 375))) + 100
-                                : 100;
-
-                            setBoards([...existingBoards, {
-                                boardId: screenId,
-                                screenId: screenId,
-                                x: startX,
-                                y: 100,
-                                width: dimensions.width,
-                                height: dimensions.height,
-                                deviceFrame: 'none',
-                                locked: false,
-                                visible: true,
-                            }]);
-
-                            buffer = buffer.substring(buffer.indexOf(startMatch[0]) + startMatch[0].length);
-                            foundMarker = true;
-                            continue;
-                        }
-                    }
-
-                    // Content / End of a screen
-                    if (currentScreenId) {
-                        const endTag = '</screen>';
-                        const endTagIndex = buffer.indexOf(endTag);
-
-                        if (endTagIndex !== -1) {
-                            const finalContent = buffer.substring(0, endTagIndex).trim();
-                            updateScreen(currentScreenId, finalContent, 'complete');
-                            buffer = buffer.substring(endTagIndex + endTag.length);
-                            currentScreenId = null;
-                            foundMarker = true;
-                            continue;
-                        } else {
-                            const cleanContent = buffer.replace(/<s?c?r?e?e?n?$/, '');
-                            if (cleanContent.length > 0) {
-                                updateScreen(currentScreenId, cleanContent.trim(), 'streaming');
-                            }
-                        }
-                    }
-                }
             });
 
-            // Final Cleanup: Mark everything as complete
-            const finalSpec = useDesignStore.getState().spec;
-            if (finalSpec) {
-                finalSpec.screens.forEach(s => {
-                    if (s.status !== 'complete') {
-                        updateScreen(s.screenId, s.html, 'complete');
-                    }
+            const placeholderIds: string[] = [];
+            const existingBoards = useCanvasStore.getState().doc.boards;
+            const startX = existingBoards.length > 0
+                ? Math.max(...existingBoards.map(b => b.x + (b.width || 375))) + 100
+                : 100;
+            const startTime = Date.now();
+
+
+            const initFeedback = () => {
+                updateMessage(assistantMsgId, {
+                    content: FEEDBACK_BUCKETS.early[0],
+                    status: 'streaming',
+                    meta: {
+                        feedbackKey: Date.now(),
+                        feedbackPhase: 'early',
+                        feedbackStart: startTime
+                    } as any
                 });
+            };
+            const schedulePlaceholder = (index: number) => {
+                const screenId = uuidv4();
+                placeholderIds[index] = screenId;
+                const screen = {
+                    screenId,
+                    name: `Generating ${index + 1}`,
+                    html: '',
+                    width: dimensions.width,
+                    height: dimensions.height,
+                    status: 'streaming' as const,
+                };
+                addScreens([screen]);
+
+                const board = {
+                    boardId: screenId,
+                    screenId,
+                    x: startX + index * (dimensions.width + 100),
+                    y: 100,
+                    width: screen.width,
+                    height: screen.height,
+                    deviceFrame: 'none' as const,
+                    locked: false,
+                    visible: true,
+                };
+                const currentBoards = useCanvasStore.getState().doc.boards;
+                setBoards([...currentBoards, board]);
+            };
+
+            // Delay placeholders: first after 5s, then every 7s
+            for (let i = 0; i < 4; i++) {
+                const timer = window.setTimeout(() => schedulePlaceholder(i), 5000 + i * 7000);
+                placeholderTimers.push(timer);
+            }
+
+            initFeedback();
+
+            const controller = new AbortController();
+            abortRef.current = controller;
+            const regen = await apiClient.generate({
+                prompt: requestPrompt,
+                stylePreset,
+                platform: selectedPlatform,
+                images: imagesToSend,
+            }, controller.signal);
+
+            regen.designSpec.screens.forEach((screen, index) => {
+                const targetId = placeholderIds[index];
+                if (targetId) {
+                    updateScreen(targetId, screen.html, 'complete', screen.width, screen.height, screen.name);
+                    return;
+                }
+
+                // If placeholder not created yet, create a real screen immediately
+                const screenId = uuidv4();
+                addScreens([{
+                    screenId,
+                    name: screen.name,
+                    html: screen.html,
+                    width: screen.width,
+                    height: screen.height,
+                    status: 'complete'
+                }]);
+
+                const board = {
+                    boardId: screenId,
+                    screenId,
+                    x: startX + index * (dimensions.width + 100),
+                    y: 100,
+                    width: screen.width,
+                    height: screen.height,
+                    deviceFrame: 'none' as const,
+                    locked: false,
+                    visible: true,
+                };
+                const currentBoards = useCanvasStore.getState().doc.boards;
+                setBoards([...currentBoards, board]);
+            });
+
+            // Clear any pending placeholder timers
+            placeholderTimers.forEach(t => window.clearTimeout(t));
+
+            // If fewer than 4 screens returned, mark remaining placeholders (if created) as complete with a note
+            for (let i = regen.designSpec.screens.length; i < 4; i++) {
+                const targetId = placeholderIds[i];
+                if (!targetId) continue;
+                updateScreen(
+                    targetId,
+                    `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script></head><body class="min-h-screen flex items-center justify-center bg-black text-white"><div class="text-center space-y-2"><div class="text-sm uppercase tracking-widest opacity-60">Generation</div><div class="text-lg font-semibold">Screen not returned</div></div></body></html>`,
+                    'complete',
+                    dimensions.width,
+                    dimensions.height,
+                    `Missing Screen ${i + 1}`
+                );
             }
 
             updateMessage(assistantMsgId, {
-                content: descriptionBuffer.trim() || `Generated ${generatedScreenCount} screens customized to your request.`,
+                content: regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`,
                 status: 'complete',
             });
+            console.info('[UI] generate: complete (json)', { screens: regen.designSpec.screens.length });
         } catch (error) {
+            if ((error as Error).name === 'AbortError') {
+                updateMessage(assistantMsgId, {
+                    content: 'Generation stopped.',
+                    status: 'error',
+                });
+                return;
+            }
             updateMessage(assistantMsgId, {
                 content: `Error: ${(error as Error).message}`,
                 status: 'error',
             });
+            console.error('[UI] generate: error', error);
         } finally {
+            abortRef.current = null;
+            placeholderTimers.forEach(t => window.clearTimeout(t));
             setGenerating(false);
         }
     };
 
-    const handleEdit = async () => {
+const handleEdit = async () => {
         if (!prompt.trim() || isGenerating || !spec) return;
 
         const selectedId = doc.selection.selectedBoardId;
@@ -241,6 +329,37 @@ export function ChatPanel() {
         } else {
             handleGenerate();
         }
+    };
+
+    const handleStop = () => {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        setGenerating(false);
+
+        const currentSpec = useDesignStore.getState().spec;
+        const currentBoards = useCanvasStore.getState().doc.boards;
+
+        if (currentSpec) {
+            const incompleteIds = currentSpec.screens
+                .filter(s => s.status === 'streaming')
+                .map(s => s.screenId);
+
+            incompleteIds.forEach(id => {
+                updateScreen(id, '', 'complete');
+                removeScreen(id);
+                removeBoard(id);
+            });
+
+            if (incompleteIds.length > 0) {
+                const filteredBoards = currentBoards.filter(b => !incompleteIds.includes(b.screenId));
+                setBoards(filteredBoards);
+            }
+        }
+
+        updateMessage(assistantMsgIdRef.current, {
+            content: 'Generation cancelled.',
+            status: 'error',
+        });
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -340,17 +459,58 @@ export function ChatPanel() {
                                 ) : (
                                     <div className="w-full max-w-[95%] space-y-2">
                                         {/* Thinking Accordion */}
-                                        {message.status === 'pending' || message.content.includes('Thinking') ? (
+                                        {message.status === 'pending' ? (
                                             <div className="animate-pulse flex items-center gap-3 px-4 py-3 bg-[#2C2C2E]/30 rounded-2xl border border-white/5 w-fit">
                                                 <Loader2 size={16} className="animate-spin text-indigo-400" />
                                                 <span className="text-sm text-gray-400 font-medium">Generating designs...</span>
                                             </div>
                                         ) : (
-                                            <div className="text-[15px] leading-relaxed text-gray-300 bg-transparent px-2 whitespace-pre-wrap font-book">
-                                                {message.content.split(/(\*\*.*?\*\*)/g).map((part, i) =>
-                                                    part.startsWith('**') && part.endsWith('**')
-                                                        ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
-                                                        : part
+                                            <div className="text-[15px] leading-relaxed text-gray-300 bg-transparent px-2 whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out">
+                                                {message.status === 'streaming' ? (
+                                                    <TextType
+                                                        key={`${message.id}-${String(message.meta?.feedbackKey ?? message.content)}`}
+                                                        text={
+                                                            message.meta?.feedbackPhase === 'working'
+                                                                ? FEEDBACK_BUCKETS.working
+                                                                : message.meta?.feedbackPhase === 'late'
+                                                                    ? FEEDBACK_BUCKETS.late
+                                                                    : message.meta?.feedbackPhase === 'wrap'
+                                                                        ? FEEDBACK_BUCKETS.wrap
+                                                                        : FEEDBACK_BUCKETS.early
+                                                        }
+                                                        className="text-[15px] font-medium text-gray-300"
+                                                        typingSpeed={75}
+                                                        deletingSpeed={50}
+                                                        pauseDuration={1500}
+                                                        showCursor
+                                                        cursorCharacter="_"
+                                                        cursorBlinkDuration={0.5}
+                                                        variableSpeed={undefined}
+                                                        loop
+                                                        onSentenceComplete={() => {
+                                                            const start = (message.meta?.feedbackStart as number) || Date.now();
+                                                            const elapsed = Date.now() - start;
+                                                            let phase: keyof typeof FEEDBACK_BUCKETS = 'early';
+                                                            if (elapsed >= 10000 && elapsed < 20000) phase = 'working';
+                                                            if (elapsed >= 20000 && elapsed < 30000) phase = 'late';
+                                                            if (elapsed >= 30000) phase = 'wrap';
+                                                            if (phase !== message.meta?.feedbackPhase) {
+                                                                updateMessage(message.id, {
+                                                                    meta: {
+                                                                        ...message.meta,
+                                                                        feedbackPhase: phase,
+                                                                        feedbackKey: Date.now()
+                                                                    }
+                                                                });
+                                                            }
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    message.content.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+                                                        part.startsWith('**') && part.endsWith('**')
+                                                            ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+                                                            : part
+                                                    )
                                                 )}
                                             </div>
                                         )}
@@ -430,17 +590,46 @@ export function ChatPanel() {
 
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-3">
-                                <span className="text-xs font-medium text-gray-500 hidden sm:block">Gemini 1.5 Flash</span>
+                                <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
+                                    <button
+                                        onClick={() => setShowStyleMenu(v => !v)}
+                                        className="h-9 px-3 rounded-full bg-white/5 text-gray-300 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-white/5 hover:bg-white/10 transition-all"
+                                        title="Select style preset"
+                                    >
+                                        Style: {stylePreset}
+                                    </button>
+                                    {showStyleMenu && (
+                                        <div className="absolute bottom-12 right-0 w-40 bg-[#1C1C1E] border border-white/10 rounded-xl shadow-2xl p-2 z-50">
+                                            {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                                                <button
+                                                    key={preset}
+                                                    onClick={() => {
+                                                        setStylePreset(preset);
+                                                        setShowStyleMenu(false);
+                                                    }}
+                                                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
+                                                        ? 'bg-indigo-500/20 text-indigo-200'
+                                                        : 'text-gray-300 hover:bg-white/5'
+                                                        }`}
+                                                >
+                                                    {preset}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                                 <button
-                                    onClick={handleSubmit}
-                                    disabled={(!prompt.trim() && images.length === 0) || isGenerating}
-                                    className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${(!prompt.trim() && images.length === 0) || isGenerating
-                                        ? 'bg-white/5 text-gray-600 cursor-not-allowed'
-                                        : 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                    onClick={isGenerating ? handleStop : handleSubmit}
+                                    disabled={(!prompt.trim() && images.length === 0) && !isGenerating}
+                                    className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${isGenerating
+                                        ? 'bg-red-500 text-white hover:bg-red-400 shadow-lg shadow-red-500/20'
+                                        : (!prompt.trim() && images.length === 0)
+                                            ? 'bg-white/5 text-gray-600 cursor-not-allowed'
+                                            : 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
                                         }`}
                                 >
                                     {isGenerating ? (
-                                        <Loader2 size={18} className="animate-spin" />
+                                        <span className="text-xs font-bold">STOP</span>
                                     ) : (
                                         <ArrowUp size={20} className="text-white" />
                                     )}

@@ -25,7 +25,19 @@ await fastify.register(cors, {
 
 // Health check
 fastify.get('/api/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+    const maskedKey = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'missing';
+
+    return {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        gemini: {
+            model,
+            apiKey: maskedKey,
+            apiKeyPresent: Boolean(apiKey),
+        },
+    };
 });
 
 // Generate new design (returns HTML)
@@ -44,8 +56,10 @@ fastify.post<{
     }
 
     try {
+        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0 }, 'generate: start');
         const designSpec = await generateDesign({ prompt, stylePreset, platform, images });
         const versionId = uuidv4();
+        fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
 
         return { designSpec, versionId };
     } catch (error) {
@@ -109,11 +123,13 @@ fastify.post<{
 
     try {
         const { generateDesignStream } = await import('./services/gemini.js');
+        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0 }, 'generate-stream: start');
         const stream = generateDesignStream({ prompt, stylePreset, platform, images });
 
         for await (const chunk of stream) {
             reply.raw.write(chunk);
         }
+        fastify.log.info('generate-stream: complete');
     } catch (error) {
         fastify.log.error(error);
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);

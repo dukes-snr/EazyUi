@@ -265,6 +265,13 @@ textarea::placeholder {
   fill: white !important;
 }
 
+.canvas-gallery-bg {
+  background:
+    radial-gradient(1200px 800px at 20% 20%, rgba(255, 255, 255, 0.04), transparent 60%),
+    radial-gradient(900px 700px at 80% 10%, rgba(255, 255, 255, 0.03), transparent 60%),
+    #0b0d10;
+}
+
 @keyframes loading-bar {
   0% {
     transform: translateX(-100%);

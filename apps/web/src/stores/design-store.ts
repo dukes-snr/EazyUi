@@ -33,7 +33,7 @@ interface DesignState {
 
     // Actions
     setSpec: (spec: HtmlDesignSpec) => void;
-    updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete', width?: number, height?: number) => void;
+    updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete', width?: number, height?: number, name?: string) => void;
     addScreen: (screen: HtmlScreen) => void;
     addScreens: (screens: HtmlScreen[]) => void;
 
@@ -61,7 +61,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
         set({ spec, error: null });
     },
 
-    updateScreen: (screenId, html, status, width, height) => {
+    updateScreen: (screenId, html, status, width, height, name) => {
         const { spec } = get();
         if (!spec) return;
 
@@ -70,6 +70,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
                 ? {
                     ...screen,
                     html,
+                    name: name || screen.name,
                     status: (status || screen.status) as 'streaming' | 'complete' | undefined,
                     width: width || screen.width,
                     height: height || screen.height

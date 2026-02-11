@@ -12,8 +12,10 @@
     "dependencies": {
         "@eazyui/renderer": "*",
         "@eazyui/shared": "*",
+        "@gsap/react": "^2.1.2",
         "@tanstack/react-query": "^5.17.0",
         "@xyflow/react": "^12.10.0",
+        "gsap": "^3.14.2",
         "konva": "^9.3.6",
         "lucide-react": "^0.563.0",
         "ogl": "^1.0.11",

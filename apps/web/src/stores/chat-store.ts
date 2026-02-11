@@ -11,7 +11,8 @@ export interface ChatMessage {
     content: string;
     timestamp: number;
     images?: string[];
-    status?: 'pending' | 'complete' | 'error';
+    status?: 'pending' | 'streaming' | 'complete' | 'error';
+    meta?: Record<string, unknown>;
     screenRef?: {
         id: string;
         label: string;

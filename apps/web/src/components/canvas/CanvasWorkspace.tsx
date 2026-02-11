@@ -103,6 +103,30 @@ function CanvasWorkspaceContent() {
         })));
     }, [doc.selection.selectedNodeIds, doc.selection.selectedBoardId, setNodes]);
 
+    // Sync node data when spec content changes without resetting positions
+    useEffect(() => {
+        if (!spec) return;
+        setNodes(nds => nds.map(n => {
+            const screen = spec.screens.find(s => s.screenId === n.id);
+            if (!screen) return n;
+
+            const nextData = {
+                ...(n.data || {}),
+                screenId: screen.screenId,
+                html: screen.html,
+                label: screen.name,
+                width: screen.width,
+                height: screen.height,
+                status: screen.status,
+            };
+
+            return {
+                ...n,
+                data: nextData,
+            };
+        }));
+    }, [spec, setNodes]);
+
     // Update nodes when structure changes or external update is triggered
     useEffect(() => {
         const currentIds = nodes.map(n => n.id).join(',');
@@ -163,7 +187,7 @@ function CanvasWorkspaceContent() {
                 nodeTypes={nodeTypes}
                 fitView
                 fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
-                className="bg-slate-950"
+                className="canvas-gallery-bg"
                 minZoom={0.05}
                 maxZoom={2}
 
@@ -187,7 +211,7 @@ function CanvasWorkspaceContent() {
                     variant={BackgroundVariant.Dots}
                     gap={20}
                     size={1}
-                    color="#334155"
+                    color="#2a313b"
                 />
                 <Controls
                     className="canvas-controls-hidden hidden" // Hide default controls

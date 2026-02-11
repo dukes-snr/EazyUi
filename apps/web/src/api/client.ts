@@ -85,10 +85,11 @@ class ApiClient {
         return response.json();
     }
 
-    async generate(request: GenerateRequest): Promise<GenerateResponse> {
+    async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
         return this.request<GenerateResponse>('/generate', {
             method: 'POST',
             body: JSON.stringify(request),
+            signal,
         });
     }
 
