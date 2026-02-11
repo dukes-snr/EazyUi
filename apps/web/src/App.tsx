@@ -5,13 +5,15 @@
 import { useEffect } from 'react';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
+import { EditPanel } from './components/edit/EditPanel';
 
-import { useDesignStore, useCanvasStore } from './stores';
+import { useDesignStore, useCanvasStore, useEditStore } from './stores';
 
 import './styles/App.css';
 
 function App() {
     const { spec, reset: resetDesign } = useDesignStore();
+    const { isEditMode } = useEditStore();
 
 
     // Initialize with empty state
@@ -48,9 +50,10 @@ function App() {
     }, []);
 
     return (
-        <div className="app-layout">
+        <div className={`app-layout ${isEditMode ? 'edit-mode' : ''}`}>
             <ChatPanel />
             <CanvasWorkspace />
+            <EditPanel />
         </div>
     );
 }

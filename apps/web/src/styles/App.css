@@ -10,6 +10,19 @@
     background: var(--color-bg);
 }
 
+.edit-panel {
+    width: 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    transition: width 0.35s ease;
+}
+
+.edit-panel.open {
+    width: 360px;
+    min-width: 360px;
+}
+
 /* ============================================================================
  * Chat Panel
  * ============================================================================ */

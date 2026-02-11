@@ -1,9 +1,10 @@
 import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback } from 'react';
-import { useDesignStore, useChatStore, useCanvasStore } from '../../stores';
+import { useDesignStore, useChatStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
+import { ensureEditableUids } from '../../utils/htmlPatcher';
 import '../../styles/DeviceFrames.css';
 
 function injectHeightScript(html: string, screenId: string) {
@@ -38,11 +39,202 @@ function injectScrollbarHide(html: string) {
     return `${styleTag}\n${html}`;
 }
 
+function injectEditorScript(html: string, screenId: string) {
+    const script = `
+<script>
+(function() {
+  const SCREEN_ID = ${JSON.stringify(screenId)};
+  const EDIT_SELECTOR = '[data-editable="true"]';
+
+  const style = document.createElement('style');
+  style.textContent = EDIT_SELECTOR + ' { cursor: pointer; }\\n' +
+    '.__eazyui-hover { position: absolute; border: 2px dashed rgba(99,102,241,.9); box-shadow: 0 0 0 1px rgba(99,102,241,.4); pointer-events: none; z-index: 999999; }\\n' +
+    '.__eazyui-selected { position: absolute; border: 2px solid rgba(16,185,129,.95); box-shadow: 0 0 0 1px rgba(16,185,129,.4); pointer-events: none; z-index: 999999; }';
+  document.head.appendChild(style);
+
+  const hoverBox = document.createElement('div');
+  hoverBox.className = '__eazyui-hover';
+  hoverBox.style.display = 'none';
+  const selectBox = document.createElement('div');
+  selectBox.className = '__eazyui-selected';
+  selectBox.style.display = 'none';
+  document.body.appendChild(hoverBox);
+  document.body.appendChild(selectBox);
+
+  let hoverEl = null;
+  let selectedEl = null;
+
+  function setBox(box, el) {
+    if (!el) {
+      box.style.display = 'none';
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const scrollX = window.scrollX || document.documentElement.scrollLeft;
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
+    box.style.display = 'block';
+    box.style.left = rect.left + scrollX + 'px';
+    box.style.top = rect.top + scrollY + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.height = rect.height + 'px';
+    box.style.borderRadius = window.getComputedStyle(el).borderRadius;
+  }
+
+  function ensureUid(el) {
+    if (!el.getAttribute('data-editable')) {
+      el.setAttribute('data-editable', 'true');
+    }
+    if (!el.getAttribute('data-uid')) {
+      el.setAttribute('data-uid', 'uid_' + Math.random().toString(36).slice(2, 10));
+    }
+    return el.getAttribute('data-uid');
+  }
+
+  function buildInfo(el) {
+    const uid = ensureUid(el);
+    const cs = window.getComputedStyle(el);
+    const textValue = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? (el.value || '') : (el.textContent || '');
+    return {
+      uid,
+      tagName: el.tagName,
+      classList: Array.from(el.classList),
+      inlineStyle: (el.getAttribute('style') || '').split(';').reduce((acc, cur) => {
+        const [k, v] = cur.split(':').map(s => s && s.trim());
+        if (k && v) acc[k] = v;
+        return acc;
+      }, {}),
+      textContent: textValue.trim().slice(0, 240),
+      computedStyle: {
+        color: cs.color,
+        backgroundColor: cs.backgroundColor,
+        fontSize: cs.fontSize,
+        fontWeight: cs.fontWeight,
+        borderRadius: cs.borderRadius,
+        padding: cs.padding,
+        margin: cs.margin,
+        width: cs.width,
+        height: cs.height,
+        display: cs.display,
+        justifyContent: cs.justifyContent,
+        alignItems: cs.alignItems,
+      },
+      rect: {
+        x: el.getBoundingClientRect().x,
+        y: el.getBoundingClientRect().y,
+        width: el.getBoundingClientRect().width,
+        height: el.getBoundingClientRect().height,
+      }
+    };
+  }
+
+  function selectElement(el) {
+    if (!el) {
+      selectedEl = null;
+      setBox(selectBox, null);
+      return;
+    }
+    selectedEl = el;
+    setBox(selectBox, selectedEl);
+    window.parent.postMessage({ type: 'editor/select', screenId: SCREEN_ID, payload: buildInfo(el) }, '*');
+  }
+
+  function getEditable(el) {
+    if (!el) return null;
+    if (el.closest) return el.closest(EDIT_SELECTOR);
+    return null;
+  }
+
+  document.addEventListener('mousemove', (event) => {
+    const target = getEditable(event.target);
+    if (target !== hoverEl) {
+      hoverEl = target;
+      setBox(hoverBox, hoverEl);
+    }
+  }, true);
+
+  document.addEventListener('mouseleave', () => setBox(hoverBox, null), true);
+
+  document.addEventListener('click', (event) => {
+    const target = getEditable(event.target);
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectElement(target);
+  }, true);
+
+  window.addEventListener('scroll', () => {
+    if (hoverEl) setBox(hoverBox, hoverEl);
+    if (selectedEl) setBox(selectBox, selectedEl);
+  }, true);
+  window.addEventListener('resize', () => {
+    if (hoverEl) setBox(hoverBox, hoverEl);
+    if (selectedEl) setBox(selectBox, selectedEl);
+  });
+
+  window.__applyPatch = function(patch) {
+    if (!patch || !patch.uid) return;
+    const target = document.querySelector('[data-uid="' + patch.uid + '"]');
+    if (!target) return;
+    if (patch.op === 'set_text') {
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        target.value = patch.text || '';
+      } else {
+        target.textContent = patch.text || '';
+      }
+    }
+    if (patch.op === 'set_style') {
+      Object.entries(patch.style || {}).forEach(([k, v]) => {
+        target.style.setProperty(k, v);
+      });
+    }
+    if (patch.op === 'add_class') {
+      (patch.add || []).forEach((cls) => target.classList.add(cls));
+    }
+    if (patch.op === 'remove_class') {
+      (patch.remove || []).forEach((cls) => target.classList.remove(cls));
+    }
+    if (selectedEl && selectedEl === target) {
+      setBox(selectBox, selectedEl);
+      window.parent.postMessage({ type: 'editor/select', screenId: SCREEN_ID, payload: buildInfo(target) }, '*');
+    }
+  };
+
+  window.addEventListener('message', (event) => {
+    const data = event.data || {};
+    if (data.screenId !== SCREEN_ID) return;
+    if (data.type === 'editor/patch') {
+      window.__applyPatch(data.patch);
+    }
+    if (data.type === 'editor/select_parent') {
+      if (!selectedEl) return;
+      let parent = selectedEl.parentElement;
+      while (parent && !parent.matches(EDIT_SELECTOR)) {
+        parent = parent.parentElement;
+      }
+      if (parent) selectElement(parent);
+    }
+  });
+
+  const majorTags = 'header,nav,main,section,article,aside,footer,div,p,span,h1,h2,h3,h4,h5,h6,button,a,img,input,textarea,select,label,ul,ol,li,figure,figcaption,form,table,thead,tbody,tr,td,th';
+  document.querySelectorAll(majorTags).forEach((el) => {
+    if (!el.getAttribute('data-editable')) el.setAttribute('data-editable', 'true');
+    if (!el.getAttribute('data-uid')) el.setAttribute('data-uid', 'uid_' + Math.random().toString(36).slice(2, 10));
+  });
+})();
+</script>`;
+
+    if (html.includes('</body>')) {
+        return html.replace('</body>', `${script}\n</body>`);
+    }
+    return `${html}\n${script}`;
+}
+
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
     const { messages, addMessage, updateMessage } = useChatStore();
-    const { removeBoard, doc } = useCanvasStore();
+    const { removeBoard, doc, setFocusNodeId } = useCanvasStore();
+    const { isEditMode, screenId: editScreenId, enterEdit } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -136,9 +328,20 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             case 'save':
                 console.log('Save action');
                 break;
+            case 'edit':
+                if (data.html && data.screenId) {
+                    const ensured = ensureEditableUids(data.html as string);
+                    if (ensured !== data.html) {
+                        updateScreen(data.screenId as string, ensured, data.status as any, width, initialHeight, data.label as string);
+                    }
+                    setFocusNodeId(data.screenId as string);
+                    enterEdit(data.screenId as string);
+                }
+                break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, data.status, width, initialHeight, setFocusNodeId]);
     const isStreaming = data.status === 'streaming';
+    const isEditingScreen = isEditMode && editScreenId === data.screenId;
 
     // Determine device type based on width
     const isDesktop = width >= 1024;
@@ -178,9 +381,10 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
     const baseHtml = injectScrollbarHide(data.html as string);
+    const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
     const injectedHtml = isDesktop && data.screenId
-        ? injectHeightScript(baseHtml, data.screenId as string)
-        : baseHtml;
+        ? injectHeightScript(withEditor, data.screenId as string)
+        : withEditor;
 
     // Frame Configuration
     let borderWidth = 8;
@@ -201,7 +405,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     // Unified premium frame
 
     return (
-        <div className={`device-node-container relative transition-all duration-300 group`}>
+        <div className={`device-node-container relative transition-all duration-300 group ${isEditMode && !isEditingScreen ? 'opacity-40' : ''}`}>
             <NodeToolbar
                 isVisible={selected && selectedCount === 1}
                 position={Position.Top}
@@ -271,11 +475,12 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         <iframe
                             srcDoc={injectedHtml}
                             title="Preview"
+                            data-screen-id={data.screenId}
                             style={{
                                 width: '100%',
                                 height: '100%',
                                 border: 'none',
-                                pointerEvents: 'none',
+                                pointerEvents: isEditingScreen ? 'auto' : 'none',
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
                             }}

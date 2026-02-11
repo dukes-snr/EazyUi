@@ -144,6 +144,13 @@ ANTI-GENERIC DESIGN RULES (MANDATORY):
 - Avoid "header + list + grid" templates. Use a focal hero with layered depth on each main screen.
 `;
 
+const EDIT_TAGGING_RULES = `
+EDIT MODE TAGGING (MANDATORY):
+- Add data-editable="true" and data-uid="unique_id" to ALL major UI elements.
+- Major elements include: header, nav, main, section, article, aside, footer, div, p, span, h1-h6, button, a, img, input, textarea, select, label, ul, ol, li, figure, figcaption, form, table, thead, tbody, tr, td, th.
+- data-uid values must be unique within each screen (any stable unique string is fine).
+`;
+
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
 
 TASK: Generate a set of HTML screens for the requested UI design.
@@ -233,6 +240,7 @@ STYLING & CONTENT:
 ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${EDIT_TAGGING_RULES}
 `;
 
 const GENERATE_STREAM_PROMPT = `You are a world-class UI designer. Stream the output using XML blocks.
@@ -300,6 +308,7 @@ PROHIBITED:
 ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${EDIT_TAGGING_RULES}
 
 Follow the same STYLING, IMAGE, and MATERIAL SYMBOL rules as the standard generation. 
 CRITICAL: The <screen name="..."> attribute MUST match the actual HTML content of that screen!
@@ -310,9 +319,10 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 1. Modify the HTML to satisfy the user instruction.
 2. Return the complete, modified HTML document.
 3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
-4. You MAY restructure layout to achieve the instruction.
-5. PROHIBITED: Do NOT use "source.unsplash.com" or other non-whitelisted image domains.
-6. Return ONLY the HTML code, no prose explanation.
+4. Preserve data-uid and data-editable attributes on existing elements.
+5. You MAY restructure layout to achieve the instruction.
+6. PROHIBITED: Do NOT use "source.unsplash.com" or other non-whitelisted image domains.
+7. Return ONLY the HTML code, no prose explanation.
 
 Current HTML:
 `;

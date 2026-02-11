@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { useState, useRef, useEffect } from 'react';
-import { useChatStore, useDesignStore, useCanvasStore } from '../../stores';
+import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
@@ -47,6 +47,7 @@ export function ChatPanel() {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
+    const autoCollapsedRef = useRef(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,6 +58,7 @@ export function ChatPanel() {
     const { messages, isGenerating, addMessage, updateMessage, setGenerating } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, doc, setFocusNodeId, removeBoard } = useCanvasStore();
+    const { isEditMode } = useEditStore();
     const assistantMsgIdRef = useRef<string>('');
 
     // Auto-scroll to bottom
@@ -96,6 +98,18 @@ export function ChatPanel() {
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [showStyleMenu]);
+
+    // Auto-collapse chat when edit mode is active
+    useEffect(() => {
+        if (isEditMode && !isCollapsed) {
+            autoCollapsedRef.current = true;
+            setIsCollapsed(true);
+        }
+        if (!isEditMode && autoCollapsedRef.current) {
+            autoCollapsedRef.current = false;
+            setIsCollapsed(false);
+        }
+    }, [isEditMode, isCollapsed]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;

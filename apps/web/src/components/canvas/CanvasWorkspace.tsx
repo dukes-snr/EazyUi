@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useDesignStore, useCanvasStore } from '../../stores';
+import { useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
@@ -32,6 +32,7 @@ const nodeTypes = {
 function CanvasWorkspaceContent() {
     const { spec } = useDesignStore();
     const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, lastExternalUpdate } = useCanvasStore();
+    const { isEditMode } = useEditStore();
     const { setCenter } = useReactFlow();
 
     // Initialize nodes from doc.boards and spec.screens
@@ -205,7 +206,7 @@ function CanvasWorkspaceContent() {
 
                 // Constraints
                 translateExtent={[[-Infinity, -Infinity], [Infinity, Infinity]]}
-                nodesDraggable={activeTool === 'select'} // Only drag nodes in select mode (optional, but standard)
+                nodesDraggable={!isEditMode && activeTool === 'select'} // Disable dragging while editing
             >
                 <Background
                     variant={BackgroundVariant.Dots}
