@@ -2,13 +2,14 @@
 import { useCanvasStore, useDesignStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, Redo2, Undo2, X } from 'lucide-react';
+import { ArrowUpLeft, Pipette, Redo2, Undo2, X } from 'lucide-react';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
 type RGB = { r: number; g: number; b: number };
 type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
+type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
 
 const GAP_CLASSES = ['gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-6', 'gap-8'];
 const JUSTIFY_CLASSES = ['justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly'];
@@ -127,6 +128,15 @@ function getIframeByScreenId(screenId: string) {
     return document.querySelector(`iframe[data-screen-id="${screenId}"]`) as HTMLIFrameElement | null;
 }
 
+function clearSelectionOnOtherScreens(activeScreenId: string) {
+    const iframes = Array.from(document.querySelectorAll('iframe[data-screen-id]')) as HTMLIFrameElement[];
+    for (const iframe of iframes) {
+        const screenId = iframe.getAttribute('data-screen-id');
+        if (!screenId || screenId === activeScreenId) continue;
+        iframe.contentWindow?.postMessage({ type: 'editor/clear_selection', screenId }, '*');
+    }
+}
+
 function dispatchPatchToIframe(screenId: string, patch: HtmlPatch) {
     const iframe = getIframeByScreenId(screenId);
     iframe?.contentWindow?.postMessage({ type: 'editor/patch', screenId, patch }, '*');
@@ -140,6 +150,11 @@ function dispatchSelectParent(screenId: string, uid: string) {
 function dispatchSelectUid(screenId: string, uid: string) {
     const iframe = getIframeByScreenId(screenId);
     iframe?.contentWindow?.postMessage({ type: 'editor/select_uid', screenId, uid }, '*');
+}
+
+function dispatchSelectScreenContainer(screenId: string) {
+    const iframe = getIframeByScreenId(screenId);
+    iframe?.contentWindow?.postMessage({ type: 'editor/select_screen_container', screenId }, '*');
 }
 
 function ScrubNumberInput({
@@ -261,6 +276,10 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
     const popoverRef = useRef<HTMLDivElement | null>(null);
     const resolvedColor = useMemo(() => resolveColorToRgba(value), [value]);
     const displayColor = resolvedColor ? rgbaToCss(resolvedColor) : 'rgba(255, 255, 255, 1)';
+    const eyeDropperCtor = typeof window !== 'undefined'
+        ? (window as unknown as { EyeDropper?: EyeDropperApi }).EyeDropper
+        : undefined;
+    const supportsEyeDropper = Boolean(eyeDropperCtor);
 
     useEffect(() => {
         const rgba = resolveColorToRgba(value);
@@ -347,6 +366,24 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                     style={{ backgroundColor: displayColor }}
                     title="Open color picker"
                 />
+                <button
+                    type="button"
+                    disabled={!supportsEyeDropper}
+                    onClick={async () => {
+                        if (!eyeDropperCtor) return;
+                        try {
+                            const eyeDropper = new eyeDropperCtor();
+                            const result = await eyeDropper.open();
+                            if (result?.sRGBHex) onChange(result.sRGBHex);
+                        } catch {
+                            // User canceled or browser blocked the picker.
+                        }
+                    }}
+                    className="h-8 w-8 rounded-md border border-white/20 bg-white/5 text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={supportsEyeDropper ? 'Pick color from page' : 'EyeDropper not supported in this browser'}
+                >
+                    <Pipette size={14} className="mx-auto" />
+                </button>
                 <input
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
@@ -447,6 +484,7 @@ export function EditPanel() {
             if (!isEditMode) return;
             const incomingScreenId = event.data.screenId as string | undefined;
             if (!incomingScreenId) return;
+            clearSelectionOnOtherScreens(incomingScreenId);
             if (incomingScreenId !== screenId) {
                 const nextScreen = spec?.screens.find((s) => s.screenId === incomingScreenId);
                 if (nextScreen) {
@@ -572,10 +610,15 @@ export function EditPanel() {
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selection</div>
                                 <div className="flex items-center justify-between">
                                     <div className="text-sm font-semibold text-white">{selected.tagName.toLowerCase()} · {selected.uid}</div>
-                                    <button onClick={() => dispatchSelectParent(screenId!, selected.uid)} className="text-xs px-2 py-1 rounded-md bg-white/5 text-gray-400 hover:bg-white/10 flex items-center gap-1">
-                                        <ArrowUpLeft size={12} />
-                                        Parent
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => dispatchSelectScreenContainer(screenId!)} className="text-xs px-2 py-1 rounded-md bg-white/5 text-gray-400 hover:bg-white/10">
+                                            Screen
+                                        </button>
+                                        <button onClick={() => dispatchSelectParent(screenId!, selected.uid)} className="text-xs px-2 py-1 rounded-md bg-white/5 text-gray-400 hover:bg-white/10 flex items-center gap-1">
+                                            <ArrowUpLeft size={12} />
+                                            Parent
+                                        </button>
+                                    </div>
                                 </div>
                                 {selected.breadcrumb && selected.breadcrumb.length > 0 && (
                                     <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">

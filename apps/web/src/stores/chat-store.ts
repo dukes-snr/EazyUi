@@ -23,6 +23,7 @@ export interface ChatMessage {
 interface ChatState {
     messages: ChatMessage[];
     isGenerating: boolean;
+    abortController: AbortController | null;
 
     // Actions
     addMessage: (role: ChatMessage['role'], content: string, images?: string[], screenRef?: ChatMessage['screenRef']) => string;
@@ -30,11 +31,14 @@ interface ChatState {
     removeMessage: (id: string) => void;
     clearMessages: () => void;
     setGenerating: (generating: boolean) => void;
+    setAbortController: (controller: AbortController | null) => void;
+    abortGeneration: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
     messages: [],
     isGenerating: false,
+    abortController: null,
 
     addMessage: (role, content, images, screenRef) => {
         const id = uuidv4();
@@ -72,4 +76,9 @@ export const useChatStore = create<ChatState>((set) => ({
     clearMessages: () => set({ messages: [] }),
 
     setGenerating: (isGenerating) => set({ isGenerating }),
+    setAbortController: (abortController) => set({ abortController }),
+    abortGeneration: () => set((state) => {
+        state.abortController?.abort();
+        return { abortController: null, isGenerating: false };
+    }),
 }));

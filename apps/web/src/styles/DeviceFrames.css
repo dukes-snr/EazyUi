@@ -42,6 +42,14 @@
         0 20px 50px -12px rgba(99, 102, 241, 0.5);
 }
 
+/* Subtle hover affordance for non-selected screens */
+.device-node-container:hover .iphone-frame:not(.selected) {
+    box-shadow:
+        0 0 0 1.5px rgba(99, 102, 241, 0.7),
+        0 0 0 var(--iphone-border) color-mix(in srgb, var(--iphone-color), black 8%),
+        0 18px 42px -16px rgba(99, 102, 241, 0.38);
+}
+
 /* The actual "bezel" area */
 .iphone-bezel {
     position: absolute;

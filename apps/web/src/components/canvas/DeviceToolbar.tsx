@@ -1,14 +1,11 @@
 import { memo, useState } from 'react';
 import {
     Sparkles,
-    LayoutGrid,
-    Link2,
     PencilLine,
-    MoreHorizontal,
     Monitor,
     Tablet,
     Smartphone,
-    Save,
+    Focus,
     ArrowUp,
     X,
     Trash2,
@@ -16,11 +13,11 @@ import {
 } from 'lucide-react';
 
 interface DeviceToolbarProps {
-    screenId: string;
+    screenId?: string;
     onAction?: (action: string, payload?: any) => void;
 }
 
-export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) => {
+export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
     const [isWriting, setIsWriting] = useState(false);
     const [inputValue, setInputValue] = useState('');
 
@@ -32,15 +29,15 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
     };
 
     return (
-        <div className={`flex items-center gap-1.5 p-1.5 bg-slate-900/95 backdrop-blur-md rounded-full shadow-2xl ring-1 ring-white/10 pointer-events-auto transition-all duration-300 animate-fade-in-up ${isWriting ? 'min-w-[400px]' : 'min-w-[300px]'}`}>
+        <div className={`flex items-center gap-1.5 p-2 bg-[#0f111a]/95 backdrop-blur-md rounded-full shadow-2xl ring-1 ring-white/10 pointer-events-auto transition-all duration-300 animate-fade-in-up ${isWriting ? 'min-w-[420px]' : 'min-w-[360px]'}`}>
             {/* Left: Write Content Action */}
             <div className={`flex items-center transition-all duration-300 flex-1`}>
                 {!isWriting ? (
                     <button
                         onClick={() => setIsWriting(true)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded-full transition-all active:scale-95 group"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-indigo-700 hover:text-white text-black rounded-2xl transition-all active:scale-95 group"
                     >
-                        <Sparkles size={14} className="text-purple-400 group-hover:animate-pulse" />
+                        <Sparkles size={14} className="text-ink-800 group-hover:animate-pulse/text-white" />
                         <span className="text-[13px] font-medium whitespace-nowrap">Refine </span>
                     </button>
                 ) : (
@@ -55,20 +52,20 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
                                     if (e.key === 'Escape') setIsWriting(false);
                                 }}
                                 placeholder="What style edit do you want?"
-                                className="w-full h-9 pl-9 pr-3 bg-white/5 rounded-full text-white text-[13px] outline-none focus:ring-2 focus:ring-purple-500/40 transition-all placeholder:text-gray-500"
+                                className="w-full h-9 pl-9 pr-3 bg-white/5 rounded-3xl text-white text-[13px] outline-none transition-all placeholder:text-gray-500"
                             />
-                            <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
+                            <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-300" />
                         </div>
                         <button
                             onClick={handleSubmit}
                             disabled={!inputValue.trim()}
-                            className="p-2 bg-white text-slate-900 rounded-full hover:bg-gray-200 disabled:opacity-30 transition-all active:scale-90"
+                            className="p-2 bg-white text-slate-900 rounded-2xl hover:bg-gray-200 disabled:opacity-30 transition-all active:scale-90"
                         >
                             <ArrowUp size={16} />
                         </button>
                         <button
                             onClick={() => setIsWriting(false)}
-                            className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-full transition-all"
+                            className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
                         >
                             <X size={16} />
                         </button>
@@ -81,27 +78,17 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
                     {/* Separator */}
                     <div className="w-[1px] h-4 bg-white/10 mx-1" />
 
-                    {/* Center: Tools */}
+                    {/* Center: Actions */}
                     <div className="flex items-center gap-1">
-                        <ToolbarButton
-                            icon={<LayoutGrid size={16} />}
-                            title="Layout"
-                            onClick={() => onAction?.('layout')}
-                        />
-                        <ToolbarButton
-                            icon={<Link2 size={16} />}
-                            title="Connect"
-                            onClick={() => onAction?.('link')}
-                        />
                         <ToolbarButton
                             icon={<PencilLine size={16} />}
                             title="Edit"
                             onClick={() => onAction?.('edit')}
                         />
                         <ToolbarButton
-                            icon={<MoreHorizontal size={16} />}
-                            title="More"
-                            onClick={() => onAction?.('more')}
+                            icon={<Focus size={16} />}
+                            title="Focus Screen"
+                            onClick={() => onAction?.('focus')}
                         />
                         <div className="w-[1px] h-3 bg-white/5 mx-0.5" />
                         <ToolbarButton
@@ -121,7 +108,7 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
                     {/* Separator */}
                     <div className="w-[1px] h-4 bg-white/10 mx-1" />
 
-                    {/* Right: Device Switcher & Save */}
+                    {/* Right: Device Switcher */}
                     <div className="flex items-center gap-1 pr-1">
                         <ToolbarButton
                             icon={<Monitor size={16} />}
@@ -138,16 +125,6 @@ export const DeviceToolbar = memo(({ screenId, onAction }: DeviceToolbarProps) =
                             title="Mobile"
                             onClick={() => onAction?.('mobile')}
                         />
-                        <button
-                            onClick={() => {
-                                console.log(`Saving screen: ${screenId}`);
-                                onAction?.('save');
-                            }}
-                            className="ml-2 px-3 py-1.5 bg-white hover:bg-gray-200 text-slate-900 rounded-full text-[13px] font-medium transition-all active:scale-95 flex items-center gap-2"
-                        >
-                            <Save size={14} />
-                            Save
-                        </button>
                     </div>
                 </>
             )}

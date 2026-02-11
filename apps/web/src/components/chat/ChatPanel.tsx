@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square } from 'lucide-react';
 import TextType from '../ui/TextType';
 
 const FEEDBACK_BUCKETS = {
@@ -53,9 +53,8 @@ export function ChatPanel() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
-    const abortRef = useRef<AbortController | null>(null);
 
-    const { messages, isGenerating, addMessage, updateMessage, setGenerating } = useChatStore();
+    const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, doc, setFocusNodeId, removeBoard } = useCanvasStore();
     const { isEditMode } = useEditStore();
@@ -216,7 +215,7 @@ export function ChatPanel() {
             initFeedback();
 
             const controller = new AbortController();
-            abortRef.current = controller;
+            setAbortController(controller);
             const regen = await apiClient.generate({
                 prompt: requestPrompt,
                 stylePreset,
@@ -293,7 +292,7 @@ export function ChatPanel() {
             });
             console.error('[UI] generate: error', error);
         } finally {
-            abortRef.current = null;
+            setAbortController(null);
             placeholderTimers.forEach(t => window.clearTimeout(t));
             setGenerating(false);
         }
@@ -315,11 +314,13 @@ const handleEdit = async () => {
         setGenerating(true);
 
         try {
+            const controller = new AbortController();
+            setAbortController(controller);
             const response = await apiClient.edit({
                 instruction: currentPrompt,
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
-            });
+            }, controller.signal);
 
             updateScreen(targetScreen.screenId, response.html);
 
@@ -333,6 +334,7 @@ const handleEdit = async () => {
                 status: 'error',
             });
         } finally {
+            setAbortController(null);
             setGenerating(false);
         }
     };
@@ -346,9 +348,8 @@ const handleEdit = async () => {
     };
 
     const handleStop = () => {
-        abortRef.current?.abort();
-        abortRef.current = null;
-        setGenerating(false);
+        abortGeneration();
+        setAbortController(null);
 
         const currentSpec = useDesignStore.getState().spec;
         const currentBoards = useCanvasStore.getState().doc.boards;
@@ -636,14 +637,14 @@ const handleEdit = async () => {
                                     onClick={isGenerating ? handleStop : handleSubmit}
                                     disabled={(!prompt.trim() && images.length === 0) && !isGenerating}
                                     className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${isGenerating
-                                        ? 'bg-red-500 text-white hover:bg-red-400 shadow-lg shadow-red-500/20'
+                                        ? 'bg-white/10 text-white hover:bg-white/15 ring-1 ring-white/15'
                                         : (!prompt.trim() && images.length === 0)
                                             ? 'bg-white/5 text-gray-600 cursor-not-allowed'
                                             : 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
                                         }`}
                                 >
                                     {isGenerating ? (
-                                        <span className="text-xs font-bold">STOP</span>
+                                        <Square size={14} className="fill-white text-white" />
                                     ) : (
                                         <ArrowUp size={20} className="text-white" />
                                     )}

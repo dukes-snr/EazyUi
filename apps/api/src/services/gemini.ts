@@ -157,7 +157,6 @@ TASK: Generate a set of HTML screens for the requested UI design.
 
 REQUIREMENTS:
 1. Output a JSON object with the following structure:
-\`\`\`json
 {
   "description": "The designs for your [app name] have been generated:\\n- [Screen 1]: [Brief one-sentence summary]\\n- [Screen 2]: [Brief one-sentence summary]",
   "screens": [
@@ -167,7 +166,6 @@ REQUIREMENTS:
     }
   ]
 }
-\`\`\`
 2. EVERY HTML screen must be a COMPLETE, standalone HTML document with its opening and closing tags(including <!DOCTYPE html>, <html>, <head>, and <body>).
 3. DESCRIPTION FORMAT: The "description" is MANDATORY and must be extremely CONCISE. 
    - Start with: "The designs for your [app name] have been generated:"
@@ -179,6 +177,7 @@ REQUIREMENTS:
 7. Use Material Symbols: <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
 8. Do NOT use SVGs or any other icon system. Material Symbols are MANDATORY: <span class="material-symbols-rounded">icon_name</span>.
 9. Return ONLY the JSON object.
+10. STRICT: Do NOT wrap JSON in markdown code fences. No \`\`\`json and no \`\`\`.
 
 DESIGN PHILOSOPHY (CRITICAL — follow these strictly):
 You are designing screens that would win awards on Dribbble or Behance. Before writing any code, THINK about what makes this specific app unique and design accordingly.
@@ -522,14 +521,28 @@ function cleanHtmlResponse(html: string): string {
  */
 function cleanJsonResponse(text: string): string {
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const source = fenced ? fenced[1] : text;
+    let source = fenced ? fenced[1] : text;
+
+    // Handle unterminated fences like: "```json\n{...".
+    source = source
+        .replace(/^\s*```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+        .trim();
+
     const extracted = extractFirstJsonObject(source);
     return extracted ?? source.trim();
 }
 
 function parseJsonSafe(text: string) {
+    const normalized = text
+        .replace(/^\uFEFF/, '')
+        .replace(/^\s*```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+        .trim();
+
+    const extracted = extractFirstJsonObject(normalized) ?? normalized;
     // Remove trailing commas before } or ]
-    const withoutTrailing = text.replace(/,\s*([}\]])/g, '$1');
+    const withoutTrailing = extracted.replace(/,\s*([}\]])/g, '$1');
     return JSON.parse(withoutTrailing);
 }
 

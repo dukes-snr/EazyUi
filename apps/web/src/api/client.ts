@@ -118,10 +118,11 @@ class ApiClient {
     }
 
 
-    async edit(request: EditRequest): Promise<EditResponse> {
+    async edit(request: EditRequest, signal?: AbortSignal): Promise<EditResponse> {
         return this.request<EditResponse>('/edit', {
             method: 'POST',
             body: JSON.stringify(request),
+            signal,
         });
     }
 

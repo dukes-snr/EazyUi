@@ -68,6 +68,7 @@ function toStyleText(style: Record<string, string>) {
 }
 
 const EDITABLE_TAGS = new Set([
+    'html', 'body',
     'header', 'nav', 'main', 'section', 'article', 'aside', 'footer',
     'div', 'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'button', 'a', 'img', 'input', 'textarea', 'select', 'label',
@@ -107,6 +108,9 @@ function addEditableAttrs(node: Node, inHead: boolean, createUid: () => string) 
         }
         if (!hasAttr(node, 'data-uid')) {
             setAttr(node, 'data-uid', createUid());
+        }
+        if (node.nodeName === 'body' && !hasAttr(node, 'data-screen-root')) {
+            setAttr(node, 'data-screen-root', 'true');
         }
     }
 }

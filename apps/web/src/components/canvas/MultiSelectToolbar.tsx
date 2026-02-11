@@ -12,13 +12,16 @@ import {
     Pencil,
     ChevronDown,
     LayoutGrid,
+    Focus,
 } from 'lucide-react';
 import { useCanvasStore } from '../../stores';
+import { useReactFlow } from '@xyflow/react';
 
 type MenuType = 'align' | 'space' | 'generate' | 'edit' | 'more' | null;
 
 export const MultiSelectToolbar = memo(() => {
     const { alignSelectedBoards, distributeSelectedBoards, smartArrangeSelectedBoards, moveSelectedBoards, doc } = useCanvasStore();
+    const { fitView } = useReactFlow();
     const [activeMenu, setActiveMenu] = useState<MenuType>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -110,6 +113,23 @@ export const MultiSelectToolbar = memo(() => {
                 active={false}
                 onClick={() => smartArrangeSelectedBoards()}
                 title="Smart Arrange"
+            />
+
+            {/* Focus Selected */}
+            <IconButton
+                icon={<Focus size={18} />}
+                active={false}
+                onClick={() => {
+                    const ids = doc.selection.selectedNodeIds;
+                    if (!ids.length) return;
+                    fitView({
+                        nodes: ids.map((id) => ({ id })),
+                        padding: 0.2,
+                        duration: 700,
+                        maxZoom: 1.2,
+                    });
+                }}
+                title="Focus Selected"
             />
 
             <div className="w-[1px] h-4 bg-white/10 mx-1" />

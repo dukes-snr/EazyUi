@@ -63,6 +63,20 @@ function injectEditorScript(html: string, screenId: string) {
 
   let hoverEl = null;
   let selectedEl = null;
+  const ROOT_TAGS = new Set(['html', 'body']);
+
+  function getDeviceFrameRadius() {
+    try {
+      const iframeEl = window.frameElement;
+      const ownerDoc = iframeEl && iframeEl.ownerDocument;
+      if (!ownerDoc || !iframeEl) return '';
+      const screenEl = iframeEl.closest && iframeEl.closest('.iphone-screen');
+      if (!screenEl) return '';
+      return window.getComputedStyle(screenEl).borderRadius || '';
+    } catch {
+      return '';
+    }
+  }
 
   function setBox(box, el) {
     if (!el) {
@@ -77,7 +91,14 @@ function injectEditorScript(html: string, screenId: string) {
     box.style.top = rect.top + scrollY + 'px';
     box.style.width = rect.width + 'px';
     box.style.height = rect.height + 'px';
-    box.style.borderRadius = window.getComputedStyle(el).borderRadius;
+    const tag = (el.tagName || '').toLowerCase();
+    const isSelectedBox = box.classList && box.classList.contains('__eazyui-selected');
+    if (isSelectedBox && ROOT_TAGS.has(tag)) {
+      const frameRadius = getDeviceFrameRadius();
+      box.style.borderRadius = frameRadius || window.getComputedStyle(el).borderRadius;
+    } else {
+      box.style.borderRadius = window.getComputedStyle(el).borderRadius;
+    }
   }
 
   function ensureUid(el) {
@@ -88,6 +109,21 @@ function injectEditorScript(html: string, screenId: string) {
       el.setAttribute('data-uid', 'uid_' + Math.random().toString(36).slice(2, 10));
     }
     return el.getAttribute('data-uid');
+  }
+
+  function getScreenContainer() {
+    const body = document.body;
+    if (!body) return null;
+    body.setAttribute('data-editable', 'true');
+    body.setAttribute('data-screen-root', 'true');
+    ensureUid(body);
+
+    let child = body.firstElementChild;
+    while (child) {
+      if (child.matches && child.matches(EDIT_SELECTOR)) return child;
+      child = child.nextElementSibling;
+    }
+    return body;
   }
 
   function classifyElement(el) {
@@ -196,6 +232,11 @@ function injectEditorScript(html: string, screenId: string) {
     window.parent.postMessage({ type: 'editor/select', screenId: SCREEN_ID, payload: buildInfo(el) }, '*');
   }
 
+  function clearSelection() {
+    selectedEl = null;
+    setBox(selectBox, null);
+  }
+
   function getEditable(el) {
     if (!el) return null;
     if (el.closest) return el.closest(EDIT_SELECTOR);
@@ -278,13 +319,23 @@ function injectEditorScript(html: string, screenId: string) {
       const target = document.querySelector('[data-uid="' + data.uid + '"]');
       if (target) selectElement(target);
     }
+    if (data.type === 'editor/select_screen_container') {
+      const container = getScreenContainer();
+      if (container) selectElement(container);
+    }
+    if (data.type === 'editor/clear_selection') {
+      clearSelection();
+    }
   });
 
-  const majorTags = 'header,nav,main,section,article,aside,footer,div,p,span,h1,h2,h3,h4,h5,h6,button,a,img,input,textarea,select,label,ul,ol,li,figure,figcaption,form,table,thead,tbody,tr,td,th';
+  const majorTags = 'html,body,header,nav,main,section,article,aside,footer,div,p,span,h1,h2,h3,h4,h5,h6,button,a,img,input,textarea,select,label,ul,ol,li,figure,figcaption,form,table,thead,tbody,tr,td,th';
   document.querySelectorAll(majorTags).forEach((el) => {
     if (!el.getAttribute('data-editable')) el.setAttribute('data-editable', 'true');
     if (!el.getAttribute('data-uid')) el.setAttribute('data-uid', 'uid_' + Math.random().toString(36).slice(2, 10));
   });
+  if (document.body && !document.body.getAttribute('data-screen-root')) {
+    document.body.setAttribute('data-screen-root', 'true');
+  }
 })();
 </script>`;
 
@@ -297,7 +348,7 @@ function injectEditorScript(html: string, screenId: string) {
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
-    const { messages, addMessage, updateMessage } = useChatStore();
+    const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, enterEdit, reloadTick } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
@@ -328,6 +379,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 } as const;
 
                 try {
+                    setGenerating(true);
                     // Add to chat history
                     addMessage('user', instruction, undefined, screenRef);
                     assistantMsgId = addMessage('assistant', `Applying edits to **${data.label || 'screen'}**...`, undefined, screenRef);
@@ -335,11 +387,13 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     // Start loading state
                     updateScreen(data.screenId as string, data.html as string, 'streaming');
 
+                    const controller = new AbortController();
+                    setAbortController(controller);
                     const response = await apiClient.edit({
                         instruction,
                         html: data.html as string,
                         screenId: data.screenId as string
-                    });
+                    }, controller.signal);
 
                     // Update with new content
                     updateScreen(data.screenId as string, response.html, 'complete');
@@ -359,7 +413,12 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             status: 'error'
                         });
                     }
-                    alert('Failed to edit screen. Please try again.');
+                    if ((error as Error).name !== 'AbortError') {
+                        alert('Failed to edit screen. Please try again.');
+                    }
+                } finally {
+                    setAbortController(null);
+                    setGenerating(false);
                 }
                 break;
             case 'delete':
@@ -369,26 +428,13 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
             case 'regenerate':
-                // Find the last user instruction for this specific screen
-                const lastUserMsg = [...messages]
-                    .reverse()
-                    .find(m => m.role === 'user' && m.screenRef?.id === data.screenId);
-
-                if (lastUserMsg) {
-                    handleAction('submit-edit', lastUserMsg.content);
-                } else {
-                    // Fallback: Use the last user message but explain it's for this specific screen
-                    const globalLastMsg = [...messages]
-                        .reverse()
-                        .find(m => m.role === 'user');
-
-                    if (globalLastMsg) {
-                        const screenName = data.label || 'this screen';
-                        handleAction('submit-edit', `Regenerate the ${screenName} based on the original task: "${globalLastMsg.content}"`);
-                    } else {
-                        handleAction('submit-edit', 'Regenerate this screen with improved design');
-                    }
-                }
+                handleAction(
+                    'submit-edit',
+                    'Regenerate this exact screen only using the current HTML as source of truth. Keep the same screen purpose, information architecture, and core sections, while improving visual quality and polish. Do not turn it into a different screen.'
+                );
+                break;
+            case 'focus':
+                setFocusNodeId(data.screenId as string);
                 break;
             case 'save':
                 console.log('Save action');
@@ -404,7 +450,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, data.status, width, initialHeight, setFocusNodeId]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, data.status, width, initialHeight, setFocusNodeId, setGenerating, setAbortController]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
 
@@ -490,7 +536,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             <NodeToolbar
                 isVisible={selected && selectedCount === 1}
                 position={Position.Top}
-                offset={20}
+                offset={50}
             >
                 <DeviceToolbar
                     screenId={data.screenId as string}

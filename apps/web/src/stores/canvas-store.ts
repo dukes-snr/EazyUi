@@ -455,17 +455,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
         if (selectedBoards.length < 2) return;
 
-        // Configuration
+        // Configuration: arrange left-to-right with a hard wrap after 4 items per row.
         const gap = 80;
-        const columns = selectedBoards.length > 4 ? 3 : 2; // Dynamic column count
+        const columns = 4;
 
         // Find top-left starting point
         const startX = Math.min(...selectedBoards.map(b => b.x));
         const startY = Math.min(...selectedBoards.map(b => b.y));
 
         const boardPositions = new Map();
-        let currentRow = 0;
-        let currentCol = 0;
         let maxRowHeight = 0;
         let currentY = startY;
         let currentX = startX;
@@ -475,15 +473,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                 currentY += maxRowHeight + gap;
                 currentX = startX;
                 maxRowHeight = 0;
-                currentCol = 0;
-                currentRow++;
             }
 
             boardPositions.set(board.boardId, { x: currentX, y: currentY });
 
             maxRowHeight = Math.max(maxRowHeight, board.height);
             currentX += board.width + gap;
-            currentCol++;
         });
 
         set({
