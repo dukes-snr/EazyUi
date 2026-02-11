@@ -90,6 +90,45 @@ function injectEditorScript(html: string, screenId: string) {
     return el.getAttribute('data-uid');
   }
 
+  function classifyElement(el) {
+    const tag = el.tagName.toLowerCase();
+    const textLikeTags = ['h1','h2','h3','h4','h5','h6','p','label','small','strong','em','b','i'];
+    if (tag === 'img') return 'image';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return 'input';
+    if (tag === 'button' || tag === 'a') return 'button';
+    if (tag === 'span' && el.className && String(el.className).includes('material-symbols')) return 'icon';
+    if (el.className && String(el.className).includes('badge')) return 'badge';
+    if (textLikeTags.includes(tag)) return 'text';
+    if (tag === 'span') {
+      const hasElementChildren = Array.from(el.childNodes || []).some((n) => n.nodeType === 1);
+      const textContent = (el.textContent || '').trim();
+      if (!hasElementChildren && textContent.length > 0) return 'text';
+    }
+    return 'container';
+  }
+
+  function buildBreadcrumb(el) {
+    const path = [];
+    let current = el;
+    while (current && current.matches && current.matches(EDIT_SELECTOR)) {
+      path.push({ uid: ensureUid(current), tagName: current.tagName });
+      current = current.parentElement;
+      while (current && current.matches && !current.matches(EDIT_SELECTOR)) {
+        current = current.parentElement;
+      }
+    }
+    return path;
+  }
+
+  function getAttributes(el) {
+    const attrs = {};
+    if (!el.attributes) return attrs;
+    Array.from(el.attributes).forEach(attr => {
+      attrs[attr.name] = attr.value;
+    });
+    return attrs;
+  }
+
   function buildInfo(el) {
     const uid = ensureUid(el);
     const cs = window.getComputedStyle(el);
@@ -97,7 +136,9 @@ function injectEditorScript(html: string, screenId: string) {
     return {
       uid,
       tagName: el.tagName,
+      elementType: classifyElement(el),
       classList: Array.from(el.classList),
+      attributes: getAttributes(el),
       inlineStyle: (el.getAttribute('style') || '').split(';').reduce((acc, cur) => {
         const [k, v] = cur.split(':').map(s => s && s.trim());
         if (k && v) acc[k] = v;
@@ -109,21 +150,38 @@ function injectEditorScript(html: string, screenId: string) {
         backgroundColor: cs.backgroundColor,
         fontSize: cs.fontSize,
         fontWeight: cs.fontWeight,
+        lineHeight: cs.lineHeight,
+        letterSpacing: cs.letterSpacing,
+        textAlign: cs.textAlign,
         borderRadius: cs.borderRadius,
         padding: cs.padding,
+        paddingTop: cs.paddingTop,
+        paddingRight: cs.paddingRight,
+        paddingBottom: cs.paddingBottom,
+        paddingLeft: cs.paddingLeft,
         margin: cs.margin,
+        marginTop: cs.marginTop,
+        marginRight: cs.marginRight,
+        marginBottom: cs.marginBottom,
+        marginLeft: cs.marginLeft,
         width: cs.width,
         height: cs.height,
+        borderColor: cs.borderColor,
+        borderWidth: cs.borderWidth,
+        opacity: cs.opacity,
+        boxShadow: cs.boxShadow,
         display: cs.display,
         justifyContent: cs.justifyContent,
         alignItems: cs.alignItems,
+        gap: cs.gap,
       },
       rect: {
         x: el.getBoundingClientRect().x,
         y: el.getBoundingClientRect().y,
         width: el.getBoundingClientRect().width,
         height: el.getBoundingClientRect().height,
-      }
+      },
+      breadcrumb: buildBreadcrumb(el),
     };
   }
 
@@ -187,11 +245,14 @@ function injectEditorScript(html: string, screenId: string) {
         target.style.setProperty(k, v);
       });
     }
-    if (patch.op === 'add_class') {
-      (patch.add || []).forEach((cls) => target.classList.add(cls));
+    if (patch.op === 'set_attr') {
+      Object.entries(patch.attr || {}).forEach(([k, v]) => {
+        target.setAttribute(k, v);
+      });
     }
-    if (patch.op === 'remove_class') {
+    if (patch.op === 'set_classes') {
       (patch.remove || []).forEach((cls) => target.classList.remove(cls));
+      (patch.add || []).forEach((cls) => target.classList.add(cls));
     }
     if (selectedEl && selectedEl === target) {
       setBox(selectBox, selectedEl);
@@ -212,6 +273,10 @@ function injectEditorScript(html: string, screenId: string) {
         parent = parent.parentElement;
       }
       if (parent) selectElement(parent);
+    }
+    if (data.type === 'editor/select_uid') {
+      const target = document.querySelector('[data-uid="' + data.uid + '"]');
+      if (target) selectElement(target);
     }
   });
 
@@ -335,7 +400,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         updateScreen(data.screenId as string, ensured, data.status as any, width, initialHeight, data.label as string);
                     }
                     setFocusNodeId(data.screenId as string);
-                    enterEdit(data.screenId as string);
+                    enterEdit(data.screenId as string, ensured);
                 }
                 break;
         }

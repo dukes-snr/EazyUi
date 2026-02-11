@@ -3,8 +3,8 @@ import { parse, serialize } from 'parse5';
 export type HtmlPatch =
     | { op: 'set_text'; uid: string; text: string }
     | { op: 'set_style'; uid: string; style: Record<string, string> }
-    | { op: 'add_class'; uid: string; add: string[] }
-    | { op: 'remove_class'; uid: string; remove: string[] };
+    | { op: 'set_attr'; uid: string; attr: Record<string, string> }
+    | { op: 'set_classes'; uid: string; add?: string[]; remove?: string[] };
 
 type Node = any;
 
@@ -147,15 +147,18 @@ export function applyPatchToHtml(html: string, patch: HtmlPatch): string {
         setAttr(target, 'style', toStyleText(next));
     }
 
-    if (patch.op === 'add_class') {
-        const current = (getAttr(target, 'class') || '').split(/\s+/).filter(Boolean);
-        const next = Array.from(new Set([...current, ...patch.add]));
-        setAttr(target, 'class', next.join(' '));
+    if (patch.op === 'set_attr') {
+        Object.entries(patch.attr).forEach(([key, value]) => {
+            setAttr(target, key, value);
+        });
     }
 
-    if (patch.op === 'remove_class') {
+    if (patch.op === 'set_classes') {
         const current = (getAttr(target, 'class') || '').split(/\s+/).filter(Boolean);
-        const next = current.filter(c => !patch.remove.includes(c));
+        const remove = patch.remove || [];
+        const add = patch.add || [];
+        const filtered = current.filter(c => !remove.includes(c));
+        const next = Array.from(new Set([...filtered, ...add]));
         setAttr(target, 'class', next.join(' '));
     }
 

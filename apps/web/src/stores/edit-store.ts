@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import type { HtmlPatch } from '../utils/htmlPatcher';
+import { applyPatchToHtml, type HtmlPatch } from '../utils/htmlPatcher';
 
 export interface SelectedElementInfo {
     uid: string;
     tagName: string;
     classList: string[];
+    attributes: Record<string, string>;
     inlineStyle: Record<string, string>;
     textContent: string;
     computedStyle: {
@@ -12,71 +13,105 @@ export interface SelectedElementInfo {
         backgroundColor?: string;
         fontSize?: string;
         fontWeight?: string;
+        lineHeight?: string;
+        letterSpacing?: string;
+        textAlign?: string;
         borderRadius?: string;
         padding?: string;
+        paddingTop?: string;
+        paddingRight?: string;
+        paddingBottom?: string;
+        paddingLeft?: string;
         margin?: string;
+        marginTop?: string;
+        marginRight?: string;
+        marginBottom?: string;
+        marginLeft?: string;
         width?: string;
         height?: string;
+        borderColor?: string;
+        borderWidth?: string;
+        opacity?: string;
+        boxShadow?: string;
         display?: string;
         justifyContent?: string;
         alignItems?: string;
+        gap?: string;
     };
     rect: { x: number; y: number; width: number; height: number };
+    elementType: 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
+    breadcrumb?: { uid: string; tagName: string }[];
 }
 
 interface EditState {
     isEditMode: boolean;
     screenId: string | null;
     selected: SelectedElementInfo | null;
-    undoStack: HtmlPatch[];
-    redoStack: HtmlPatch[];
+    baseHtml: string | null;
+    patches: HtmlPatch[];
+    pointer: number;
 
-    enterEdit: (screenId: string) => void;
+    enterEdit: (screenId: string, baseHtml: string) => void;
     exitEdit: () => void;
     setSelected: (info: SelectedElementInfo | null) => void;
     pushPatch: (patch: HtmlPatch) => void;
-    undo: () => HtmlPatch | null;
-    redo: () => HtmlPatch | null;
+    undo: () => void;
+    redo: () => void;
+    applyPatchAndRebuild: (patch: HtmlPatch) => string | null;
+    undoAndRebuild: () => string | null;
+    redoAndRebuild: () => string | null;
+    rebuildHtml: () => string | null;
     clearHistory: () => void;
+}
+
+function rebuildFrom(baseHtml: string | null, patches: HtmlPatch[], pointer: number): string | null {
+    if (!baseHtml) return null;
+    return patches.slice(0, pointer).reduce((html, patch) => {
+        return applyPatchToHtml(html, patch);
+    }, baseHtml);
 }
 
 export const useEditStore = create<EditState>((set, get) => ({
     isEditMode: false,
     screenId: null,
     selected: null,
-    undoStack: [],
-    redoStack: [],
+    baseHtml: null,
+    patches: [],
+    pointer: 0,
 
-    enterEdit: (screenId) => set({ isEditMode: true, screenId, selected: null }),
-    exitEdit: () => set({ isEditMode: false, screenId: null, selected: null, undoStack: [], redoStack: [] }),
+    enterEdit: (screenId, baseHtml) => set({ isEditMode: true, screenId, selected: null, baseHtml, patches: [], pointer: 0 }),
+    exitEdit: () => set({ isEditMode: false, screenId: null, selected: null, baseHtml: null, patches: [], pointer: 0 }),
     setSelected: (selected) => set({ selected }),
 
     pushPatch: (patch) => set(state => ({
-        undoStack: [...state.undoStack, patch],
-        redoStack: [],
+        patches: [...state.patches.slice(0, state.pointer), patch],
+        pointer: state.pointer + 1,
     })),
 
-    undo: () => {
+    undo: () => set(state => ({ pointer: Math.max(0, state.pointer - 1) })),
+    redo: () => set(state => ({ pointer: Math.min(state.patches.length, state.pointer + 1) })),
+    applyPatchAndRebuild: (patch) => {
         const state = get();
-        const last = state.undoStack[state.undoStack.length - 1];
-        if (!last) return null;
-        set({
-            undoStack: state.undoStack.slice(0, -1),
-            redoStack: [last, ...state.redoStack],
-        });
-        return last;
+        const nextPatches = [...state.patches.slice(0, state.pointer), patch];
+        const nextPointer = state.pointer + 1;
+        set({ patches: nextPatches, pointer: nextPointer });
+        return rebuildFrom(state.baseHtml, nextPatches, nextPointer);
     },
-
-    redo: () => {
+    undoAndRebuild: () => {
         const state = get();
-        const next = state.redoStack[0];
-        if (!next) return null;
-        set({
-            undoStack: [...state.undoStack, next],
-            redoStack: state.redoStack.slice(1),
-        });
-        return next;
+        const nextPointer = Math.max(0, state.pointer - 1);
+        set({ pointer: nextPointer });
+        return rebuildFrom(state.baseHtml, state.patches, nextPointer);
     },
-
-    clearHistory: () => set({ undoStack: [], redoStack: [] }),
+    redoAndRebuild: () => {
+        const state = get();
+        const nextPointer = Math.min(state.patches.length, state.pointer + 1);
+        set({ pointer: nextPointer });
+        return rebuildFrom(state.baseHtml, state.patches, nextPointer);
+    },
+    rebuildHtml: () => {
+        const state = get();
+        return rebuildFrom(state.baseHtml, state.patches, state.pointer);
+    },
+    clearHistory: () => set({ patches: [], pointer: 0 }),
 }));
