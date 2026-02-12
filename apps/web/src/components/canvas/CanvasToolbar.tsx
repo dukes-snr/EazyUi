@@ -1,19 +1,57 @@
-import { useCanvasStore } from '../../stores';
+import { useCanvasStore, useDesignStore, useHistoryStore } from '../../stores';
 import {
     MousePointer2,
     Hand,
     ZoomIn,
     ZoomOut,
-    Maximize
+    Maximize,
+    Undo2,
+    Redo2,
 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 
 export function CanvasToolbar() {
-    const { activeTool, setActiveTool, doc } = useCanvasStore();
+    const { activeTool, setActiveTool, doc, setDoc } = useCanvasStore();
+    const { setSpec } = useDesignStore();
+    const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { zoomIn, zoomOut, fitView } = useReactFlow();
+
+    const handleUndo = () => {
+        const snapshot = undoSnapshot();
+        if (!snapshot) return;
+        setSpec(snapshot.spec as any);
+        setDoc(snapshot.doc);
+    };
+
+    const handleRedo = () => {
+        const snapshot = redoSnapshot();
+        if (!snapshot) return;
+        setSpec(snapshot.spec as any);
+        setDoc(snapshot.doc);
+    };
 
     return (
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-white/20 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl z-50">
+            {/* History Group */}
+            <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+                <button
+                    onClick={handleUndo}
+                    disabled={!canUndo()}
+                    className="p-2.5 rounded-full text-gray-200 hover:bg-white/10 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Undo"
+                >
+                    <Undo2 size={20} />
+                </button>
+                <button
+                    onClick={handleRedo}
+                    disabled={!canRedo()}
+                    className="p-2.5 rounded-full text-gray-200 hover:bg-white/10 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Redo"
+                >
+                    <Redo2 size={20} />
+                </button>
+            </div>
+
             {/* Tools Group */}
             <div className="flex items-center gap-1 pr-2 border-r border-white/10">
                 <button

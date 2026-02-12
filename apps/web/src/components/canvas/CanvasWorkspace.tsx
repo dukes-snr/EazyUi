@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useDesignStore, useCanvasStore, useEditStore } from '../../stores';
+import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore } from '../../stores';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
@@ -33,6 +33,8 @@ function CanvasWorkspaceContent() {
     const { spec } = useDesignStore();
     const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, lastExternalUpdate } = useCanvasStore();
     const { isEditMode } = useEditStore();
+    const { isGenerating } = useChatStore();
+    const { recordSnapshot } = useHistoryStore();
     const { setCenter } = useReactFlow();
 
     // Initialize nodes from doc.boards and spec.screens
@@ -144,6 +146,16 @@ function CanvasWorkspaceContent() {
             setNodes(syncedNodes);
         }
     }, [initialNodes, setNodes, lastExternalUpdate]); // lastExternalUpdate is key here
+
+    // Global history capture for canvas + design.
+    // Skip while generation/edit is running to avoid noisy intermediate states.
+    useEffect(() => {
+        if (isGenerating) return;
+        recordSnapshot({
+            spec: spec ? JSON.parse(JSON.stringify(spec)) : null,
+            doc: JSON.parse(JSON.stringify(doc)),
+        });
+    }, [spec, doc, isGenerating, recordSnapshot]);
 
     // Handle node changes (dragging, selection)
     const handleNodesChange = useCallback(

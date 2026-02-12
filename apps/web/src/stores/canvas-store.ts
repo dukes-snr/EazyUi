@@ -83,6 +83,7 @@ interface CanvasState {
 
     // Bulk operations
     setBoards: (boards: Board[]) => void;
+    setDoc: (doc: CanvasDoc) => void;
     reset: () => void;
 }
 
@@ -687,6 +688,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             },
         });
     },
+
+    setDoc: (doc) => set({ doc }),
 
     reset: () => set({
         doc: createDefaultDoc(),

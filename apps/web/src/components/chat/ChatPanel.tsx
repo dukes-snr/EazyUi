@@ -41,6 +41,20 @@ const FEEDBACK_BUCKETS = {
     ],
 };
 
+function injectThumbScrollbarHide(html: string) {
+    const styleTag = `
+<style>
+  ::-webkit-scrollbar { width: 0; height: 0; }
+  ::-webkit-scrollbar-thumb { background: transparent; }
+  html, body { -ms-overflow-style: none; scrollbar-width: none; overflow: hidden; }
+</style>`;
+
+    if (html.includes('</head>')) {
+        return html.replace('</head>', `${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${html}`;
+}
+
 export function ChatPanel() {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
@@ -59,6 +73,12 @@ export function ChatPanel() {
     const { setBoards, doc, setFocusNodeId, removeBoard } = useCanvasStore();
     const { isEditMode } = useEditStore();
     const assistantMsgIdRef = useRef<string>('');
+
+    const getScreenPreview = (screenId: string) => {
+        return spec?.screens.find((s) => s.screenId === screenId) || null;
+    };
+
+    const THUMB_W = 112;
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -136,9 +156,10 @@ export function ChatPanel() {
         const imagesToSend = [...images];
         setImages([]);
 
-        addMessage('user', prompt, imagesToSend);
+        const userMsgId = addMessage('user', prompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Warming up the studio...');
         assistantMsgIdRef.current = assistantMsgId;
+        updateMessage(userMsgId, { meta: { livePreview: false } });
 
         setPrompt('');
         setGenerating(true);
@@ -306,14 +327,35 @@ const handleEdit = async () => {
 
         if (!targetScreen) return;
 
-        addMessage('user', prompt);
-        const assistantMsgId = addMessage('assistant', `Updating...`);
+        const screenRef = {
+            id: targetScreen.screenId,
+            label: targetScreen.name,
+            type: targetScreen.width >= 1024 ? 'desktop' : targetScreen.width >= 600 ? 'tablet' : 'mobile'
+        } as const;
+
+        const userMsgId = addMessage('user', prompt, undefined, screenRef);
+        const assistantMsgId = addMessage('assistant', `Updating...`, undefined, screenRef);
+        updateMessage(userMsgId, {
+            meta: {
+                screenSnapshots: {
+                    [targetScreen.screenId]: {
+                        screenId: targetScreen.screenId,
+                        name: targetScreen.name,
+                        html: targetScreen.html,
+                        width: targetScreen.width,
+                        height: targetScreen.height,
+                    }
+                }
+            }
+        });
+        updateMessage(assistantMsgId, { meta: { livePreview: true } });
 
         const currentPrompt = prompt;
         setPrompt('');
         setGenerating(true);
 
         try {
+            updateScreen(targetScreen.screenId, targetScreen.html, 'streaming', targetScreen.width, targetScreen.height, targetScreen.name);
             const controller = new AbortController();
             setAbortController(controller);
             const response = await apiClient.edit({
@@ -322,13 +364,14 @@ const handleEdit = async () => {
                 screenId: targetScreen.screenId,
             }, controller.signal);
 
-            updateScreen(targetScreen.screenId, response.html);
+            updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
 
             updateMessage(assistantMsgId, {
                 content: `Updated ${targetScreen.name} based on your feedback.`,
                 status: 'complete',
             });
         } catch (error) {
+            updateScreen(targetScreen.screenId, targetScreen.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
             updateMessage(assistantMsgId, {
                 content: `Error: ${(error as Error).message}`,
                 status: 'error',
@@ -438,22 +481,70 @@ const handleEdit = async () => {
                                 className={`flex flex-col gap-2 ${message.role === 'user' ? 'items-end' : 'items-start'}`}
                             >
                                 {/* Screen Reference Visual */}
-                                {message.screenRef && (
-                                    <button
-                                        onClick={() => setFocusNodeId(message.screenRef!.id)}
-                                        className={`flex items-center gap-2 mb-1 px-3 py-1.5 rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-sm transition-all hover:bg-white/[0.08] hover:border-white/10 active:scale-95 group ${message.role === 'user' ? 'mr-1' : 'ml-1'}`}
-                                        title={`Focus ${message.screenRef.label} on canvas`}
-                                    >
-                                        <div className={`p-1.5 rounded-lg bg-[#2C2C2E] ring-1 ring-white/10 text-indigo-400 shadow-sm flex items-center justify-center group-hover:bg-indigo-500/10 transition-colors`}>
-                                            {message.screenRef.type === 'desktop' && <Monitor size={14} />}
-                                            {message.screenRef.type === 'tablet' && <Tablet size={14} />}
-                                            {message.screenRef.type === 'mobile' && <Smartphone size={14} />}
-                                        </div>
-                                        <div className="flex flex-col text-left">
-                                            <span className="text-[9px] text-gray-500 font-black uppercase tracking-[0.15em] leading-none mb-0.5">Edit Target</span>
-                                            <span className="text-[12px] text-gray-300 font-semibold leading-tight group-hover:text-white transition-colors">{message.screenRef.label}</span>
-                                        </div>
-                                    </button>
+                                {(message.screenRef || Array.isArray(message.meta?.screenIds)) && (
+                                    <div className={`flex flex-wrap gap-2 mb-1 ${message.role === 'user' ? 'justify-end mr-1' : 'justify-start ml-1'}`}>
+                                        {(message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []))
+                                            .slice(0, 4)
+                                            .map((screenId) => {
+                                                const snapshotPreview = (message.meta?.screenSnapshots as Record<string, any> | undefined)?.[screenId] || null;
+                                                const preview = (message.role === 'user' && snapshotPreview) ? snapshotPreview : getScreenPreview(screenId);
+                                                const label = preview?.name || message.screenRef?.label || 'Screen';
+                                                return (
+                                                    <button
+                                                        key={`${message.id}-${screenId}`}
+                                                        onClick={() => setFocusNodeId(screenId)}
+                                                        className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-sm p-1.5 transition-all hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99]"
+                                                        style={{ width: THUMB_W + 12 }}
+                                                        title={`Focus ${label} on canvas`}
+                                                    >
+                                                        <div
+                                                            className="rounded-lg overflow-hidden border border-white/10 bg-transparent relative"
+                                                            style={{
+                                                                width: THUMB_W,
+                                                                height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
+                                                            }}
+                                                        >
+                                                            {preview?.html ? (
+                                                                (() => {
+                                                                    const sourceW = preview.width || 375;
+                                                                    const sourceH = preview.height || 812;
+                                                                    const thumbH = Math.max(1, Math.round(THUMB_W * (sourceH / sourceW)));
+                                                                    const scale = Math.min(THUMB_W / sourceW, thumbH / sourceH);
+                                                                    const scaledW = Math.max(1, Math.floor(sourceW * scale));
+                                                                    const scaledH = Math.max(1, Math.floor(sourceH * scale));
+                                                                    const offsetX = Math.floor((THUMB_W - scaledW) / 2);
+                                                                    const offsetY = Math.floor((thumbH - scaledH) / 2);
+                                                                    return (
+                                                                        <div
+                                                                            className="absolute left-0 top-0"
+                                                                            style={{ width: THUMB_W, height: thumbH }}
+                                                                        >
+                                                                            <iframe
+                                                                                srcDoc={injectThumbScrollbarHide(preview.html)}
+                                                                                title={`preview-${screenId}`}
+                                                                                sandbox="allow-scripts allow-same-origin"
+                                                                                scrolling="no"
+                                                                                className="pointer-events-none absolute"
+                                                                                style={{
+                                                                                    width: sourceW,
+                                                                                    height: sourceH,
+                                                                                    transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+                                                                                    transformOrigin: 'top left',
+                                                                                    border: '0',
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                    );
+                                                                })()
+                                                            ) : (
+                                                                <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500">No preview</div>
+                                                            )}
+                                                        </div>
+                                                        <div className="mt-1 text-[10px] text-gray-300 font-semibold truncate">{label}</div>
+                                                    </button>
+                                                );
+                                            })}
+                                    </div>
                                 )}
 
                                 {message.role === 'user' ? (

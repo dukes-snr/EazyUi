@@ -381,8 +381,22 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 try {
                     setGenerating(true);
                     // Add to chat history
-                    addMessage('user', instruction, undefined, screenRef);
+                    const userMsgId = addMessage('user', instruction, undefined, screenRef);
                     assistantMsgId = addMessage('assistant', `Applying edits to **${data.label || 'screen'}**...`, undefined, screenRef);
+                    updateMessage(userMsgId, {
+                        meta: {
+                            screenSnapshots: {
+                                [data.screenId as string]: {
+                                    screenId: data.screenId as string,
+                                    name: data.label as string || 'screen',
+                                    html: data.html as string,
+                                    width,
+                                    height: initialHeight,
+                                }
+                            }
+                        }
+                    });
+                    updateMessage(assistantMsgId, { meta: { livePreview: true } });
 
                     // Start loading state
                     updateScreen(data.screenId as string, data.html as string, 'streaming');
