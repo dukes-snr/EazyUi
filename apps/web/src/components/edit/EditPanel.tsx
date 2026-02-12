@@ -296,8 +296,14 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                 <button
                     type="button"
                     onClick={() => setOpen((v) => !v)}
-                    className="h-8 w-8 rounded-md border border-white/20 shadow-inner"
-                    style={{ backgroundColor: displayColor }}
+                    className="h-8 w-8 rounded-md border border-white/45 shadow-inner outline outline-1 outline-black/35"
+                    style={{
+                        backgroundColor: displayColor,
+                        backgroundImage:
+                            'linear-gradient(45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.14) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.14) 75%)',
+                        backgroundSize: '8px 8px',
+                        backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
+                    }}
                     title="Open color picker"
                 />
                 <button
@@ -614,35 +620,35 @@ export function EditPanel() {
 
     return (
         <aside className="edit-panel open">
-            <div className="h-full flex bg-[#0f1116] border-l border-white/10 shadow-2xl">
-                <div className="flex-1 min-w-0 flex flex-col border-r border-white/10">
-                <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+            <div className="h-full flex bg-[#171a20] border-l border-[#2b3038] shadow-2xl">
+                <div className="flex-1 min-w-0 flex flex-col border-r border-[#2b3038]">
+                <div className="px-4 py-3 border-b border-[#2b3038] flex items-center justify-between">
                     <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Edit Mode</div>
-                        <div className="text-sm text-white font-semibold">{activeScreen?.name || 'Selected Screen'}</div>
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Inspector</div>
+                        <div className="text-sm text-white/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
                     </div>
-                    <button onClick={exitEdit} className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 flex items-center justify-center" title="Exit Edit Mode">
+                    <button onClick={exitEdit} className="h-8 w-8 rounded-lg border border-white/10 bg-[#22262d] text-gray-300 hover:bg-[#2a2f37] flex items-center justify-center" title="Exit Edit Mode">
                         <X size={16} />
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2 px-5 py-3 border-b border-white/5">
-                    <button onClick={onUndo} className="px-3 py-2 rounded-lg bg-white/5 text-gray-300 text-xs font-semibold uppercase tracking-wide hover:bg-white/10 flex items-center gap-2">
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-[#2b3038]">
+                    <button onClick={onUndo} className="h-8 rounded-lg border border-white/10 bg-[#22262d] px-3 text-[11px] text-gray-200 hover:bg-[#2a2f37] flex items-center gap-2">
                         <Undo2 size={14} />
                         Undo
                     </button>
-                    <button onClick={onRedo} className="px-3 py-2 rounded-lg bg-white/5 text-gray-300 text-xs font-semibold uppercase tracking-wide hover:bg-white/10 flex items-center gap-2">
+                    <button onClick={onRedo} className="h-8 rounded-lg border border-white/10 bg-[#22262d] px-3 text-[11px] text-gray-200 hover:bg-[#2a2f37] flex items-center gap-2">
                         <Redo2 size={14} />
                         Redo
                     </button>
                 </div>
 
-                <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-5 py-5 space-y-6 text-gray-200">
+                <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-4 py-4 space-y-5 text-gray-200">
                     {!selected && activeTab === 'edit' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
 
                     {!!selected && activeTab === 'edit' && (
                         <>
-                            <section className="space-y-2">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selection</div>
                                 <div className="flex items-center justify-between">
                                     <div className="text-sm font-semibold text-white">{selected.tagName.toLowerCase()} · {selected.uid}</div>
@@ -668,7 +674,7 @@ export function EditPanel() {
                             </section>
 
                             {showTextContent && (
-                                <section className="space-y-2">
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Content</div>
                                     <textarea
                                         value={textValue}
@@ -684,7 +690,7 @@ export function EditPanel() {
                             )}
 
                             {(showImage || showLink) && (
-                                <section className="grid grid-cols-1 gap-3">
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-1 gap-3">
                                     {showImage && (
                                         <div className="space-y-2">
                                             <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Image Src</div>
@@ -756,7 +762,7 @@ export function EditPanel() {
                             )}
 
                             {showIconPicker && (
-                                <section className="space-y-2">
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Icon</div>
                                     <input
                                         value={iconQuery}
@@ -832,7 +838,7 @@ export function EditPanel() {
                                 </section>
                             )}
 
-                            <section className="grid grid-cols-2 gap-3">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
                                 {showColor && (
                                     <>
                                         <div className="space-y-2">
@@ -902,7 +908,7 @@ export function EditPanel() {
                                 </div>
                             </section>
 
-                            <section className="space-y-2">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Element Align</div>
                                 <div className="grid grid-cols-3 gap-2">
                                     <button
@@ -926,7 +932,7 @@ export function EditPanel() {
                                 </div>
                             </section>
 
-                            <section className="space-y-2">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Z Index</div>
                                 <div className="grid grid-cols-[1fr_auto_auto] gap-2">
                                     <ScrubNumberInput
@@ -961,7 +967,7 @@ export function EditPanel() {
                                 </div>
                             </section>
 
-                            <section className="grid grid-cols-2 gap-3">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Width</div>
                                     <ScrubNumberInput value={width} onChangeValue={(next) => { setWidth(next); patchStyle({ width: next ? `${next}px` : '' }); }} min={0} />
@@ -977,7 +983,7 @@ export function EditPanel() {
                             </section>
 
                             {showTypography && (
-                                <section className="grid grid-cols-2 gap-3">
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
                                     <div className="space-y-2">
                                         <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Font Size</div>
                                         <ScrubNumberInput value={fontSize} onChangeValue={(next) => { setFontSize(next); patchStyle({ 'font-size': next ? `${next}px` : '' }); }} min={0} />
@@ -1054,7 +1060,7 @@ export function EditPanel() {
                                 </section>
                             )}
 
-                            <section className="space-y-3">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Padding</div>
                                 <div className="grid grid-cols-2 gap-3">
                                     {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
@@ -1073,7 +1079,7 @@ export function EditPanel() {
                                 </div>
                             </section>
 
-                            <section className="space-y-3">
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Margin</div>
                                 <div className="grid grid-cols-2 gap-3">
                                     {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
@@ -1093,7 +1099,7 @@ export function EditPanel() {
                             </section>
 
                             {showLayout && (
-                                <section className="space-y-3">
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
                                     <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Layout</div>
                                     <div className="grid grid-cols-3 gap-2">
                                         {(['block', 'flex', 'grid'] as const).map((type) => (
@@ -1144,7 +1150,7 @@ export function EditPanel() {
                     )}
 
                     {activeTab === 'images' && (
-                        <section className="space-y-3">
+                        <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
                             <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Images On Screen</div>
                             <input
                                 ref={globalImageFileInputRef}
@@ -1221,11 +1227,11 @@ export function EditPanel() {
                     )}
                 </div>
                 </div>
-                <aside className="w-[70px] flex flex-col items-center justify-start gap-3 py-4 bg-[#13161b]">
+                <aside className="w-[50px] flex flex-col items-center justify-start gap-3 py-4 bg-[#13161b]">
                     <button
                         type="button"
                         onClick={() => setActiveTab('edit')}
-                        className={`h-11 w-11 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'edit' ? 'border-indigo-300/70 bg-indigo-500/25 text-white' : 'border-white/10 bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'edit' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
                         aria-label="Edit tab"
                         title="Edit"
                     >
@@ -1234,7 +1240,7 @@ export function EditPanel() {
                     <button
                         type="button"
                         onClick={() => setActiveTab('images')}
-                        className={`h-11 w-11 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'images' ? 'border-indigo-300/70 bg-indigo-500/25 text-white' : 'border-white/10 bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'images' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
                         aria-label="Images tab"
                         title="Images"
                     >
@@ -1245,6 +1251,12 @@ export function EditPanel() {
         </aside>
     );
 }
+
+
+
+
+
+
 
 
 
