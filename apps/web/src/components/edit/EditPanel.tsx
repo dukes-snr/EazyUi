@@ -2,7 +2,7 @@
 import { useCanvasStore, useDesignStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, Pipette, Redo2, Undo2, X } from 'lucide-react';
+import { ArrowUpLeft, Images, Pipette, Redo2, SlidersHorizontal, Undo2, X } from 'lucide-react';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
@@ -10,14 +10,28 @@ type RGB = { r: number; g: number; b: number };
 type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
 type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
+type ScreenImageItem = { uid: string; src: string; alt: string };
 
 const GAP_CLASSES = ['gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-6', 'gap-8'];
 const JUSTIFY_CLASSES = ['justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly'];
 const ALIGN_CLASSES = ['items-start', 'items-center', 'items-end', 'items-stretch'];
 const FLEX_DIR_CLASSES = ['flex-row', 'flex-col', 'flex-row-reverse', 'flex-col-reverse'];
 const DISPLAY_CLASSES = ['flex', 'grid'];
+const MATERIAL_ICON_FALLBACK_OPTIONS = [
+    'home', 'search', 'settings', 'person', 'favorite', 'star', 'menu', 'close', 'check',
+    'add', 'remove', 'edit', 'delete', 'arrow_back', 'arrow_forward', 'expand_more',
+    'expand_less', 'chevron_left', 'chevron_right', 'notifications', 'shopping_cart',
+    'shopping_bag', 'account_circle', 'calendar_today', 'event', 'schedule', 'today',
+    'location_on', 'place', 'map', 'call', 'chat', 'mail', 'send', 'image', 'photo',
+    'camera_alt', 'mic', 'play_arrow', 'pause', 'stop', 'volume_up', 'visibility',
+    'visibility_off', 'lock', 'lock_open', 'help', 'info', 'warning', 'error',
+    'thumb_up', 'thumb_down', 'bookmark', 'share', 'download', 'upload', 'bolt',
+    'dark_mode', 'light_mode', 'palette', 'auto_awesome', 'rocket_launch', 'public',
+    'language', 'school', 'work', 'badge', 'payments', 'credit_card', 'receipt_long',
+    'local_shipping', 'directions_car', 'flight', 'restaurant', 'local_cafe',
+];
 
-const inputBase = 'w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white outline-none focus:border-indigo-400/60';
+const inputBase = 'w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-xs text-white outline-none transition-colors focus:border-indigo-400/60';
 const selectBase = `${inputBase} appearance-none bg-[linear-gradient(45deg,transparent_50%,#9ca3af_50%),linear-gradient(135deg,#9ca3af_50%,transparent_50%)] bg-[position:calc(100%-16px)_calc(50%-2px),calc(100%-10px)_calc(50%-2px)] bg-[length:6px_6px,6px_6px] bg-no-repeat pr-8`;
 
 function toPxValue(value?: string) {
@@ -172,96 +186,16 @@ function ScrubNumberInput({
     max?: number;
     placeholder?: string;
 }) {
-    const startXRef = useRef(0);
-    const startValueRef = useRef(0);
-    const draggingRef = useRef(false);
-    const scrubbingRef = useRef(false);
-    const suppressClickRef = useRef(false);
-    const targetValueRef = useRef(0);
-    const currentValueRef = useRef(0);
-    const rafRef = useRef<number | null>(null);
-    const deadZone = 4;
-    const sensitivity = 0.035;
-
-    const stopAnimation = () => {
-        if (rafRef.current !== null) {
-            window.cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-        }
-    };
-
-    const animate = () => {
-        const delta = targetValueRef.current - currentValueRef.current;
-        if (Math.abs(delta) < 0.001) {
-            stopAnimation();
-            const final = Number.isInteger(step)
-                ? Math.round(currentValueRef.current)
-                : Math.round(currentValueRef.current * 100) / 100;
-            onChangeValue(String(final));
-            return;
-        }
-        currentValueRef.current += delta * 0.24;
-        const rounded = Number.isInteger(step)
-            ? Math.round(currentValueRef.current)
-            : Math.round(currentValueRef.current * 100) / 100;
-        onChangeValue(String(rounded));
-        rafRef.current = window.requestAnimationFrame(animate);
-    };
-
-    const onPointerDown = (event: ReactPointerEvent<HTMLInputElement>) => {
-        if (event.button !== 0) return;
-        const parsed = parseFloat(value || '0');
-        startValueRef.current = Number.isNaN(parsed) ? 0 : parsed;
-        currentValueRef.current = startValueRef.current;
-        targetValueRef.current = startValueRef.current;
-        startXRef.current = event.clientX;
-        draggingRef.current = true;
-        scrubbingRef.current = false;
-        suppressClickRef.current = false;
-
-        const onMove = (moveEvent: PointerEvent) => {
-            if (!draggingRef.current) return;
-            const deltaX = moveEvent.clientX - startXRef.current;
-            if (!scrubbingRef.current && Math.abs(deltaX) < deadZone) return;
-            if (!scrubbingRef.current) {
-                scrubbingRef.current = true;
-                suppressClickRef.current = true;
-                document.body.style.userSelect = 'none';
-            }
-            let next = startValueRef.current + deltaX * step * sensitivity;
-            if (typeof min === 'number') next = Math.max(min, next);
-            if (typeof max === 'number') next = Math.min(max, next);
-            targetValueRef.current = next;
-            if (rafRef.current === null) rafRef.current = window.requestAnimationFrame(animate);
-        };
-
-        const onUp = () => {
-            draggingRef.current = false;
-            document.body.style.userSelect = '';
-            stopAnimation();
-            window.removeEventListener('pointermove', onMove);
-            window.removeEventListener('pointerup', onUp);
-        };
-
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-    };
-
     return (
         <input
             value={value}
             onChange={(e) => onChangeValue(e.target.value)}
-            onPointerDown={onPointerDown}
-            onClick={(e) => {
-                if (!suppressClickRef.current) return;
-                e.preventDefault();
-                e.stopPropagation();
-                suppressClickRef.current = false;
-            }}
             type="number"
-            className={`${inputBase} cursor-ew-resize`}
+            step={step}
+            min={min}
+            max={max}
+            className={inputBase}
             placeholder={placeholder}
-            title="Drag horizontally to scrub value"
         />
     );
 }
@@ -463,6 +397,17 @@ export function EditPanel() {
     const [elementAlign, setElementAlign] = useState<'left' | 'center' | 'right'>('left');
     const [zIndex, setZIndex] = useState('');
     const [textFlexAlign, setTextFlexAlign] = useState<'start' | 'center' | 'end' | 'stretch'>('start');
+    const [iconQuery, setIconQuery] = useState('');
+    const [showIconResults, setShowIconResults] = useState(false);
+    const [allIconOptions, setAllIconOptions] = useState<string[]>(MATERIAL_ICON_FALLBACK_OPTIONS);
+    const [iconActiveIndex, setIconActiveIndex] = useState(0);
+    const [screenImages, setScreenImages] = useState<ScreenImageItem[]>([]);
+    const [imageInputs, setImageInputs] = useState<Record<string, string>>({});
+    const [uploadTargetUid, setUploadTargetUid] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<'edit' | 'images'>('edit');
+    const imageFileInputRef = useRef<HTMLInputElement | null>(null);
+    const globalImageFileInputRef = useRef<HTMLInputElement | null>(null);
+    const iconListRef = useRef<HTMLDivElement | null>(null);
 
     const activeScreen = useMemo(() => {
         if (!spec || !screenId) return null;
@@ -477,6 +422,78 @@ export function EditPanel() {
     const showLayout = elementType === 'container' || elementType === 'button' || elementType === 'badge';
     const showColor = elementType !== 'image';
     const showTextFlexAlign = elementType === 'text' || elementType === 'badge' || elementType === 'button';
+    const showIconPicker = elementType === 'icon';
+    const filteredIcons = useMemo(() => {
+        const query = iconQuery.trim().toLowerCase();
+        if (!query) return allIconOptions;
+        return allIconOptions.filter((name) => name.includes(query));
+    }, [iconQuery, allIconOptions]);
+
+    useEffect(() => {
+        setIconActiveIndex(0);
+    }, [iconQuery, showIconResults]);
+
+    useEffect(() => {
+        if (!showIconResults || !iconListRef.current) return;
+        const activeEl = iconListRef.current.querySelector<HTMLButtonElement>(`button[data-icon-index="${iconActiveIndex}"]`);
+        activeEl?.scrollIntoView({ block: 'nearest' });
+    }, [iconActiveIndex, showIconResults]);
+
+    useEffect(() => {
+        let alive = true;
+        const tryLoadAllIcons = async () => {
+            const endpoints = [
+                'https://fonts.google.com/metadata/icons?key=material_symbols&incomplete=true',
+                'https://fonts.google.com/metadata/icons?key=material_symbols_rounded&incomplete=true',
+                'https://fonts.google.com/metadata/icons?incomplete=true',
+            ];
+
+            for (const url of endpoints) {
+                try {
+                    const res = await fetch(url);
+                    if (!res.ok) continue;
+                    const raw = await res.text();
+                    const normalized = raw.replace(/^\)\]\}'\s*/, '').trim();
+                    const parsed = JSON.parse(normalized) as { icons?: Array<{ name?: string }> };
+                    const names = (parsed.icons || [])
+                        .map((entry) => (entry?.name || '').trim())
+                        .filter(Boolean);
+                    if (names.length > 0) {
+                        const unique = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+                        if (alive) setAllIconOptions(unique);
+                        return;
+                    }
+                } catch {
+                    // try next endpoint
+                }
+            }
+        };
+
+        void tryLoadAllIcons();
+        return () => {
+            alive = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!activeScreen?.html) {
+            setScreenImages([]);
+            setImageInputs({});
+            return;
+        }
+        const doc = new DOMParser().parseFromString(activeScreen.html, 'text/html');
+        const items = Array.from(doc.querySelectorAll('img'))
+            .map((img) => ({
+                uid: img.getAttribute('data-uid') || '',
+                src: img.getAttribute('src') || '',
+                alt: img.getAttribute('alt') || '',
+            }))
+            .filter((item) => !!item.uid);
+        setScreenImages(items);
+        const inputs: Record<string, string> = {};
+        for (const item of items) inputs[item.uid] = item.src;
+        setImageInputs(inputs);
+    }, [activeScreen?.html]);
 
     useEffect(() => {
         const handler = (event: MessageEvent) => {
@@ -518,6 +535,8 @@ export function EditPanel() {
         setMargin(parsePadding(selected.computedStyle.margin));
         setImageSrc(selected.attributes?.src || '');
         setLinkHref(selected.attributes?.href || '');
+        setIconQuery((selected.textContent || '').trim());
+        setShowIconResults(false);
         setDisplay(selected.computedStyle.display === 'flex' ? 'flex' : selected.computedStyle.display === 'grid' ? 'grid' : 'block');
         setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || ''));
         const ml = selected.computedStyle.marginLeft || '';
@@ -543,6 +562,12 @@ export function EditPanel() {
         dispatchPatchToIframe(screenId, patch);
         const rebuilt = applyPatchAndRebuild(patch);
         if (rebuilt) updateScreen(screenId, rebuilt);
+    };
+
+    const applyImageSourceForUid = (uid: string, nextSrc: string) => {
+        if (!uid) return;
+        applyPatch({ op: 'set_attr', uid, attr: { src: nextSrc } });
+        setImageInputs((prev) => ({ ...prev, [uid]: nextSrc }));
     };
 
     const onUndo = () => {
@@ -575,11 +600,22 @@ export function EditPanel() {
         }
     };
 
+    const applyIconName = (iconName: string) => {
+        if (!selected) return;
+        const cleaned = iconName.trim();
+        if (!cleaned) return;
+        setIconQuery(cleaned);
+        setTextValue(cleaned);
+        setShowIconResults(false);
+        applyPatch({ op: 'set_text', uid: selected.uid, text: cleaned });
+    };
+
     if (!isEditMode) return <aside className="edit-panel" aria-hidden="true" />;
 
     return (
         <aside className="edit-panel open">
-            <div className="h-full flex flex-col bg-[#111114] border-l border-white/10 shadow-2xl">
+            <div className="h-full flex bg-[#0f1116] border-l border-white/10 shadow-2xl">
+                <div className="flex-1 min-w-0 flex flex-col border-r border-white/10">
                 <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
                     <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Edit Mode</div>
@@ -601,10 +637,10 @@ export function EditPanel() {
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 text-gray-200">
-                    {!selected && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
+                <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-5 py-5 space-y-6 text-gray-200">
+                    {!selected && activeTab === 'edit' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
 
-                    {!!selected && (
+                    {!!selected && activeTab === 'edit' && (
                         <>
                             <section className="space-y-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selection</div>
@@ -652,6 +688,19 @@ export function EditPanel() {
                                     {showImage && (
                                         <div className="space-y-2">
                                             <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Image Src</div>
+                                            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#16181d] p-2">
+                                                <div className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                                    {imageSrc ? (
+                                                        <img src={imageSrc} alt="Selected element preview" className="h-full w-full object-cover" />
+                                                    ) : (
+                                                        <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wide text-gray-500">No Img</div>
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="truncate text-[11px] text-gray-300">{selected.uid}</div>
+                                                    <div className="truncate text-[10px] text-gray-500">{selected.attributes?.alt || 'Selected image element'}</div>
+                                                </div>
+                                            </div>
                                             <input
                                                 value={imageSrc}
                                                 onChange={(e) => {
@@ -661,6 +710,32 @@ export function EditPanel() {
                                                 }}
                                                 className={inputBase}
                                             />
+                                            <input
+                                                ref={imageFileInputRef}
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                onChange={(event) => {
+                                                    const file = event.target.files?.[0];
+                                                    if (!file) return;
+                                                    const reader = new FileReader();
+                                                    reader.onload = () => {
+                                                        const result = typeof reader.result === 'string' ? reader.result : '';
+                                                        if (!result || !selected) return;
+                                                        setImageSrc(result);
+                                                        applyPatch({ op: 'set_attr', uid: selected.uid, attr: { src: result } });
+                                                    };
+                                                    reader.readAsDataURL(file);
+                                                    event.currentTarget.value = '';
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => imageFileInputRef.current?.click()}
+                                                className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
+                                            >
+                                                Upload Image
+                                            </button>
                                         </div>
                                     )}
                                     {showLink && (
@@ -675,6 +750,83 @@ export function EditPanel() {
                                                 }}
                                                 className={inputBase}
                                             />
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+
+                            {showIconPicker && (
+                                <section className="space-y-2">
+                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Icon</div>
+                                    <input
+                                        value={iconQuery}
+                                        onChange={(e) => {
+                                            setIconQuery(e.target.value);
+                                            setShowIconResults(true);
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'ArrowDown') {
+                                                e.preventDefault();
+                                                setShowIconResults(true);
+                                                setIconActiveIndex((prev) => Math.min(prev + 1, Math.max(0, filteredIcons.length - 1)));
+                                                return;
+                                            }
+                                            if (e.key === 'ArrowUp') {
+                                                e.preventDefault();
+                                                setShowIconResults(true);
+                                                setIconActiveIndex((prev) => Math.max(prev - 1, 0));
+                                                return;
+                                            }
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                if (showIconResults && filteredIcons[iconActiveIndex]) {
+                                                    applyIconName(filteredIcons[iconActiveIndex]);
+                                                } else {
+                                                    applyIconName(iconQuery);
+                                                }
+                                            }
+                                            if (e.key === 'Escape') {
+                                                setShowIconResults(false);
+                                            }
+                                        }}
+                                        onFocus={() => setShowIconResults(true)}
+                                        className={inputBase}
+                                        placeholder="Search icon name..."
+                                    />
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => applyIconName(iconQuery)}
+                                            className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15"
+                                        >
+                                            Apply Typed Icon
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowIconResults((v) => !v)}
+                                            className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
+                                        >
+                                            {showIconResults ? 'Hide List' : 'Show List'}
+                                        </button>
+                                    </div>
+                                    {showIconResults && (
+                                        <div ref={iconListRef} className="hide-scrollbar-panel max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#121219] p-1">
+                                            {filteredIcons.length === 0 && (
+                                                <div className="px-2 py-2 text-xs text-gray-500">No matching icons</div>
+                                            )}
+                                            {filteredIcons.map((iconName, index) => (
+                                                <button
+                                                    key={iconName}
+                                                    type="button"
+                                                    data-icon-index={index}
+                                                    onMouseEnter={() => setIconActiveIndex(index)}
+                                                    onClick={() => applyIconName(iconName)}
+                                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-gray-200 hover:bg-white/10 ${iconActiveIndex === index ? 'bg-indigo-500/25' : ''}`}
+                                                >
+                                                    <span className="material-symbols-rounded text-base leading-none">{iconName}</span>
+                                                    <span className="truncate">{iconName}</span>
+                                                </button>
+                                            ))}
                                         </div>
                                     )}
                                 </section>
@@ -990,9 +1142,109 @@ export function EditPanel() {
                             )}
                         </>
                     )}
+
+                    {activeTab === 'images' && (
+                        <section className="space-y-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Images On Screen</div>
+                            <input
+                                ref={globalImageFileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (!file || !uploadTargetUid) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                        const result = typeof reader.result === 'string' ? reader.result : '';
+                                        if (!result) return;
+                                        applyImageSourceForUid(uploadTargetUid, result);
+                                    };
+                                    reader.readAsDataURL(file);
+                                    event.currentTarget.value = '';
+                                    setUploadTargetUid(null);
+                                }}
+                            />
+                            {screenImages.length === 0 ? (
+                                <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                    No images found on this screen.
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {screenImages.map((image) => (
+                                        <div key={image.uid} className="grid grid-cols-[64px_1fr_auto] items-center gap-2 rounded-xl border border-white/10 bg-[#16181d] p-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => dispatchSelectUid(screenId!, image.uid)}
+                                                className="h-16 w-16 overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                                                title="Select image element"
+                                            >
+                                                <img src={image.src} alt={image.alt || 'image'} className="h-full w-full object-cover" />
+                                            </button>
+                                            <input
+                                                value={imageInputs[image.uid] || ''}
+                                                onChange={(e) => {
+                                                    const next = e.target.value;
+                                                    setImageInputs((prev) => ({ ...prev, [image.uid]: next }));
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') applyImageSourceForUid(image.uid, imageInputs[image.uid] || '');
+                                                }}
+                                                onBlur={() => applyImageSourceForUid(image.uid, imageInputs[image.uid] || '')}
+                                                className={inputBase}
+                                                placeholder="Image URL"
+                                            />
+                                            <div className="flex flex-col gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => dispatchSelectUid(screenId!, image.uid)}
+                                                    className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                >
+                                                    Select
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setUploadTargetUid(image.uid);
+                                                        globalImageFileInputRef.current?.click();
+                                                    }}
+                                                    className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                >
+                                                    Upload
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+                    )}
                 </div>
+                </div>
+                <aside className="w-[70px] flex flex-col items-center justify-start gap-3 py-4 bg-[#13161b]">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('edit')}
+                        className={`h-11 w-11 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'edit' ? 'border-indigo-300/70 bg-indigo-500/25 text-white' : 'border-white/10 bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                        aria-label="Edit tab"
+                        title="Edit"
+                    >
+                        <SlidersHorizontal size={18} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('images')}
+                        className={`h-11 w-11 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'images' ? 'border-indigo-300/70 bg-indigo-500/25 text-white' : 'border-white/10 bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                        aria-label="Images tab"
+                        title="Images"
+                    >
+                        <Images size={18} />
+                    </button>
+                </aside>
             </div>
         </aside>
     );
 }
+
+
 

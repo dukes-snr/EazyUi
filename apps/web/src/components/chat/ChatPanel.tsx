@@ -481,7 +481,7 @@ const handleEdit = async () => {
                                 className={`flex flex-col gap-2 ${message.role === 'user' ? 'items-end' : 'items-start'}`}
                             >
                                 {/* Screen Reference Visual */}
-                                {(message.screenRef || Array.isArray(message.meta?.screenIds)) && (
+                                {(message.screenRef || Array.isArray(message.meta?.screenIds)) && (message.role === 'user' || message.status === 'complete' || message.status === 'error') && (
                                     <div className={`flex flex-wrap gap-2 mb-1 ${message.role === 'user' ? 'justify-end mr-1' : 'justify-start ml-1'}`}>
                                         {(message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []))
                                             .slice(0, 4)
