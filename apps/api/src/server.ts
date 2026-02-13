@@ -6,7 +6,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
-import { generateDesign, editDesign, type HtmlDesignSpec } from './services/gemini.js';
+import { generateDesign, editDesign, completePartialScreen, type HtmlDesignSpec } from './services/gemini.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 
 const fastify = Fastify({
@@ -77,9 +77,10 @@ fastify.post<{
         instruction: string;
         html: string;
         screenId: string;
+        images?: string[];
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId } = request.body;
+    const { instruction, html, screenId, images } = request.body;
 
     if (!instruction?.trim()) {
         return reply.status(400).send({ error: 'Instruction is required' });
@@ -90,10 +91,10 @@ fastify.post<{
     }
 
     try {
-        const editedHtml = await editDesign({ instruction, html, screenId });
+        const edited = await editDesign({ instruction, html, screenId, images });
         const versionId = uuidv4();
 
-        return { html: editedHtml, versionId };
+        return { html: edited.html, description: edited.description, versionId };
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({
@@ -135,6 +136,44 @@ fastify.post<{
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
     } finally {
         reply.raw.end();
+    }
+});
+
+// Complete a partial streamed screen
+fastify.post<{
+    Body: {
+        screenName: string;
+        partialHtml: string;
+        prompt?: string;
+        platform?: string;
+        stylePreset?: string;
+    };
+}>('/api/complete-screen', async (request, reply) => {
+    const { screenName, partialHtml, prompt, platform, stylePreset } = request.body;
+
+    if (!screenName?.trim()) {
+        return reply.status(400).send({ error: 'screenName is required' });
+    }
+
+    if (!partialHtml?.trim()) {
+        return reply.status(400).send({ error: 'partialHtml is required' });
+    }
+
+    try {
+        const html = await completePartialScreen({
+            screenName,
+            partialHtml,
+            prompt,
+            platform,
+            stylePreset,
+        });
+        return { html };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to complete partial screen',
+            message: (error as Error).message,
+        });
     }
 });
 

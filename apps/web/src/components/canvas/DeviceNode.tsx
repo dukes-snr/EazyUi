@@ -350,7 +350,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, enterEdit, reloadTick } = useEditStore();
+    const { isEditMode, screenId: editScreenId, enterEdit, rebuildHtml, reloadTick } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -369,7 +369,14 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 updateScreen(data.screenId as string, data.html as string, undefined, 375, 812);
                 break;
             case 'submit-edit':
-                const instruction = payload as string;
+                const editPayload = typeof payload === 'string'
+                    ? { instruction: payload, images: [] as string[] }
+                    : {
+                        instruction: String(payload?.instruction || ''),
+                        images: Array.isArray(payload?.images) ? payload.images as string[] : [] as string[],
+                    };
+                const instruction = editPayload.instruction;
+                const images = editPayload.images;
                 let assistantMsgId = '';
 
                 const screenRef = {
@@ -381,7 +388,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 try {
                     setGenerating(true);
                     // Add to chat history
-                    const userMsgId = addMessage('user', instruction, undefined, screenRef);
+                    const userMsgId = addMessage('user', instruction, images, screenRef);
                     assistantMsgId = addMessage('assistant', `Applying edits to **${data.label || 'screen'}**...`, undefined, screenRef);
                     updateMessage(userMsgId, {
                         meta: {
@@ -406,7 +413,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     const response = await apiClient.edit({
                         instruction,
                         html: data.html as string,
-                        screenId: data.screenId as string
+                        screenId: data.screenId as string,
+                        images,
                     }, controller.signal);
 
                     // Update with new content
@@ -414,7 +422,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
                     // Update chat message
                     updateMessage(assistantMsgId, {
-                        content: `Updated **${data.label || 'screen'}** based on your instruction: "${instruction}"`,
+                        content: response.description?.trim()
+                            ? response.description
+                            : `Updated **${data.label || 'screen'}** based on your instruction: "${instruction}"`,
                         status: 'complete'
                     });
                 } catch (error) {
@@ -442,9 +452,13 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
             case 'regenerate':
+                const regenImages = Array.isArray(payload?.images) ? payload.images as string[] : [];
                 handleAction(
                     'submit-edit',
-                    'Regenerate this exact screen only using the current HTML as source of truth. Keep the same screen purpose, information architecture, and core sections, while improving visual quality and polish. Do not turn it into a different screen.'
+                    {
+                        instruction: 'Regenerate this exact screen only using the current HTML as source of truth. Keep the same screen purpose, information architecture, and core sections, while improving visual quality and polish. Do not turn it into a different screen.',
+                        images: regenImages,
+                    }
                 );
                 break;
             case 'focus':
@@ -455,6 +469,12 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 break;
             case 'edit':
                 if (data.html && data.screenId) {
+                    if (isEditMode && editScreenId && editScreenId !== data.screenId) {
+                        const rebuilt = rebuildHtml();
+                        if (rebuilt) {
+                            updateScreen(editScreenId, rebuilt);
+                        }
+                    }
                     const ensured = ensureEditableUids(data.html as string);
                     if (ensured !== data.html) {
                         updateScreen(data.screenId as string, ensured, data.status as any, width, initialHeight, data.label as string);
@@ -464,7 +484,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, data.status, width, initialHeight, setFocusNodeId, setGenerating, setAbortController]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setGenerating, setAbortController]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
 
@@ -506,7 +526,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
     const baseHtml = injectScrollbarHide(data.html as string);
-    const withEditor = isEditMode && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
+    const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
     const injectedHtml = isDesktop && data.screenId
         ? injectHeightScript(withEditor, data.screenId as string)
         : withEditor;
@@ -621,7 +641,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 width: '100%',
                                 height: '100%',
                                 border: 'none',
-                                pointerEvents: isEditMode ? 'auto' : 'none',
+                                pointerEvents: isEditingScreen ? 'auto' : 'none',
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
                             }}

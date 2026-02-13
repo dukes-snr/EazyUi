@@ -375,7 +375,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
 export function EditPanel() {
     const { spec, updateScreen } = useDesignStore();
     const { setFocusNodeId } = useCanvasStore();
-    const { isEditMode, screenId, selected, setSelected, setActiveScreen, applyPatchAndRebuild, undoAndRebuild, redoAndRebuild, exitEdit } = useEditStore();
+    const { isEditMode, screenId, selected, setSelected, setActiveScreen, applyPatchAndRebuild, undoAndRebuild, redoAndRebuild, rebuildHtml, exitEdit } = useEditStore();
 
     const [textValue, setTextValue] = useState('');
     const [bgColor, setBgColor] = useState('');
@@ -419,6 +419,14 @@ export function EditPanel() {
         if (!spec || !screenId) return null;
         return spec.screens.find((s) => s.screenId === screenId) || null;
     }, [spec, screenId]);
+
+    const commitActiveScreenEdits = () => {
+        if (!screenId) return;
+        const rebuilt = rebuildHtml();
+        if (rebuilt) {
+            updateScreen(screenId, rebuilt);
+        }
+    };
 
     const elementType = (selected?.elementType || 'container') as ElementType;
     const showTextContent = elementType === 'text' || elementType === 'button' || elementType === 'badge';
@@ -509,6 +517,7 @@ export function EditPanel() {
             if (!incomingScreenId) return;
             clearSelectionOnOtherScreens(incomingScreenId);
             if (incomingScreenId !== screenId) {
+                commitActiveScreenEdits();
                 const nextScreen = spec?.screens.find((s) => s.screenId === incomingScreenId);
                 if (nextScreen) {
                     setActiveScreen(incomingScreenId, nextScreen.html);
@@ -627,7 +636,14 @@ export function EditPanel() {
                         <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Inspector</div>
                         <div className="text-sm text-white/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
                     </div>
-                    <button onClick={exitEdit} className="h-8 w-8 rounded-lg border border-white/10 bg-[#22262d] text-gray-300 hover:bg-[#2a2f37] flex items-center justify-center" title="Exit Edit Mode">
+                    <button
+                        onClick={() => {
+                            commitActiveScreenEdits();
+                            exitEdit();
+                        }}
+                        className="h-8 w-8 rounded-lg border border-white/10 bg-[#22262d] text-gray-300 hover:bg-[#2a2f37] flex items-center justify-center"
+                        title="Exit Edit Mode"
+                    >
                         <X size={16} />
                     </button>
                 </div>
@@ -1251,7 +1267,6 @@ export function EditPanel() {
         </aside>
     );
 }
-
 
 
 

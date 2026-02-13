@@ -39,11 +39,21 @@ export interface EditRequest {
     instruction: string;
     html: string;
     screenId: string;
+    images?: string[];
 }
 
 export interface EditResponse {
     html: string;
+    description?: string;
     versionId: string;
+}
+
+export interface CompleteScreenRequest {
+    screenName: string;
+    partialHtml: string;
+    prompt?: string;
+    platform?: string;
+    stylePreset?: string;
 }
 
 export interface SaveRequest {
@@ -95,12 +105,14 @@ class ApiClient {
 
     async generateStream(
         request: GenerateRequest,
-        onChunk: (chunk: string) => void
+        onChunk: (chunk: string) => void,
+        signal?: AbortSignal
     ): Promise<void> {
         const response = await fetch(`${API_BASE}/generate-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
+            signal,
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -120,6 +132,14 @@ class ApiClient {
 
     async edit(request: EditRequest, signal?: AbortSignal): Promise<EditResponse> {
         return this.request<EditResponse>('/edit', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<{ html: string }> {
+        return this.request<{ html: string }>('/complete-screen', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

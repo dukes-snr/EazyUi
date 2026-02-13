@@ -35,7 +35,7 @@ console.info(`[Gemini] Using model: ${modelName} (env: ${envModel || 'unset'})`)
 const GENERATION_CONFIG = {
     temperature: 1.0,
     topP: 0.9,
-    maxOutputTokens: 12288,
+    maxOutputTokens: 16384,
 };
 
 // ============================================================================
@@ -151,6 +151,21 @@ EDIT MODE TAGGING (MANDATORY):
 - data-uid values must be unique within each screen (any stable unique string is fine).
 `;
 
+const MAP_SCREEN_RULES = `
+MAP SCREENS (MANDATORY RULES):
+- Do NOT use Google Maps/Mapbox scripts or API keys.
+- Do NOT use external map SDK scripts in generated HTML.
+- Create a map mock using CSS gradients + optional SVG routes.
+- The map mock should include subtle grid lines + noise + land/water gradients.
+- The map must have 3 layers:
+  1) base map background (gradients + faint roads)
+  2) map pins + route overlay (SVG)
+  3) UI chrome (search bar, chips, bottom sheet)
+- Include at least 1-3 pins, one search UI, and a bottom sheet or pinned place card.
+- Add an optional route line when context implies trip/directions.
+- Ensure proper contrast over map surfaces (cards/chips/text must remain legible).
+`;
+
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
 
 TASK: Generate a set of HTML screens for the requested UI design.
@@ -167,9 +182,12 @@ REQUIREMENTS:
   ]
 }
 2. EVERY HTML screen must be a COMPLETE, standalone HTML document with its opening and closing tags(including <!DOCTYPE html>, <html>, <head>, and <body>).
-3. DESCRIPTION FORMAT: The "description" is MANDATORY and must be extremely CONCISE. 
+3. DESCRIPTION FORMAT: The "description" is MANDATORY and must be extremely CONCISE but written as a ui/ux designer (dont be too technical). 
    - Start with: "The designs for your [app name] have been generated:"
    - List each screen as a bullet point: "- [Screen Name]: [One sentence summary]."
+   - Also include structured display tags so UI can style content:
+     [h2]Section title[/h2], [p]Paragraph[/p], [li]List item[/li], [b]Bold[/b], [i]Italic[/i]
+   - Keep tags balanced and valid. Prefer [h2] + multiple [li] lines for summaries.
    - PROHIBITED: Do NOT write long prose, "walkthroughs", or logic explanations.
 4. Create a maximum of 4 screens for a cohesive user flow.
 5. Use Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"></script>
@@ -240,6 +258,7 @@ ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${EDIT_TAGGING_RULES}
+${MAP_SCREEN_RULES}
 `;
 
 const GENERATE_STREAM_PROMPT = `You are a world-class UI designer. Stream the output using XML blocks.
@@ -248,10 +267,13 @@ STRUCTURE RULE (STRICT):
 1. Output all <screen> blocks first.
 2. Output exactly ONE <description> block after ALL screens. 
 3. The description must be a concise bulleted summary of ALL screens (e.g. "The designs for [app] have been generated:\\n- [Screen 1]: [Summary]\\n- [Screen 2]: [Summary]").
+   - Include UI display tags in description for rich rendering:
+     [h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i]
 4. DO NOT repeat the <description> block.
 5. Every <screen> MUST end with a closing </screen> tag.
 6. Do NOT end output until ALL </screen> tags are closed.
-7. If unsure, repeat the final </screen> and then stop.
+7. After the final </description>, output <done/> on its own line.
+8. If unsure, repeat the final </screen> and then stop.
 
 <screen name="Screen Name">
 <!DOCTYPE html>
@@ -308,20 +330,37 @@ ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${EDIT_TAGGING_RULES}
+${MAP_SCREEN_RULES}
 
 Follow the same STYLING, IMAGE, and MATERIAL SYMBOL rules as the standard generation. 
 CRITICAL: The <screen name="..."> attribute MUST match the actual HTML content of that screen!
 CRITICAL: Every <screen> block MUST be a COMPLETE HTML document.
 Do NOT use markdown fences.`;
 
+const COMPLETE_PARTIAL_SCREEN_PROMPT = `You repair and complete partially streamed HTML screens.
+
+TASK:
+- You will receive a partial HTML document for one screen.
+- Return ONE complete HTML document only.
+
+RULES:
+1. Output ONLY HTML (no markdown, no prose).
+2. Must include <!DOCTYPE html>, <html>, <head>, <body>, and closing tags.
+3. Preserve and continue the existing design direction and content as much as possible.
+4. Keep Tailwind CDN, Google Fonts, Material Symbols, and token contract in <head>.
+5. Do not introduce non-whitelisted image domains.
+`;
+
 const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 1. Modify the HTML to satisfy the user instruction.
-2. Return the complete, modified HTML document.
+2. Return:
+   <description>[One to two concise sentences summarizing what changed and why]</description>
+   followed by the complete, modified HTML document.
 3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
 4. Preserve data-uid and data-editable attributes on existing elements.
 5. You MAY restructure layout to achieve the instruction.
 6. PROHIBITED: Do NOT use "source.unsplash.com" or other non-whitelisted image domains.
-7. Return ONLY the HTML code, no prose explanation.
+7. Do NOT use markdown fences.
 
 Current HTML:
 `;
@@ -428,8 +467,19 @@ export async function* generateDesignStream(options: GenerateOptions): AsyncGene
         generationConfig: GENERATION_CONFIG,
     });
 
+    let totalChars = 0;
     for await (const chunk of result.stream) {
-        yield chunk.text();
+        const text = chunk.text();
+        totalChars += text.length;
+        yield text;
+    }
+
+    try {
+        const finalResponse = await result.response;
+        const finishReason = finalResponse?.candidates?.[0]?.finishReason || 'UNKNOWN';
+        console.info('[Gemini] generateDesignStream: finish', { finishReason, totalChars });
+    } catch (err) {
+        console.warn('[Gemini] generateDesignStream: failed to read final response metadata', err);
     }
 }
 
@@ -441,24 +491,76 @@ export interface EditOptions {
     instruction: string;
     html: string;
     screenId: string;
+    images?: string[];
 }
 
-export async function editDesign(options: EditOptions): Promise<string> {
-    const { instruction, html } = options;
+export interface CompleteScreenOptions {
+    screenName: string;
+    partialHtml: string;
+    prompt?: string;
+    platform?: string;
+    stylePreset?: string;
+}
+
+export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
+    const { instruction, html, images = [] } = options;
     const userPrompt = `${EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
 
+    const parts: any[] = [{ text: userPrompt }];
+    if (images.length > 0) {
+        images.forEach((img) => {
+            const matches = img.match(/^data:(.+);base64,(.+)$/);
+            if (matches) {
+                parts.push({
+                    inlineData: { data: matches[2], mimeType: matches[1] }
+                });
+            }
+        });
+    }
+
     const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: GENERATION_CONFIG,
     });
 
-    let editedHtml = cleanHtmlResponse(result.response.text());
+    const raw = result.response.text();
+    const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
+    const description = descriptionMatch?.[1]?.trim();
+    const withoutDescription = raw.replace(/<description>[\s\S]*?<\/description>/i, '').trim();
+    let editedHtml = cleanHtmlResponse(withoutDescription || raw);
 
     if (!editedHtml.includes('<!DOCTYPE html>')) {
         throw new Error('Gemini failed to return a full HTML document.');
     }
 
-    return editedHtml;
+    return { html: editedHtml, description };
+}
+
+export async function completePartialScreen(options: CompleteScreenOptions): Promise<string> {
+    const { screenName, partialHtml, prompt, platform, stylePreset } = options;
+    const userPrompt = `${COMPLETE_PARTIAL_SCREEN_PROMPT}
+Screen name: ${screenName}
+Original request: ${prompt || 'N/A'}
+Platform: ${platform || 'unknown'}
+Style: ${stylePreset || 'unknown'}
+
+Partial HTML:
+${partialHtml}
+`;
+
+    const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: {
+            ...GENERATION_CONFIG,
+            temperature: 0.4,
+        },
+    });
+
+    const completedHtml = cleanHtmlResponse(result.response.text());
+    if (!completedHtml.includes('<!DOCTYPE html>') || !completedHtml.match(/<\/html>/i)) {
+        throw new Error('Gemini failed to return a complete HTML document for partial screen completion.');
+    }
+    return completedHtml;
 }
 
 // ============================================================================

@@ -98,33 +98,40 @@ function collectExistingUids(node: Node, set: Set<string>) {
     }
 }
 
-function addEditableAttrs(node: Node, inHead: boolean, createUid: () => string) {
+function addEditableAttrs(node: Node, inHead: boolean, createUid: () => string): boolean {
+    let changed = false;
     if (inHead) {
-        return;
+        return changed;
     }
     if (node.nodeName && EDITABLE_TAGS.has(node.nodeName)) {
         if (!hasAttr(node, 'data-editable')) {
             setAttr(node, 'data-editable', 'true');
+            changed = true;
         }
         if (!hasAttr(node, 'data-uid')) {
             setAttr(node, 'data-uid', createUid());
+            changed = true;
         }
         if (node.nodeName === 'body' && !hasAttr(node, 'data-screen-root')) {
             setAttr(node, 'data-screen-root', 'true');
+            changed = true;
         }
     }
+    return changed;
 }
 
-function walk(node: Node, inHead: boolean, createUid: () => string) {
+function walk(node: Node, inHead: boolean, createUid: () => string): boolean {
+    let changed = false;
     const nextInHead = inHead || node.nodeName === 'head';
     if (node.nodeName && node.nodeName !== '#text' && node.nodeName !== '#document') {
-        addEditableAttrs(node, nextInHead, createUid);
+        changed = addEditableAttrs(node, nextInHead, createUid) || changed;
     }
     if (node.childNodes) {
         for (const child of node.childNodes) {
-            walk(child, nextInHead, createUid);
+            changed = walk(child, nextInHead, createUid) || changed;
         }
     }
+    return changed;
 }
 
 export function ensureEditableUids(html: string): string {
@@ -132,7 +139,10 @@ export function ensureEditableUids(html: string): string {
     const existing = new Set<string>();
     collectExistingUids(doc, existing);
     const createUid = createUidFactory(existing);
-    walk(doc, false, createUid);
+    const changed = walk(doc, false, createUid);
+
+    // Avoid normalizing/re-serializing untouched documents.
+    if (!changed) return html;
     return serialize(doc);
 }
 

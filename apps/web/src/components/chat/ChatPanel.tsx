@@ -2,11 +2,11 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square } from 'lucide-react';
+import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb } from 'lucide-react';
 import TextType from '../ui/TextType';
 
 const FEEDBACK_BUCKETS = {
@@ -55,13 +55,373 @@ function injectThumbScrollbarHide(html: string) {
     return `${styleTag}\n${html}`;
 }
 
+function stripMarkdownBold(text: string): string {
+    return text.replace(/\*\*(.*?)\*\*/g, '$1');
+}
+
+function stripUiTags(text: string): string {
+    return text.replace(/\[(\/)?(h1|h2|h3|p|li|b|i)\]/gi, '');
+}
+
+function getThinkingSeconds(message: any): number | null {
+    const explicit = Number(message?.meta?.thinkingMs);
+    if (Number.isFinite(explicit) && explicit > 0) {
+        return Math.max(1, Math.round(explicit / 1000));
+    }
+    const startedAt = Number(message?.meta?.feedbackStart);
+    if (Number.isFinite(startedAt) && startedAt > 0 && message?.status === 'streaming') {
+        return Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+    }
+    return null;
+}
+
+function renderInlineRichText(text: string): ReactNode[] {
+    const nodes: ReactNode[] = [];
+    const pattern = /\[(b|i)\]([\s\S]*?)\[\/\1\]/gi;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let key = 0;
+
+    const renderColorTokens = (input: string, prefix: string): ReactNode[] => {
+        const out: ReactNode[] = [];
+        const colorPattern = /(#[0-9A-Fa-f]{3,8}\b|rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|hsla?\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))/g;
+        let cursor = 0;
+        let tokenMatch: RegExpExecArray | null;
+        let tokenIndex = 0;
+
+        while ((tokenMatch = colorPattern.exec(input)) !== null) {
+            if (tokenMatch.index > cursor) {
+                out.push(input.slice(cursor, tokenMatch.index));
+            }
+            const token = tokenMatch[0];
+            out.push(
+                <span key={`${prefix}-color-${tokenIndex++}`} className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md bg-white/[0.05] border border-white/10 align-middle">
+                    <span
+                        className="inline-block w-2.5 h-2.5 rounded-full border border-white/20"
+                        style={{ backgroundColor: token }}
+                    />
+                    <code className="text-[11px] leading-none text-cyan-200">{token}</code>
+                </span>
+            );
+            cursor = tokenMatch.index + token.length;
+        }
+
+        if (cursor < input.length) {
+            out.push(input.slice(cursor));
+        }
+
+        return out;
+    };
+
+    while ((match = pattern.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            nodes.push(...renderColorTokens(text.slice(lastIndex, match.index), `plain-${key}`));
+        }
+        const tag = match[1].toLowerCase();
+        const content = match[2];
+        if (tag === 'b') nodes.push(<strong key={`rb-${key++}`} className="font-semibold text-amber-300">{renderColorTokens(content, `b-${key}`)}</strong>);
+        if (tag === 'i') nodes.push(<em key={`ri-${key++}`} className="italic text-slate-300">{renderColorTokens(content, `i-${key}`)}</em>);
+        lastIndex = pattern.lastIndex;
+    }
+
+    if (lastIndex < text.length) {
+        nodes.push(...renderColorTokens(text.slice(lastIndex), `tail-${key}`));
+    }
+
+    return nodes;
+}
+
+function renderPlainChunk(text: string, keyPrefix: string): ReactNode[] {
+    const lines = text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    return lines.map((line, idx) => {
+        if (line.startsWith('- ')) {
+            return <li key={`${keyPrefix}-li-${idx}`} className="ml-5 list-disc mb-1 text-gray-200">{renderInlineRichText(line.slice(2).trim())}</li>;
+        }
+        return <p key={`${keyPrefix}-p-${idx}`} className="mb-2 text-gray-200 leading-relaxed">{renderInlineRichText(line)}</p>;
+    });
+}
+
+function renderTaggedDescription(text: string): ReactNode {
+    const source = text || '';
+    const blockPattern = /\[(h1|h2|h3|p|li)\]([\s\S]*?)\[\/\1\]/gi;
+    const nodes: ReactNode[] = [];
+    let match: RegExpExecArray | null;
+    let key = 0;
+    let cursor = 0;
+
+    while ((match = blockPattern.exec(source)) !== null) {
+        const plainBefore = source.slice(cursor, match.index);
+        if (plainBefore.trim()) {
+            nodes.push(...renderPlainChunk(plainBefore, `plain-${key++}`));
+        }
+
+        const tag = match[1].toLowerCase();
+        const content = match[2].trim();
+        const inline = renderInlineRichText(content);
+        if (tag === 'h1') nodes.push(<h1 key={`h1-${key++}`} className="text-base font-semibold text-white mb-1.5">{inline}</h1>);
+        if (tag === 'h2') nodes.push(<h2 key={`h2-${key++}`} className="text-[14px] font-semibold text-white mb-1">{inline}</h2>);
+        if (tag === 'h3') nodes.push(<h3 key={`h3-${key++}`} className="text-[13px] font-semibold text-gray-100 mb-1">{inline}</h3>);
+        if (tag === 'p') nodes.push(<p key={`p-${key++}`} className="mb-1.5 text-[13px] text-gray-200 leading-relaxed">{inline}</p>);
+        if (tag === 'li') nodes.push(<li key={`li-${key++}`} className="ml-4 list-disc mb-1 text-[13px] text-gray-200">{inline}</li>);
+        cursor = match.index + match[0].length;
+    }
+
+    const plainAfter = source.slice(cursor);
+    if (plainAfter.trim()) {
+        nodes.push(...renderPlainChunk(plainAfter, `plain-tail-${key++}`));
+    }
+
+    if (nodes.length > 0) {
+        return <div>{nodes}</div>;
+    }
+
+    return (
+        <>
+            {source.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+                part.startsWith('**') && part.endsWith('**')
+                    ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+                    : part
+            )}
+        </>
+    );
+}
+
+function TypedTaggedText({ text, className, speed = 14 }: { text: string; className?: string; speed?: number }) {
+    const [visibleCount, setVisibleCount] = useState(0);
+
+    useEffect(() => {
+        setVisibleCount(0);
+        const timer = window.setInterval(() => {
+            setVisibleCount((prev) => {
+                if (prev >= text.length) {
+                    window.clearInterval(timer);
+                    return prev;
+                }
+                return prev + 1;
+            });
+        }, speed);
+        return () => window.clearInterval(timer);
+    }, [text, speed]);
+
+    return <div className={className}>{renderTaggedDescription(text.slice(0, visibleCount))}</div>;
+}
+
+type StreamParserState = {
+    buffer: string;
+    openScreenName: string | null;
+    openScreenSeq: number | null;
+    nextSeq: number;
+    descriptionSeen: boolean;
+};
+
+type StreamParseEvent =
+    | { type: 'description'; text: string }
+    | { type: 'screen_start'; seq: number; name: string }
+    | { type: 'screen_preview'; seq: number; name: string; html: string }
+    | { type: 'screen_complete'; seq: number; name: string; html: string; rawPartial: string }
+    | { type: 'screen_incomplete'; seq: number; name: string; html: string; rawPartial: string; valid: boolean };
+
+function createStreamParserState(): StreamParserState {
+    return {
+        buffer: '',
+        openScreenName: null,
+        openScreenSeq: null,
+        nextSeq: 0,
+        descriptionSeen: false,
+    };
+}
+
+function isValidHtmlScreen(html: string): boolean {
+    return /<!doctype html>/i.test(html)
+        && /<html[\s>]/i.test(html)
+        && /<head[\s>]/i.test(html)
+        && /<body[\s>]/i.test(html)
+        && /<\/html>/i.test(html);
+}
+
+function extractLikelyHtml(content: string): string {
+    const doctypeIdx = content.search(/<!doctype html>/i);
+    if (doctypeIdx >= 0) return content.slice(doctypeIdx).trim();
+
+    const htmlIdx = content.search(/<html[\s>]/i);
+    if (htmlIdx >= 0) return content.slice(htmlIdx).trim();
+
+    return content.trim();
+}
+
+function bestEffortCompleteHtml(content: string): string {
+    let html = extractLikelyHtml(content);
+    if (!html) return '';
+
+    if (!/<html[\s>]/i.test(html)) {
+        html = `<html><head></head><body>${html}</body></html>`;
+    }
+    if (!/<!doctype html>/i.test(html)) {
+        html = `<!DOCTYPE html>\n${html}`;
+    }
+    if (!/<head[\s>]/i.test(html)) {
+        html = html.replace(/<html([^>]*)>/i, '<html$1><head></head>');
+    }
+    if (!/<body[\s>]/i.test(html)) {
+        if (/<\/head>/i.test(html)) {
+            html = html.replace(/<\/head>/i, '</head><body>');
+        } else {
+            html = html.replace(/<html([^>]*)>/i, '<html$1><body>');
+        }
+    }
+    if (!/<\/body>/i.test(html)) {
+        html += '\n</body>';
+    }
+    if (!/<\/html>/i.test(html)) {
+        html += '\n</html>';
+    }
+
+    return html.trim();
+}
+
+function findScreenStart(buffer: string): { index: number; tag: string; name: string } | null {
+    const match = /<screen\s+name=(['"])(.*?)\1\s*>/i.exec(buffer);
+    if (!match || match.index === undefined) return null;
+    return {
+        index: match.index,
+        tag: match[0],
+        name: (match[2] || '').trim() || 'Generated Screen',
+    };
+}
+
+function parseDescription(buffer: string): { start: number; end: number; text: string } | null {
+    const openMatch = /<description(?:\s[^>]*)?>/i.exec(buffer);
+    if (!openMatch || openMatch.index === undefined) return null;
+    const start = openMatch.index;
+    const openTag = openMatch[0];
+    const closeTag = '</description>';
+    const end = buffer.indexOf(closeTag, start + openTag.length);
+    if (end < 0) return null;
+    return {
+        start,
+        end: end + closeTag.length,
+        text: buffer.slice(start + openTag.length, end).trim(),
+    };
+}
+
+function parseStreamChunk(state: StreamParserState, chunk: string): StreamParseEvent[] {
+    const events: StreamParseEvent[] = [];
+    state.buffer += chunk;
+
+    while (true) {
+        if (!state.openScreenName) {
+            const description = parseDescription(state.buffer);
+            const screenStart = findScreenStart(state.buffer);
+
+            if (description && (!screenStart || description.start < screenStart.index)) {
+                if (!state.descriptionSeen && description.text) {
+                    events.push({ type: 'description', text: description.text });
+                    state.descriptionSeen = true;
+                }
+                state.buffer = state.buffer.slice(description.end);
+                continue;
+            }
+
+            if (!screenStart) {
+                const descriptionStart = state.buffer.search(/<description(?:\s[^>]*)?>/i);
+                if (descriptionStart >= 0) {
+                    if (descriptionStart > 0) {
+                        state.buffer = state.buffer.slice(descriptionStart);
+                    }
+                } else if (state.buffer.length > 20000) {
+                    state.buffer = state.buffer.slice(-8000);
+                }
+                break;
+            }
+
+            const seq = state.nextSeq++;
+            state.openScreenName = screenStart.name;
+            state.openScreenSeq = seq;
+            state.buffer = state.buffer.slice(screenStart.index + screenStart.tag.length);
+            events.push({ type: 'screen_start', seq, name: screenStart.name });
+            continue;
+        }
+
+        const endIdx = state.buffer.indexOf('</screen>');
+        if (endIdx < 0) {
+            const previewHtml = bestEffortCompleteHtml(state.buffer);
+            if (previewHtml) {
+                events.push({
+                    type: 'screen_preview',
+                    seq: state.openScreenSeq as number,
+                    name: state.openScreenName,
+                    html: previewHtml,
+                });
+            }
+            if (state.buffer.length > 200000) {
+                state.buffer = state.buffer.slice(-200000);
+            }
+            break;
+        }
+
+        const rawPartial = state.buffer.slice(0, endIdx);
+        const html = bestEffortCompleteHtml(rawPartial);
+        events.push({
+            type: 'screen_complete',
+            seq: state.openScreenSeq as number,
+            name: state.openScreenName,
+            html,
+            rawPartial,
+        });
+        state.buffer = state.buffer.slice(endIdx + '</screen>'.length);
+        state.openScreenName = null;
+        state.openScreenSeq = null;
+    }
+
+    return events;
+}
+
+function finalizeStream(state: StreamParserState): StreamParseEvent[] {
+    const events: StreamParseEvent[] = [];
+    events.push(...parseStreamChunk(state, ''));
+
+    if (!state.descriptionSeen) {
+        const description = parseDescription(state.buffer);
+        if (description?.text) {
+            events.push({ type: 'description', text: description.text });
+            state.descriptionSeen = true;
+            state.buffer = state.buffer.slice(description.end);
+        }
+    }
+
+    if (state.openScreenName && state.openScreenSeq !== null) {
+        const rawPartial = state.buffer;
+        const html = bestEffortCompleteHtml(rawPartial);
+        events.push({
+            type: 'screen_incomplete',
+            seq: state.openScreenSeq,
+            name: state.openScreenName,
+            html,
+            rawPartial,
+            valid: isValidHtmlScreen(html),
+        });
+        state.openScreenName = null;
+        state.openScreenSeq = null;
+        state.buffer = '';
+    }
+
+    return events;
+}
+
 export function ChatPanel() {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
+    const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
+    const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
+    const copyResetTimersRef = useRef<Record<string, number>>({});
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,12 +438,24 @@ export function ChatPanel() {
         return spec?.screens.find((s) => s.screenId === screenId) || null;
     };
 
-    const THUMB_W = 112;
+    const THUMB_W = 68;
 
     // Auto-scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    useEffect(() => {
+        if (!isGenerating) return;
+        const timer = window.setInterval(() => setClockTick(v => v + 1), 1000);
+        return () => window.clearInterval(timer);
+    }, [isGenerating]);
+
+    useEffect(() => {
+        return () => {
+            Object.values(copyResetTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+        };
+    }, []);
 
     // Auto-resize textarea
     useEffect(() => {
@@ -149,6 +521,49 @@ export function ChatPanel() {
         setImages(prev => prev.filter((_, i) => i !== index));
     };
 
+    const handleCopyMessage = async (messageId: string, content: string) => {
+        const text = stripUiTags(stripMarkdownBold(content || ''));
+        if (!text.trim()) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            updateMessage(messageId, { meta: { ...(useChatStore.getState().messages.find(m => m.id === messageId)?.meta || {}), copiedAt: Date.now() } });
+            setCopiedMessageIds(prev => ({ ...prev, [messageId]: true }));
+            if (copyResetTimersRef.current[messageId]) {
+                window.clearTimeout(copyResetTimersRef.current[messageId]);
+            }
+            copyResetTimersRef.current[messageId] = window.setTimeout(() => {
+                setCopiedMessageIds(prev => ({ ...prev, [messageId]: false }));
+                delete copyResetTimersRef.current[messageId];
+            }, 2200);
+        } catch (err) {
+            console.warn('Failed to copy message', err);
+        }
+    };
+
+    const handleReaction = (messageId: string, reaction: 'like' | 'dislike') => {
+        updateMessage(messageId, {
+            meta: {
+                ...(useChatStore.getState().messages.find(m => m.id === messageId)?.meta || {}),
+                reaction,
+            }
+        });
+    };
+
+    const handleShareMessage = async (messageId: string, content: string) => {
+        const text = stripUiTags(stripMarkdownBold(content || ''));
+        if (!text.trim()) return;
+        try {
+            if (navigator.share) {
+                await navigator.share({ text });
+                return;
+            }
+            await navigator.clipboard.writeText(text);
+            updateMessage(messageId, { meta: { ...(useChatStore.getState().messages.find(m => m.id === messageId)?.meta || {}), sharedAt: Date.now() } });
+        } catch (err) {
+            console.warn('Failed to share message', err);
+        }
+    };
+
     const handleGenerate = async () => {
         if (!prompt.trim() || isGenerating) return;
 
@@ -169,97 +584,67 @@ export function ChatPanel() {
             : selectedPlatform === 'tablet'
                 ? { width: 768, height: 1024 }
                 : { width: 375, height: 812 }; // Default mobile
-
-            const placeholderTimers: number[] = [];
+        let startTime = Date.now();
 
         try {
-            console.info('[UI] generate: start (json)', {
+            console.info('[UI] generate: start (stream)', {
                 prompt: requestPrompt,
                 stylePreset,
                 platform: selectedPlatform,
                 images: imagesToSend,
             });
 
-            const placeholderIds: string[] = [];
             const existingBoards = useCanvasStore.getState().doc.boards;
             const startX = existingBoards.length > 0
                 ? Math.max(...existingBoards.map(b => b.x + (b.width || 375))) + 100
                 : 100;
-            const startTime = Date.now();
+            startTime = Date.now();
 
+            updateMessage(assistantMsgId, {
+                content: FEEDBACK_BUCKETS.early[0],
+                status: 'streaming',
+                meta: {
+                    feedbackKey: Date.now(),
+                    feedbackPhase: 'early',
+                    feedbackStart: startTime
+                } as any
+            });
 
-            const initFeedback = () => {
+            const parserState = createStreamParserState();
+            const screenIdBySeq = new Map<number, string>();
+            const createdSeqs: number[] = [];
+            let completedCount = 0;
+            let finalDescription = '';
+            let thinkingStopped = false;
+
+            const stopThinkingOnFirstScreen = () => {
+                if (thinkingStopped) return;
+                thinkingStopped = true;
                 updateMessage(assistantMsgId, {
-                    content: FEEDBACK_BUCKETS.early[0],
-                    status: 'streaming',
                     meta: {
-                        feedbackKey: Date.now(),
-                        feedbackPhase: 'early',
-                        feedbackStart: startTime
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        thinkingStopped: true,
                     } as any
                 });
             };
-            const schedulePlaceholder = (index: number) => {
+
+            const ensureScreen = (seq: number, name: string): string => {
+                const existingId = screenIdBySeq.get(seq);
+                if (existingId) return existingId;
+
+                const index = createdSeqs.length;
                 const screenId = uuidv4();
-                placeholderIds[index] = screenId;
-                const screen = {
+                createdSeqs.push(seq);
+                screenIdBySeq.set(seq, screenId);
+
+                addScreens([{
                     screenId,
-                    name: `Generating ${index + 1}`,
+                    name,
                     html: '',
                     width: dimensions.width,
                     height: dimensions.height,
-                    status: 'streaming' as const,
-                };
-                addScreens([screen]);
-
-                const board = {
-                    boardId: screenId,
-                    screenId,
-                    x: startX + index * (dimensions.width + 100),
-                    y: 100,
-                    width: screen.width,
-                    height: screen.height,
-                    deviceFrame: 'none' as const,
-                    locked: false,
-                    visible: true,
-                };
-                const currentBoards = useCanvasStore.getState().doc.boards;
-                setBoards([...currentBoards, board]);
-            };
-
-            // Delay placeholders: first after 5s, then every 7s
-            for (let i = 0; i < 4; i++) {
-                const timer = window.setTimeout(() => schedulePlaceholder(i), 5000 + i * 7000);
-                placeholderTimers.push(timer);
-            }
-
-            initFeedback();
-
-            const controller = new AbortController();
-            setAbortController(controller);
-            const regen = await apiClient.generate({
-                prompt: requestPrompt,
-                stylePreset,
-                platform: selectedPlatform,
-                images: imagesToSend,
-            }, controller.signal);
-
-            regen.designSpec.screens.forEach((screen, index) => {
-                const targetId = placeholderIds[index];
-                if (targetId) {
-                    updateScreen(targetId, screen.html, 'complete', screen.width, screen.height, screen.name);
-                    return;
-                }
-
-                // If placeholder not created yet, create a real screen immediately
-                const screenId = uuidv4();
-                addScreens([{
-                    screenId,
-                    name: screen.name,
-                    html: screen.html,
-                    width: screen.width,
-                    height: screen.height,
-                    status: 'complete'
+                    status: 'streaming',
                 }]);
 
                 const board = {
@@ -267,54 +652,175 @@ export function ChatPanel() {
                     screenId,
                     x: startX + index * (dimensions.width + 100),
                     y: 100,
-                    width: screen.width,
-                    height: screen.height,
+                    width: dimensions.width,
+                    height: dimensions.height,
                     deviceFrame: 'none' as const,
                     locked: false,
                     visible: true,
                 };
                 const currentBoards = useCanvasStore.getState().doc.boards;
                 setBoards([...currentBoards, board]);
-            });
+                stopThinkingOnFirstScreen();
 
-            // Clear any pending placeholder timers
-            placeholderTimers.forEach(t => window.clearTimeout(t));
+                return screenId;
+            };
 
-            // If fewer than 4 screens returned, mark remaining placeholders (if created) as complete with a note
-            for (let i = regen.designSpec.screens.length; i < 4; i++) {
-                const targetId = placeholderIds[i];
-                if (!targetId) continue;
-                updateScreen(
-                    targetId,
-                    `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://cdn.tailwindcss.com"></script></head><body class="min-h-screen flex items-center justify-center bg-black text-white"><div class="text-center space-y-2"><div class="text-sm uppercase tracking-widest opacity-60">Generation</div><div class="text-lg font-semibold">Screen not returned</div></div></body></html>`,
-                    'complete',
-                    dimensions.width,
-                    dimensions.height,
-                    `Missing Screen ${i + 1}`
-                );
+            const controller = new AbortController();
+            setAbortController(controller);
+
+            await apiClient.generateStream({
+                prompt: requestPrompt,
+                stylePreset,
+                platform: selectedPlatform,
+                images: imagesToSend,
+            }, (chunk) => {
+                const events = parseStreamChunk(parserState, chunk);
+                for (const event of events) {
+                    if (event.type === 'description') {
+                        finalDescription = event.text;
+                        continue;
+                    }
+                    if (event.type === 'screen_start') {
+                        ensureScreen(event.seq, event.name);
+                        continue;
+                    }
+                    if (event.type === 'screen_preview') {
+                        const screenId = ensureScreen(event.seq, event.name);
+                        updateScreen(screenId, event.html, 'streaming', dimensions.width, dimensions.height, event.name);
+                        continue;
+                    }
+                    if (event.type === 'screen_complete') {
+                        const screenId = ensureScreen(event.seq, event.name);
+                        updateScreen(screenId, event.html, 'complete', dimensions.width, dimensions.height, event.name);
+                        completedCount += 1;
+                    }
+                }
+            }, controller.signal);
+
+            const finalizeEvents = finalizeStream(parserState);
+            for (const event of finalizeEvents) {
+                if (event.type === 'description') {
+                    finalDescription = event.text;
+                    continue;
+                }
+                if (event.type === 'screen_incomplete') {
+                    const screenId = ensureScreen(event.seq, event.name);
+                    let finalHtml = event.html;
+                    if (!event.valid) {
+                        try {
+                            const repaired = await apiClient.completeScreen({
+                                screenName: event.name,
+                                partialHtml: event.rawPartial,
+                                prompt: requestPrompt,
+                                platform: selectedPlatform,
+                                stylePreset,
+                            }, controller.signal);
+                            finalHtml = repaired.html;
+                        } catch (repairError) {
+                            console.warn('[UI] stream finalize: complete-screen failed, using best effort HTML', repairError);
+                        }
+                    }
+                    updateScreen(screenId, finalHtml, 'complete', dimensions.width, dimensions.height, event.name);
+                    completedCount += 1;
+                }
+            }
+
+            if (completedCount === 0) {
+                const regen = await apiClient.generate({
+                    prompt: requestPrompt,
+                    stylePreset,
+                    platform: selectedPlatform,
+                    images: imagesToSend,
+                }, controller.signal);
+
+                regen.designSpec.screens.forEach((screen, index) => {
+                    const seq = createdSeqs[index];
+                    if (seq !== undefined) {
+                        const targetId = screenIdBySeq.get(seq);
+                        if (targetId) {
+                            updateScreen(targetId, screen.html, 'complete', screen.width, screen.height, screen.name);
+                            return;
+                        }
+                    }
+
+                    const screenId = uuidv4();
+                    addScreens([{
+                        screenId,
+                        name: screen.name,
+                        html: screen.html,
+                        width: screen.width,
+                        height: screen.height,
+                        status: 'complete'
+                    }]);
+
+                    const board = {
+                        boardId: screenId,
+                        screenId,
+                        x: startX + index * (dimensions.width + 100),
+                        y: 100,
+                        width: screen.width,
+                        height: screen.height,
+                        deviceFrame: 'none' as const,
+                        locked: false,
+                        visible: true,
+                    };
+                    const currentBoards = useCanvasStore.getState().doc.boards;
+                    setBoards([...currentBoards, board]);
+                });
+
+                updateMessage(assistantMsgId, {
+                    content: regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`,
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                    }
+                });
+                console.info('[UI] generate: complete (fallback json)', { screens: regen.designSpec.screens.length });
+                return;
+            }
+
+            for (const seq of createdSeqs) {
+                const screenId = screenIdBySeq.get(seq);
+                if (!screenId) continue;
+                const current = useDesignStore.getState().spec?.screens.find(s => s.screenId === screenId);
+                if (current && current.status === 'streaming') {
+                    updateScreen(screenId, current.html, 'complete', current.width, current.height, current.name);
+                }
             }
 
             updateMessage(assistantMsgId, {
-                content: regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`,
+                content: finalDescription || `Generated ${completedCount} screens customized to your request.`,
                 status: 'complete',
+                meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                    thinkingMs: Date.now() - startTime,
+                }
             });
-            console.info('[UI] generate: complete (json)', { screens: regen.designSpec.screens.length });
+            console.info('[UI] generate: complete (stream)', { screens: completedCount });
         } catch (error) {
             if ((error as Error).name === 'AbortError') {
                 updateMessage(assistantMsgId, {
                     content: 'Generation stopped.',
                     status: 'error',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                    }
                 });
                 return;
             }
             updateMessage(assistantMsgId, {
                 content: `Error: ${(error as Error).message}`,
                 status: 'error',
+                meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                    thinkingMs: Date.now() - startTime,
+                }
             });
             console.error('[UI] generate: error', error);
         } finally {
             setAbortController(null);
-            placeholderTimers.forEach(t => window.clearTimeout(t));
             setGenerating(false);
         }
     };
@@ -348,11 +854,11 @@ const handleEdit = async () => {
                 }
             }
         });
-        updateMessage(assistantMsgId, { meta: { livePreview: true } });
-
         const currentPrompt = prompt;
         setPrompt('');
         setGenerating(true);
+        const startTime = Date.now();
+        updateMessage(assistantMsgId, { meta: { livePreview: true, feedbackStart: startTime } });
 
         try {
             updateScreen(targetScreen.screenId, targetScreen.html, 'streaming', targetScreen.width, targetScreen.height, targetScreen.name);
@@ -367,14 +873,24 @@ const handleEdit = async () => {
             updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
 
             updateMessage(assistantMsgId, {
-                content: `Updated ${targetScreen.name} based on your feedback.`,
+                content: response.description?.trim()
+                    ? response.description
+                    : `Updated ${targetScreen.name} based on your feedback.`,
                 status: 'complete',
+                meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                    thinkingMs: Date.now() - startTime,
+                }
             });
         } catch (error) {
             updateScreen(targetScreen.screenId, targetScreen.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
             updateMessage(assistantMsgId, {
                 content: `Error: ${(error as Error).message}`,
                 status: 'error',
+                meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                    thinkingMs: Date.now() - startTime,
+                }
             });
         } finally {
             setAbortController(null);
@@ -481,13 +997,13 @@ const handleEdit = async () => {
                                 className={`flex flex-col gap-2 ${message.role === 'user' ? 'items-end' : 'items-start'}`}
                             >
                                 {/* Screen Reference Visual */}
-                                {(message.screenRef || Array.isArray(message.meta?.screenIds)) && (message.role === 'user' || message.status === 'complete' || message.status === 'error') && (
-                                    <div className={`flex flex-wrap gap-2 mb-1 ${message.role === 'user' ? 'justify-end mr-1' : 'justify-start ml-1'}`}>
+                                {(message.screenRef || Array.isArray(message.meta?.screenIds)) && (message.role !== 'user') && (message.status === 'complete' || message.status === 'error') && (
+                                    <div className="flex flex-wrap gap-2 mb-1 justify-start ml-1">
                                         {(message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []))
                                             .slice(0, 4)
                                             .map((screenId) => {
                                                 const snapshotPreview = (message.meta?.screenSnapshots as Record<string, any> | undefined)?.[screenId] || null;
-                                                const preview = (message.role === 'user' && snapshotPreview) ? snapshotPreview : getScreenPreview(screenId);
+                                                const preview = snapshotPreview || getScreenPreview(screenId);
                                                 const label = preview?.name || message.screenRef?.label || 'Screen';
                                                 return (
                                                     <button
@@ -549,9 +1065,70 @@ const handleEdit = async () => {
 
                                 {message.role === 'user' ? (
                                     <div className="flex flex-col items-end gap-2 max-w-[90%]">
-                                        {message.images && message.images.length > 0 && (
-                                            <div className="flex flex-wrap gap-2 justify-end mb-1">
-                                                {message.images.map((img, idx) => (
+                                        {(((message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || [])).length > 0) || (message.images && message.images.length > 0)) && (
+                                            <div className="flex flex-wrap items-end gap-2 justify-end mb-1 w-full">
+                                                {(message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []))
+                                                    .slice(0, 4)
+                                                    .map((screenId) => {
+                                                        const snapshotPreview = (message.meta?.screenSnapshots as Record<string, any> | undefined)?.[screenId] || null;
+                                                        const preview = snapshotPreview || getScreenPreview(screenId);
+                                                        const label = preview?.name || message.screenRef?.label || 'Screen';
+                                                        return (
+                                                            <button
+                                                                key={`${message.id}-${screenId}`}
+                                                                onClick={() => setFocusNodeId(screenId)}
+                                                                className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-sm p-1.5 transition-all hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99]"
+                                                                style={{ width: THUMB_W + 12 }}
+                                                                title={`Focus ${label} on canvas`}
+                                                            >
+                                                                <div
+                                                                    className="rounded-lg overflow-hidden border border-white/10 bg-transparent relative"
+                                                                    style={{
+                                                                        width: THUMB_W,
+                                                                        height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
+                                                                    }}
+                                                                >
+                                                                    {preview?.html ? (
+                                                                        (() => {
+                                                                            const sourceW = preview.width || 375;
+                                                                            const sourceH = preview.height || 812;
+                                                                            const thumbH = Math.max(1, Math.round(THUMB_W * (sourceH / sourceW)));
+                                                                            const scale = Math.min(THUMB_W / sourceW, thumbH / sourceH);
+                                                                            const scaledW = Math.max(1, Math.floor(sourceW * scale));
+                                                                            const scaledH = Math.max(1, Math.floor(sourceH * scale));
+                                                                            const offsetX = Math.floor((THUMB_W - scaledW) / 2);
+                                                                            const offsetY = Math.floor((thumbH - scaledH) / 2);
+                                                                            return (
+                                                                                <div
+                                                                                    className="absolute left-0 top-0"
+                                                                                    style={{ width: THUMB_W, height: thumbH }}
+                                                                                >
+                                                                                    <iframe
+                                                                                        srcDoc={injectThumbScrollbarHide(preview.html)}
+                                                                                        title={`preview-${screenId}`}
+                                                                                        sandbox="allow-scripts allow-same-origin"
+                                                                                        scrolling="no"
+                                                                                        className="pointer-events-none absolute"
+                                                                                        style={{
+                                                                                            width: sourceW,
+                                                                                            height: sourceH,
+                                                                                            transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+                                                                                            transformOrigin: 'top left',
+                                                                                            border: '0',
+                                                                                        }}
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        })()
+                                                                    ) : (
+                                                                        <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500">No preview</div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="mt-1 text-[10px] text-gray-300 font-semibold truncate">{label}</div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                {message.images && message.images.map((img, idx) => (
                                                     <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-white/10 shadow-sm group">
                                                         <img src={img} alt="attached" className="w-full h-full object-cover" />
                                                     </div>
@@ -560,6 +1137,17 @@ const handleEdit = async () => {
                                         )}
                                         <div className="bg-[#2C2C2E] px-5 py-3 rounded-[24px] rounded-tr-sm text-[15px] text-gray-100 shadow-sm ring-1 ring-white/5">
                                             {message.content}
+                                        </div>
+                                        <div className="flex items-center justify-end w-full pr-1">
+                                            <button
+                                                onClick={() => handleCopyMessage(message.id, message.content)}
+                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                title="Copy"
+                                            >
+                                                {copiedMessageIds[message.id]
+                                                    ? <Check size={14} className="text-emerald-400" />
+                                                    : <Copy size={14} />}
+                                            </button>
                                         </div>
                                     </div>
                                 ) : (
@@ -571,53 +1159,108 @@ const handleEdit = async () => {
                                                 <span className="text-sm text-gray-400 font-medium">Generating designs...</span>
                                             </div>
                                         ) : (
-                                            <div className="text-[15px] leading-relaxed text-gray-300 bg-transparent px-2 whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out">
+                                            <div className="space-y-2">
+                                                {(() => {
+                                                    const thinkingSeconds = getThinkingSeconds(message);
+                                                    if (!thinkingSeconds) return null;
+                                                    return (
+                                                        <div className="flex items-center gap-2 text-xs text-gray-400 px-2">
+                                                            <Lightbulb size={13} />
+                                                            <span>Thought for {thinkingSeconds} second{thinkingSeconds === 1 ? '' : 's'}</span>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                <div className="text-[13px] leading-relaxed whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out text-gray-200 bg-transparent px-2">
                                                 {message.status === 'streaming' ? (
-                                                    <TextType
-                                                        key={`${message.id}-${String(message.meta?.feedbackKey ?? message.content)}`}
-                                                        text={
-                                                            message.meta?.feedbackPhase === 'working'
-                                                                ? FEEDBACK_BUCKETS.working
-                                                                : message.meta?.feedbackPhase === 'late'
-                                                                    ? FEEDBACK_BUCKETS.late
-                                                                    : message.meta?.feedbackPhase === 'wrap'
-                                                                        ? FEEDBACK_BUCKETS.wrap
-                                                                        : FEEDBACK_BUCKETS.early
-                                                        }
-                                                        className="text-[15px] font-medium text-gray-300"
-                                                        typingSpeed={75}
-                                                        deletingSpeed={50}
-                                                        pauseDuration={1500}
-                                                        showCursor
-                                                        cursorCharacter="_"
-                                                        cursorBlinkDuration={0.5}
-                                                        variableSpeed={undefined}
-                                                        loop
-                                                        onSentenceComplete={() => {
-                                                            const start = (message.meta?.feedbackStart as number) || Date.now();
-                                                            const elapsed = Date.now() - start;
-                                                            let phase: keyof typeof FEEDBACK_BUCKETS = 'early';
-                                                            if (elapsed >= 10000 && elapsed < 20000) phase = 'working';
-                                                            if (elapsed >= 20000 && elapsed < 30000) phase = 'late';
-                                                            if (elapsed >= 30000) phase = 'wrap';
-                                                            if (phase !== message.meta?.feedbackPhase) {
-                                                                updateMessage(message.id, {
-                                                                    meta: {
-                                                                        ...message.meta,
-                                                                        feedbackPhase: phase,
-                                                                        feedbackKey: Date.now()
-                                                                    }
-                                                                });
+                                                    message.meta?.thinkingStopped ? (
+                                                        <span className="text-[13px] font-medium text-gray-300">Rendering remaining screens...</span>
+                                                    ) : (
+                                                        <TextType
+                                                            key={`${message.id}-${String(message.meta?.feedbackKey ?? message.content)}`}
+                                                            text={
+                                                                message.meta?.feedbackPhase === 'working'
+                                                                    ? FEEDBACK_BUCKETS.working
+                                                                    : message.meta?.feedbackPhase === 'late'
+                                                                        ? FEEDBACK_BUCKETS.late
+                                                                        : message.meta?.feedbackPhase === 'wrap'
+                                                                            ? FEEDBACK_BUCKETS.wrap
+                                                                            : FEEDBACK_BUCKETS.early
                                                             }
-                                                        }}
+                                                            className="text-[13px] font-medium text-gray-300"
+                                                            typingSpeed={75}
+                                                            deletingSpeed={50}
+                                                            pauseDuration={1500}
+                                                            showCursor
+                                                            cursorCharacter="_"
+                                                            cursorBlinkDuration={0.5}
+                                                            variableSpeed={undefined}
+                                                            loop
+                                                            onSentenceComplete={() => {
+                                                                const start = (message.meta?.feedbackStart as number) || Date.now();
+                                                                const elapsed = Date.now() - start;
+                                                                let phase: keyof typeof FEEDBACK_BUCKETS = 'early';
+                                                                if (elapsed >= 10000 && elapsed < 20000) phase = 'working';
+                                                                if (elapsed >= 20000 && elapsed < 30000) phase = 'late';
+                                                                if (elapsed >= 30000) phase = 'wrap';
+                                                                if (phase !== message.meta?.feedbackPhase) {
+                                                                    updateMessage(message.id, {
+                                                                        meta: {
+                                                                            ...message.meta,
+                                                                            feedbackPhase: phase,
+                                                                            feedbackKey: Date.now()
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }}
+                                                        />
+                                                    )
+                                                ) : message.status === 'complete' ? (
+                                                    <TypedTaggedText
+                                                        key={`${message.id}-${message.content}`}
+                                                        text={message.content}
+                                                        className="text-[13px] font-medium text-gray-100"
+                                                        speed={12}
                                                     />
                                                 ) : (
-                                                    message.content.split(/(\*\*.*?\*\*)/g).map((part, i) =>
-                                                        part.startsWith('**') && part.endsWith('**')
-                                                            ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
-                                                            : part
-                                                    )
+                                                    renderTaggedDescription(message.content)
                                                 )}
+                                                </div>
+                                                <div className="flex items-center gap-2 px-1">
+                                                    <button
+                                                        onClick={() => handleCopyMessage(message.id, message.content)}
+                                                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                        title="Copy"
+                                                    >
+                                                        {copiedMessageIds[message.id]
+                                                            ? <Check size={14} className="text-emerald-400" />
+                                                            : <Copy size={14} />}
+                                                    </button>
+                                                    {message.status === 'complete' && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleReaction(message.id, 'like')}
+                                                                className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'like' ? 'text-emerald-300 bg-emerald-500/15' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                                                                title="Like"
+                                                            >
+                                                                <ThumbsUp size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleReaction(message.id, 'dislike')}
+                                                                className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'dislike' ? 'text-rose-300 bg-rose-500/15' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                                                                title="Dislike"
+                                                            >
+                                                                <ThumbsDown size={14} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleShareMessage(message.id, message.content)}
+                                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                                title="Share"
+                                                            >
+                                                                <Share2 size={14} />
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
