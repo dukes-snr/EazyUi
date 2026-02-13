@@ -553,7 +553,7 @@ export function EditPanel() {
         setIconQuery((selected.textContent || '').trim());
         setShowIconResults(false);
         setDisplay(selected.computedStyle.display === 'flex' ? 'flex' : selected.computedStyle.display === 'grid' ? 'grid' : 'block');
-        setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || ''));
+        setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || selected.computedStyle.zIndex || ''));
         const ml = selected.computedStyle.marginLeft || '';
         const mr = selected.computedStyle.marginRight || '';
         if (ml === 'auto' && mr === 'auto') setElementAlign('center');
@@ -600,6 +600,16 @@ export function EditPanel() {
     const patchStyle = (style: Record<string, string>) => {
         if (!selected) return;
         applyPatch({ op: 'set_style', uid: selected.uid, style });
+    };
+
+    const patchZIndex = (next: string) => {
+        if (!selected) return;
+        const effectivePosition = (selected.inlineStyle?.position || selected.computedStyle.position || '').trim().toLowerCase();
+        const style: Record<string, string> = { 'z-index': next || '0' };
+        if (!effectivePosition || effectivePosition === 'static') {
+            style.position = 'relative';
+        }
+        patchStyle(style);
     };
 
     const applyElementAlign = (next: 'left' | 'center' | 'right') => {
@@ -955,7 +965,7 @@ export function EditPanel() {
                                         value={zIndex}
                                         onChangeValue={(next) => {
                                             setZIndex(next);
-                                            patchStyle({ 'z-index': next || '0', position: selected.inlineStyle?.position || 'relative' });
+                                            patchZIndex(next);
                                         }}
                                     />
                                     <button
@@ -963,7 +973,7 @@ export function EditPanel() {
                                             const current = parseInt(zIndex || '0', 10) || 0;
                                             const next = String(current - 1);
                                             setZIndex(next);
-                                            patchStyle({ 'z-index': next, position: selected.inlineStyle?.position || 'relative' });
+                                            patchZIndex(next);
                                         }}
                                         className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
                                     >
@@ -974,7 +984,7 @@ export function EditPanel() {
                                             const current = parseInt(zIndex || '0', 10) || 0;
                                             const next = String(current + 1);
                                             setZIndex(next);
-                                            patchStyle({ 'z-index': next, position: selected.inlineStyle?.position || 'relative' });
+                                            patchZIndex(next);
                                         }}
                                         className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
                                     >
@@ -1267,7 +1277,6 @@ export function EditPanel() {
         </aside>
     );
 }
-
 
 
 

@@ -31,11 +31,11 @@ const nodeTypes = {
 // Inner component to use React Flow hooks if needed
 function CanvasWorkspaceContent() {
     const { spec } = useDesignStore();
-    const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, lastExternalUpdate } = useCanvasStore();
+    const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, focusNodeIds, setFocusNodeIds, lastExternalUpdate } = useCanvasStore();
     const { isEditMode } = useEditStore();
     const { isGenerating } = useChatStore();
     const { recordSnapshot } = useHistoryStore();
-    const { setCenter } = useReactFlow();
+    const { setCenter, fitView } = useReactFlow();
 
     // Initialize nodes from doc.boards and spec.screens
     const initialNodes = useMemo(() => {
@@ -87,14 +87,30 @@ function CanvasWorkspaceContent() {
 
                 // Also select it to give visual feedback
                 selectNodes([focusNodeId]);
-            } else {
-                console.warn(`[CanvasWorkspace] Could not find node with ID: ${focusNodeId} for focusing.`);
+                // Reset focus ID only after successful focus
+                setFocusNodeId(null);
             }
-
-            // Reset focus ID after triggering
-            setFocusNodeId(null);
         }
     }, [focusNodeId, setCenter, setFocusNodeId, nodes, selectNodes]);
+
+    // Handle focusing a group of nodes from chat/edit flows
+    useEffect(() => {
+        if (!focusNodeIds || focusNodeIds.length === 0) return;
+        const existing = focusNodeIds.filter(id => nodes.some(n => n.id === id));
+        if (!existing.length) {
+            setFocusNodeIds(null);
+            return;
+        }
+
+        fitView({
+            nodes: existing.map((id) => ({ id })),
+            padding: 0.2,
+            duration: 900,
+            maxZoom: 1.1,
+        });
+        selectNodes(existing);
+        setFocusNodeIds(null);
+    }, [focusNodeIds, fitView, nodes, selectNodes, setFocusNodeIds]);
 
     // Update nodes when structure or selection changes
     // But avoid resetting positions while users are interacting via React Flow

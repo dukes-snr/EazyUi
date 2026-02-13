@@ -67,6 +67,8 @@ interface CanvasState {
     // Focus state for navigation
     focusNodeId: string | null;
     setFocusNodeId: (nodeId: string | null) => void;
+    focusNodeIds: string[] | null;
+    setFocusNodeIds: (nodeIds: string[] | null) => void;
 
     lastExternalUpdate: number;
     triggerExternalUpdate: () => void;
@@ -116,6 +118,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     focusNodeId: null,
     setFocusNodeId: (focusNodeId) => set({ focusNodeId }),
+    focusNodeIds: null,
+    setFocusNodeIds: (focusNodeIds) => set({ focusNodeIds }),
 
     lastExternalUpdate: 0,
     triggerExternalUpdate: () => set({ lastExternalUpdate: Date.now() }),

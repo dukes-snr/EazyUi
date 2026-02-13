@@ -430,7 +430,7 @@ export function ChatPanel() {
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
-    const { setBoards, doc, setFocusNodeId, removeBoard } = useCanvasStore();
+    const { setBoards, doc, setFocusNodeId, setFocusNodeIds, removeBoard } = useCanvasStore();
     const { isEditMode } = useEditStore();
     const assistantMsgIdRef = useRef<string>('');
 
@@ -661,6 +661,7 @@ export function ChatPanel() {
                 const currentBoards = useCanvasStore.getState().doc.boards;
                 setBoards([...currentBoards, board]);
                 stopThinkingOnFirstScreen();
+                setFocusNodeId(screenId);
 
                 return screenId;
             };
@@ -776,6 +777,12 @@ export function ChatPanel() {
                         thinkingMs: Date.now() - startTime,
                     }
                 });
+                const fallbackIds = regen.designSpec.screens
+                    .map((_, index) => screenIdBySeq.get(createdSeqs[index] as number))
+                    .filter(Boolean) as string[];
+                if (fallbackIds.length > 0) {
+                    setFocusNodeIds(fallbackIds);
+                }
                 console.info('[UI] generate: complete (fallback json)', { screens: regen.designSpec.screens.length });
                 return;
             }
@@ -797,6 +804,12 @@ export function ChatPanel() {
                     thinkingMs: Date.now() - startTime,
                 }
             });
+            const generatedIds = createdSeqs
+                .map((seq) => screenIdBySeq.get(seq))
+                .filter(Boolean) as string[];
+            if (generatedIds.length > 0) {
+                setFocusNodeIds(generatedIds);
+            }
             console.info('[UI] generate: complete (stream)', { screens: completedCount });
         } catch (error) {
             if ((error as Error).name === 'AbortError') {
@@ -861,6 +874,7 @@ const handleEdit = async () => {
         updateMessage(assistantMsgId, { meta: { livePreview: true, feedbackStart: startTime } });
 
         try {
+            setFocusNodeId(targetScreen.screenId);
             updateScreen(targetScreen.screenId, targetScreen.html, 'streaming', targetScreen.width, targetScreen.height, targetScreen.name);
             const controller = new AbortController();
             setAbortController(controller);
@@ -871,6 +885,7 @@ const handleEdit = async () => {
             }, controller.signal);
 
             updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
+            setFocusNodeIds([targetScreen.screenId]);
 
             updateMessage(assistantMsgId, {
                 content: response.description?.trim()

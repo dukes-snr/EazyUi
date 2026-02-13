@@ -207,6 +207,8 @@ function injectEditorScript(html: string, screenId: string) {
         opacity: cs.opacity,
         boxShadow: cs.boxShadow,
         display: cs.display,
+        position: cs.position,
+        zIndex: cs.zIndex,
         justifyContent: cs.justifyContent,
         alignItems: cs.alignItems,
         gap: cs.gap,
@@ -349,8 +351,8 @@ function injectEditorScript(html: string, screenId: string) {
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
-    const { removeBoard, doc, setFocusNodeId } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, enterEdit, rebuildHtml, reloadTick } = useEditStore();
+    const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
+    const { isEditMode, screenId: editScreenId, enterEdit, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -406,6 +408,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     updateMessage(assistantMsgId, { meta: { livePreview: true } });
 
                     // Start loading state
+                    setFocusNodeId(data.screenId as string);
                     updateScreen(data.screenId as string, data.html as string, 'streaming');
 
                     const controller = new AbortController();
@@ -419,6 +422,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
                     // Update with new content
                     updateScreen(data.screenId as string, response.html, 'complete');
+                    setFocusNodeIds([data.screenId as string]);
 
                     // Update chat message
                     updateMessage(assistantMsgId, {
@@ -484,7 +488,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setGenerating, setAbortController]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
 
@@ -530,22 +534,23 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const injectedHtml = isDesktop && data.screenId
         ? injectHeightScript(withEditor, data.screenId as string)
         : withEditor;
+    const injectedHtmlWithNonce = `${injectedHtml}\n<!--eazyui-render:${isEditMode ? 'edit' : 'view'}:${refreshAllTick}-->`;
 
-    const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtml);
+    const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtmlWithNonce);
     const wasEditingRef = useRef(false);
     const lastReloadTickRef = useRef(reloadTick);
     useEffect(() => {
         if (isEditingScreen) {
             const reloadRequested = lastReloadTickRef.current !== reloadTick;
             if (!wasEditingRef.current || reloadRequested) {
-                setStableSrcDoc(injectedHtml);
+                setStableSrcDoc(injectedHtmlWithNonce);
             }
         } else {
-            setStableSrcDoc(injectedHtml);
+            setStableSrcDoc(injectedHtmlWithNonce);
         }
         wasEditingRef.current = isEditingScreen;
         lastReloadTickRef.current = reloadTick;
-    }, [injectedHtml, isEditingScreen, reloadTick]);
+    }, [injectedHtmlWithNonce, isEditingScreen, reloadTick]);
 
     // Frame Configuration
     let borderWidth = 8;

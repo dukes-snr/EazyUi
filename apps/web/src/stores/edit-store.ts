@@ -34,6 +34,8 @@ export interface SelectedElementInfo {
         opacity?: string;
         boxShadow?: string;
         display?: string;
+        position?: string;
+        zIndex?: string;
         justifyContent?: string;
         alignItems?: string;
         gap?: string;
@@ -51,6 +53,7 @@ interface EditState {
     patches: HtmlPatch[];
     pointer: number;
     reloadTick: number;
+    refreshAllTick: number;
 
     enterEdit: (screenId: string, baseHtml: string) => void;
     setActiveScreen: (screenId: string, baseHtml: string) => void;
@@ -81,10 +84,19 @@ export const useEditStore = create<EditState>((set, get) => ({
     patches: [],
     pointer: 0,
     reloadTick: 0,
+    refreshAllTick: 0,
 
     enterEdit: (screenId, baseHtml) => set({ isEditMode: true, screenId, selected: null, baseHtml, patches: [], pointer: 0 }),
     setActiveScreen: (screenId, baseHtml) => set({ screenId, baseHtml, selected: null, patches: [], pointer: 0 }),
-    exitEdit: () => set({ isEditMode: false, screenId: null, selected: null, baseHtml: null, patches: [], pointer: 0 }),
+    exitEdit: () => set(state => ({
+        isEditMode: false,
+        screenId: null,
+        selected: null,
+        baseHtml: null,
+        patches: [],
+        pointer: 0,
+        refreshAllTick: state.refreshAllTick + 1,
+    })),
     setSelected: (selected) => set({ selected }),
 
     pushPatch: (patch) => set(state => ({

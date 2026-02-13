@@ -24,7 +24,7 @@ import { apiClient } from '../../api/client';
 type MenuType = 'align' | 'space' | 'generate' | 'edit' | 'more' | null;
 
 export const MultiSelectToolbar = memo(() => {
-    const { alignSelectedBoards, distributeSelectedBoards, smartArrangeSelectedBoards, moveSelectedBoards, doc } = useCanvasStore();
+    const { alignSelectedBoards, distributeSelectedBoards, smartArrangeSelectedBoards, moveSelectedBoards, doc, setFocusNodeIds } = useCanvasStore();
     const { spec, updateScreen } = useDesignStore();
     const { isGenerating, setGenerating, setAbortController, addMessage, updateMessage } = useChatStore();
     const { fitView } = useReactFlow();
@@ -112,6 +112,10 @@ export const MultiSelectToolbar = memo(() => {
                     failed++;
                 }
             });
+            const successIds = results
+                .flatMap((result) => result.status === 'fulfilled' ? [result.value.screenId] : []);
+            const targetIds = successIds.length > 0 ? successIds : targetScreens.map((s) => s.screenId);
+            setFocusNodeIds(targetIds);
 
             updateMessage(assistantMsgId, {
                 content: failed === 0
