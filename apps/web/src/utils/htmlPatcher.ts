@@ -116,6 +116,16 @@ function addEditableAttrs(node: Node, inHead: boolean, createUid: () => string):
             setAttr(node, 'data-screen-root', 'true');
             changed = true;
         }
+        if (node.nodeName === 'img' && !hasAttr(node, 'alt')) {
+            const uid = getAttr(node, 'data-uid') || createUid();
+            if (!hasAttr(node, 'data-uid')) {
+                setAttr(node, 'data-uid', uid);
+                changed = true;
+            }
+            const readable = uid.replace(/^uid[_-]?/i, '').replace(/[-_]+/g, ' ').trim();
+            setAttr(node, 'alt', readable ? `image ${readable}` : 'app image');
+            changed = true;
+        }
     }
     return changed;
 }

@@ -6,11 +6,12 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
-import { generateDesign, editDesign, completePartialScreen, type HtmlDesignSpec } from './services/gemini.js';
+import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 
 const fastify = Fastify({
     logger: true,
+    bodyLimit: parseInt(process.env.API_BODY_LIMIT || `${25 * 1024 * 1024}`, 10),
 });
 
 // Register CORS
@@ -78,9 +79,10 @@ fastify.post<{
         html: string;
         screenId: string;
         images?: string[];
+        preferredModel?: string;
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId, images } = request.body;
+    const { instruction, html, screenId, images, preferredModel } = request.body;
 
     if (!instruction?.trim()) {
         return reply.status(400).send({ error: 'Instruction is required' });
@@ -91,7 +93,7 @@ fastify.post<{
     }
 
     try {
-        const edited = await editDesign({ instruction, html, screenId, images });
+        const edited = await editDesign({ instruction, html, screenId, images, preferredModel });
         const versionId = uuidv4();
 
         return { html: edited.html, description: edited.description, versionId };
@@ -99,6 +101,31 @@ fastify.post<{
         fastify.log.error(error);
         return reply.status(500).send({
             error: 'Failed to edit design',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        prompt: string;
+        instruction?: string;
+        preferredModel?: string;
+    };
+}>('/api/generate-image', async (request, reply) => {
+    const { prompt, instruction, preferredModel } = request.body;
+
+    if (!prompt?.trim()) {
+        return reply.status(400).send({ error: 'Prompt is required' });
+    }
+
+    try {
+        const result = await generateImageAsset({ prompt, instruction, preferredModel });
+        return result;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to generate image',
             message: (error as Error).message,
         });
     }

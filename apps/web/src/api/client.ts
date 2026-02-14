@@ -40,12 +40,25 @@ export interface EditRequest {
     html: string;
     screenId: string;
     images?: string[];
+    preferredModel?: string;
 }
 
 export interface EditResponse {
     html: string;
     description?: string;
     versionId: string;
+}
+
+export interface GenerateImageRequest {
+    prompt: string;
+    instruction?: string;
+    preferredModel?: string;
+}
+
+export interface GenerateImageResponse {
+    src: string;
+    modelUsed: string;
+    description?: string;
 }
 
 export interface CompleteScreenRequest {
@@ -132,6 +145,14 @@ class ApiClient {
 
     async edit(request: EditRequest, signal?: AbortSignal): Promise<EditResponse> {
         return this.request<EditResponse>('/edit', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async generateImage(request: GenerateImageRequest, signal?: AbortSignal): Promise<GenerateImageResponse> {
+        return this.request<GenerateImageResponse>('/generate-image', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

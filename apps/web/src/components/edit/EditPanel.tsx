@@ -1,8 +1,9 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useCanvasStore, useDesignStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
-import { type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, Images, Pipette, Redo2, SlidersHorizontal, Undo2, X } from 'lucide-react';
+import { apiClient } from '../../api/client';
+import { ensureEditableUids, type HtmlPatch } from '../../utils/htmlPatcher';
+import { ArrowUpLeft, ImagePlus, Images, Pipette, Redo2, SlidersHorizontal, Sparkles, Undo2, X } from 'lucide-react';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
@@ -11,6 +12,20 @@ type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
 type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
 type ScreenImageItem = { uid: string; src: string; alt: string };
+
+function defaultImagePromptFromAlt(alt?: string, appName?: string, screenName?: string): string {
+    const cleaned = (alt || '').trim();
+    const shortOrVague =
+        cleaned.length < 14 ||
+        cleaned.split(/\s+/).length < 3 ||
+        /^(image|photo|pic|logo|icon|cook|salad|recipe view)$/i.test(cleaned);
+    if (!shortOrVague) return cleaned;
+
+    const app = (appName || 'app').trim();
+    const screen = (screenName || 'screen').trim();
+    const subject = cleaned || 'hero visual';
+    return `${app} ${screen} ${subject} image, modern UI style, clean composition`;
+}
 
 const GAP_CLASSES = ['gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-6', 'gap-8'];
 const JUSTIFY_CLASSES = ['justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly'];
@@ -375,7 +390,20 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
 export function EditPanel() {
     const { spec, updateScreen } = useDesignStore();
     const { setFocusNodeId } = useCanvasStore();
-    const { isEditMode, screenId, selected, setSelected, setActiveScreen, applyPatchAndRebuild, undoAndRebuild, redoAndRebuild, rebuildHtml, exitEdit } = useEditStore();
+    const {
+        isEditMode,
+        screenId,
+        selected,
+        setSelected,
+        setActiveScreen,
+        applyPatchAndRebuild,
+        undoAndRebuild,
+        redoAndRebuild,
+        rebuildHtml,
+        exitEdit,
+        aiEditHistoryByScreen,
+        addAiEditHistory,
+    } = useEditStore();
 
     const [textValue, setTextValue] = useState('');
     const [bgColor, setBgColor] = useState('');
@@ -410,7 +438,16 @@ export function EditPanel() {
     const [screenImages, setScreenImages] = useState<ScreenImageItem[]>([]);
     const [imageInputs, setImageInputs] = useState<Record<string, string>>({});
     const [uploadTargetUid, setUploadTargetUid] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'edit' | 'images'>('edit');
+    const [activeTab, setActiveTab] = useState<'ai' | 'edit' | 'images'>('edit');
+    const [aiPrompt, setAiPrompt] = useState('');
+    const [isApplyingAi, setIsApplyingAi] = useState(false);
+    const [aiDescription, setAiDescription] = useState('');
+    const [aiError, setAiError] = useState('');
+    const [aiImageGenEnabled, setAiImageGenEnabled] = useState(false);
+    const [imageGenPromptByUid, setImageGenPromptByUid] = useState<Record<string, string>>({});
+    const [imageGenLoadingUid, setImageGenLoadingUid] = useState<string | null>(null);
+    const [imagesTabError, setImagesTabError] = useState('');
+    const aiAbortRef = useRef<AbortController | null>(null);
     const imageFileInputRef = useRef<HTMLInputElement | null>(null);
     const globalImageFileInputRef = useRef<HTMLInputElement | null>(null);
     const iconListRef = useRef<HTMLDivElement | null>(null);
@@ -419,6 +456,18 @@ export function EditPanel() {
         if (!spec || !screenId) return null;
         return spec.screens.find((s) => s.screenId === screenId) || null;
     }, [spec, screenId]);
+
+    const activeAiHistory = useMemo(() => {
+        if (!screenId) return [];
+        return aiEditHistoryByScreen[screenId] || [];
+    }, [aiEditHistoryByScreen, screenId]);
+
+    const applyScreenHtmlImmediately = (nextHtml: string) => {
+        if (!screenId) return;
+        const ensured = ensureEditableUids(nextHtml);
+        updateScreen(screenId, ensured, 'complete');
+        setActiveScreen(screenId, ensured);
+    };
 
     const commitActiveScreenEdits = () => {
         if (!screenId) return;
@@ -493,6 +542,7 @@ export function EditPanel() {
         if (!activeScreen?.html) {
             setScreenImages([]);
             setImageInputs({});
+            setImageGenPromptByUid({});
             return;
         }
         const doc = new DOMParser().parseFromString(activeScreen.html, 'text/html');
@@ -505,9 +555,17 @@ export function EditPanel() {
             .filter((item) => !!item.uid);
         setScreenImages(items);
         const inputs: Record<string, string> = {};
+        const nextGenPrompts: Record<string, string> = {};
         for (const item of items) inputs[item.uid] = item.src;
+        setImageGenPromptByUid((prev) => {
+            for (const item of items) {
+                const existing = (prev[item.uid] || '').trim();
+                nextGenPrompts[item.uid] = existing || defaultImagePromptFromAlt(item.alt, spec?.name, activeScreen?.name);
+            }
+            return nextGenPrompts;
+        });
         setImageInputs(inputs);
-    }, [activeScreen?.html]);
+    }, [activeScreen?.html, activeScreen?.name, spec?.name]);
 
     useEffect(() => {
         const handler = (event: MessageEvent) => {
@@ -572,6 +630,19 @@ export function EditPanel() {
         else setTextFlexAlign('start');
     }, [selected]);
 
+    useEffect(() => {
+        if (selected?.elementType !== 'image') {
+            setAiImageGenEnabled(false);
+        }
+    }, [selected?.elementType]);
+
+    useEffect(() => {
+        return () => {
+            aiAbortRef.current?.abort();
+            aiAbortRef.current = null;
+        };
+    }, []);
+
     const applyPatch = (patch: HtmlPatch) => {
         if (!screenId || !activeScreen) return;
         dispatchPatchToIframe(screenId, patch);
@@ -635,6 +706,149 @@ export function EditPanel() {
         applyPatch({ op: 'set_text', uid: selected.uid, text: cleaned });
     };
 
+    const applyAiEditToSelection = async () => {
+        if (!screenId || !selected || !activeScreen) return;
+        const snapshot = selected;
+        const isImageGenerationMode = aiImageGenEnabled && snapshot.elementType === 'image';
+        const prompt = aiPrompt.trim() || (isImageGenerationMode
+            ? defaultImagePromptFromAlt(snapshot.attributes?.alt, spec?.name, activeScreen?.name)
+            : '');
+        if (!prompt || isApplyingAi) return;
+
+        const htmlSource = rebuildHtml() || activeScreen.html;
+        if (!htmlSource) return;
+
+        setAiError('');
+        setAiDescription('');
+        setIsApplyingAi(true);
+        const controller = new AbortController();
+        aiAbortRef.current = controller;
+        try {
+            const scopedInstruction = `
+Edit only the selected component in this screen.
+
+USER REQUEST:
+${prompt}
+
+TARGET COMPONENT:
+- data-uid: ${snapshot.uid}
+- tag: ${snapshot.tagName.toLowerCase()}
+- type: ${snapshot.elementType}
+- classes: ${(snapshot.classList || []).join(' ') || '(none)'}
+- inline-style: ${JSON.stringify(snapshot.inlineStyle || {})}
+- attrs: ${JSON.stringify(snapshot.attributes || {})}
+
+LAYOUT CONTEXT:
+- computed display: ${snapshot.computedStyle.display || ''}
+- computed position: ${snapshot.computedStyle.position || ''}
+- computed z-index: ${snapshot.computedStyle.zIndex || ''}
+- computed width: ${snapshot.computedStyle.width || ''}
+- computed height: ${snapshot.computedStyle.height || ''}
+- computed margin: ${snapshot.computedStyle.margin || ''}
+- computed padding: ${snapshot.computedStyle.padding || ''}
+
+RULES:
+- Keep the screen architecture intact and preserve all unrelated components.
+- Modify only the target element and only minimal nearby wrappers if required for layout integrity.
+- Preserve existing data-uid and data-editable attributes.
+- Keep icon/text visibility and stacking context correct.
+- Return valid full HTML only.
+`.trim();
+
+            if (isImageGenerationMode) {
+                const imageResult = await apiClient.generateImage({
+                    prompt,
+                    preferredModel: 'image',
+                }, controller.signal);
+                const nextSrc = imageResult.src;
+                applyPatch({ op: 'set_attr', uid: snapshot.uid, attr: { src: nextSrc } });
+                setImageSrc(nextSrc);
+                setImageInputs((prev) => ({ ...prev, [snapshot.uid]: nextSrc }));
+                if (imageResult.description?.trim()) {
+                    setAiDescription(imageResult.description.trim());
+                }
+            } else {
+                const response = await apiClient.edit({
+                    instruction: scopedInstruction,
+                    html: htmlSource,
+                    screenId,
+                }, controller.signal);
+                applyScreenHtmlImmediately(response.html);
+                if (response.description?.trim()) {
+                    setAiDescription(response.description.trim());
+                }
+            }
+            addAiEditHistory({
+                id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                screenId,
+                uid: snapshot.uid,
+                tagName: snapshot.tagName.toLowerCase(),
+                elementType: snapshot.elementType,
+                prompt,
+                description: aiImageGenEnabled && snapshot.elementType === 'image'
+                    ? 'Generated image and replaced selected component src.'
+                    : undefined,
+                createdAt: new Date().toISOString(),
+            });
+            setAiPrompt('');
+            window.setTimeout(() => dispatchSelectUid(screenId, snapshot.uid), 120);
+        } catch (error) {
+            if ((error as Error).name === 'AbortError') {
+                setAiError('AI edit stopped.');
+            } else {
+                setAiError((error as Error).message || 'Failed to apply AI edit.');
+            }
+        } finally {
+            aiAbortRef.current = null;
+            setIsApplyingAi(false);
+        }
+    };
+
+    const generateImageForUid = async (uid: string) => {
+        if (!screenId || !activeScreen || imageGenLoadingUid) return;
+        const prompt = (imageGenPromptByUid[uid] || '').trim();
+        if (!prompt) return;
+        setImagesTabError('');
+        setImageGenLoadingUid(uid);
+        const controller = new AbortController();
+        aiAbortRef.current = controller;
+        try {
+            const imageResult = await apiClient.generateImage({
+                prompt,
+                preferredModel: 'image',
+            }, controller.signal);
+            const nextSrc = imageResult.src;
+            applyPatch({ op: 'set_attr', uid, attr: { src: nextSrc } });
+            setImageInputs((prev) => ({ ...prev, [uid]: nextSrc }));
+            if (selected?.uid === uid) setImageSrc(nextSrc);
+            addAiEditHistory({
+                id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                screenId,
+                uid,
+                tagName: 'img',
+                elementType: 'image',
+                prompt,
+                description: imageResult.description?.trim() || 'Generated and replaced image.',
+                createdAt: new Date().toISOString(),
+            });
+            setImageGenPromptByUid((prev) => ({ ...prev, [uid]: '' }));
+            window.setTimeout(() => dispatchSelectUid(screenId, uid), 120);
+        } catch (error) {
+            if ((error as Error).name === 'AbortError') {
+                setImagesTabError('Image generation stopped.');
+            } else {
+                setImagesTabError((error as Error).message || 'Image generation failed.');
+            }
+        } finally {
+            aiAbortRef.current = null;
+            setImageGenLoadingUid(null);
+        }
+    };
+
+    const stopAiEdit = () => {
+        aiAbortRef.current?.abort();
+    };
+
     if (!isEditMode) return <aside className="edit-panel" aria-hidden="true" />;
 
     return (
@@ -671,6 +885,104 @@ export function EditPanel() {
 
                 <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-4 py-4 space-y-5 text-gray-200">
                     {!selected && activeTab === 'edit' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
+                    {activeTab === 'ai' && (
+                        <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">AI Component Edit</div>
+                            {!selected ? (
+                                <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                    Select a component on the canvas, then describe what to change.
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-xs text-gray-300">
+                                        <div className="font-semibold text-white">{selected.tagName.toLowerCase()} · {selected.uid}</div>
+                                        <div className="mt-1 text-gray-400">{selected.elementType} component</div>
+                                    </div>
+                                    {selected.elementType === 'image' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setAiImageGenEnabled((v) => !v)}
+                                            className={`w-full rounded-xl border px-3 py-2 text-xs flex items-center gap-2 transition-colors ${aiImageGenEnabled ? 'border-indigo-300/50 bg-indigo-500/15 text-indigo-100' : 'border-white/10 bg-[#16181d] text-gray-300 hover:bg-[#1d2129]'}`}
+                                            title="Enable image generation model"
+                                        >
+                                            <ImagePlus size={14} />
+                                            {aiImageGenEnabled ? 'Image Generation On (env model)' : 'Enable Image Generation'}
+                                        </button>
+                                    )}
+                                    <textarea
+                                        value={aiPrompt}
+                                        onChange={(e) => setAiPrompt(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                                                void applyAiEditToSelection();
+                                            }
+                                        }}
+                                        placeholder="Describe the exact changes for this selected component..."
+                                        className="min-h-[120px] w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-white outline-none transition-colors focus:border-indigo-400/60 resize-y"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void applyAiEditToSelection()}
+                                            disabled={!aiPrompt.trim() || isApplyingAi}
+                                            className="h-9 rounded-xl border border-white/10 bg-white/10 px-3 text-xs font-medium text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {isApplyingAi ? 'Applying…' : 'Apply AI Edit'}
+                                        </button>
+                                        {(isApplyingAi || imageGenLoadingUid !== null) && (
+                                            <button
+                                                type="button"
+                                                onClick={stopAiEdit}
+                                                className="h-9 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-medium text-red-100 hover:bg-red-500/20"
+                                            >
+                                                Stop
+                                            </button>
+                                        )}
+                                    </div>
+                                    {aiError && (
+                                        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                                            {aiError}
+                                        </div>
+                                    )}
+                                    {aiDescription && (
+                                        <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                                            {aiDescription}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            <div className="pt-2 border-t border-white/10 space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">History (This Screen)</div>
+                                {activeAiHistory.length === 0 ? (
+                                    <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                        No AI edits yet for this screen.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {activeAiHistory.map((item) => (
+                                            <button
+                                                key={item.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (!screenId) return;
+                                                    setFocusNodeId(screenId);
+                                                    dispatchSelectUid(screenId, item.uid);
+                                                }}
+                                                className="w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-left hover:bg-[#1d2129] transition-colors"
+                                                title={`Select ${item.tagName} (${item.uid})`}
+                                            >
+                                                <div className="text-[11px] text-gray-400">{item.tagName} · {item.uid}</div>
+                                                <div className="mt-1 text-xs text-white max-h-10 overflow-hidden">{item.prompt}</div>
+                                                {item.description && (
+                                                    <div className="mt-1 text-[11px] text-emerald-300/90 max-h-10 overflow-hidden">{item.description}</div>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+                    )}
 
                     {!!selected && activeTab === 'edit' && (
                         <>
@@ -1203,47 +1515,88 @@ export function EditPanel() {
                                 </div>
                             ) : (
                                 <div className="space-y-2">
+                                    {imagesTabError && (
+                                        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                                            {imagesTabError}
+                                        </div>
+                                    )}
                                     {screenImages.map((image) => (
-                                        <div key={image.uid} className="grid grid-cols-[64px_1fr_auto] items-center gap-2 rounded-xl border border-white/10 bg-[#16181d] p-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                className="h-16 w-16 overflow-hidden rounded-lg border border-white/10 bg-black/20"
-                                                title="Select image element"
-                                            >
-                                                <img src={image.src} alt={image.alt || 'image'} className="h-full w-full object-cover" />
-                                            </button>
-                                            <input
-                                                value={imageInputs[image.uid] || ''}
-                                                onChange={(e) => {
-                                                    const next = e.target.value;
-                                                    setImageInputs((prev) => ({ ...prev, [image.uid]: next }));
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') applyImageSourceForUid(image.uid, imageInputs[image.uid] || '');
-                                                }}
-                                                onBlur={() => applyImageSourceForUid(image.uid, imageInputs[image.uid] || '')}
-                                                className={inputBase}
-                                                placeholder="Image URL"
-                                            />
-                                            <div className="flex flex-col gap-1">
+                                        <div key={image.uid} className="rounded-xl border border-white/10 bg-[#16181d] p-2 space-y-2">
+                                            <div className="grid grid-cols-[64px_1fr_auto] items-center gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                    className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                    className="h-16 w-16 overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                                                    title="Select image element"
                                                 >
-                                                    Select
+                                                    <img src={image.src} alt={image.alt || 'image'} className="h-full w-full object-cover" />
                                                 </button>
+                                                <input
+                                                    value={imageInputs[image.uid] || ''}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value;
+                                                        setImageInputs((prev) => ({ ...prev, [image.uid]: next }));
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') applyImageSourceForUid(image.uid, imageInputs[image.uid] || '');
+                                                    }}
+                                                    onBlur={() => applyImageSourceForUid(image.uid, imageInputs[image.uid] || '')}
+                                                    className={inputBase}
+                                                    placeholder="Image URL"
+                                                />
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => dispatchSelectUid(screenId!, image.uid)}
+                                                        className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                    >
+                                                        Select
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setUploadTargetUid(image.uid);
+                                                            globalImageFileInputRef.current?.click();
+                                                        }}
+                                                        className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                    >
+                                                        Upload
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    value={imageGenPromptByUid[image.uid] || ''}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value;
+                                                        setImageGenPromptByUid((prev) => ({ ...prev, [image.uid]: next }));
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') void generateImageForUid(image.uid);
+                                                    }}
+                                                    className={inputBase}
+                                                    placeholder="Generate a new image for this slot..."
+                                                />
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        setUploadTargetUid(image.uid);
-                                                        globalImageFileInputRef.current?.click();
-                                                    }}
-                                                    className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                    onClick={() => void generateImageForUid(image.uid)}
+                                                    disabled={imageGenLoadingUid === image.uid || !(imageGenPromptByUid[image.uid] || '').trim()}
+                                                    className="rounded-md bg-indigo-500/20 border border-indigo-400/30 px-3 py-2 text-[10px] uppercase tracking-wide text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                                    title="Generate and replace image"
                                                 >
-                                                    Upload
+                                                    <ImagePlus size={12} />
+                                                    {imageGenLoadingUid === image.uid ? 'Generating…' : 'Generate'}
                                                 </button>
+                                                {imageGenLoadingUid === image.uid && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={stopAiEdit}
+                                                        className="rounded-md bg-red-500/10 border border-red-400/30 px-3 py-2 text-[10px] uppercase tracking-wide text-red-100 hover:bg-red-500/20"
+                                                        title="Stop image generation"
+                                                    >
+                                                        Stop
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1254,6 +1607,15 @@ export function EditPanel() {
                 </div>
                 </div>
                 <aside className="w-[50px] flex flex-col items-center justify-start gap-3 py-4 bg-[#13161b]">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('ai')}
+                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'ai' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
+                        aria-label="AI tab"
+                        title="AI"
+                    >
+                        <Sparkles size={18} />
+                    </button>
                     <button
                         type="button"
                         onClick={() => setActiveTab('edit')}
@@ -1277,6 +1639,10 @@ export function EditPanel() {
         </aside>
     );
 }
+
+
+
+
 
 
 

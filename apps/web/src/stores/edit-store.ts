@@ -45,6 +45,17 @@ export interface SelectedElementInfo {
     breadcrumb?: { uid: string; tagName: string }[];
 }
 
+export interface AiEditHistoryItem {
+    id: string;
+    screenId: string;
+    uid: string;
+    tagName: string;
+    elementType: SelectedElementInfo['elementType'];
+    prompt: string;
+    description?: string;
+    createdAt: string;
+}
+
 interface EditState {
     isEditMode: boolean;
     screenId: string | null;
@@ -54,6 +65,7 @@ interface EditState {
     pointer: number;
     reloadTick: number;
     refreshAllTick: number;
+    aiEditHistoryByScreen: Record<string, AiEditHistoryItem[]>;
 
     enterEdit: (screenId: string, baseHtml: string) => void;
     setActiveScreen: (screenId: string, baseHtml: string) => void;
@@ -67,6 +79,7 @@ interface EditState {
     redoAndRebuild: () => string | null;
     rebuildHtml: () => string | null;
     clearHistory: () => void;
+    addAiEditHistory: (item: AiEditHistoryItem) => void;
 }
 
 function rebuildFrom(baseHtml: string | null, patches: HtmlPatch[], pointer: number): string | null {
@@ -85,9 +98,17 @@ export const useEditStore = create<EditState>((set, get) => ({
     pointer: 0,
     reloadTick: 0,
     refreshAllTick: 0,
+    aiEditHistoryByScreen: {},
 
     enterEdit: (screenId, baseHtml) => set({ isEditMode: true, screenId, selected: null, baseHtml, patches: [], pointer: 0 }),
-    setActiveScreen: (screenId, baseHtml) => set({ screenId, baseHtml, selected: null, patches: [], pointer: 0 }),
+    setActiveScreen: (screenId, baseHtml) => set(state => ({
+        screenId,
+        baseHtml,
+        selected: null,
+        patches: [],
+        pointer: 0,
+        reloadTick: state.reloadTick + 1,
+    })),
     exitEdit: () => set(state => ({
         isEditMode: false,
         screenId: null,
@@ -130,4 +151,14 @@ export const useEditStore = create<EditState>((set, get) => ({
         return rebuildFrom(state.baseHtml, state.patches, state.pointer);
     },
     clearHistory: () => set({ patches: [], pointer: 0 }),
+    addAiEditHistory: (item) => set((state) => {
+        const current = state.aiEditHistoryByScreen[item.screenId] || [];
+        const next = [item, ...current].slice(0, 50);
+        return {
+            aiEditHistoryByScreen: {
+                ...state.aiEditHistoryByScreen,
+                [item.screenId]: next,
+            }
+        };
+    }),
 }));

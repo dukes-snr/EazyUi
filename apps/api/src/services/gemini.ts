@@ -31,6 +31,40 @@ const model = genAI.getGenerativeModel({
 });
 console.info(`[Gemini] Using model: ${modelName} (env: ${envModel || 'unset'})`);
 
+function getGenerativeModel(preferredModel?: string) {
+    const requested = (preferredModel || '').trim();
+    const resolved = requested.length > 0 ? requested : modelName;
+    return {
+        name: resolved,
+        model: genAI.getGenerativeModel({ model: resolved }),
+    };
+}
+
+function isQuotaOrRateLimitError(error: unknown): boolean {
+    const message = (error as Error)?.message || '';
+    return (
+        message.includes('429') ||
+        message.includes('Too Many Requests') ||
+        message.includes('quota') ||
+        message.includes('Quota exceeded') ||
+        message.includes('rate limit')
+    );
+}
+
+const imagePrimaryEnvModel = (process.env.GEMINI_IMAGE_MODEL || '').trim();
+const imageFallbackEnvModel = (process.env.GEMINI_IMAGE_FALLBACK_MODEL || '').trim();
+const IMAGE_PRIMARY_MODEL = imagePrimaryEnvModel || 'gemini-3-pro-image-preview';
+const IMAGE_FALLBACK_MODEL = imageFallbackEnvModel || 'gemini-2.5-flash-image';
+console.info(`[Gemini] Image edit model: ${IMAGE_PRIMARY_MODEL} (env: ${imagePrimaryEnvModel || 'unset'})`);
+console.info(`[Gemini] Image fallback model: ${IMAGE_FALLBACK_MODEL} (env: ${imageFallbackEnvModel || 'unset'})`);
+
+function resolvePreferredModel(preferredModel?: string): string | undefined {
+    const requested = (preferredModel || '').trim();
+    if (!requested) return undefined;
+    if (requested === 'image') return IMAGE_PRIMARY_MODEL;
+    return requested;
+}
+
 
 const GENERATION_CONFIG = {
     temperature: 1.0,
@@ -149,6 +183,12 @@ EDIT MODE TAGGING (MANDATORY):
 - Add data-editable="true" and data-uid="unique_id" to ALL major UI elements.
 - Major elements include: header, nav, main, section, article, aside, footer, div, p, span, h1-h6, button, a, img, input, textarea, select, label, ul, ol, li, figure, figcaption, form, table, thead, tbody, tr, td, th.
 - data-uid values must be unique within each screen (any stable unique string is fine).
+- Every <img> MUST include a meaningful, contextual alt attribute.
+- Alt text quality rules:
+  1) Include app/domain context + screen context + visual subject.
+  2) 6-16 words preferred.
+  3) Do NOT use one-word or vague alts like "image", "photo", "cook", "salad", "recipe view".
+  4) Good format example: "Meal planning app recipe detail hero image with fresh salad bowl".
 `;
 
 const MAP_SCREEN_RULES = `
@@ -492,6 +532,13 @@ export interface EditOptions {
     html: string;
     screenId: string;
     images?: string[];
+    preferredModel?: string;
+}
+
+export interface GenerateImageOptions {
+    prompt: string;
+    instruction?: string;
+    preferredModel?: string;
 }
 
 export interface CompleteScreenOptions {
@@ -502,8 +549,77 @@ export interface CompleteScreenOptions {
     stylePreset?: string;
 }
 
+function extractImageSrcFromResponse(response: any): string | null {
+    const parts = response?.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+        const inlineData = part?.inlineData;
+        if (inlineData?.data && inlineData?.mimeType) {
+            return `data:${inlineData.mimeType};base64,${inlineData.data}`;
+        }
+        const text = (part?.text || '').trim();
+        if (!text) continue;
+        const dataUrlMatch = text.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/);
+        if (dataUrlMatch) return dataUrlMatch[0];
+        const urlMatch = text.match(/https?:\/\/[^\s"')>]+/);
+        if (urlMatch) return urlMatch[0];
+    }
+    return null;
+}
+
+export async function generateImageAsset(options: GenerateImageOptions): Promise<{ src: string; modelUsed: string; description?: string }> {
+    const prompt = (options.prompt || '').trim();
+    if (!prompt) throw new Error('Prompt is required');
+
+    const extraInstruction = (options.instruction || '').trim();
+    const compactBaseInstruction = 'Generate one high-quality UI-ready image only. No text, logos, watermark, UI mockup, or explanation unless specifically requested. Return image output only.';
+    const instruction = extraInstruction
+        ? `${compactBaseInstruction} ${extraInstruction.slice(0, 240)}`
+        : compactBaseInstruction;
+    const requestText = `Instruction: ${instruction}\nPrompt: ${prompt.slice(0, 500)}`;
+    const parts: any[] = [{ text: requestText }];
+
+    const resolvedPreferredModel = resolvePreferredModel(options.preferredModel || 'image');
+    const selectedModel = getGenerativeModel(resolvedPreferredModel);
+    console.info('[Gemini] generateImageAsset model:', selectedModel.name);
+
+    try {
+        const result = await selectedModel.model.generateContent({
+            contents: [{ role: 'user', parts }],
+            generationConfig: GENERATION_CONFIG,
+        });
+        const src = extractImageSrcFromResponse(result.response);
+        if (!src) throw new Error('Image model did not return a usable image payload.');
+        return { src, modelUsed: selectedModel.name };
+    } catch (error) {
+        const shouldFallback =
+            Boolean(resolvedPreferredModel) &&
+            selectedModel.name !== IMAGE_FALLBACK_MODEL &&
+            isQuotaOrRateLimitError(error);
+
+        if (!shouldFallback) throw error;
+
+        console.warn('[Gemini] generateImageAsset preferred model rate-limited/quota-exceeded; falling back', {
+            preferredModel: selectedModel.name,
+            fallbackModel: IMAGE_FALLBACK_MODEL,
+        });
+
+        const fallbackModel = getGenerativeModel(IMAGE_FALLBACK_MODEL);
+        const fallbackResult = await fallbackModel.model.generateContent({
+            contents: [{ role: 'user', parts }],
+            generationConfig: GENERATION_CONFIG,
+        });
+        const fallbackSrc = extractImageSrcFromResponse(fallbackResult.response);
+        if (!fallbackSrc) throw new Error('Fallback image model did not return a usable image payload.');
+        return {
+            src: fallbackSrc,
+            modelUsed: IMAGE_FALLBACK_MODEL,
+            description: `(Primary image model unavailable; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`,
+        };
+    }
+}
+
 export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
-    const { instruction, html, images = [] } = options;
+    const { instruction, html, images = [], preferredModel } = options;
     const userPrompt = `${EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
 
     const parts: any[] = [{ text: userPrompt }];
@@ -518,22 +634,52 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
         });
     }
 
-    const result = await model.generateContent({
-        contents: [{ role: 'user', parts }],
-        generationConfig: GENERATION_CONFIG,
-    });
+    const parseEditResponse = (raw: string): { html: string; description?: string } => {
+        const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
+        const description = descriptionMatch?.[1]?.trim();
+        const withoutDescription = raw.replace(/<description>[\s\S]*?<\/description>/i, '').trim();
+        const editedHtml = cleanHtmlResponse(withoutDescription || raw);
+        if (!editedHtml.includes('<!DOCTYPE html>')) {
+            throw new Error('Gemini failed to return a full HTML document.');
+        }
+        return { html: editedHtml, description };
+    };
 
-    const raw = result.response.text();
-    const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
-    const description = descriptionMatch?.[1]?.trim();
-    const withoutDescription = raw.replace(/<description>[\s\S]*?<\/description>/i, '').trim();
-    let editedHtml = cleanHtmlResponse(withoutDescription || raw);
+    const resolvedPreferredModel = resolvePreferredModel(preferredModel);
+    const selectedModel = getGenerativeModel(resolvedPreferredModel);
+    console.info('[Gemini] editDesign model:', selectedModel.name);
 
-    if (!editedHtml.includes('<!DOCTYPE html>')) {
-        throw new Error('Gemini failed to return a full HTML document.');
+    try {
+        const result = await selectedModel.model.generateContent({
+            contents: [{ role: 'user', parts }],
+            generationConfig: GENERATION_CONFIG,
+        });
+        return parseEditResponse(result.response.text());
+    } catch (error) {
+        const shouldFallback =
+            Boolean(resolvedPreferredModel) &&
+            selectedModel.name !== modelName &&
+            isQuotaOrRateLimitError(error);
+
+        if (!shouldFallback) throw error;
+
+        console.warn('[Gemini] editDesign preferred model rate-limited/quota-exceeded; falling back', {
+            preferredModel: selectedModel.name,
+            fallbackModel: IMAGE_FALLBACK_MODEL,
+        });
+
+        const fallbackModel = getGenerativeModel(IMAGE_FALLBACK_MODEL);
+        const fallbackResult = await fallbackModel.model.generateContent({
+            contents: [{ role: 'user', parts }],
+            generationConfig: GENERATION_CONFIG,
+        });
+        const parsed = parseEditResponse(fallbackResult.response.text());
+        const fallbackNote = `(Image model quota exceeded; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`;
+        return {
+            html: parsed.html,
+            description: parsed.description ? `${parsed.description} ${fallbackNote}` : fallbackNote,
+        };
     }
-
-    return { html: editedHtml, description };
 }
 
 export async function completePartialScreen(options: CompleteScreenOptions): Promise<string> {

@@ -352,7 +352,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { updateScreen, removeScreen } = useDesignStore();
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, enterEdit, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
+    const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -422,6 +422,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
                     // Update with new content
                     updateScreen(data.screenId as string, response.html, 'complete');
+                    if (isEditMode && editScreenId === data.screenId) {
+                        setActiveScreen(data.screenId as string, response.html);
+                    }
                     setFocusNodeIds([data.screenId as string]);
 
                     // Update chat message
@@ -488,7 +491,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
 

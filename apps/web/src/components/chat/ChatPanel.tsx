@@ -431,7 +431,7 @@ export function ChatPanel() {
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, doc, setFocusNodeId, setFocusNodeIds, removeBoard } = useCanvasStore();
-    const { isEditMode } = useEditStore();
+    const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
     const assistantMsgIdRef = useRef<string>('');
 
     const getScreenPreview = (screenId: string) => {
@@ -885,6 +885,9 @@ const handleEdit = async () => {
             }, controller.signal);
 
             updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
+            if (isEditMode && editScreenId === targetScreen.screenId) {
+                setActiveScreen(targetScreen.screenId, response.html);
+            }
             setFocusNodeIds([targetScreen.screenId]);
 
             updateMessage(assistantMsgId, {
