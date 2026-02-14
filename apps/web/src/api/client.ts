@@ -28,6 +28,7 @@ export interface GenerateRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[]; // Base64 encoded images
+    preferredModel?: string;
 }
 
 export interface GenerateResponse {
@@ -67,6 +68,18 @@ export interface CompleteScreenRequest {
     prompt?: string;
     platform?: string;
     stylePreset?: string;
+}
+
+export interface TranscribeAudioRequest {
+    audioBase64: string;
+    mimeType: string;
+    language?: string;
+    model?: string;
+}
+
+export interface TranscribeAudioResponse {
+    text: string;
+    modelUsed: string;
 }
 
 export interface SaveRequest {
@@ -161,6 +174,14 @@ class ApiClient {
 
     async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<{ html: string }> {
         return this.request<{ html: string }>('/complete-screen', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async transcribeAudio(request: TranscribeAudioRequest, signal?: AbortSignal): Promise<TranscribeAudioResponse> {
+        return this.request<TranscribeAudioResponse>('/transcribe-audio', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

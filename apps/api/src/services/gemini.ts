@@ -7,6 +7,7 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
+import { groqChatCompletion, isGroqModel } from './groq.provider.js';
 
 const envCandidates = [
     path.resolve(process.cwd(), '.env'),
@@ -426,10 +427,11 @@ export interface GenerateOptions {
     stylePreset?: string;
     platform?: string;
     images?: string[];
+    preferredModel?: string;
 }
 
 export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
-    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [] } = options;
+    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
 
     const imageGuidance = images.length > 0
@@ -461,10 +463,33 @@ ${imageGuidance}
         return parts;
     };
 
-    let initialResponse = await generateDesignOnce(buildParts(baseUserPrompt));
+    const generateOnce = async (promptText: string): Promise<ParsedDesign> => {
+        if (isGroqModel(preferredModel)) {
+            const { text } = await groqChatCompletion({
+                model: preferredModel,
+                systemPrompt: 'You are a world-class UI designer that returns strict JSON.',
+                prompt: `${GENERATE_HTML_PROMPT}\n\n${promptText}`,
+                maxTokens: 8192,
+                temperature: 0.8,
+            });
+            try {
+                const cleanedJson = cleanJsonResponse(text);
+                const parsed = parseJsonSafe(cleanedJson) as { description?: string; screens: RawScreen[] };
+                return { description: parsed.description, screens: parsed.screens || [], parsedOk: true };
+            } catch {
+                if (text.includes('<!DOCTYPE html>')) {
+                    return { screens: [{ name: 'Generated Screen', html: cleanHtmlResponse(text) }], parsedOk: false };
+                }
+                return { screens: [], parsedOk: false };
+            }
+        }
+        return generateDesignOnce(buildParts(promptText));
+    };
+
+    let initialResponse = await generateOnce(baseUserPrompt);
     if (!initialResponse.parsedOk || initialResponse.screens.length === 0) {
         const retryPrompt = `${baseUserPrompt}\nReturn STRICT JSON only. No markdown, no code fences, no trailing commas.`;
-        initialResponse = await generateDesignOnce(buildParts(retryPrompt));
+        initialResponse = await generateOnce(retryPrompt);
     }
 
     const designId = uuidv4();
@@ -644,6 +669,22 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
         }
         return { html: editedHtml, description };
     };
+
+    if (isGroqModel(preferredModel)) {
+        const { text, modelUsed } = await groqChatCompletion({
+            model: preferredModel,
+            systemPrompt: 'You are an expert UI designer that edits HTML.',
+            prompt: userPrompt,
+            maxTokens: 8192,
+            temperature: 0.6,
+        });
+        const parsed = parseEditResponse(text);
+        const note = `(Model: ${modelUsed})`;
+        return {
+            html: parsed.html,
+            description: parsed.description ? `${parsed.description} ${note}` : note,
+        };
+    }
 
     const resolvedPreferredModel = resolvePreferredModel(preferredModel);
     const selectedModel = getGenerativeModel(resolvedPreferredModel);

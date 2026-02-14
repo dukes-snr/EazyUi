@@ -8,6 +8,7 @@ import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
 import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
+import { GROQ_MODELS, groqWhisperTranscription } from './services/groq.provider.js';
 
 const fastify = Fastify({
     logger: true,
@@ -24,21 +25,112 @@ await fastify.register(cors, {
 // Routes
 // ============================================================================
 
+fastify.get('/', async (_request, reply) => {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EazyUI API</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f16; color: #e5e7eb; margin: 0; }
+    .wrap { max-width: 860px; margin: 56px auto; padding: 0 20px; }
+    .card { background: #121824; border: 1px solid #263043; border-radius: 12px; padding: 16px; margin-top: 14px; }
+    a { color: #93c5fd; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { color: #bfdbfe; }
+    .muted { color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EazyUI API</h1>
+    <p class="muted">Backend service is running.</p>
+    <div class="card">
+      <h2>Quick Links</h2>
+      <p><a href="/api/health">/api/health</a></p>
+      <p><a href="/api/models">/api/models</a></p>
+    </div>
+    <div class="card">
+      <h2>Core Endpoints</h2>
+      <p><code>POST /api/generate</code></p>
+      <p><code>POST /api/generate-stream</code></p>
+      <p><code>POST /api/edit</code></p>
+      <p><code>POST /api/generate-image</code></p>
+      <p><code>POST /api/transcribe-audio</code></p>
+    </div>
+  </div>
+</body>
+</html>`;
+    return reply.type('text/html; charset=utf-8').send(html);
+});
+
 // Health check
-fastify.get('/api/health', async () => {
+fastify.get('/api/health', async (request, reply) => {
     const apiKey = process.env.GEMINI_API_KEY || '';
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
-    const maskedKey = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'missing';
+    const groqModels = Object.keys(GROQ_MODELS);
 
-    return {
+    const payload = {
         status: 'ok',
         timestamp: new Date().toISOString(),
         gemini: {
             model,
-            apiKey: maskedKey,
             apiKeyPresent: Boolean(apiKey),
         },
+        groq: {
+            apiKeyPresent: Boolean((process.env.GROQ_API_KEY || '').trim()),
+            models: groqModels,
+        },
     };
+
+    const accept = String(request.headers.accept || '');
+    if (accept.includes('text/html')) {
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EazyUI API Health</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f16; color: #e5e7eb; margin: 0; }
+    .wrap { max-width: 860px; margin: 48px auto; padding: 0 20px; }
+    .card { background: #121824; border: 1px solid #263043; border-radius: 12px; padding: 16px; margin-top: 14px; }
+    .ok { color: #86efac; font-weight: 600; }
+    .muted { color: #94a3b8; }
+    code { color: #bfdbfe; }
+    ul { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EazyUI API Health <span class="ok">OK</span></h1>
+    <p class="muted">Timestamp: ${payload.timestamp}</p>
+    <div class="card">
+      <h2>Gemini</h2>
+      <p>Model: <code>${payload.gemini.model}</code></p>
+      <p>API Key Present: <code>${payload.gemini.apiKeyPresent}</code></p>
+    </div>
+    <div class="card">
+      <h2>Groq</h2>
+      <p>API Key Present: <code>${payload.groq.apiKeyPresent}</code></p>
+      <p>Models:</p>
+      <ul>${payload.groq.models.map((m) => `<li><code>${m}</code></li>`).join('')}</ul>
+    </div>
+    <div class="card">
+      <h2>Useful Endpoints</h2>
+      <p><code>POST /api/generate</code></p>
+      <p><code>POST /api/edit</code></p>
+      <p><code>POST /api/transcribe-audio</code></p>
+      <p><code>GET /api/models</code></p>
+    </div>
+  </div>
+</body>
+</html>`;
+        return reply.type('text/html; charset=utf-8').send(html);
+    }
+
+    return payload;
 });
 
 // Generate new design (returns HTML)
@@ -48,17 +140,18 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        preferredModel?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images } = request.body;
+    const { prompt, stylePreset, platform, images, preferredModel } = request.body;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
     }
 
     try {
-        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0 }, 'generate: start');
-        const designSpec = await generateDesign({ prompt, stylePreset, platform, images });
+        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel }, 'generate: start');
+        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel });
         const versionId = uuidv4();
         fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
 
@@ -132,6 +225,53 @@ fastify.post<{
 });
 
 // Generate new design (STREAM)
+fastify.post<{
+    Body: {
+        audioBase64: string;
+        mimeType: string;
+        language?: string;
+        model?: string;
+    };
+}>('/api/transcribe-audio', async (request, reply) => {
+    const { audioBase64, mimeType, language, model } = request.body;
+
+    if (!audioBase64?.trim()) {
+        return reply.status(400).send({ error: 'audioBase64 is required' });
+    }
+    if (!mimeType?.trim()) {
+        return reply.status(400).send({ error: 'mimeType is required' });
+    }
+
+    try {
+        fastify.log.info({
+            mimeType,
+            language: language || 'auto',
+            model: model || process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo',
+            audioBytesApprox: Math.round(audioBase64.length * 0.75),
+        }, 'transcribe-audio: start');
+        const result = await groqWhisperTranscription({ audioBase64, mimeType, language, model });
+        fastify.log.info({
+            modelUsed: result.modelUsed,
+            textLength: result.text.length,
+            preview: result.text.slice(0, 120),
+        }, 'transcribe-audio: complete');
+        return result;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to transcribe audio',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get('/api/models', async () => {
+    return {
+        groq: Object.keys(GROQ_MODELS),
+        defaultTextModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
+    };
+});
+
 fastify.post<{
     Body: {
         prompt: string;

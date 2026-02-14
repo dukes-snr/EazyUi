@@ -6,7 +6,7 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb } from 'lucide-react';
+import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, Mic } from 'lucide-react';
 import TextType from '../ui/TextType';
 
 const FEEDBACK_BUCKETS = {
@@ -412,21 +412,37 @@ function finalizeStream(state: StreamParserState): StreamParseEvent[] {
     return events;
 }
 
-export function ChatPanel() {
+type ChatPanelProps = {
+    initialRequest?: {
+        id: string;
+        prompt: string;
+        images?: string[];
+        platform?: 'mobile' | 'tablet' | 'desktop';
+        stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+    } | null;
+};
+
+export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
+    const initialRequestSubmittedRef = useRef<string | null>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
@@ -454,6 +470,9 @@ export function ChatPanel() {
     useEffect(() => {
         return () => {
             Object.values(copyResetTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+            }
         };
     }, []);
 
@@ -521,6 +540,84 @@ export function ChatPanel() {
         setImages(prev => prev.filter((_, i) => i !== index));
     };
 
+    const blobToBase64 = (blob: Blob): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const result = typeof reader.result === 'string' ? reader.result : '';
+                const base64 = result.split(',')[1] || '';
+                if (!base64) {
+                    reject(new Error('Failed to encode audio'));
+                    return;
+                }
+                resolve(base64);
+            };
+            reader.onerror = () => reject(new Error('Failed to read audio blob'));
+            reader.readAsDataURL(blob);
+        });
+    };
+
+    const cleanupRecording = () => {
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+            mediaStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+        setIsRecording(false);
+    };
+
+    const handleMicToggle = async () => {
+        if (isTranscribing) return;
+
+        if (isRecording) {
+            mediaRecorderRef.current?.stop();
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+
+            const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+            const mimeType = preferred.find((type) => MediaRecorder.isTypeSupported(type));
+            const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+            mediaRecorderRef.current = recorder;
+            audioChunksRef.current = [];
+
+            recorder.ondataavailable = (event) => {
+                if (event.data.size > 0) audioChunksRef.current.push(event.data);
+            };
+
+            recorder.onstop = async () => {
+                try {
+                    setIsTranscribing(true);
+                    const type = recorder.mimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunksRef.current, { type });
+                    const audioBase64 = await blobToBase64(audioBlob);
+                    const result = await apiClient.transcribeAudio({
+                        audioBase64,
+                        mimeType: audioBlob.type || 'audio/webm',
+                    });
+                    if (result.text.trim()) {
+                        setPrompt((prev) => (prev.trim() ? `${prev.trim()} ${result.text.trim()}` : result.text.trim()));
+                    }
+                } catch (error) {
+                    console.error('Voice transcription failed:', error);
+                } finally {
+                    setIsTranscribing(false);
+                    cleanupRecording();
+                }
+            };
+
+            recorder.start();
+            setIsRecording(true);
+        } catch (error) {
+            console.error('Microphone access failed:', error);
+            cleanupRecording();
+        }
+    };
+
     const handleCopyMessage = async (messageId: string, content: string) => {
         const text = stripUiTags(stripMarkdownBold(content || ''));
         if (!text.trim()) return;
@@ -564,14 +661,23 @@ export function ChatPanel() {
         }
     };
 
-    const handleGenerate = async () => {
-        if (!prompt.trim() || isGenerating) return;
+    const handleGenerate = async (
+        incomingPrompt?: string,
+        incomingImages?: string[],
+        incomingPlatform?: 'mobile' | 'tablet' | 'desktop',
+        incomingStylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'
+    ) => {
+        const requestPrompt = (incomingPrompt ?? prompt).trim();
+        if (!requestPrompt || isGenerating) return;
 
-        const requestPrompt = prompt.trim();
-        const imagesToSend = [...images];
-        setImages([]);
+        const imagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
+        const platformToUse = incomingPlatform || selectedPlatform;
+        const styleToUse = incomingStylePreset || stylePreset;
+        if (!incomingPrompt) {
+            setImages([]);
+        }
 
-        const userMsgId = addMessage('user', prompt, imagesToSend);
+        const userMsgId = addMessage('user', requestPrompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Warming up the studio...');
         assistantMsgIdRef.current = assistantMsgId;
         updateMessage(userMsgId, { meta: { livePreview: false } });
@@ -579,18 +685,18 @@ export function ChatPanel() {
         setPrompt('');
         setGenerating(true);
 
-        const dimensions = selectedPlatform === 'desktop'
+        const effectiveDimensions = platformToUse === 'desktop'
             ? { width: 1280, height: 800 }
-            : selectedPlatform === 'tablet'
+            : platformToUse === 'tablet'
                 ? { width: 768, height: 1024 }
-                : { width: 375, height: 812 }; // Default mobile
+                : { width: 375, height: 812 };
         let startTime = Date.now();
 
         try {
             console.info('[UI] generate: start (stream)', {
                 prompt: requestPrompt,
-                stylePreset,
-                platform: selectedPlatform,
+                stylePreset: styleToUse,
+                platform: platformToUse,
                 images: imagesToSend,
             });
 
@@ -642,18 +748,18 @@ export function ChatPanel() {
                     screenId,
                     name,
                     html: '',
-                    width: dimensions.width,
-                    height: dimensions.height,
+                    width: effectiveDimensions.width,
+                    height: effectiveDimensions.height,
                     status: 'streaming',
                 }]);
 
                 const board = {
                     boardId: screenId,
                     screenId,
-                    x: startX + index * (dimensions.width + 100),
+                    x: startX + index * (effectiveDimensions.width + 100),
                     y: 100,
-                    width: dimensions.width,
-                    height: dimensions.height,
+                    width: effectiveDimensions.width,
+                    height: effectiveDimensions.height,
                     deviceFrame: 'none' as const,
                     locked: false,
                     visible: true,
@@ -671,8 +777,8 @@ export function ChatPanel() {
 
             await apiClient.generateStream({
                 prompt: requestPrompt,
-                stylePreset,
-                platform: selectedPlatform,
+                stylePreset: styleToUse,
+                platform: platformToUse,
                 images: imagesToSend,
             }, (chunk) => {
                 const events = parseStreamChunk(parserState, chunk);
@@ -687,12 +793,12 @@ export function ChatPanel() {
                     }
                     if (event.type === 'screen_preview') {
                         const screenId = ensureScreen(event.seq, event.name);
-                        updateScreen(screenId, event.html, 'streaming', dimensions.width, dimensions.height, event.name);
+                        updateScreen(screenId, event.html, 'streaming', effectiveDimensions.width, effectiveDimensions.height, event.name);
                         continue;
                     }
                     if (event.type === 'screen_complete') {
                         const screenId = ensureScreen(event.seq, event.name);
-                        updateScreen(screenId, event.html, 'complete', dimensions.width, dimensions.height, event.name);
+                        updateScreen(screenId, event.html, 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
                         completedCount += 1;
                     }
                 }
@@ -711,17 +817,17 @@ export function ChatPanel() {
                         try {
                             const repaired = await apiClient.completeScreen({
                                 screenName: event.name,
-                                partialHtml: event.rawPartial,
-                                prompt: requestPrompt,
-                                platform: selectedPlatform,
-                                stylePreset,
-                            }, controller.signal);
+                            partialHtml: event.rawPartial,
+                            prompt: requestPrompt,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                        }, controller.signal);
                             finalHtml = repaired.html;
                         } catch (repairError) {
                             console.warn('[UI] stream finalize: complete-screen failed, using best effort HTML', repairError);
                         }
                     }
-                    updateScreen(screenId, finalHtml, 'complete', dimensions.width, dimensions.height, event.name);
+                    updateScreen(screenId, finalHtml, 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
                     completedCount += 1;
                 }
             }
@@ -729,8 +835,8 @@ export function ChatPanel() {
             if (completedCount === 0) {
                 const regen = await apiClient.generate({
                     prompt: requestPrompt,
-                    stylePreset,
-                    platform: selectedPlatform,
+                    stylePreset: styleToUse,
+                    platform: platformToUse,
                     images: imagesToSend,
                 }, controller.signal);
 
@@ -757,7 +863,7 @@ export function ChatPanel() {
                     const board = {
                         boardId: screenId,
                         screenId,
-                        x: startX + index * (dimensions.width + 100),
+                        x: startX + index * (effectiveDimensions.width + 100),
                         y: 100,
                         width: screen.width,
                         height: screen.height,
@@ -837,6 +943,22 @@ export function ChatPanel() {
             setGenerating(false);
         }
     };
+
+    useEffect(() => {
+        const requestId = initialRequest?.id || '';
+        const next = (initialRequest?.prompt || '').trim();
+        const nextImages = Array.isArray(initialRequest?.images) ? initialRequest.images : [];
+        const nextPlatform = initialRequest?.platform;
+        const nextStylePreset = initialRequest?.stylePreset;
+        if (!requestId || !next) return;
+        if (messages.length > 0 || isGenerating) return;
+        if (initialRequestSubmittedRef.current === requestId) return;
+
+        initialRequestSubmittedRef.current = requestId;
+        if (nextPlatform) setPlatform(nextPlatform);
+        if (nextStylePreset) setStylePreset(nextStylePreset);
+        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset);
+    }, [initialRequest, messages.length, isGenerating]);
 
 const handleEdit = async () => {
         if (!prompt.trim() || isGenerating || !spec) return;
@@ -1319,7 +1441,8 @@ const handleEdit = async () => {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Describe your UI idea..."
                                 disabled={isGenerating}
-                                className="w-full bg-transparent text-gray-100 text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-gray-500 px-2 py-1 leading-relaxed"
+                                className="no-focus-ring w-full bg-transparent text-gray-100 text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-gray-500 px-2 py-1 leading-relaxed"
+                                style={{ border: 'none', boxShadow: 'none' }}
                             />
                         </div>
 
@@ -1359,6 +1482,18 @@ const handleEdit = async () => {
 
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleMicToggle}
+                                    disabled={isTranscribing}
+                                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ring-1 ${isRecording
+                                        ? 'bg-rose-500/20 text-rose-200 ring-rose-300/25'
+                                        : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 ring-white/5'
+                                        } ${isTranscribing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Record voice'}
+                                >
+                                    {isRecording ? <Square size={13} className="fill-current" /> : <Mic size={15} />}
+                                </button>
                                 <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
                                     <button
                                         onClick={() => setShowStyleMenu(v => !v)}

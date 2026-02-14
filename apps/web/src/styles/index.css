@@ -89,6 +89,18 @@ body {
   outline-offset: 2px;
 }
 
+/* Opt-out for custom surfaces (e.g., landing composer textarea) */
+.no-focus-ring,
+.no-focus-ring:focus {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.no-focus-ring:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
 /* Scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;
@@ -307,4 +319,23 @@ textarea::placeholder {
   -webkit-font-feature-settings: 'liga';
   -webkit-font-smoothing: antialiased;
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+@keyframes infinite-scroll-left {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.infinite-scroll-track {
+  animation: infinite-scroll-left var(--marquee-duration, 28s) linear infinite;
+  will-change: transform;
+}
+
+.marquee-hover:hover .infinite-scroll-track {
+  animation-play-state: paused;
 }

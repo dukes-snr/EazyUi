@@ -2,18 +2,33 @@
 // Main App Component
 // ============================================================================
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditPanel } from './components/edit/EditPanel';
+import { LandingPage } from './components/landing/LandingPage';
 
 import { useDesignStore, useCanvasStore, useEditStore } from './stores';
 
 import './styles/App.css';
 
+const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
+
+function getRouteFromPath() {
+    return window.location.pathname === '/app' ? 'app' : 'landing';
+}
+
 function App() {
     const { spec, reset: resetDesign } = useDesignStore();
     const { isEditMode } = useEditStore();
+    const [route, setRoute] = useState<'landing' | 'app'>(getRouteFromPath());
+    const [initialRequest, setInitialRequest] = useState<{
+        id: string;
+        prompt: string;
+        images: string[];
+        platform?: 'mobile' | 'tablet' | 'desktop';
+        stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+    } | null>(null);
 
 
     // Initialize with empty state
@@ -22,6 +37,56 @@ function App() {
             resetDesign();
         }
     }, [spec, resetDesign]);
+
+    useEffect(() => {
+        const onPopState = () => setRoute(getRouteFromPath());
+        window.addEventListener('popstate', onPopState);
+        return () => window.removeEventListener('popstate', onPopState);
+    }, []);
+
+    const landingPrompt = useMemo(() => {
+        if (route !== 'app') return '';
+        return new URLSearchParams(window.location.search).get('prompt')?.trim() || '';
+    }, [route]);
+
+    useEffect(() => {
+        if (route !== 'app') return;
+        const staged = window.sessionStorage.getItem(LANDING_DRAFT_KEY);
+        if (staged) {
+            try {
+                const parsed = JSON.parse(staged) as {
+                    prompt?: string;
+                    images?: string[];
+                    platform?: 'mobile' | 'tablet' | 'desktop';
+                    stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+                };
+                const prompt = (parsed.prompt || '').trim();
+                const images = Array.isArray(parsed.images) ? parsed.images.filter((x) => typeof x === 'string') : [];
+                if (prompt) {
+                    setInitialRequest({
+                        id: `landing-${Date.now()}`,
+                        prompt,
+                        images,
+                        platform: parsed.platform,
+                        stylePreset: parsed.stylePreset,
+                    });
+                }
+            } catch {
+                // ignore malformed staged payload
+            } finally {
+                window.sessionStorage.removeItem(LANDING_DRAFT_KEY);
+            }
+            return;
+        }
+        if (landingPrompt) {
+            setInitialRequest({ id: `query-${Date.now()}`, prompt: landingPrompt, images: [] });
+        }
+    }, [route, landingPrompt]);
+
+    const navigate = (path: string, search = '') => {
+        window.history.pushState({}, '', `${path}${search}`);
+        setRoute(getRouteFromPath());
+    };
 
     // Keyboard shortcuts
     useEffect(() => {
@@ -49,9 +114,20 @@ function App() {
         };
     }, []);
 
+    if (route === 'landing') {
+        return (
+            <LandingPage
+                onStart={({ prompt, images, platform, stylePreset }) => {
+                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset }));
+                    navigate('/app');
+                }}
+            />
+        );
+    }
+
     return (
         <div className={`app-layout ${isEditMode ? 'edit-mode' : ''}`}>
-            <ChatPanel />
+            <ChatPanel initialRequest={initialRequest} />
             <CanvasWorkspace />
             <EditPanel />
         </div>
