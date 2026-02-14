@@ -183,7 +183,7 @@ EDIT MODE TAGGING (MANDATORY):
 - Add data-editable="true" and data-uid="unique_id" to ALL major UI elements.
 - Major elements include: header, nav, main, section, article, aside, footer, div, p, span, h1-h6, button, a, img, input, textarea, select, label, ul, ol, li, figure, figcaption, form, table, thead, tbody, tr, td, th.
 - data-uid values must be unique within each screen (any stable unique string is fine).
-- Every <img> MUST include a meaningful, contextual alt attribute.
+- Every <img> MUST include a meaningful, contextual alt attribute (this would serve as propmts for image generation).
 - Alt text quality rules:
   1) Include app/domain context + screen context + visual subject.
   2) 6-16 words preferred.
@@ -213,7 +213,7 @@ TASK: Generate a set of HTML screens for the requested UI design.
 REQUIREMENTS:
 1. Output a JSON object with the following structure:
 {
-  "description": "The designs for your [app name] have been generated:\\n- [Screen 1]: [Brief one-sentence summary]\\n- [Screen 2]: [Brief one-sentence summary]",
+  "description": "The designs for your [app name] have been generated:\\n- Screen name (use b tags for screen name): [Brief one-sentence summary]\\n- Screen 2 name (use b tags for screen name): [Brief one-sentence summary]",
   "screens": [
     {
       "name": "Screen Name (e.g. Login, Home)",
@@ -306,7 +306,7 @@ const GENERATE_STREAM_PROMPT = `You are a world-class UI designer. Stream the ou
 STRUCTURE RULE (STRICT):
 1. Output all <screen> blocks first.
 2. Output exactly ONE <description> block after ALL screens. 
-3. The description must be a concise bulleted summary of ALL screens (e.g. "The designs for [app] have been generated:\\n- [Screen 1]: [Summary]\\n- [Screen 2]: [Summary]").
+3. The description must be a concise bulleted summary of ALL screens (e.g. "The designs for [app] have been generated:\\n- Screen 1: [Summary]\\n- Screen 2: [Summary]").
    - Include UI display tags in description for rich rendering:
      [h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i]
 4. DO NOT repeat the <description> block.

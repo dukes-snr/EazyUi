@@ -964,14 +964,14 @@ const handleEdit = async () => {
     return (
         <>
             <div
-                className={`flex flex-col h-full bg-[#1C1C1E] text-gray-200 font-sans border-r border-[#2C2C2E] transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-0 border-r-0' : 'w-[var(--chat-width)]'
+                className={`group flex flex-col h-full text-gray-200 font-sans border-r border-[#2B2F37] transition-all duration-300 ease-in-out relative bg-[#171A20] ${isCollapsed ? 'w-0 border-r-0' : 'w-[var(--chat-width)]'
                     }`}
             >
                 {/* Collapse Button Header */}
                 <div className="absolute top-4 -right-12 z-20">
                     <button
                         onClick={() => setIsCollapsed(!isCollapsed)}
-                        className={`p-2 rounded-lg bg-[#2C2C2E] text-gray-400 hover:text-white border border-white/5 shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        className={`p-2 rounded-lg bg-[#22262D] text-gray-400 hover:text-white border border-white/10 shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                             }`}
                         title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
                     >
@@ -979,16 +979,18 @@ const handleEdit = async () => {
                     </button>
                 </div>
 
-                <div className={`flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                     {/* Header / Date */}
-                    <div className="py-4 px-6 flex items-center justify-between border-b border-white/5 bg-[#1C1C1E]/50 backdrop-blur-sm sticky top-0 z-10">
-                        <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
-                            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                        </span>
-
+                    <div className="py-4 px-5 flex items-center justify-between border-b border-[#2B2F37] bg-[#171A20] sticky top-0 z-10">
+                        <div className="leading-tight">
+                            <p className="text-[13px] font-semibold text-gray-100 tracking-wide">Chat</p>
+                            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.12em]">
+                                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            </p>
+                        </div>
                         <button
                             onClick={() => setIsCollapsed(true)}
-                            className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                            className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
                             title="Collapse Sidebar"
                         >
                             <ChevronLeft size={16} />
@@ -996,15 +998,15 @@ const handleEdit = async () => {
                     </div>
 
                     {/* Messages */}
-                    <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-8 scrollbar-hide">
+                    <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide">
                         {messages.length === 0 && (
-                            <div className="flex flex-col items-center justify-center h-full text-[#A1A1AA] text-center px-4 opacity-0 animate-fade-in space-y-4" style={{ animationFillMode: 'forwards' }}>
-                                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center mb-2 ring-1 ring-white/10">
-                                    <ArrowUp size={24} className="text-indigo-400" />
-                                </div>
-                                <div>
+                            <div className="flex flex-col items-center justify-center h-full text-[#A1A1AA] text-center px-4 opacity-0 animate-fade-in" style={{ animationFillMode: 'forwards' }}>
+                                <div className="w-full max-w-[300px] p-5 rounded-2xl bg-[#1D2129] border border-[#2B2F37] shadow-lg">
+                                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-3 border border-white/10">
+                                        <ArrowUp size={20} className="text-gray-300" />
+                                    </div>
                                     <h2 className="text-lg font-medium text-white mb-1">What are we building?</h2>
-                                    <p className="text-sm text-gray-500">Describe your app idea to generate screens.</p>
+                                    <p className="text-sm text-gray-400 leading-relaxed">Describe your app idea to generate screens.</p>
                                 </div>
                             </div>
                         )}
@@ -1246,7 +1248,7 @@ const handleEdit = async () => {
                                                 <div className="flex items-center gap-2 px-1">
                                                     <button
                                                         onClick={() => handleCopyMessage(message.id, message.content)}
-                                                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all"
                                                         title="Copy"
                                                     >
                                                         {copiedMessageIds[message.id]
@@ -1255,23 +1257,23 @@ const handleEdit = async () => {
                                                     </button>
                                                     {message.status === 'complete' && (
                                                         <>
-                                                            <button
-                                                                onClick={() => handleReaction(message.id, 'like')}
-                                                                className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'like' ? 'text-emerald-300 bg-emerald-500/15' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                                                                title="Like"
-                                                            >
+                                                                <button
+                                                                    onClick={() => handleReaction(message.id, 'like')}
+                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'like' ? 'text-emerald-300 bg-emerald-500/15' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                                                    title="Like"
+                                                                >
                                                                 <ThumbsUp size={14} />
                                                             </button>
-                                                            <button
-                                                                onClick={() => handleReaction(message.id, 'dislike')}
-                                                                className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'dislike' ? 'text-rose-300 bg-rose-500/15' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                                                                title="Dislike"
-                                                            >
+                                                                <button
+                                                                    onClick={() => handleReaction(message.id, 'dislike')}
+                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'dislike' ? 'text-rose-300 bg-rose-500/15' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                                                    title="Dislike"
+                                                                >
                                                                 <ThumbsDown size={14} />
                                                             </button>
                                                             <button
                                                                 onClick={() => handleShareMessage(message.id, message.content)}
-                                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all"
                                                                 title="Share"
                                                             >
                                                                 <Share2 size={14} />
@@ -1376,7 +1378,7 @@ const handleEdit = async () => {
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
                                                         ? 'bg-indigo-500/20 text-indigo-200'
-                                                        : 'text-gray-300 hover:bg-white/5'
+                                                        : 'text-gray-300 hover:bg-white/10'
                                                         }`}
                                                 >
                                                     {preset}

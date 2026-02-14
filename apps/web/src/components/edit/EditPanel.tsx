@@ -650,10 +650,16 @@ export function EditPanel() {
         if (rebuilt) updateScreen(screenId, rebuilt);
     };
 
+    const buildImageAttrPatch = (nextSrc: string) => ({
+        src: nextSrc,
+        srcset: nextSrc,
+    });
+
     const applyImageSourceForUid = (uid: string, nextSrc: string) => {
         if (!uid) return;
-        applyPatch({ op: 'set_attr', uid, attr: { src: nextSrc } });
+        applyPatch({ op: 'set_attr', uid, attr: buildImageAttrPatch(nextSrc) });
         setImageInputs((prev) => ({ ...prev, [uid]: nextSrc }));
+        setScreenImages((prev) => prev.map((item) => (item.uid === uid ? { ...item, src: nextSrc } : item)));
     };
 
     const onUndo = () => {
@@ -761,9 +767,10 @@ RULES:
                     preferredModel: 'image',
                 }, controller.signal);
                 const nextSrc = imageResult.src;
-                applyPatch({ op: 'set_attr', uid: snapshot.uid, attr: { src: nextSrc } });
+                applyPatch({ op: 'set_attr', uid: snapshot.uid, attr: buildImageAttrPatch(nextSrc) });
                 setImageSrc(nextSrc);
                 setImageInputs((prev) => ({ ...prev, [snapshot.uid]: nextSrc }));
+                setScreenImages((prev) => prev.map((item) => (item.uid === snapshot.uid ? { ...item, src: nextSrc } : item)));
                 if (imageResult.description?.trim()) {
                     setAiDescription(imageResult.description.trim());
                 }
@@ -818,8 +825,9 @@ RULES:
                 preferredModel: 'image',
             }, controller.signal);
             const nextSrc = imageResult.src;
-            applyPatch({ op: 'set_attr', uid, attr: { src: nextSrc } });
+            applyPatch({ op: 'set_attr', uid, attr: buildImageAttrPatch(nextSrc) });
             setImageInputs((prev) => ({ ...prev, [uid]: nextSrc }));
+            setScreenImages((prev) => prev.map((item) => (item.uid === uid ? { ...item, src: nextSrc } : item)));
             if (selected?.uid === uid) setImageSrc(nextSrc);
             addAiEditHistory({
                 id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
