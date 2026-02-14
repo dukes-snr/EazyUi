@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, Figma, Globe, Mic, Monitor, Paperclip, Smartphone, Square, Tablet, X } from 'lucide-react';
-import heroBg from '../../assets/hero-bg.jpg';
+import { ArrowUp, Figma, Globe, Mic, Monitor, Paperclip, Smartphone, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/hero-bg2.jpg';
-import heroBg3 from '../../assets/hero-bg3.webp';
 import { apiClient } from '../../api/client';
+import type { DesignModelProfile } from '../../constants/designModels';
 import TextType from '../ui/TextType';
 
 type LandingPageProps = {
@@ -12,6 +11,7 @@ type LandingPageProps = {
         images: string[];
         platform: 'mobile' | 'tablet' | 'desktop';
         stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+        modelProfile: DesignModelProfile;
     }) => void;
 };
 
@@ -29,7 +29,7 @@ const TYPED_PLACEHOLDER_SUGGESTIONS = [
     'Create an ecommerce home screen with search, categories, and recommendations...',
     'Generate a travel planner app with itinerary, maps, and booking cards...',
 ];
-const PATTERN_TABS = ['Screens', 'UI Elements', 'Flows', 'Text in Screenshot'] as const;
+const PATTERN_TABS = ['Screens', 'UI Elements', 'Flows'] as const;
 type PatternTab = (typeof PATTERN_TABS)[number];
 
 type PatternCard = {
@@ -39,53 +39,103 @@ type PatternCard = {
     image?: string;
 };
 
+const MOBBIN_SCREEN_IMAGES = [
+    'https://i.postimg.cc/5Nk5nbfm/Ui-(1).jpg',
+    'https://i.postimg.cc/jdk6ZtR8/Ui-(2).jpg',
+    'https://i.postimg.cc/NfP8pBQr/Ui-(3).jpg',
+    'https://i.postimg.cc/5Nk5nbfC/Ui-(4).jpg',
+    'https://i.postimg.cc/bNF03pqn/Ui-(5).jpg',
+    'https://i.postimg.cc/kXhNfq7K/Ui-(6).jpg',
+] as const;
+
 const PATTERN_LIBRARY: Record<PatternTab, PatternCard[]> = {
     Screens: [
         {
             title: 'Account Setup',
             prompt: 'Design an account setup mobile screen with progressive questions and avatar choices.',
             accent: 'from-sky-500/45 to-indigo-500/25',
-            image: heroBg,
+            image: MOBBIN_SCREEN_IMAGES[0],
         },
         {
             title: 'Streaming Home',
             prompt: 'Create a streaming app home screen with featured hero, category tabs, and media cards.',
             accent: 'from-fuchsia-500/40 to-slate-500/20',
-            image: heroBg2,
+            image: MOBBIN_SCREEN_IMAGES[1],
         },
         {
             title: 'Subscription Paywall',
             prompt: 'Generate a paywall screen with annual/monthly options and strong CTA hierarchy.',
             accent: 'from-amber-500/45 to-orange-500/25',
-            image: heroBg3,
+            image: MOBBIN_SCREEN_IMAGES[2],
         },
         {
             title: 'Login',
             prompt: 'Build a login/auth screen with social options, secure inputs, and create-account path.',
             accent: 'from-violet-500/45 to-cyan-500/20',
-            image: heroBg,
+            image: MOBBIN_SCREEN_IMAGES[3],
         },
-        { title: 'Settings', prompt: 'Design a settings dashboard with grouped controls, toggles, and profile summary.', accent: 'from-slate-600/50 to-zinc-500/20' },
-        { title: 'Checkout', prompt: 'Create a checkout screen with address, delivery options, and sticky payment CTA.', accent: 'from-zinc-400/35 to-slate-500/20' },
-        { title: 'Collections', prompt: 'Generate a product collection screen with cards, wishlist actions, and filters.', accent: 'from-emerald-500/35 to-cyan-500/20' },
+        { 
+            title: 'Settings',
+            prompt: 'Design a settings dashboard with grouped controls, toggles, and profile summary.', 
+            accent: 'from-slate-600/50 to-zinc-500/20', 
+            image: MOBBIN_SCREEN_IMAGES[4] 
+        },
+        { 
+            title: 'Checkout',
+            prompt: 'Create a checkout screen with address, delivery options, and sticky payment CTA.', 
+            accent: 'from-zinc-400/35 to-slate-500/20', 
+            image: MOBBIN_SCREEN_IMAGES[5] 
+        },
+        { 
+            title: 'Collections',
+            prompt: 'Generate a product collection screen with cards, wishlist actions, and filters.', 
+            accent: 'from-emerald-500/35 to-cyan-500/20', 
+            image: MOBBIN_SCREEN_IMAGES[0] 
+        },
     ],
     'UI Elements': [
-        { title: 'Floating CTA Bar', prompt: 'Add a floating CTA bar with subtle blur, icon, and primary action.', accent: 'from-sky-500/45 to-cyan-500/25' },
-        { title: 'Card Grid Module', prompt: 'Design a responsive card grid module with mixed card sizes and badges.', accent: 'from-indigo-500/40 to-violet-500/25' },
-        { title: 'Pricing Toggle', prompt: 'Create a pricing toggle component with monthly/yearly states and savings label.', accent: 'from-amber-500/45 to-orange-500/25' },
-        { title: 'Segmented Filter', prompt: 'Build a segmented filter control with clear active/hover states.', accent: 'from-emerald-500/40 to-teal-500/25' },
+        { 
+            title: 'Floating CTA Bar', 
+            prompt: 'Add a floating CTA bar with subtle blur, icon, and primary action.', 
+            accent: 'from-sky-500/45 to-cyan-500/25' 
+        },
+        { 
+            title: 'Card Grid Module', 
+            prompt: 'Design a responsive card grid module with mixed card sizes and badges.', 
+            accent: 'from-indigo-500/40 to-violet-500/25' 
+        },
+        { 
+            title: 'Pricing Toggle', 
+            prompt: 'Create a pricing toggle component with monthly/yearly states and savings label.', 
+            accent: 'from-amber-500/45 to-orange-500/25' 
+        },
+        { 
+            title: 'Segmented Filter', 
+            prompt: 'Build a segmented filter control with clear active/hover states.', 
+            accent: 'from-emerald-500/40 to-teal-500/25' 
+        },
     ],
     Flows: [
-        { title: 'Onboarding Flow', prompt: 'Create a 3-step onboarding flow with progress indicator and optional skip.', accent: 'from-sky-500/45 to-blue-500/25' },
-        { title: 'Signup to First Task', prompt: 'Design a signup to first-task completion flow for a SaaS product.', accent: 'from-violet-500/45 to-indigo-500/25' },
-        { title: 'Browse to Checkout', prompt: 'Generate an e-commerce browse-to-checkout conversion flow.', accent: 'from-amber-500/45 to-rose-500/25' },
-        { title: 'Profile Completion', prompt: 'Create a profile completion flow with progressive disclosure and reminders.', accent: 'from-teal-500/40 to-cyan-500/25' },
-    ],
-    'Text in Screenshot': [
-        { title: 'Headline Pattern', prompt: 'Use a bold benefit headline with concise supporting line and high contrast.', accent: 'from-sky-500/45 to-indigo-500/25' },
-        { title: 'Tab Label Set', prompt: 'Create compact category tabs: Screens, UI Elements, Flows, Text in Screenshot.', accent: 'from-zinc-500/40 to-slate-500/25' },
-        { title: 'Context Labels', prompt: 'Add contextual labels above cards for quick scanning of pattern types.', accent: 'from-violet-500/45 to-fuchsia-500/25' },
-        { title: 'Actionable Captions', prompt: 'Use actionable captions under visuals to explain where/why to use pattern.', accent: 'from-emerald-500/40 to-teal-500/25' },
+        { 
+            title: 'Onboarding Flow', 
+            prompt: 'Create a 3-step onboarding flow with progress indicator and optional skip.', 
+            accent: 'from-sky-500/45 to-blue-500/25' 
+        },
+        { 
+            title: 'Signup to First Task', 
+            prompt: 'Design a signup to first-task completion flow for a SaaS product.', 
+            accent: 'from-violet-500/45 to-indigo-500/25' 
+        },
+        { 
+            title: 'Browse to Checkout', 
+            prompt: 'Generate an e-commerce browse-to-checkout conversion flow.', 
+            accent: 'from-amber-500/45 to-rose-500/25' 
+        },
+        { 
+            title: 'Profile Completion', 
+            prompt: 'Create a profile completion flow with progressive disclosure and reminders.', 
+            accent: 'from-teal-500/40 to-cyan-500/25' 
+        },
     ],
 };
 const CHIP_LABEL_MAX = 34;
@@ -101,6 +151,7 @@ export function LandingPage({ onStart }: LandingPageProps) {
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
+    const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
     const [activePatternTab, setActivePatternTab] = useState<PatternTab>('Screens');
     const [isPromptFocused, setIsPromptFocused] = useState(false);
@@ -115,7 +166,7 @@ export function LandingPage({ onStart }: LandingPageProps) {
     const submit = () => {
         const next = prompt.trim();
         if (!next) return;
-        onStart({ prompt: next, images, platform, stylePreset });
+        onStart({ prompt: next, images, platform, stylePreset, modelProfile });
     };
 
     const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
@@ -386,6 +437,32 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                         </button>
                                     ))}
                                 </div>
+                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('fast')}
+                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'fast'
+                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
+                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            }`}
+                                        title="Fast model"
+                                    >
+                                        <Zap size={12} />
+                                        Fast
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('quality')}
+                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'quality'
+                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
+                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            }`}
+                                        title="Quality model"
+                                    >
+                                        <Sparkles size={12} />
+                                        Quality
+                                    </button>
+                                </div>
                                 <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
                                     <button
                                         type="button"
@@ -500,30 +577,27 @@ export function LandingPage({ onStart }: LandingPageProps) {
                         </div>
                     </div>
 
-                    <div className="mt-8 relative overflow-hidden marquee-hover px-3 md:px-4">
+                    <div className="mt-8 relative overflow-hidden px-3 md:px-4">
                         <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_right,rgba(6,7,11,1),rgba(6,7,11,0))]" />
                         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_left,rgba(6,7,11,1),rgba(6,7,11,0))]" />
                         <div
                             className="infinite-scroll-track flex w-max gap-4"
-                            style={{ ['--marquee-duration' as any]: `${Math.max(22, patternCards.length * 4)}s` }}
+                            style={{ ['--marquee-duration' as any]: `${Math.max(36, patternCards.length * 7)}s` }}
                         >
                             {marqueeCards.map((item, idx) => (
                                 <button
                                     key={`${item.title}-${idx}`}
                                     type="button"
                                     onClick={() => setPrompt(item.prompt)}
-                                    className="w-[210px] md:w-[240px] shrink-0 rounded-2xl border border-white/10 bg-[#121725] p-2.5 text-left hover:border-white/20 transition-colors"
+                                    className="w-[250px] md:w-[280px] shrink-0 rounded-2xl border border-white/10 bg-transparent p-2.5 text-left hover:border-white/20 transition-colors"
                                     title="Use this pattern in the prompt"
                                 >
-                                    <div className={`relative h-[300px] md:h-[340px] rounded-xl border border-white/10 overflow-hidden ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[#0f131e]'}`}>
+                                    <div className="mb-5 text-[13px] font-semibold text-gray-100 text-center">{item.title}</div>
+                                    <div className={`relative w-full aspect-[9/19.5] rounded-xl border border-white/10 overflow-hidden ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[#0f131e]'}`}>
                                         {item.image && (
-                                            <>
-                                                <img src={item.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />
-                                                <div className={`absolute inset-0 bg-gradient-to-b ${item.accent}`} />
-                                            </>
+                                            <img src={item.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />
                                         )}
                                     </div>
-                                    <div className="mt-2.5 text-[13px] font-semibold text-gray-100">{item.title}</div>
                                 </button>
                             ))}
                         </div>

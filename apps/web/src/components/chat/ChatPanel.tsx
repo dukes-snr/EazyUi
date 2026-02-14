@@ -6,7 +6,8 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, Mic } from 'lucide-react';
+import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, Mic, Zap } from 'lucide-react';
+import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import TextType from '../ui/TextType';
 
 const FEEDBACK_BUCKETS = {
@@ -419,6 +420,7 @@ type ChatPanelProps = {
         images?: string[];
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+        modelProfile?: DesignModelProfile;
     } | null;
 };
 
@@ -427,6 +429,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
+    const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -665,7 +668,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         incomingPrompt?: string,
         incomingImages?: string[],
         incomingPlatform?: 'mobile' | 'tablet' | 'desktop',
-        incomingStylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'
+        incomingStylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful',
+        incomingModelProfile?: DesignModelProfile
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
@@ -673,6 +677,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const imagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
         const platformToUse = incomingPlatform || selectedPlatform;
         const styleToUse = incomingStylePreset || stylePreset;
+        const modelProfileToUse = incomingModelProfile || modelProfile;
+        const preferredModel = getPreferredTextModel(modelProfileToUse);
         if (!incomingPrompt) {
             setImages([]);
         }
@@ -698,6 +704,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
+                modelProfile: modelProfileToUse,
             });
 
             const existingBoards = useCanvasStore.getState().doc.boards;
@@ -775,11 +782,64 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             const controller = new AbortController();
             setAbortController(controller);
 
+            if (preferredModel) {
+                const generatedIds: string[] = [];
+                const regen = await apiClient.generate({
+                    prompt: requestPrompt,
+                    stylePreset: styleToUse,
+                    platform: platformToUse,
+                    images: imagesToSend,
+                    preferredModel,
+                }, controller.signal);
+
+                regen.designSpec.screens.forEach((screen, index) => {
+                    const screenId = uuidv4();
+                    addScreens([{
+                        screenId,
+                        name: screen.name,
+                        html: screen.html,
+                        width: screen.width,
+                        height: screen.height,
+                        status: 'complete'
+                    }]);
+                    generatedIds.push(screenId);
+
+                    const board = {
+                        boardId: screenId,
+                        screenId,
+                        x: startX + index * (effectiveDimensions.width + 100),
+                        y: 100,
+                        width: screen.width,
+                        height: screen.height,
+                        deviceFrame: 'none' as const,
+                        locked: false,
+                        visible: true,
+                    };
+                    const currentBoards = useCanvasStore.getState().doc.boards;
+                    setBoards([...currentBoards, board]);
+                });
+
+                updateMessage(assistantMsgId, {
+                    content: regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`,
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                    }
+                });
+                if (generatedIds.length > 0) {
+                    setFocusNodeIds(generatedIds);
+                }
+                console.info('[UI] generate: complete (fast model)', { screens: regen.designSpec.screens.length });
+                return;
+            }
+
             await apiClient.generateStream({
                 prompt: requestPrompt,
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
+                preferredModel,
             }, (chunk) => {
                 const events = parseStreamChunk(parserState, chunk);
                 for (const event of events) {
@@ -838,6 +898,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    preferredModel,
                 }, controller.signal);
 
                 regen.designSpec.screens.forEach((screen, index) => {
@@ -950,6 +1011,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const nextImages = Array.isArray(initialRequest?.images) ? initialRequest.images : [];
         const nextPlatform = initialRequest?.platform;
         const nextStylePreset = initialRequest?.stylePreset;
+        const nextModelProfile = initialRequest?.modelProfile;
         if (!requestId || !next) return;
         if (messages.length > 0 || isGenerating) return;
         if (initialRequestSubmittedRef.current === requestId) return;
@@ -957,7 +1019,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         initialRequestSubmittedRef.current = requestId;
         if (nextPlatform) setPlatform(nextPlatform);
         if (nextStylePreset) setStylePreset(nextStylePreset);
-        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset);
+        if (nextModelProfile) setModelProfile(nextModelProfile);
+        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
     }, [initialRequest, messages.length, isGenerating]);
 
 const handleEdit = async () => {
@@ -1004,6 +1067,7 @@ const handleEdit = async () => {
                 instruction: currentPrompt,
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
+                preferredModel: getPreferredTextModel(modelProfile),
             }, controller.signal);
 
             updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
@@ -1477,6 +1541,32 @@ const handleEdit = async () => {
                                             {p === 'desktop' && <Monitor size={14} />}
                                         </button>
                                     ))}
+                                </div>
+                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('fast')}
+                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'fast'
+                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
+                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            }`}
+                                        title="Fast model"
+                                    >
+                                        <Zap size={12} />
+                                        Fast
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('quality')}
+                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'quality'
+                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
+                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            }`}
+                                        title="Quality model"
+                                    >
+                                        <Sparkles size={12} />
+                                        Quality
+                                    </button>
                                 </div>
                             </div>
 

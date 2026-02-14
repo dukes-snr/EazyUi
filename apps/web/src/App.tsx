@@ -7,6 +7,7 @@ import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditPanel } from './components/edit/EditPanel';
 import { LandingPage } from './components/landing/LandingPage';
+import type { DesignModelProfile } from './constants/designModels';
 
 import { useDesignStore, useCanvasStore, useEditStore } from './stores';
 
@@ -28,6 +29,7 @@ function App() {
         images: string[];
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+        modelProfile?: DesignModelProfile;
     } | null>(null);
 
 
@@ -59,6 +61,7 @@ function App() {
                     images?: string[];
                     platform?: 'mobile' | 'tablet' | 'desktop';
                     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+                    modelProfile?: DesignModelProfile;
                 };
                 const prompt = (parsed.prompt || '').trim();
                 const images = Array.isArray(parsed.images) ? parsed.images.filter((x) => typeof x === 'string') : [];
@@ -69,6 +72,7 @@ function App() {
                         images,
                         platform: parsed.platform,
                         stylePreset: parsed.stylePreset,
+                        modelProfile: parsed.modelProfile,
                     });
                 }
             } catch {
@@ -117,8 +121,8 @@ function App() {
     if (route === 'landing') {
         return (
             <LandingPage
-                onStart={({ prompt, images, platform, stylePreset }) => {
-                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset }));
+                onStart={({ prompt, images, platform, stylePreset, modelProfile }) => {
+                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile }));
                     navigate('/app');
                 }}
             />

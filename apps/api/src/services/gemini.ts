@@ -48,7 +48,8 @@ function isQuotaOrRateLimitError(error: unknown): boolean {
         message.includes('Too Many Requests') ||
         message.includes('quota') ||
         message.includes('Quota exceeded') ||
-        message.includes('rate limit')
+        message.includes('rate limit') ||
+        message.includes('Rate limit')
     );
 }
 
@@ -406,6 +407,33 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 Current HTML:
 `;
 
+const FAST_GENERATE_HTML_PROMPT = `Return STRICT JSON only:
+{
+  "description":"1 short sentence using [h2]/[li] tags",
+  "screens":[{"name":"Screen Name","html":"<!DOCTYPE html>...</html>"}]
+}
+Rules:
+- Exactly 1 screen only.
+- Each screen must be complete HTML with <!DOCTYPE html>, <html>, <head>, <body>.
+- Include Tailwind CDN, Plus Jakarta Sans + one display font, and Material Symbols Rounded.
+- Keep HTML compact: no comments, no repeated placeholder cards, no long text blocks.
+- Build only core UI blocks (header, search, one product card, one CTA/filter control).
+- Do not include reasoning, analysis, notes, or planning text.
+- No markdown fences.
+`;
+
+const FAST_EDIT_HTML_PROMPT = `Edit the HTML to match the user instruction.
+Return:
+<description>one concise sentence</description>
+then the complete updated HTML document.
+Rules:
+- Keep full valid HTML document.
+- Keep existing data-uid and data-editable attributes where present.
+- No markdown fences.
+`;
+
+const FAST_JSON_SEED_ASSISTANT = `{"description":"A modern mobile ecommerce screen with header, search, product card and filter/checkout controls.","screens":[{"name":"Main Screen","html":"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Ecommerce</title><link href=\"https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600&family=Roboto+Slab:wght@600&display=swap\" rel=\"stylesheet\"><link href=\"https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded\" rel=\"stylesheet\" /><script src=\"https://cdn.tailwindcss.com\"></script><script>tailwind.config={theme:{extend:{fontFamily:{sans:['\\\"Plus Jakarta Sans\\\"','sans-serif'],display:['\\\"Roboto Slab\\\"','serif']}}}}</script></head><body class=\"font-sans bg-gray-100 p-4\"><header class=\"flex items-center justify-between mb-4\"><h1 class=\"text-2xl font-display\">Shop</h1><span class=\"material-symbols-rounded text-2xl\">shopping_cart</span></header><div class=\"mb-4\"><input type=\"text\" placeholder=\"Search products\" class=\"w-full rounded-md border border-gray-300 p-2 focus:outline-none\"/></div><div class=\"bg-white rounded-lg shadow p-4 flex items-center mb-4\"><img src=\"https://via.placeholder.com/80\" alt=\"Product\" class=\"w-20 h-20 rounded object-cover mr-4\"/><div class=\"flex-1\"><h2 class=\"font-display text-lg\">Smart Watch</h2><p class=\"text-sm text-gray-600\">$199</p></div><button class=\"bg-blue-600 text-white px-3 py-1 rounded\">Add</button></div><div class=\"flex justify-between items-center\"><button class=\"bg-green-600 text-white px-4 py-2 rounded\">Filter</button><button class=\"bg-blue-600 text-white px-4 py-2 rounded\">Checkout</button></div></body></html>"}]}`;
+
 
 // ============================================================================
 // Platform Dimensions
@@ -446,6 +474,14 @@ Generate a maximum of 4 complete screens.
 ${imageGuidance}
 `;
 
+    const fastBaseUserPrompt = `
+Design a UI for: "${prompt}"
+Platform: ${platform} (${dimensions.width}x${dimensions.height})
+Style: ${stylePreset}
+Generate exactly 1 complete screen.
+${imageGuidance}
+`;
+
     const buildParts = (userPrompt: string) => {
         const parts: any[] = [{ text: GENERATE_HTML_PROMPT + '\n\n' + userPrompt }];
 
@@ -465,30 +501,56 @@ ${imageGuidance}
 
     const generateOnce = async (promptText: string): Promise<ParsedDesign> => {
         if (isGroqModel(preferredModel)) {
-            const { text } = await groqChatCompletion({
-                model: preferredModel,
-                systemPrompt: 'You are a world-class UI designer that returns strict JSON.',
-                prompt: `${GENERATE_HTML_PROMPT}\n\n${promptText}`,
-                maxTokens: 8192,
-                temperature: 0.8,
-            });
             try {
-                const cleanedJson = cleanJsonResponse(text);
-                const parsed = parseJsonSafe(cleanedJson) as { description?: string; screens: RawScreen[] };
-                return { description: parsed.description, screens: parsed.screens || [], parsedOk: true };
-            } catch {
-                if (text.includes('<!DOCTYPE html>')) {
-                    return { screens: [{ name: 'Generated Screen', html: cleanHtmlResponse(text) }], parsedOk: false };
+                const { text, finishReason } = await groqChatCompletion({
+                    model: preferredModel,
+                    // Mirror the exact Groq request shape requested by user for testing.
+                    messages: [
+                        {
+                            role: 'user',
+                            content: `${FAST_GENERATE_HTML_PROMPT}\n\n${promptText}`,
+                        },
+                        {
+                            role: 'assistant',
+                            content: FAST_JSON_SEED_ASSISTANT,
+                        },
+                        {
+                            role: 'user',
+                            content: '',
+                        },
+                    ],
+                    prompt: `${FAST_GENERATE_HTML_PROMPT}\n\n${promptText}`,
+                    maxCompletionTokens: 8192,
+                    temperature: 1,
+                    topP: 1,
+                    reasoningEffort: 'medium',
+                    responseFormat: 'json_object',
+                    stop: null,
+                });
+                if (finishReason === 'length') {
+                    throw new Error('Fast model output was truncated. Please retry with a shorter prompt.');
                 }
-                return { screens: [], parsedOk: false };
+                try {
+                    const cleanedJson = cleanJsonResponse(text);
+                    const parsed = parseJsonSafe(cleanedJson) as { description?: string; screens: RawScreen[] };
+                    return { description: parsed.description, screens: parsed.screens || [], parsedOk: true };
+                } catch {
+                    throw new Error('Fast model returned invalid structured output. Please retry.');
+                }
+            } catch (error) {
+                if (isQuotaOrRateLimitError(error)) {
+                    throw new Error('Fast model is rate-limited right now. Please wait a few seconds and retry.');
+                }
+                throw error;
             }
         }
         return generateDesignOnce(buildParts(promptText));
     };
 
-    let initialResponse = await generateOnce(baseUserPrompt);
+    let initialResponse = await generateOnce(isGroqModel(preferredModel) ? fastBaseUserPrompt : baseUserPrompt);
     if (!initialResponse.parsedOk || initialResponse.screens.length === 0) {
-        const retryPrompt = `${baseUserPrompt}\nReturn STRICT JSON only. No markdown, no code fences, no trailing commas.`;
+        const activeBasePrompt = isGroqModel(preferredModel) ? fastBaseUserPrompt : baseUserPrompt;
+        const retryPrompt = `${activeBasePrompt}\nReturn STRICT JSON only. No markdown, no code fences, no trailing commas.`;
         initialResponse = await generateOnce(retryPrompt);
     }
 
@@ -646,6 +708,7 @@ export async function generateImageAsset(options: GenerateImageOptions): Promise
 export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
     const { instruction, html, images = [], preferredModel } = options;
     const userPrompt = `${EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
+    const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
 
     const parts: any[] = [{ text: userPrompt }];
     if (images.length > 0) {
@@ -671,19 +734,26 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
     };
 
     if (isGroqModel(preferredModel)) {
-        const { text, modelUsed } = await groqChatCompletion({
-            model: preferredModel,
-            systemPrompt: 'You are an expert UI designer that edits HTML.',
-            prompt: userPrompt,
-            maxTokens: 8192,
-            temperature: 0.6,
-        });
-        const parsed = parseEditResponse(text);
-        const note = `(Model: ${modelUsed})`;
-        return {
-            html: parsed.html,
-            description: parsed.description ? `${parsed.description} ${note}` : note,
-        };
+        try {
+            const { text, modelUsed } = await groqChatCompletion({
+                model: preferredModel,
+                systemPrompt: 'You are an expert UI designer that edits HTML.',
+                prompt: fastUserPrompt,
+                maxTokens: 1800,
+                temperature: 0.5,
+            });
+            const parsed = parseEditResponse(text);
+            const note = `(Model: ${modelUsed})`;
+            return {
+                html: parsed.html,
+                description: parsed.description ? `${parsed.description} ${note}` : note,
+            };
+        } catch (error) {
+            if (isQuotaOrRateLimitError(error)) {
+                throw new Error('Fast model is rate-limited right now. Please wait a few seconds and retry.');
+            }
+            throw error;
+        }
     }
 
     const resolvedPreferredModel = resolvePreferredModel(preferredModel);
@@ -757,6 +827,75 @@ ${partialHtml}
 type RawScreen = { name: string; html: string };
 type ParsedDesign = { description?: string; screens: RawScreen[]; parsedOk: boolean };
 
+function looksLikeJsonBlob(text: string): boolean {
+    const sample = text.slice(0, 2000);
+    return sample.includes('"description"') || sample.includes('"screens"');
+}
+
+function ensureCompleteHtmlDocument(input: string): string {
+    let html = (input || '').trim();
+    if (!html) return html;
+    if (!/<!doctype html>/i.test(html)) {
+        html = `<!DOCTYPE html>\n${html}`;
+    }
+    if (!/<html[\s>]/i.test(html)) {
+        html = `<html><head></head><body>${html}</body></html>`;
+    }
+    if (!/<head[\s>]/i.test(html)) {
+        html = html.replace(/<html([^>]*)>/i, '<html$1><head></head>');
+    }
+    if (!/<body[\s>]/i.test(html)) {
+        html = html.replace(/<\/head>/i, '</head><body>');
+    }
+    if (!/<\/body>/i.test(html)) {
+        html += '\n</body>';
+    }
+    if (!/<\/html>/i.test(html)) {
+        html += '\n</html>';
+    }
+    return html;
+}
+
+function recoverHtmlFromMalformedFastOutput(raw: string): string | null {
+    const text = (raw || '').trim();
+    if (!text) return null;
+
+    // If JSON got serialized into text, try to parse it back and extract first screen HTML.
+    if (looksLikeJsonBlob(text)) {
+        try {
+            const parsed = parseJsonSafe(cleanJsonResponse(text)) as { screens?: Array<{ html?: string }> };
+            const candidate = (parsed.screens || []).find((s) => typeof s?.html === 'string')?.html || '';
+            if (candidate.trim()) {
+                const unescaped = candidate.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                return ensureCompleteHtmlDocument(unescaped);
+            }
+        } catch {
+            // continue to next fallback
+        }
+    }
+
+    // If we only got escaped HTML-ish text, unescape and wrap.
+    let unescaped = text.replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+    const firstHtmlIdxCandidates = [
+        unescaped.search(/<!doctype html>/i),
+        unescaped.search(/<html[\s>]/i),
+        unescaped.search(/<body[\s>]/i),
+        unescaped.search(/<main[\s>]/i),
+        unescaped.search(/<div[\s>]/i),
+    ].filter((idx) => idx >= 0);
+    if (firstHtmlIdxCandidates.length > 0) {
+        const firstHtmlIdx = Math.min(...firstHtmlIdxCandidates);
+        if (firstHtmlIdx > 0) {
+            unescaped = unescaped.slice(firstHtmlIdx).trim();
+        }
+    }
+    if (/<[a-z][\s\S]*>/i.test(unescaped)) {
+        return ensureCompleteHtmlDocument(unescaped);
+    }
+
+    return null;
+}
+
 async function generateDesignOnce(parts: any[]): Promise<ParsedDesign> {
     console.info('[Gemini] generateDesignOnce: start');
     const result = await model.generateContent({
@@ -785,10 +924,15 @@ async function generateDesignOnce(parts: any[]): Promise<ParsedDesign> {
 
     return {
         description: parsedResponse.description,
-        screens: parsedResponse.screens.map(s => ({
-            name: s.name,
-            html: cleanHtmlResponse(s.html),
-        })),
+        screens: parsedResponse.screens.map(s => {
+            const rawHtml = cleanHtmlResponse(s.html);
+            const recovered = recoverHtmlFromMalformedFastOutput(rawHtml);
+            const finalHtml = recovered || ensureCompleteHtmlDocument(rawHtml);
+            return {
+                name: s.name,
+                html: finalHtml,
+            };
+        }),
         parsedOk: parsedResponse.parsedOk,
     };
 }

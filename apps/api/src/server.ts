@@ -8,7 +8,7 @@ import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
 import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
-import { GROQ_MODELS, groqWhisperTranscription } from './services/groq.provider.js';
+import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 
 const fastify = Fastify({
     logger: true,
@@ -270,6 +270,14 @@ fastify.get('/api/models', async () => {
         groq: Object.keys(GROQ_MODELS),
         defaultTextModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
     };
+});
+
+fastify.get('/api/debug/groq-last-chat', async (_request, reply) => {
+    const debug = getLastGroqChatDebug();
+    if (!debug) {
+        return reply.status(404).send({ error: 'No Groq chat call has been captured yet.' });
+    }
+    return debug;
 });
 
 fastify.post<{
