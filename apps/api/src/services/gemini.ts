@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
 import { groqChatCompletion, isGroqModel } from './groq.provider.js';
+import { isNvidiaModel, nvidiaChatCompletion } from './nvidia.provider.js';
 
 const envCandidates = [
     path.resolve(process.cwd(), '.env'),
@@ -100,6 +101,27 @@ export interface HtmlDesignSpec {
     description?: string;
     createdAt: string;
     updatedAt: string;
+}
+
+function normalizeUiDescriptionTags(input?: string): string | undefined {
+    if (!input) return input;
+    return input
+        .replace(/<\s*h2[^>]*>/gi, '[h2]')
+        .replace(/<\s*\/\s*h2\s*>/gi, '[/h2]')
+        .replace(/<\s*h3[^>]*>/gi, '[h3]')
+        .replace(/<\s*\/\s*h3\s*>/gi, '[/h3]')
+        .replace(/<\s*p[^>]*>/gi, '[p]')
+        .replace(/<\s*\/\s*p\s*>/gi, '[/p]')
+        .replace(/<\s*li[^>]*>/gi, '[li]')
+        .replace(/<\s*\/\s*li\s*>/gi, '[/li]')
+        .replace(/<\s*b[^>]*>/gi, '[b]')
+        .replace(/<\s*\/\s*b\s*>/gi, '[/b]')
+        .replace(/<\s*i[^>]*>/gi, '[i]')
+        .replace(/<\s*\/\s*i\s*>/gi, '[/i]')
+        // Remove wrapper list tags; chat renderer only needs [li] blocks.
+        .replace(/<\s*\/?\s*ul[^>]*>/gi, '')
+        .replace(/<\s*\/?\s*ol[^>]*>/gi, '')
+        .trim();
 }
 
 // ============================================================================
@@ -208,6 +230,17 @@ MAP SCREENS (MANDATORY RULES):
 - Ensure proper contrast over map surfaces (cards/chips/text must remain legible).
 `;
 
+const ICON_POLICY_RULES = `
+ICONS (MANDATORY):
+- For brand icons (Google, Facebook, Apple, GitHub, X/Twitter, LinkedIn, Instagram), use Iconify with Simple Icons.
+- Include this script in <head> when brand icons are present:
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+- Brand icon example:
+  <iconify-icon icon="simple-icons:google" width="20" height="20"></iconify-icon>
+- Do NOT output text placeholders like LOGO_GOOGLE, LOGO_FACEBOOK, BRAND_ICON, or icon names as plain text.
+- For non-brand interface icons, use Material Symbols Rounded.
+`;
+
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
 
 TASK: Generate a set of HTML screens for the requested UI design.
@@ -299,6 +332,7 @@ STYLING & CONTENT:
 ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${ICON_POLICY_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 `;
@@ -371,6 +405,7 @@ PROHIBITED:
 ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${ICON_POLICY_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 
@@ -413,15 +448,38 @@ const FAST_GENERATE_HTML_PROMPT = `Return STRICT JSON only:
   "screens":[{"name":"Screen Name","html":"<!DOCTYPE html>...</html>"}]
 }
 Rules:
-- Exactly 1 screen only.
+- Exactly 1 main screen only.
 - Each screen must be complete HTML with <!DOCTYPE html>, <html>, <head>, <body>.
-- Include Tailwind CDN, Plus Jakarta Sans + one display font, and Material Symbols Rounded.
-- Keep HTML compact: no comments, no repeated placeholder cards, no long text blocks.
-- Build only core UI blocks (header, search, one product card, one CTA/filter control).
+- MUST include exactly this Tailwind loader in <head>: <script src="https://cdn.tailwindcss.com"></script>
+- Include Plus Jakarta Sans + one display font, and Material Symbols Rounded.
+- Do NOT use Tailwind stylesheet links like cdn.jsdelivr tailwind.min.css.
+- Keep HTML compact but premium (no comments/long paragraphs).
+- Build a premium mobile composition with: hero/header, search or filter controls, one featured card, one secondary recommendations module, and sticky CTA.
+- Use clear hierarchy with a display heading + supporting text + metadata + emphasized CTA.
+- Add depth with at least 2 of: gradient background, glass/blur panel, soft shadow, layered overlap.
+- Use prompt-specific labels; no filler copy (no "Lorem ipsum", "Item 1", "Product Name").
+- Define tailwind.config theme.extend.colors with semantic tokens: bg, surface, text, muted, accent.
+- Use those semantic tokens for major surfaces and CTA.
+- Avoid invented class names that are not valid Tailwind utilities.
+- Brand icons must use Iconify + Simple Icons (never placeholder text like LOGO_GOOGLE).
 - Do not include reasoning, analysis, notes, or planning text.
 - No markdown fences.
 `;
 
+const FAST_GENERATE_HTML_PROMPT_COMPACT = `Return STRICT JSON only:
+{
+  "description":"1 short sentence using [h2]/[li] tags",
+  "screens":[{"name":"Screen Name","html":"<!DOCTYPE html>...</html>"}]
+}
+Rules:
+- Exactly 1 main screen only.
+- Complete HTML document required.
+- Include: <script src="https://cdn.tailwindcss.com"></script>
+- Include Plus Jakarta Sans + one display font + Material Symbols Rounded.
+- Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
+- Keep markup concise and visually rich; avoid long repeated sections.
+- No reasoning or markdown.
+`;
 const FAST_EDIT_HTML_PROMPT = `Edit the HTML to match the user instruction.
 Return:
 <description>one concise sentence</description>
@@ -429,10 +487,34 @@ then the complete updated HTML document.
 Rules:
 - Keep full valid HTML document.
 - Keep existing data-uid and data-editable attributes where present.
+- Brand icons must use Iconify + Simple Icons (no placeholder text).
 - No markdown fences.
 `;
 
-const FAST_JSON_SEED_ASSISTANT = `{"description":"A modern mobile ecommerce screen with header, search, product card and filter/checkout controls.","screens":[{"name":"Main Screen","html":"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Ecommerce</title><link href=\"https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600&family=Roboto+Slab:wght@600&display=swap\" rel=\"stylesheet\"><link href=\"https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded\" rel=\"stylesheet\" /><script src=\"https://cdn.tailwindcss.com\"></script><script>tailwind.config={theme:{extend:{fontFamily:{sans:['\\\"Plus Jakarta Sans\\\"','sans-serif'],display:['\\\"Roboto Slab\\\"','serif']}}}}</script></head><body class=\"font-sans bg-gray-100 p-4\"><header class=\"flex items-center justify-between mb-4\"><h1 class=\"text-2xl font-display\">Shop</h1><span class=\"material-symbols-rounded text-2xl\">shopping_cart</span></header><div class=\"mb-4\"><input type=\"text\" placeholder=\"Search products\" class=\"w-full rounded-md border border-gray-300 p-2 focus:outline-none\"/></div><div class=\"bg-white rounded-lg shadow p-4 flex items-center mb-4\"><img src=\"https://via.placeholder.com/80\" alt=\"Product\" class=\"w-20 h-20 rounded object-cover mr-4\"/><div class=\"flex-1\"><h2 class=\"font-display text-lg\">Smart Watch</h2><p class=\"text-sm text-gray-600\">$199</p></div><button class=\"bg-blue-600 text-white px-3 py-1 rounded\">Add</button></div><div class=\"flex justify-between items-center\"><button class=\"bg-green-600 text-white px-4 py-2 rounded\">Filter</button><button class=\"bg-blue-600 text-white px-4 py-2 rounded\">Checkout</button></div></body></html>"}]}`;
+const FAST_UNSPLASH_IMAGE_RULES = `
+Fast image policy:
+- Use only these exact Unsplash bases (query params allowed):
+  - https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05
+  - https://images.unsplash.com/photo-1488590528505-98d2b5aba04b
+  - https://images.unsplash.com/photo-1539571696357-5a69c17a67c6
+  - https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1
+  - https://images.unsplash.com/photo-1541701494587-cb58502866ab
+  - https://images.unsplash.com/photo-1504674900247-0877df9cc836
+  - https://images.unsplash.com/photo-1486406146926-c627a92ad1ab
+- Prefer thematic, high-quality photos that match the prompt domain.
+- Every <img> src should be a full Unsplash URL with query params, e.g. ?auto=format&fit=crop&w=1200&q=80.
+- Avoid placeholder domains (e.g. via.placeholder.com) and broken image hosts.
+`;
+
+const FAST_IMAGE_FALLBACKS = [
+    'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80',
+] as const;
 
 
 // ============================================================================
@@ -463,7 +545,7 @@ export async function generateDesign(options: GenerateOptions): Promise<HtmlDesi
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
 
     const imageGuidance = images.length > 0
-        ? `Use the attached image(s) to infer palette, typography mood, spacing density, and material finish. Do not copy the layout 1:1.`
+        ? `Use the attached image(s) to infer palette, typography mood, spacing density, and material finish. Do not copy the layout 1:1 unless told to do so explicitly.`
         : '';
 
     const baseUserPrompt = `
@@ -478,7 +560,7 @@ ${imageGuidance}
 Design a UI for: "${prompt}"
 Platform: ${platform} (${dimensions.width}x${dimensions.height})
 Style: ${stylePreset}
-Generate exactly 1 complete screen.
+Generate exactly 1 complete main screen.
 ${imageGuidance}
 `;
 
@@ -499,39 +581,48 @@ ${imageGuidance}
         return parts;
     };
 
+    const isFastTextProviderModel = isGroqModel(preferredModel) || isNvidiaModel(preferredModel);
+
+    const resolvedPreferredModel = resolvePreferredModel(preferredModel);
+
     const generateOnce = async (promptText: string): Promise<ParsedDesign> => {
-        if (isGroqModel(preferredModel)) {
+        if (isFastTextProviderModel) {
             try {
-                const { text, finishReason } = await groqChatCompletion({
-                    model: preferredModel,
-                    // Mirror the exact Groq request shape requested by user for testing.
-                    messages: [
-                        {
-                            role: 'user',
-                            content: `${FAST_GENERATE_HTML_PROMPT}\n\n${promptText}`,
-                        },
-                        {
-                            role: 'assistant',
-                            content: FAST_JSON_SEED_ASSISTANT,
-                        },
-                        {
-                            role: 'user',
-                            content: '',
-                        },
-                    ],
-                    prompt: `${FAST_GENERATE_HTML_PROMPT}\n\n${promptText}`,
-                    maxCompletionTokens: 8192,
-                    temperature: 1,
-                    topP: 1,
-                    reasoningEffort: 'medium',
-                    responseFormat: 'json_object',
-                    stop: null,
-                });
+                const isNvidia = isNvidiaModel(preferredModel);
+                const maxCompletionTokens = isNvidia ? 3400 : 2200;
+
+                const runFast = async (promptPrefix: string) => (isNvidia
+                    ? await nvidiaChatCompletion({
+                        model: preferredModel,
+                        systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
+                        prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
+                        maxCompletionTokens,
+                        temperature: 0.52,
+                        topP: 0.9,
+                        responseFormat: 'json_object',
+                        thinking: false,
+                    })
+                    : await groqChatCompletion({
+                        model: preferredModel,
+                        systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
+                        prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
+                        maxCompletionTokens,
+                        temperature: 0.52,
+                        topP: 0.9,
+                        reasoningEffort: 'low',
+                        responseFormat: 'json_object',
+                    }));
+
+                let completion = await runFast(FAST_GENERATE_HTML_PROMPT);
+                const { text, finishReason } = completion;
                 if (finishReason === 'length') {
-                    throw new Error('Fast model output was truncated. Please retry with a shorter prompt.');
+                    completion = await runFast(FAST_GENERATE_HTML_PROMPT_COMPACT);
+                }
+                if (completion.finishReason === 'length') {
+                    throw new Error('Fast model output was truncated. Please retry with a shorter design request.');
                 }
                 try {
-                    const cleanedJson = cleanJsonResponse(text);
+                    const cleanedJson = cleanJsonResponse(completion.text);
                     const parsed = parseJsonSafe(cleanedJson) as { description?: string; screens: RawScreen[] };
                     return { description: parsed.description, screens: parsed.screens || [], parsedOk: true };
                 } catch {
@@ -544,21 +635,26 @@ ${imageGuidance}
                 throw error;
             }
         }
-        return generateDesignOnce(buildParts(promptText));
+        return generateDesignOnce(buildParts(promptText), resolvedPreferredModel);
     };
 
-    let initialResponse = await generateOnce(isGroqModel(preferredModel) ? fastBaseUserPrompt : baseUserPrompt);
+    let initialResponse = await generateOnce(isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt);
     if (!initialResponse.parsedOk || initialResponse.screens.length === 0) {
-        const activeBasePrompt = isGroqModel(preferredModel) ? fastBaseUserPrompt : baseUserPrompt;
+        const activeBasePrompt = isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt;
         const retryPrompt = `${activeBasePrompt}\nReturn STRICT JSON only. No markdown, no code fences, no trailing commas.`;
         initialResponse = await generateOnce(retryPrompt);
     }
 
     const designId = uuidv4();
+    const isFastMode = isFastTextProviderModel;
     const screens: HtmlScreen[] = initialResponse.screens.map(s => ({
         screenId: uuidv4(),
         name: s.name,
-        html: s.html,
+        html: normalizeBrokenLogoPlaceholders(
+            isFastMode
+                ? enforceFastWorkingImageUrls(normalizeFastFrameworkAssets(s.html))
+                : s.html
+        ),
         width: dimensions.width,
         height: dimensions.height,
     }));
@@ -567,7 +663,7 @@ ${imageGuidance}
         id: designId,
         name: prompt,
         screens,
-        description: initialResponse.description,
+        description: normalizeUiDescriptionTags(initialResponse.description),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
@@ -724,24 +820,34 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
 
     const parseEditResponse = (raw: string): { html: string; description?: string } => {
         const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
-        const description = descriptionMatch?.[1]?.trim();
+        const description = normalizeUiDescriptionTags(descriptionMatch?.[1]?.trim());
         const withoutDescription = raw.replace(/<description>[\s\S]*?<\/description>/i, '').trim();
         const editedHtml = cleanHtmlResponse(withoutDescription || raw);
         if (!editedHtml.includes('<!DOCTYPE html>')) {
             throw new Error('Gemini failed to return a full HTML document.');
         }
-        return { html: editedHtml, description };
+        return { html: normalizeBrokenLogoPlaceholders(editedHtml), description };
     };
 
-    if (isGroqModel(preferredModel)) {
+    if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
         try {
-            const { text, modelUsed } = await groqChatCompletion({
-                model: preferredModel,
-                systemPrompt: 'You are an expert UI designer that edits HTML.',
-                prompt: fastUserPrompt,
-                maxTokens: 1800,
-                temperature: 0.5,
-            });
+            const completion = isNvidiaModel(preferredModel)
+                ? await nvidiaChatCompletion({
+                    model: preferredModel,
+                    systemPrompt: 'You are an expert UI designer that edits HTML.',
+                    prompt: fastUserPrompt,
+                    maxTokens: 1800,
+                    temperature: 0.5,
+                    thinking: false,
+                })
+                : await groqChatCompletion({
+                    model: preferredModel,
+                    systemPrompt: 'You are an expert UI designer that edits HTML.',
+                    prompt: fastUserPrompt,
+                    maxTokens: 1800,
+                    temperature: 0.5,
+                });
+            const { text, modelUsed } = completion;
             const parsed = parseEditResponse(text);
             const note = `(Model: ${modelUsed})`;
             return {
@@ -856,6 +962,64 @@ function ensureCompleteHtmlDocument(input: string): string {
     return html;
 }
 
+function normalizeFastFrameworkAssets(html: string): string {
+    if (!html) return html;
+    let next = html;
+    next = next.replace(/<link[^>]+tailwind[^>]*>/gi, '');
+    const hasTailwindScript = /<script[^>]+src=["']https:\/\/cdn\.tailwindcss\.com["'][^>]*><\/script>/i.test(next);
+    if (!hasTailwindScript && /<\/head>/i.test(next)) {
+        next = next.replace(/<\/head>/i, '<script src="https://cdn.tailwindcss.com"></script></head>');
+    }
+    return next;
+}
+
+function enforceFastWorkingImageUrls(html: string): string {
+    if (!html || !/<img\b/i.test(html)) return html;
+    let index = 0;
+    return html.replace(/(<img\b[^>]*\bsrc=)(["']).*?\2/gi, (_match, prefix: string) => {
+        const src = FAST_IMAGE_FALLBACKS[index % FAST_IMAGE_FALLBACKS.length];
+        index += 1;
+        return `${prefix}"${src}"`;
+    });
+}
+
+function normalizeBrokenLogoPlaceholders(html: string): string {
+    if (!html) return html;
+
+    const brandIcons: Array<{ pattern: RegExp; icon: string }> = [
+        { pattern: /\bLOGO[_\-\s]*GOOGLE\b/gi, icon: 'simple-icons:google' },
+        { pattern: /\bLOGO[_\-\s]*FACEBOOK\b/gi, icon: 'simple-icons:facebook' },
+        { pattern: /\bLOGO[_\-\s]*APPLE\b/gi, icon: 'simple-icons:apple' },
+        { pattern: /\bLOGO[_\-\s]*GITHUB\b/gi, icon: 'simple-icons:github' },
+        { pattern: /\bLOGO[_\-\s]*(TWITTER|X)\b/gi, icon: 'simple-icons:x' },
+        { pattern: /\bLOGO[_\-\s]*LINKEDIN\b/gi, icon: 'simple-icons:linkedin' },
+        { pattern: /\bLOGO[_\-\s]*INSTAGRAM\b/gi, icon: 'simple-icons:instagram' },
+    ];
+
+    let next = html;
+    let replacedBrand = false;
+    for (const entry of brandIcons) {
+        if (entry.pattern.test(next)) replacedBrand = true;
+        entry.pattern.lastIndex = 0;
+        next = next.replace(
+            entry.pattern,
+            `<iconify-icon icon="${entry.icon}" width="20" height="20" style="vertical-align:middle"></iconify-icon>`
+        );
+    }
+
+    const needsIconify = replacedBrand || /<iconify-icon\b/i.test(next);
+    const hasIconifyScript = /<script[^>]+src=["']https:\/\/code\.iconify\.design\/iconify-icon\/2\.1\.0\/iconify-icon\.min\.js["'][^>]*><\/script>/i.test(next);
+
+    if (needsIconify && !hasIconifyScript && /<\/head>/i.test(next)) {
+        next = next.replace(
+            /<\/head>/i,
+            '<script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script></head>'
+        );
+    }
+
+    return next;
+}
+
 function recoverHtmlFromMalformedFastOutput(raw: string): string | null {
     const text = (raw || '').trim();
     if (!text) return null;
@@ -896,9 +1060,10 @@ function recoverHtmlFromMalformedFastOutput(raw: string): string | null {
     return null;
 }
 
-async function generateDesignOnce(parts: any[]): Promise<ParsedDesign> {
+async function generateDesignOnce(parts: any[], preferredModelName?: string): Promise<ParsedDesign> {
     console.info('[Gemini] generateDesignOnce: start');
-    const result = await model.generateContent({
+    const activeModel = preferredModelName ? getGenerativeModel(preferredModelName).model : model;
+    const result = await activeModel.generateContent({
         contents: [{ role: 'user', parts }],
         generationConfig: GENERATION_CONFIG,
     });

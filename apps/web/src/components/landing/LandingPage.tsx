@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, Figma, Globe, Mic, Monitor, Paperclip, Smartphone, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
+import { ArrowUp, Mic, Monitor, Paperclip, Smartphone, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/hero-bg2.jpg';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -409,16 +409,16 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                     className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
                                     title="Attach images"
                                 >
-                                    <Paperclip size={13} />
-                                    <span className="text-[12px]">Attach</span>
+                                    <Paperclip size={17} />
+                                    {/* <span className="text-[12px]">Attach</span> */}
                                 </button>
-                                <button
+                                {/* <button
                                     type="button"
                                     className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
                                 >
                                     <Figma size={13} />
                                     <span className="text-[12px]">Import</span>
-                                </button>
+                                </button> */}
                                 <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
@@ -431,36 +431,39 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
-                                            {p === 'mobile' && <Smartphone size={12} />}
-                                            {p === 'tablet' && <Tablet size={12} />}
-                                            {p === 'desktop' && <Monitor size={12} />}
+                                            {p === 'mobile' && <Smartphone size={15} />}
+                                            {p === 'tablet' && <Tablet size={15} />}
+                                            {p === 'desktop' && <Monitor size={15} />}
                                         </button>
                                     ))}
                                 </div>
+
+
+                            </div>
+
+                            <div className="flex items-center gap-3">
                                 <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
                                         className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'fast'
                                             ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            : 'text-amber-400 hover:text-amber-200 hover:bg-white/5'
                                             }`}
                                         title="Fast model"
                                     >
                                         <Zap size={12} />
-                                        Fast
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'quality'
                                             ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-white/5'
                                             }`}
                                         title="Quality model"
                                     >
                                         <Sparkles size={12} />
-                                        Quality
                                     </button>
                                 </div>
                                 <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
@@ -492,14 +495,8 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                             ))}
                                         </div>
                                     )}
-                                </div>
-                            </div>
+                                </div>   
 
-                            <div className="flex items-center gap-3">
-                                <span className="text-[12px] text-gray-200 flex items-center gap-1.5">
-                                    <Globe size={13} />
-                                    Public
-                                </span>
                                 <button
                                     type="button"
                                     onClick={handleMicToggle}

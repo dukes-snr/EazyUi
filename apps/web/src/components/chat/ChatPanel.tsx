@@ -6,7 +6,7 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, Mic, Zap } from 'lucide-react';
+import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import TextType from '../ui/TextType';
 
@@ -1147,6 +1147,29 @@ const handleEdit = async () => {
         }
     };
 
+    const hasPromptText = prompt.trim().length > 0;
+    const showSendAction = hasPromptText;
+    const actionIsStop = isGenerating || isRecording;
+    const actionDisabled = !showSendAction && !isGenerating && isTranscribing;
+    const StyleIcon = stylePreset === 'minimal'
+        ? LineSquiggle
+        : stylePreset === 'vibrant'
+            ? Palette
+            : stylePreset === 'luxury'
+                ? Gem
+                : stylePreset === 'playful'
+                    ? Smile
+                    : CircleStar;
+    const styleButtonTone = stylePreset === 'minimal'
+        ? 'bg-slate-400/15 text-slate-200 ring-slate-300/30 hover:bg-slate-400/20'
+        : stylePreset === 'vibrant'
+            ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
+            : stylePreset === 'luxury'
+                ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
+                : stylePreset === 'playful'
+                    ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
+                    : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+
     return (
         <>
             <div
@@ -1542,55 +1565,41 @@ const handleEdit = async () => {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelProfile('fast')}
-                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'fast'
-                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                                            }`}
-                                        title="Fast model"
-                                    >
-                                        <Zap size={12} />
-                                        Fast
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelProfile('quality')}
-                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'quality'
-                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                                            }`}
-                                        title="Quality model"
-                                    >
-                                        <Sparkles size={12} />
-                                        Quality
-                                    </button>
-                                </div>
                             </div>
 
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={handleMicToggle}
-                                    disabled={isTranscribing}
-                                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ring-1 ${isRecording
-                                        ? 'bg-rose-500/20 text-rose-200 ring-rose-300/25'
-                                        : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 ring-white/5'
-                                        } ${isTranscribing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                    title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Record voice'}
-                                >
-                                    {isRecording ? <Square size={13} className="fill-current" /> : <Mic size={15} />}
-                                </button>
+                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('fast')}
+                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
+                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
+                                            : 'text-amber-400 hover:text-amber-200 hover:bg-white/5'
+                                            }`}
+                                        title="Fast model"
+                                    >
+                                        <Zap size={12} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('quality')}
+                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
+                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
+                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-white/5'
+                                            }`}
+                                        title="Quality model"
+                                    >
+                                        <Sparkles size={12} />
+                                    </button>
+                                </div>
                                 <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
                                     <button
                                         onClick={() => setShowStyleMenu(v => !v)}
-                                        className="h-9 px-3 rounded-full bg-white/5 text-gray-300 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-white/5 hover:bg-white/10 transition-all"
+                                        className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
                                         title="Select style preset"
                                     >
-                                        Style: {stylePreset}
+                                        <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
                                         <div className="absolute bottom-12 right-0 w-40 bg-[#1C1C1E] border border-white/10 rounded-xl shadow-2xl p-2 z-50">
@@ -1613,19 +1622,43 @@ const handleEdit = async () => {
                                     )}
                                 </div>
                                 <button
-                                    onClick={isGenerating ? handleStop : handleSubmit}
-                                    disabled={(!prompt.trim() && images.length === 0) && !isGenerating}
+                                    type="button"
+                                    onClick={() => {
+                                        if (isGenerating) {
+                                            handleStop();
+                                            return;
+                                        }
+                                        if (showSendAction) {
+                                            handleSubmit();
+                                            return;
+                                        }
+                                        handleMicToggle();
+                                    }}
+                                    disabled={actionDisabled}
                                     className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${isGenerating
                                         ? 'bg-white/10 text-white hover:bg-white/15 ring-1 ring-white/15'
-                                        : (!prompt.trim() && images.length === 0)
-                                            ? 'bg-white/5 text-gray-600 cursor-not-allowed'
-                                            : 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                        : isRecording
+                                            ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
+                                            : showSendAction
+                                                ? 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                                : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 ring-1 ring-white/5'
                                         }`}
+                                    title={isGenerating
+                                        ? 'Stop generation'
+                                        : showSendAction
+                                            ? 'Send prompt'
+                                            : isRecording
+                                                ? 'Stop recording'
+                                                : isTranscribing
+                                                    ? 'Transcribing...'
+                                                    : 'Record voice'}
                                 >
-                                    {isGenerating ? (
-                                        <Square size={14} className="fill-white text-white" />
-                                    ) : (
+                                    {actionIsStop ? (
+                                        <Square size={14} className="fill-current" />
+                                    ) : showSendAction ? (
                                         <ArrowUp size={20} className="text-white" />
+                                    ) : (
+                                        <Mic size={15} />
                                     )}
                                 </button>
                             </div>

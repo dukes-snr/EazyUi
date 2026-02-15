@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
+import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
 
 const fastify = Fastify({
     logger: true,
@@ -70,6 +71,7 @@ fastify.get('/api/health', async (request, reply) => {
     const apiKey = process.env.GEMINI_API_KEY || '';
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
     const groqModels = Object.keys(GROQ_MODELS);
+    const nvidiaModels = Object.keys(NVIDIA_MODELS);
 
     const payload = {
         status: 'ok',
@@ -81,6 +83,10 @@ fastify.get('/api/health', async (request, reply) => {
         groq: {
             apiKeyPresent: Boolean((process.env.GROQ_API_KEY || '').trim()),
             models: groqModels,
+        },
+        nvidia: {
+            apiKeyPresent: Boolean((process.env.NVIDIA_API_KEY || '').trim()),
+            models: nvidiaModels,
         },
     };
 
@@ -116,6 +122,12 @@ fastify.get('/api/health', async (request, reply) => {
       <p>API Key Present: <code>${payload.groq.apiKeyPresent}</code></p>
       <p>Models:</p>
       <ul>${payload.groq.models.map((m) => `<li><code>${m}</code></li>`).join('')}</ul>
+    </div>
+    <div class="card">
+      <h2>NVIDIA</h2>
+      <p>API Key Present: <code>${payload.nvidia.apiKeyPresent}</code></p>
+      <p>Models:</p>
+      <ul>${payload.nvidia.models.map((m) => `<li><code>${m}</code></li>`).join('')}</ul>
     </div>
     <div class="card">
       <h2>Useful Endpoints</h2>
@@ -268,6 +280,7 @@ fastify.post<{
 fastify.get('/api/models', async () => {
     return {
         groq: Object.keys(GROQ_MODELS),
+        nvidia: Object.keys(NVIDIA_MODELS),
         defaultTextModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
     };
 });
@@ -276,6 +289,14 @@ fastify.get('/api/debug/groq-last-chat', async (_request, reply) => {
     const debug = getLastGroqChatDebug();
     if (!debug) {
         return reply.status(404).send({ error: 'No Groq chat call has been captured yet.' });
+    }
+    return debug;
+});
+
+fastify.get('/api/debug/nvidia-last-chat', async (_request, reply) => {
+    const debug = getLastNvidiaChatDebug();
+    if (!debug) {
+        return reply.status(404).send({ error: 'No NVIDIA chat call has been captured yet.' });
     }
     return debug;
 });

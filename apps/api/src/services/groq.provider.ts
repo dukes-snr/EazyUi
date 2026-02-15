@@ -6,6 +6,7 @@ const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 export const GROQ_MODELS = {
+    'moonshotai/kimi-k2-instruct-0905': { name: 'Kimi K2 Instruct 0905', contextWindow: 131072 },
     'openai/gpt-oss-120b': { name: 'GPT OSS 120B', contextWindow: 131072 },
     'llama-3.1-8b-instant': { name: 'Llama 3.1 8B Instant', contextWindow: 131072 },
     'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B Versatile', contextWindow: 131072 },
@@ -94,6 +95,12 @@ function parseJsonSafe(text: string): any {
     }
 }
 
+function supportsReasoningEffort(model: string): boolean {
+    // Kimi rejects reasoning_effort in Groq API.
+    if (model.startsWith('moonshotai/')) return false;
+    return true;
+}
+
 export async function groqChatCompletion(input: {
     prompt: string;
     systemPrompt?: string;
@@ -127,7 +134,7 @@ export async function groqChatCompletion(input: {
                     : { max_tokens: maxTokens }),
                 temperature: input.temperature ?? 0.7,
                 top_p: input.topP ?? 1,
-                ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+                ...(input.reasoningEffort && supportsReasoningEffort(model) ? { reasoning_effort: input.reasoningEffort } : {}),
                 ...(input.stop !== undefined ? { stop: input.stop } : {}),
                 ...(input.responseFormat === 'json_object'
                     ? { response_format: { type: 'json_object' as const } }
@@ -146,7 +153,7 @@ export async function groqChatCompletion(input: {
                     : { max_tokens: Math.max(700, Math.floor(maxTokens * 0.85)) }),
                 temperature: Math.min(input.temperature ?? 0.7, 0.4),
                 top_p: input.topP ?? 1,
-                ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+                ...(input.reasoningEffort && supportsReasoningEffort(model) ? { reasoning_effort: input.reasoningEffort } : {}),
                 ...(input.stop !== undefined ? { stop: input.stop } : {}),
             },
         ];
