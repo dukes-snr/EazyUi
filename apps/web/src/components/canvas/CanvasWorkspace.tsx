@@ -22,6 +22,7 @@ import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryS
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
+import { CanvasProfileMenu } from './CanvasProfileMenu';
 
 // Define custom node types
 const nodeTypes = {
@@ -240,7 +241,7 @@ function CanvasWorkspaceContent() {
                     variant={BackgroundVariant.Dots}
                     gap={20}
                     size={1}
-                    color="#2a313b"
+                    color="var(--ui-canvas-dot)"
                 />
                 <Controls
                     className="canvas-controls-hidden hidden" // Hide default controls
@@ -255,6 +256,10 @@ function CanvasWorkspaceContent() {
             {/* Multi-Selection Toolbar */}
             <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
                 <MultiSelectToolbar />
+            </div>
+
+            <div className="absolute top-4 right-4 z-50">
+                <CanvasProfileMenu />
             </div>
         </div>
     );

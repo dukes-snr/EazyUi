@@ -1,10 +1,11 @@
 import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
-import { useDesignStore, useChatStore, useCanvasStore, useEditStore } from '../../stores';
+import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
+import { getPreferredTextModel } from '../../constants/designModels';
 import '../../styles/DeviceFrames.css';
 
 function injectHeightScript(html: string, screenId: string) {
@@ -74,7 +75,7 @@ function injectEditorScript(html: string, screenId: string) {
   selectionHudDelete.type = 'button';
   selectionHudDelete.className = '__eazyui-selection-hud-btn';
   selectionHudDelete.title = 'Delete selected element';
-  selectionHudDelete.textContent = '🗑';
+  selectionHudDelete.textContent = 'Delete';
   selectionHud.appendChild(selectionHudTag);
   selectionHud.appendChild(selectionHudDelete);
   document.body.appendChild(hoverBox);
@@ -430,6 +431,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
+    const { modelProfile } = useUiStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -495,6 +497,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         html: data.html as string,
                         screenId: data.screenId as string,
                         images,
+                        preferredModel: getPreferredTextModel(modelProfile),
                     }, controller.signal);
 
                     // Update with new content
@@ -568,7 +571,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
 
@@ -703,7 +706,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     {/* Desktop Browser Header */}
                     {isDesktop && showBrowserHeader && (
                         <div
-                            className="absolute top-0 left-0 w-full h-10 bg-[#1e293b] flex items-center px-4 gap-2 border-b border-slate-700/50 z-10"
+                            className="absolute top-0 left-0 w-full h-10 bg-[var(--ui-surface-2)] flex items-center px-4 gap-2 border-b border-[var(--ui-border)] z-10"
                             style={{ borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}
                         >
                             <div className="flex gap-1.5">
@@ -711,7 +714,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
                             </div>
-                            <div className="flex-1 mx-4 h-6 bg-slate-800/50 rounded flex items-center justify-center text-[9px] text-slate-500 font-medium">
+                            <div className="flex-1 mx-4 h-6 bg-[var(--ui-surface-3)] rounded flex items-center justify-center text-[9px] text-[var(--ui-text-subtle)] font-medium">
                                 {data.screenId ? `eazyui.dev/preview/${data.screenId}` : 'localhost:3000'}
                             </div>
                         </div>
@@ -740,7 +743,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             position: 'absolute',
                             inset: 0,
                             zIndex: 30,
-                            backgroundColor: '#0f172a',
+                            backgroundColor: 'var(--ui-surface-2)',
                             opacity: isStreaming ? 1 : 0,
                             pointerEvents: isStreaming ? 'auto' : 'none',
                             transition: 'opacity 0.7s ease-in-out',
@@ -766,7 +769,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             <Handle type="target" position={Position.Left} className="opacity-0 pointer-events-none" />
 
             {/* Label (Top Left outside frame) */}
-            <div className={`absolute -top-8 left-0 text-xs font-medium transition-colors duration-200 ${selected ? 'text-indigo-400' : 'text-indigo-200'}`}>
+            <div className={`absolute -top-8 left-0 text-xs font-medium transition-colors duration-200 ${selected ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}>
                 {data.label as string}
                 <span className="ml-2 opacity-50 text-[10px] uppercase tracking-wider">
                     {isDesktop ? 'Desktop' : isTablet ? 'Tablet' : 'Mobile'}

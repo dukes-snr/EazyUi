@@ -8,9 +8,10 @@ import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditPanel } from './components/edit/EditPanel';
 import { LayersPanel } from './components/edit/LayersPanel';
 import { LandingPage } from './components/landing/LandingPage';
+import { ToastViewport } from './components/ui/ToastViewport';
 import type { DesignModelProfile } from './constants/designModels';
 
-import { useDesignStore, useCanvasStore, useEditStore } from './stores';
+import { useDesignStore, useCanvasStore, useEditStore, useUiStore } from './stores';
 
 import './styles/App.css';
 
@@ -23,6 +24,7 @@ function getRouteFromPath() {
 function App() {
     const { spec, reset: resetDesign } = useDesignStore();
     const { isEditMode } = useEditStore();
+    const { theme, pushToast } = useUiStore();
     const [route, setRoute] = useState<'landing' | 'app'>(getRouteFromPath());
     const [initialRequest, setInitialRequest] = useState<{
         id: string;
@@ -119,6 +121,35 @@ function App() {
         };
     }, []);
 
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+    }, [theme]);
+
+    useEffect(() => {
+        const handleOffline = () => {
+            pushToast({
+                kind: 'error',
+                title: 'No internet connection',
+                message: 'You are offline. Generation and edits will fail until the network is restored.',
+                durationMs: 7000,
+            });
+        };
+        const handleOnline = () => {
+            pushToast({
+                kind: 'info',
+                title: 'Back online',
+                message: 'Connection restored.',
+            });
+        };
+
+        window.addEventListener('offline', handleOffline);
+        window.addEventListener('online', handleOnline);
+        return () => {
+            window.removeEventListener('offline', handleOffline);
+            window.removeEventListener('online', handleOnline);
+        };
+    }, [pushToast]);
+
     if (route === 'landing') {
         return (
             <LandingPage
@@ -136,6 +167,7 @@ function App() {
             <LayersPanel />
             <CanvasWorkspace />
             <EditPanel />
+            <ToastViewport />
         </div>
     );
 }

@@ -1,10 +1,11 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useCanvasStore, useDesignStore } from '../../stores';
+import { useCanvasStore, useDesignStore, useUiStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { apiClient } from '../../api/client';
 import { ensureEditableUids, type HtmlPatch } from '../../utils/htmlPatcher';
 import { ArrowUpLeft, ImagePlus, Maximize2, Minimize2, Pipette, Redo2, Undo2, X } from 'lucide-react';
 import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectParent, dispatchSelectScreenContainer, dispatchSelectUid } from '../../utils/editMessaging';
+import { getPreferredTextModel } from '../../constants/designModels';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
@@ -47,7 +48,7 @@ const MATERIAL_ICON_FALLBACK_OPTIONS = [
     'local_shipping', 'directions_car', 'flight', 'restaurant', 'local_cafe',
 ];
 
-const inputBase = 'w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-xs text-white outline-none transition-colors focus:border-indigo-400/60';
+const inputBase = 'w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-[var(--ui-primary)]';
 const selectBase = `${inputBase} appearance-none bg-[linear-gradient(45deg,transparent_50%,#9ca3af_50%),linear-gradient(135deg,#9ca3af_50%,transparent_50%)] bg-[position:calc(100%-16px)_calc(50%-2px),calc(100%-10px)_calc(50%-2px)] bg-[length:6px_6px,6px_6px] bg-no-repeat pr-8`;
 
 function toPxValue(value?: string) {
@@ -288,7 +289,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                 <button
                     type="button"
                     onClick={() => setOpen((v) => !v)}
-                    className="h-8 w-8 rounded-md border border-white/45 shadow-inner outline outline-1 outline-black/35"
+                    className="h-8 w-8 rounded-md border border-[var(--ui-border-light)] shadow-inner outline outline-1 outline-[var(--ui-border)]"
                     style={{
                         backgroundColor: displayColor,
                         backgroundImage:
@@ -311,7 +312,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                             // User canceled or browser blocked the picker.
                         }
                     }}
-                    className="h-8 w-8 rounded-md border border-white/20 bg-white/5 text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="h-8 w-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] disabled:cursor-not-allowed disabled:opacity-40"
                     title={supportsEyeDropper ? 'Pick color from page' : 'EyeDropper not supported in this browser'}
                 >
                     <Pipette size={14} className="mx-auto" />
@@ -326,7 +327,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
             {open && (
                 <div
                     ref={popoverRef}
-                    className="fixed z-[999] w-[220px] rounded-xl border border-white/10 bg-[#0f111a] p-3 shadow-2xl"
+                    className="fixed z-[999] w-[220px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-2xl"
                     style={{ top: position.top, left: position.left }}
                 >
                     <div
@@ -344,7 +345,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                         />
                     </div>
                     <div className="mt-3 space-y-2">
-                        <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Opacity</div>
+                        <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Opacity</div>
                         <input
                             type="range"
                             min={0}
@@ -366,6 +367,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
 
 export function EditPanel() {
     const { spec, updateScreen } = useDesignStore();
+    const { modelProfile } = useUiStore();
     const { setFocusNodeId } = useCanvasStore();
     const {
         isEditMode,
@@ -423,7 +425,7 @@ export function EditPanel() {
     const [screenImages, setScreenImages] = useState<ScreenImageItem[]>([]);
     const [imageInputs, setImageInputs] = useState<Record<string, string>>({});
     const [uploadTargetUid, setUploadTargetUid] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'Ai Edit' | 'style' | 'Images'>('style');
+    const [activeTab, setActiveTab] = useState<'blocks' | 'style' | 'symbols'>('style');
     const [aiPrompt, setAiPrompt] = useState('');
     const [isApplyingAi, setIsApplyingAi] = useState(false);
     const [aiDescription, setAiDescription] = useState('');
@@ -803,6 +805,7 @@ RULES:
                     instruction: scopedInstruction,
                     html: htmlSource,
                     screenId,
+                    preferredModel: getPreferredTextModel(modelProfile),
                 }, controller.signal);
                 applyScreenHtmlImmediately(response.html);
                 if (response.description?.trim()) {
@@ -885,43 +888,43 @@ RULES:
 
     return (
         <aside className="edit-panel open">
-            <div className="h-full flex flex-col bg-[#171a20] border-l border-[#2b3038] shadow-2xl">
-                <div className="px-4 py-3 border-b border-[#2b3038] flex items-center justify-between">
+            <div className="h-full flex flex-col bg-[var(--ui-surface-1)] border-l border-[var(--ui-border)] shadow-2xl">
+                <div className="px-4 py-3 border-b border-[var(--ui-border)] flex items-center justify-between">
                     <div>
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Style</div>
-                        <div className="text-sm text-white/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Style</div>
+                        <div className="text-sm text-[var(--ui-text)]/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
                     </div>
                     <button
                         onClick={() => {
                             commitActiveScreenEdits();
                             exitEdit();
                         }}
-                        className="h-8 w-8 rounded-lg border border-white/10 bg-[#22262d] text-gray-300 hover:bg-[#2a2f37] flex items-center justify-center"
+                        className="h-8 w-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] flex items-center justify-center"
                         title="Exit Edit Mode"
                     >
                         <X size={16} />
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2 px-4 py-2 border-b border-[#2b3038]">
-                    <button onClick={onUndo} className="h-8 rounded-lg border border-white/10 bg-[#22262d] px-3 text-[11px] text-gray-200 hover:bg-[#2a2f37] flex items-center gap-2">
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--ui-border)]">
+                    <button onClick={onUndo} className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] flex items-center gap-2">
                         <Undo2 size={14} />
                         Undo
                     </button>
-                    <button onClick={onRedo} className="h-8 rounded-lg border border-white/10 bg-[#22262d] px-3 text-[11px] text-gray-200 hover:bg-[#2a2f37] flex items-center gap-2">
+                    <button onClick={onRedo} className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] flex items-center gap-2">
                         <Redo2 size={14} />
                         Redo
                     </button>
                 </div>
 
-                <div className="px-4 pt-3 pb-2 border-b border-[#2b3038]">
-                    <div className="inline-flex rounded-xl border border-white/10 bg-[#16181d] p-1 w-full">
-                        {(['Ai Edit', 'style', 'Images'] as const).map((tab) => (
+                <div className="px-4 pt-3 pb-2 border-b border-[var(--ui-border)]">
+                    <div className="inline-flex rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 w-full">
+                        {(['blocks', 'style', 'symbols'] as const).map((tab) => (
                             <button
                                 key={tab}
                                 type="button"
                                 onClick={() => setActiveTab(tab)}
-                                className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${activeTab === tab ? 'bg-[#2a2f37] text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                                className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${activeTab === tab ? 'bg-[var(--ui-tab-active-bg)] text-[var(--ui-text)] shadow-sm' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'}`}
                             >
                                 {tab}
                             </button>
@@ -929,26 +932,26 @@ RULES:
                     </div>
                 </div>
 
-                <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-4 py-4 space-y-5 text-gray-200">
-                    {!selected && activeTab === 'style' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
-                    {activeTab === 'Ai Edit' && (
-                        <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Ai Edit</div>
+                <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-4 py-4 space-y-5 text-[var(--ui-text)]">
+                    {!selected && activeTab === 'style' && <div className="text-sm text-[var(--ui-text-subtle)] leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
+                    {activeTab === 'blocks' && (
+                        <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Blocks</div>
                             {!selected ? (
-                                <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-muted)]">
                                     Select a component on the canvas, then describe what to change.
                                 </div>
                             ) : (
                                 <>
-                                    <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-xs text-gray-300">
-                                        <div className="font-semibold text-white">{selected.tagName.toLowerCase()} · {selected.uid}</div>
-                                        <div className="mt-1 text-gray-400">{selected.elementType} component</div>
+                                    <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-text-muted)]">
+                                        <div className="font-semibold text-[var(--ui-text)]">{selected.tagName.toLowerCase()} · {selected.uid}</div>
+                                        <div className="mt-1 text-[var(--ui-text-muted)]">{selected.elementType} component</div>
                                     </div>
                                     {selected.elementType === 'image' && (
                                         <button
                                             type="button"
                                             onClick={() => setAiImageGenEnabled((v) => !v)}
-                                            className={`w-full rounded-xl border px-3 py-2 text-xs flex items-center gap-2 transition-colors ${aiImageGenEnabled ? 'border-indigo-300/50 bg-indigo-500/15 text-indigo-100' : 'border-white/10 bg-[#16181d] text-gray-300 hover:bg-[#1d2129]'}`}
+                                            className={`w-full rounded-xl border px-3 py-2 text-xs flex items-center gap-2 transition-colors ${aiImageGenEnabled ? 'border-indigo-300/50 bg-indigo-500/15 text-indigo-100' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'}`}
                                             title="Enable image generation model"
                                         >
                                             <ImagePlus size={14} />
@@ -964,14 +967,14 @@ RULES:
                                             }
                                         }}
                                         placeholder="Describe the exact changes for this selected component..."
-                                        className="min-h-[120px] w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-white outline-none transition-colors focus:border-indigo-400/60 resize-y"
+                                        className="min-h-[120px] w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-indigo-400/60 resize-y"
                                     />
                                     <div className="flex items-center gap-2">
                                         <button
                                             type="button"
                                             onClick={() => void applyAiEditToSelection()}
                                             disabled={!aiPrompt.trim() || isApplyingAi}
-                                            className="h-9 rounded-xl border border-white/10 bg-white/10 px-3 text-xs font-medium text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="h-9 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-xs font-medium text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                             {isApplyingAi ? 'Applying…' : 'Apply AI Edit'}
                                         </button>
@@ -997,10 +1000,10 @@ RULES:
                                     )}
                                 </>
                             )}
-                            <div className="pt-2 border-t border-white/10 space-y-2">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">History (This Screen)</div>
+                            <div className="pt-2 border-t border-[var(--ui-border)] space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">History (This Screen)</div>
                                 {activeAiHistory.length === 0 ? (
-                                    <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                    <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-muted)]">
                                         No AI edits yet for this screen.
                                     </div>
                                 ) : (
@@ -1014,11 +1017,11 @@ RULES:
                                                     setFocusNodeId(screenId);
                                                     dispatchSelectUid(screenId, item.uid);
                                                 }}
-                                                className="w-full rounded-xl border border-white/10 bg-[#16181d] px-3 py-2 text-left hover:bg-[#1d2129] transition-colors"
+                                                className="w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-left hover:bg-[var(--ui-surface-3)] transition-colors"
                                                 title={`Select ${item.tagName} (${item.uid})`}
                                             >
-                                                <div className="text-[11px] text-gray-400">{item.tagName} · {item.uid}</div>
-                                                <div className="mt-1 text-xs text-white max-h-10 overflow-hidden">{item.prompt}</div>
+                                                <div className="text-[11px] text-[var(--ui-text-muted)]">{item.tagName} · {item.uid}</div>
+                                                <div className="mt-1 text-xs text-[var(--ui-text)] max-h-10 overflow-hidden">{item.prompt}</div>
                                                 {item.description && (
                                                     <div className="mt-1 text-[11px] text-emerald-300/90 max-h-10 overflow-hidden">{item.description}</div>
                                                 )}
@@ -1032,15 +1035,15 @@ RULES:
 
                     {!!selected && activeTab === 'style' && (
                         <>
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selection</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Selection</div>
                                 <div className="flex items-center justify-between">
-                                    <div className="text-sm font-semibold text-white">{selected.tagName.toLowerCase()} · {selected.uid}</div>
+                                    <div className="text-sm font-semibold text-[var(--ui-text)]">{selected.tagName.toLowerCase()} · {selected.uid}</div>
                                     <div className="flex items-center gap-2">
-                                        <button onClick={() => dispatchSelectScreenContainer(screenId!)} className="text-xs px-2 py-1 rounded-md bg-white/5 text-gray-400 hover:bg-white/10">
+                                        <button onClick={() => dispatchSelectScreenContainer(screenId!)} className="text-xs px-2 py-1 rounded-md bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]">
                                             Screen
                                         </button>
-                                        <button onClick={() => dispatchSelectParent(screenId!, selected.uid)} className="text-xs px-2 py-1 rounded-md bg-white/5 text-gray-400 hover:bg-white/10 flex items-center gap-1">
+                                        <button onClick={() => dispatchSelectParent(screenId!, selected.uid)} className="text-xs px-2 py-1 rounded-md bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] flex items-center gap-1">
                                             <ArrowUpLeft size={12} />
                                             Parent
                                         </button>
@@ -1056,9 +1059,9 @@ RULES:
                                     </div>
                                 </div>
                                 {selected.breadcrumb && selected.breadcrumb.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">
+                                    <div className="flex flex-wrap gap-2 text-[11px] text-[var(--ui-text-subtle)]">
                                         {selected.breadcrumb.map((crumb) => (
-                                            <button key={crumb.uid} onClick={() => dispatchSelectUid(screenId!, crumb.uid)} className="px-2 py-1 rounded-md bg-white/5 hover:bg-white/10">
+                                            <button key={crumb.uid} onClick={() => dispatchSelectUid(screenId!, crumb.uid)} className="px-2 py-1 rounded-md bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]">
                                                 {crumb.tagName.toLowerCase()}
                                             </button>
                                         ))}
@@ -1066,11 +1069,11 @@ RULES:
                                 )}
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                <div className="text-xs font-semibold text-gray-300">Breakpoint</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Breakpoint</div>
                                 <div className="space-y-2">
                                     <div className="grid grid-cols-[52px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">W</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">W</div>
                                         <div className="grid grid-cols-[1fr_84px] gap-2">
                                             <ScrubNumberInput
                                                 value={width}
@@ -1089,14 +1092,14 @@ RULES:
                                                 }}
                                                 className={selectBase}
                                             >
-                                                <option className="bg-[#121219]" value="fixed">Fixed</option>
-                                                <option className="bg-[#121219]" value="hug">Hug</option>
-                                                <option className="bg-[#121219]" value="auto">Auto</option>
+                                                <option className="bg-[var(--ui-popover)]" value="fixed">Fixed</option>
+                                                <option className="bg-[var(--ui-popover)]" value="hug">Hug</option>
+                                                <option className="bg-[var(--ui-popover)]" value="auto">Auto</option>
                                             </select>
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-[52px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">H</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">H</div>
                                         <div className="grid grid-cols-[1fr_84px] gap-2">
                                             <ScrubNumberInput
                                                 value={height}
@@ -1115,34 +1118,34 @@ RULES:
                                                 }}
                                                 className={selectBase}
                                             >
-                                                <option className="bg-[#121219]" value="fixed">Fixed</option>
-                                                <option className="bg-[#121219]" value="hug">Hug</option>
-                                                <option className="bg-[#121219]" value="auto">Auto</option>
+                                                <option className="bg-[var(--ui-popover)]" value="fixed">Fixed</option>
+                                                <option className="bg-[var(--ui-popover)]" value="hug">Hug</option>
+                                                <option className="bg-[var(--ui-popover)]" value="auto">Auto</option>
                                             </select>
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                <div className="text-xs font-semibold text-gray-300">Rotate</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Rotate</div>
                                 <div className="grid grid-cols-[52px_1fr] items-center gap-3">
-                                    <div className="text-xs text-gray-400">R</div>
+                                    <div className="text-xs text-[var(--ui-text-muted)]">R</div>
                                     <div className="grid grid-cols-[1fr_auto] gap-2">
                                         <ScrubNumberInput
                                             value={rotate}
                                             onChangeValue={(next) => patchRotate(next)}
                                         />
-                                        <div className="h-10 rounded-lg border border-white/10 bg-[#16181d] px-3 text-xs text-gray-400 flex items-center">deg</div>
+                                        <div className="h-10 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs text-[var(--ui-text-muted)] flex items-center">deg</div>
                                     </div>
                                 </div>
                             </section>
 
                             {showLayout && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                    <div className="text-xs font-semibold text-gray-300">Layout</div>
+                                <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                                    <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Layout</div>
                                     <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Mode</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Mode</div>
                                         <div className="grid grid-cols-3 gap-2">
                                             {(['block', 'flex', 'grid'] as const).map((type) => (
                                                 <button
@@ -1152,7 +1155,7 @@ RULES:
                                                         const add = type === 'block' ? [] : [type];
                                                         applyPatch({ op: 'set_classes', uid: selected.uid, add, remove: DISPLAY_CLASSES.filter((c) => c !== type) });
                                                     }}
-                                                    className={`rounded-lg border px-2 py-2 text-xs capitalize ${display === type ? 'border-indigo-300/70 bg-indigo-500/20 text-indigo-100' : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                    className={`rounded-lg border px-2 py-2 text-xs capitalize ${display === type ? 'border-indigo-300/70 bg-indigo-500/20 text-indigo-100' : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     {type}
                                                 </button>
@@ -1162,27 +1165,27 @@ RULES:
                                     {display === 'flex' && (
                                         <div className="space-y-2">
                                             <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                                <div className="text-xs text-gray-400">Direction</div>
+                                                <div className="text-xs text-[var(--ui-text-muted)]">Direction</div>
                                                 <select value={flexDir} onChange={(e) => { setFlexDir(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: FLEX_DIR_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {FLEX_DIR_CLASSES.map((dir) => <option className="bg-[#121219]" key={dir} value={dir}>{dir}</option>)}
+                                                    {FLEX_DIR_CLASSES.map((dir) => <option className="bg-[var(--ui-popover)]" key={dir} value={dir}>{dir}</option>)}
                                                 </select>
                                             </div>
                                             <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                                <div className="text-xs text-gray-400">Align</div>
+                                                <div className="text-xs text-[var(--ui-text-muted)]">Align</div>
                                                 <select value={align} onChange={(e) => { setAlign(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: ALIGN_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {ALIGN_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                    {ALIGN_CLASSES.map((entry) => <option className="bg-[var(--ui-popover)]" key={entry} value={entry}>{entry}</option>)}
                                                 </select>
                                             </div>
                                             <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                                <div className="text-xs text-gray-400">Justify</div>
+                                                <div className="text-xs text-[var(--ui-text-muted)]">Justify</div>
                                                 <select value={justify} onChange={(e) => { setJustify(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: JUSTIFY_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {JUSTIFY_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                    {JUSTIFY_CLASSES.map((entry) => <option className="bg-[var(--ui-popover)]" key={entry} value={entry}>{entry}</option>)}
                                                 </select>
                                             </div>
                                             <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                                <div className="text-xs text-gray-400">Gap</div>
+                                                <div className="text-xs text-[var(--ui-text-muted)]">Gap</div>
                                                 <select value={gap} onChange={(e) => { setGap(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: GAP_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {GAP_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                    {GAP_CLASSES.map((entry) => <option className="bg-[var(--ui-popover)]" key={entry} value={entry}>{entry}</option>)}
                                                 </select>
                                             </div>
                                         </div>
@@ -1190,11 +1193,11 @@ RULES:
                                 </section>
                             )}
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                <div className="text-xs font-semibold text-gray-300">Position</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Position</div>
                                 <div className="space-y-2">
                                     <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">X / Y</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">X / Y</div>
                                         <div className="grid grid-cols-2 gap-2">
                                             <ScrubNumberInput
                                                 value={posX}
@@ -1209,24 +1212,24 @@ RULES:
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Type</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Type</div>
                                         <select
                                             value={positionType}
                                             onChange={(e) => patchPosition(e.target.value, posX, posY)}
                                             className={selectBase}
                                         >
-                                            <option className="bg-[#121219]" value="static">Static</option>
-                                            <option className="bg-[#121219]" value="relative">Relative</option>
-                                            <option className="bg-[#121219]" value="absolute">Absolute</option>
-                                            <option className="bg-[#121219]" value="fixed">Fixed</option>
+                                            <option className="bg-[var(--ui-popover)]" value="static">Static</option>
+                                            <option className="bg-[var(--ui-popover)]" value="relative">Relative</option>
+                                            <option className="bg-[var(--ui-popover)]" value="absolute">Absolute</option>
+                                            <option className="bg-[var(--ui-popover)]" value="fixed">Fixed</option>
                                         </select>
                                     </div>
                                 </div>
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
                                 <div className="grid grid-cols-[72px_1fr_auto] items-center gap-3">
-                                    <div className="text-xs text-gray-400">Padding</div>
+                                    <div className="text-xs text-[var(--ui-text-muted)]">Padding</div>
                                     <ScrubNumberInput
                                         value={spacingSummary(padding)}
                                         onChangeValue={(next) => {
@@ -1239,7 +1242,7 @@ RULES:
                                     <button
                                         type="button"
                                         onClick={() => setExpandPadding((v) => !v)}
-                                        className="h-9 w-9 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 inline-flex items-center justify-center"
+                                        className="h-9 w-9 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] inline-flex items-center justify-center"
                                         title={expandPadding ? 'Collapse padding sides' : 'Expand padding sides'}
                                     >
                                         {expandPadding ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
@@ -1262,9 +1265,9 @@ RULES:
                                 )}
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
                                 <div className="grid grid-cols-[72px_1fr_auto] items-center gap-3">
-                                    <div className="text-xs text-gray-400">Margin</div>
+                                    <div className="text-xs text-[var(--ui-text-muted)]">Margin</div>
                                     <ScrubNumberInput
                                         value={spacingSummary(margin)}
                                         onChangeValue={(next) => {
@@ -1277,7 +1280,7 @@ RULES:
                                     <button
                                         type="button"
                                         onClick={() => setExpandMargin((v) => !v)}
-                                        className="h-9 w-9 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 inline-flex items-center justify-center"
+                                        className="h-9 w-9 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] inline-flex items-center justify-center"
                                         title={expandMargin ? 'Collapse margin sides' : 'Expand margin sides'}
                                     >
                                         {expandMargin ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
@@ -1301,8 +1304,8 @@ RULES:
                             </section>
 
                             {showTextContent && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Content</div>
+                                <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Content</div>
                                     <textarea
                                         value={textValue}
                                         onChange={(e) => {
@@ -1317,21 +1320,21 @@ RULES:
                             )}
 
                             {(showImage || showLink) && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-1 gap-3">
+                                <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 grid grid-cols-1 gap-3">
                                     {showImage && (
                                         <div className="space-y-2">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Image Src</div>
-                                            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#16181d] p-2">
-                                                <div className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Image Src</div>
+                                            <div className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-2">
+                                                <div className="h-12 w-12 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-3)]">
                                                     {imageSrc ? (
                                                         <img src={imageSrc} alt="Selected element preview" className="h-full w-full object-cover" />
                                                     ) : (
-                                                        <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wide text-gray-500">No Img</div>
+                                                        <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wide text-[var(--ui-text-subtle)]">No Img</div>
                                                     )}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <div className="truncate text-[11px] text-gray-300">{selected.uid}</div>
-                                                    <div className="truncate text-[10px] text-gray-500">{selected.attributes?.alt || 'Selected image element'}</div>
+                                                    <div className="truncate text-[11px] text-[var(--ui-text-muted)]">{selected.uid}</div>
+                                                    <div className="truncate text-[10px] text-[var(--ui-text-subtle)]">{selected.attributes?.alt || 'Selected image element'}</div>
                                                 </div>
                                             </div>
                                             <input
@@ -1365,7 +1368,7 @@ RULES:
                                             <button
                                                 type="button"
                                                 onClick={() => imageFileInputRef.current?.click()}
-                                                className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
+                                                className="rounded-lg bg-[var(--ui-surface-3)] px-3 py-2 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                             >
                                                 Upload Image
                                             </button>
@@ -1373,7 +1376,7 @@ RULES:
                                     )}
                                     {showLink && (
                                         <div className="space-y-2">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Link Href</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Link Href</div>
                                             <input
                                                 value={linkHref}
                                                 onChange={(e) => {
@@ -1389,8 +1392,8 @@ RULES:
                             )}
 
                             {showIconPicker && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Icon</div>
+                                <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Icon</div>
                                     <input
                                         value={iconQuery}
                                         onChange={(e) => {
@@ -1430,22 +1433,22 @@ RULES:
                                         <button
                                             type="button"
                                             onClick={() => applyIconName(iconQuery)}
-                                            className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15"
+                                            className="rounded-lg bg-[var(--ui-surface-4)] px-3 py-2 text-xs font-semibold text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]"
                                         >
                                             Apply Typed Icon
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setShowIconResults((v) => !v)}
-                                            className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10"
+                                            className="rounded-lg bg-[var(--ui-surface-3)] px-3 py-2 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                         >
                                             {showIconResults ? 'Hide List' : 'Show List'}
                                         </button>
                                     </div>
                                     {showIconResults && (
-                                        <div ref={iconListRef} className="hide-scrollbar-panel max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#121219] p-1">
+                                        <div ref={iconListRef} className="hide-scrollbar-panel max-h-48 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-popover)] p-1">
                                             {filteredIcons.length === 0 && (
-                                                <div className="px-2 py-2 text-xs text-gray-500">No matching icons</div>
+                                                <div className="px-2 py-2 text-xs text-[var(--ui-text-subtle)]">No matching icons</div>
                                             )}
                                             {filteredIcons.map((iconName, index) => (
                                                 <button
@@ -1454,7 +1457,7 @@ RULES:
                                                     data-icon-index={index}
                                                     onMouseEnter={() => setIconActiveIndex(index)}
                                                     onClick={() => applyIconName(iconName)}
-                                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-gray-200 hover:bg-white/10 ${iconActiveIndex === index ? 'bg-indigo-500/25' : ''}`}
+                                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ${iconActiveIndex === index ? 'bg-indigo-500/25' : ''}`}
                                                 >
                                                     <span className="material-symbols-rounded text-base leading-none">{iconName}</span>
                                                     <span className="truncate">{iconName}</span>
@@ -1465,12 +1468,12 @@ RULES:
                                 </section>
                             )}
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                <div className="text-xs font-semibold text-gray-300">Style & Appearance</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Style & Appearance</div>
                                 <div className="space-y-2">
                                     {showColor && (
                                         <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                            <div className="text-xs text-gray-400">Fill</div>
+                                            <div className="text-xs text-[var(--ui-text-muted)]">Fill</div>
                                             <ColorWheelInput
                                                 value={bgColor}
                                                 onChange={(next) => {
@@ -1482,7 +1485,7 @@ RULES:
                                     )}
                                     {showColor && (
                                         <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                            <div className="text-xs text-gray-400">Text</div>
+                                            <div className="text-xs text-[var(--ui-text-muted)]">Text</div>
                                             <ColorWheelInput
                                                 value={textColor}
                                                 onChange={(next) => {
@@ -1493,7 +1496,7 @@ RULES:
                                         </div>
                                     )}
                                     <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Border Color</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Border Color</div>
                                         <ColorWheelInput
                                             value={borderColor}
                                             onChange={(next) => {
@@ -1503,7 +1506,7 @@ RULES:
                                         />
                                     </div>
                                     <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Border</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Border</div>
                                         <ScrubNumberInput
                                             value={borderWidth}
                                             onChangeValue={(next) => {
@@ -1514,7 +1517,7 @@ RULES:
                                         />
                                     </div>
                                     <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Opacity</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Opacity</div>
                                         <ScrubNumberInput
                                             value={opacity}
                                             onChangeValue={(next) => {
@@ -1527,43 +1530,43 @@ RULES:
                                         />
                                     </div>
                                     <div className="grid grid-cols-[84px_1fr] items-center gap-3">
-                                        <div className="text-xs text-gray-400">Effect</div>
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Effect</div>
                                         <select value={boxShadow} onChange={(e) => { setBoxShadow(e.target.value); patchStyle({ 'box-shadow': e.target.value }); }} className={selectBase}>
-                                            <option className="bg-[#121219]" value="">Add effect</option>
-                                            <option className="bg-[#121219]" value="0 12px 34px rgba(0,0,0,.28)">Soft</option>
-                                            <option className="bg-[#121219]" value="0 20px 60px rgba(0,0,0,.22)">Glow</option>
-                                            <option className="bg-[#121219]" value="0 10px 40px -10px rgba(0,0,0,.35)">Deep</option>
+                                            <option className="bg-[var(--ui-popover)]" value="">Add effect</option>
+                                            <option className="bg-[var(--ui-popover)]" value="0 12px 34px rgba(0,0,0,.28)">Soft</option>
+                                            <option className="bg-[var(--ui-popover)]" value="0 20px 60px rgba(0,0,0,.22)">Glow</option>
+                                            <option className="bg-[var(--ui-popover)]" value="0 10px 40px -10px rgba(0,0,0,.35)">Deep</option>
                                         </select>
                                     </div>
                                 </div>
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Element Align</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Element Align</div>
                                 <div className="grid grid-cols-3 gap-2">
                                     <button
                                         onClick={() => applyElementAlign('left')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                     >
                                         Left
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('center')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                     >
                                         Center
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('right')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                     >
                                         Right
                                     </button>
                                 </div>
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Z Index</div>
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Z Index</div>
                                 <div className="grid grid-cols-[1fr_auto_auto] gap-2">
                                     <ScrubNumberInput
                                         value={zIndex}
@@ -1579,7 +1582,7 @@ RULES:
                                             setZIndex(next);
                                             patchZIndex(next);
                                         }}
-                                        className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
+                                        className="rounded-lg bg-[var(--ui-surface-3)] px-3 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                     >
                                         -
                                     </button>
@@ -1590,70 +1593,70 @@ RULES:
                                             setZIndex(next);
                                             patchZIndex(next);
                                         }}
-                                        className="rounded-lg bg-white/5 px-3 text-xs text-gray-300 hover:bg-white/10"
+                                        className="rounded-lg bg-[var(--ui-surface-3)] px-3 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                     >
                                         +
                                     </button>
                                 </div>
                             </section>
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
+                            <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Width</div>
+                                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Width</div>
                                     <ScrubNumberInput value={width} onChangeValue={(next) => { setWidth(next); patchStyle({ width: next ? `${next}px` : '' }); }} min={0} />
                                 </div>
                                 <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Height</div>
+                                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Height</div>
                                     <ScrubNumberInput value={height} onChangeValue={(next) => { setHeight(next); patchStyle({ height: next ? `${next}px` : '' }); }} min={0} />
                                 </div>
                                 <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Radius</div>
+                                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Radius</div>
                                     <ScrubNumberInput value={radius} onChangeValue={(next) => { setRadius(next); patchStyle({ 'border-radius': next ? `${next}px` : '' }); }} min={0} />
                                 </div>
                             </section>
 
                             {showTypography && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
+                                <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 grid grid-cols-2 gap-3">
                                     <div className="space-y-2">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Font Size</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Font Size</div>
                                         <ScrubNumberInput value={fontSize} onChangeValue={(next) => { setFontSize(next); patchStyle({ 'font-size': next ? `${next}px` : '' }); }} min={0} />
                                     </div>
                                     <div className="space-y-2">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Line Height</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Line Height</div>
                                         <ScrubNumberInput value={lineHeight} onChangeValue={(next) => { setLineHeight(next); patchStyle({ 'line-height': next ? `${next}px` : '' }); }} min={0} />
                                     </div>
                                     <div className="space-y-2">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Letter Spacing</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Letter Spacing</div>
                                         <ScrubNumberInput value={letterSpacing} onChangeValue={(next) => { setLetterSpacing(next); patchStyle({ 'letter-spacing': next ? `${next}px` : '' }); }} />
                                     </div>
                                     <div className="space-y-2">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Text Align</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Text Align</div>
                                         <select value={textAlign} onChange={(e) => { setTextAlign(e.target.value); patchStyle({ 'text-align': e.target.value }); }} className={selectBase}>
-                                            <option className="bg-[#121219]" value="">default</option>
-                                            <option className="bg-[#121219]" value="left">left</option>
-                                            <option className="bg-[#121219]" value="center">center</option>
-                                            <option className="bg-[#121219]" value="right">right</option>
-                                            <option className="bg-[#121219]" value="justify">justify</option>
+                                            <option className="bg-[var(--ui-popover)]" value="">default</option>
+                                            <option className="bg-[var(--ui-popover)]" value="left">left</option>
+                                            <option className="bg-[var(--ui-popover)]" value="center">center</option>
+                                            <option className="bg-[var(--ui-popover)]" value="right">right</option>
+                                            <option className="bg-[var(--ui-popover)]" value="justify">justify</option>
                                         </select>
                                     </div>
                                     <div className="col-span-2 grid grid-cols-2 gap-2">
-                                        <button onClick={() => applyPatch({ op: 'set_classes', uid: selected.uid, add: ['font-display'], remove: ['font-sans'] })} className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10">
+                                        <button onClick={() => applyPatch({ op: 'set_classes', uid: selected.uid, add: ['font-display'], remove: ['font-sans'] })} className="rounded-lg bg-[var(--ui-surface-3)] px-3 py-2 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]">
                                             Display Font
                                         </button>
-                                        <button onClick={() => applyPatch({ op: 'set_classes', uid: selected.uid, add: ['font-sans'], remove: ['font-display'] })} className="rounded-lg bg-white/5 px-3 py-2 text-xs text-gray-300 hover:bg-white/10">
+                                        <button onClick={() => applyPatch({ op: 'set_classes', uid: selected.uid, add: ['font-sans'], remove: ['font-display'] })} className="rounded-lg bg-[var(--ui-surface-3)] px-3 py-2 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]">
                                             Sans Font
                                         </button>
                                     </div>
                                     {showTextFlexAlign && (
                                         <div className="col-span-2 space-y-2">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Flex Align</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Flex Align</div>
                                             <div className="grid grid-cols-4 gap-2">
                                                 <button
                                                     onClick={() => {
                                                         setTextFlexAlign('start');
                                                         patchStyle({ 'align-self': 'flex-start' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     Start
                                                 </button>
@@ -1662,7 +1665,7 @@ RULES:
                                                         setTextFlexAlign('center');
                                                         patchStyle({ 'align-self': 'center' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     Center
                                                 </button>
@@ -1671,7 +1674,7 @@ RULES:
                                                         setTextFlexAlign('end');
                                                         patchStyle({ 'align-self': 'flex-end' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     End
                                                 </button>
@@ -1680,7 +1683,7 @@ RULES:
                                                         setTextFlexAlign('stretch');
                                                         patchStyle({ 'align-self': 'stretch' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     Stretch
                                                 </button>
@@ -1693,9 +1696,9 @@ RULES:
                         </>
                     )}
 
-                    {activeTab === 'Images' && (
-                        <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Images</div>
+                    {activeTab === 'symbols' && (
+                        <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Images</div>
                             <input
                                 ref={globalImageFileInputRef}
                                 type="file"
@@ -1716,7 +1719,7 @@ RULES:
                                 }}
                             />
                             {screenImages.length === 0 ? (
-                                <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
+                                <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-muted)]">
                                     No images found on this screen.
                                 </div>
                             ) : (
@@ -1727,12 +1730,12 @@ RULES:
                                         </div>
                                     )}
                                     {screenImages.map((image) => (
-                                        <div key={image.uid} className="rounded-xl border border-white/10 bg-[#16181d] p-2 space-y-2">
+                                        <div key={image.uid} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-2 space-y-2">
                                             <div className="grid grid-cols-[64px_1fr_auto] items-center gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                    className="h-16 w-16 overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                                                    className="h-16 w-16 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-3)]"
                                                     title="Select image element"
                                                 >
                                                     <img src={image.src} alt={image.alt || 'image'} className="h-full w-full object-cover" />
@@ -1754,7 +1757,7 @@ RULES:
                                                     <button
                                                         type="button"
                                                         onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                        className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                        className="rounded-md bg-[var(--ui-surface-3)] px-2 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                                     >
                                                         Select
                                                     </button>
@@ -1764,7 +1767,7 @@ RULES:
                                                             setUploadTargetUid(image.uid);
                                                             globalImageFileInputRef.current?.click();
                                                         }}
-                                                        className="rounded-md bg-white/5 px-2 py-2 text-[10px] uppercase tracking-wide text-gray-300 hover:bg-white/10"
+                                                        className="rounded-md bg-[var(--ui-surface-3)] px-2 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
                                                     >
                                                         Upload
                                                     </button>
@@ -1815,6 +1818,11 @@ RULES:
         </aside>
     );
 }
+
+
+
+
+
 
 
 

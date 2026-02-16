@@ -19,7 +19,9 @@ import { useCanvasStore } from '../../stores';
 import { useReactFlow } from '@xyflow/react';
 import { useDesignStore } from '../../stores/design-store';
 import { useChatStore } from '../../stores/chat-store';
+import { useUiStore } from '../../stores/ui-store';
 import { apiClient } from '../../api/client';
+import { getPreferredTextModel } from '../../constants/designModels';
 
 type MenuType = 'align' | 'space' | 'generate' | 'edit' | 'more' | null;
 
@@ -27,6 +29,7 @@ export const MultiSelectToolbar = memo(() => {
     const { alignSelectedBoards, distributeSelectedBoards, smartArrangeSelectedBoards, moveSelectedBoards, doc, setFocusNodeIds } = useCanvasStore();
     const { spec, updateScreen } = useDesignStore();
     const { isGenerating, setGenerating, setAbortController, addMessage, updateMessage } = useChatStore();
+    const { modelProfile } = useUiStore();
     const { fitView } = useReactFlow();
     const [activeMenu, setActiveMenu] = useState<MenuType>(null);
     const [isWriting, setIsWriting] = useState(false);
@@ -93,6 +96,7 @@ export const MultiSelectToolbar = memo(() => {
                         instruction: `Apply this edit to this exact screen only. Keep screen intent and content structure. User request: ${instruction}`,
                         html: screen.html,
                         screenId: screen.screenId,
+                        preferredModel: getPreferredTextModel(modelProfile),
                     }, controller.signal);
                     return { screenId: screen.screenId, html: response.html, name: screen.name };
                 })
@@ -140,12 +144,12 @@ export const MultiSelectToolbar = memo(() => {
     return (
         <div
             ref={containerRef}
-            className="flex items-center gap-1 p-1.5 bg-[#141414]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] pointer-events-auto ring-1 ring-white/5"
+            className="flex items-center gap-1 p-1.5 bg-[var(--ui-surface-2)]/95 backdrop-blur-xl border border-[var(--ui-border)] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] pointer-events-auto ring-1 ring-[var(--ui-border)]"
         >
             {!isWriting ? (
                 <button
                     onClick={() => setIsWriting(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-indigo-700 hover:text-white text-black rounded-xl transition-all active:scale-95 group"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-[var(--ui-primary)] hover:bg-[var(--ui-primary-hover)] text-white rounded-xl transition-all active:scale-95 group"
                     disabled={isGenerating}
                 >
                     <Sparkles size={14} />
@@ -162,25 +166,25 @@ export const MultiSelectToolbar = memo(() => {
                             if (e.key === 'Escape') setIsWriting(false);
                         }}
                         placeholder="Edit selected screens..."
-                        className="w-full h-9 pl-3 pr-3 bg-white/5 rounded-xl text-white text-[13px] outline-none placeholder:text-gray-500"
+                        className="w-full h-9 pl-3 pr-3 bg-[var(--ui-surface-3)] rounded-xl text-[var(--ui-text)] text-[13px] outline-none placeholder:text-[var(--ui-text-subtle)]"
                     />
                     <button
                         onClick={handleBatchRefine}
                         disabled={!inputValue.trim() || isGenerating}
-                        className="p-2 bg-white text-slate-900 rounded-xl hover:bg-gray-200 disabled:opacity-30 transition-all active:scale-90"
+                        className="p-2 bg-[var(--ui-primary)] text-white rounded-xl hover:bg-[var(--ui-primary-hover)] disabled:opacity-30 transition-all active:scale-90"
                     >
                         <ArrowUp size={16} />
                     </button>
                     <button
                         onClick={() => setIsWriting(false)}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition-all"
+                        className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-xl transition-all"
                     >
                         <X size={16} />
                     </button>
                 </div>
             )}
 
-            <div className="w-[1px] h-4 bg-white/10 mx-1" />
+            <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
 
             {/* Alignment Tool */}
             <div className="relative">
@@ -195,7 +199,7 @@ export const MultiSelectToolbar = memo(() => {
                         <MenuOption label="Align Left" icon={<AlignLeft size={16} />} onClick={() => { alignSelectedBoards('left'); setActiveMenu(null); }} />
                         <MenuOption label="Horizontal Center" icon={<AlignCenter size={16} />} onClick={() => { alignSelectedBoards('center'); setActiveMenu(null); }} />
                         <MenuOption label="Align Right" icon={<AlignRight size={16} />} onClick={() => { alignSelectedBoards('right'); setActiveMenu(null); }} />
-                        <div className="h-[1px] bg-white/5 my-1" />
+                        <div className="h-[1px] bg-[var(--ui-border)] my-1" />
                         <MenuOption label="Align Top" icon={<AlignVerticalJustifyStart size={16} />} onClick={() => { alignSelectedBoards('top'); setActiveMenu(null); }} />
                         <MenuOption label="Vertical Center" icon={<AlignVerticalJustifyCenter size={16} />} onClick={() => { alignSelectedBoards('middle'); setActiveMenu(null); }} />
                         <MenuOption label="Align Bottom" icon={<AlignVerticalJustifyEnd size={16} />} onClick={() => { alignSelectedBoards('bottom'); setActiveMenu(null); }} />
@@ -244,7 +248,7 @@ export const MultiSelectToolbar = memo(() => {
                 title="Focus Selected"
             />
 
-            <div className="w-[1px] h-4 bg-white/10 mx-1" />
+            <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
 
             {/* More Button */}
             <div className="relative">
@@ -277,7 +281,7 @@ const DropdownButton = ({ label, icon, active, onClick, hasChevron }: {
         onClick={onClick}
         className={`
             flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all
-            ${active ? 'bg-white/10 text-white' : 'text-slate-300 hover:text-white hover:bg-white/5'}
+            ${active ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}
         `}
     >
         {icon}
@@ -292,7 +296,7 @@ const IconButton = ({ icon, active, onClick, title }: { icon: React.ReactNode, a
         title={title}
         className={`
             p-2 rounded-xl transition-all
-            ${active ? 'bg-white/10 text-white shadow-inner' : 'text-slate-400 hover:text-white hover:bg-white/5'}
+            ${active ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-inner' : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}
         `}
     >
         {icon}
@@ -300,7 +304,7 @@ const IconButton = ({ icon, active, onClick, title }: { icon: React.ReactNode, a
 );
 
 const DropdownMenu = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-    <div className={`absolute z-[100] p-1.5 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-200 ${className}`}>
+    <div className={`absolute z-[100] p-1.5 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-200 ${className}`}>
         {children}
     </div>
 );
@@ -308,10 +312,10 @@ const DropdownMenu = ({ children, className = "" }: { children: React.ReactNode,
 const MenuOption = ({ label, icon, onClick }: { label: string, icon?: React.ReactNode, onClick: () => void }) => (
     <button
         onClick={onClick}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-all text-left group"
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-xl transition-all text-left group"
     >
         <div className="flex items-center gap-2">
-            {icon && <span className="text-slate-500 group-hover:text-indigo-400 transition-colors">{icon}</span>}
+            {icon && <span className="text-[var(--ui-text-subtle)] group-hover:text-indigo-400 transition-colors">{icon}</span>}
             <span className="font-medium">{label}</span>
         </div>
     </button>

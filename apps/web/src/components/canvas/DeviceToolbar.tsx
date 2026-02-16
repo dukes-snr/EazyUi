@@ -60,15 +60,15 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
 
     return (
         <div className="flex items-center gap-2 pointer-events-auto">
-            <div className={`flex items-center gap-1.5 p-2 bg-[#0f111a]/95 backdrop-blur-md rounded-full shadow-2xl ring-1 ring-white/10 transition-all duration-300 animate-fade-in-up ${isWriting ? 'min-w-[500px]' : 'min-w-[360px]'}`}>
+            <div className={`flex items-center gap-1.5 p-2 bg-[var(--ui-surface-2)]/95 backdrop-blur-md rounded-full shadow-2xl ring-1 ring-[var(--ui-border)] transition-all duration-300 animate-fade-in-up ${isWriting ? 'min-w-[500px]' : 'min-w-[360px]'}`}>
                 {/* Left: Write Content Action */}
                 <div className={`flex items-center transition-all duration-300 flex-1`}>
                     {!isWriting ? (
                         <button
                             onClick={() => setIsWriting(true)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-indigo-700 hover:text-white text-black rounded-2xl transition-all active:scale-95 group"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-[var(--ui-primary)] hover:bg-[var(--ui-primary-hover)] text-white rounded-2xl transition-all active:scale-95 group"
                         >
-                            <Sparkles size={14} className="text-ink-800" />
+                            <Sparkles size={14} className="text-white" />
                             <span className="text-[13px] font-medium whitespace-nowrap">Refine</span>
                         </button>
                     ) : (
@@ -83,13 +83,13 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                                         if (e.key === 'Escape') setIsWriting(false);
                                     }}
                                     placeholder="What style edit do you want?"
-                                    className="w-full h-9 pl-9 pr-3 bg-white/5 rounded-3xl text-white text-[13px] outline-none transition-all placeholder:text-gray-500"
+                                    className="w-full h-9 pl-9 pr-3 bg-[var(--ui-surface-3)] rounded-3xl text-[var(--ui-text)] text-[13px] outline-none transition-all placeholder:text-[var(--ui-text-subtle)]"
                                 />
                                 <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-300" />
                             </div>
                             <button
                                 onClick={() => editFileInputRef.current?.click()}
-                                className="p-2 text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                                className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
                                 title="Attach reference image(s)"
                             >
                                 <Plus size={16} />
@@ -108,7 +108,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                             <button
                                 onClick={handleSubmit}
                                 disabled={!inputValue.trim()}
-                                className="p-2 bg-white text-slate-900 rounded-2xl hover:bg-gray-200 disabled:opacity-30 transition-all active:scale-90"
+                                className="p-2 bg-[var(--ui-primary)] text-white rounded-2xl hover:bg-[var(--ui-primary-hover)] disabled:opacity-30 transition-all active:scale-90"
                             >
                                 <ArrowUp size={16} />
                             </button>
@@ -117,7 +117,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                                     setIsWriting(false);
                                     setEditImages([]);
                                 }}
-                                className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                                className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
                             >
                                 <X size={16} />
                             </button>
@@ -128,7 +128,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                 {!isWriting && (
                     <>
                         {/* Separator */}
-                        <div className="w-[1px] h-4 bg-white/10 mx-1" />
+                        <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
 
                         {/* Center: Actions */}
                         <div className="flex items-center gap-1">
@@ -142,7 +142,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                                 title="Focus Screen"
                                 onClick={() => onAction?.('focus')}
                             />
-                            <div className="w-[1px] h-3 bg-white/5 mx-0.5" />
+                            <div className="w-[1px] h-3 bg-[var(--ui-border)] mx-0.5" />
                             <ToolbarButton
                                 icon={<Trash2 size={16} />}
                                 title="Delete Screen"
@@ -152,7 +152,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                         </div>
 
                         {/* Separator */}
-                        <div className="w-[1px] h-4 bg-white/10 mx-1" />
+                        <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
 
                         {/* Right: Device Switcher */}
                         <div className="flex items-center gap-1 pr-1">
@@ -181,15 +181,15 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                 <button
                     onClick={() => setIsRegenOpen(true)}
                     title="Regenerate"
-                    className="h-12 w-12 shrink-0 rounded-full bg-[#0f111a]/95 text-gray-300 hover:text-white ring-1 ring-white/10 backdrop-blur-md shadow-2xl flex items-center justify-center transition-all active:scale-95"
+                    className="h-12 w-12 shrink-0 rounded-full bg-[var(--ui-surface-2)]/95 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] backdrop-blur-md shadow-2xl flex items-center justify-center transition-all active:scale-95"
                 >
                     <RotateCcw size={16} />
                 </button>
             ) : (
-                <div className="h-12 pl-2 pr-1 rounded-full bg-[#0f111a]/95 ring-1 ring-white/10 backdrop-blur-md shadow-2xl flex items-center gap-1.5 transition-all duration-300 animate-in fade-in slide-in-from-right-2">
+                <div className="h-12 pl-2 pr-1 rounded-full bg-[var(--ui-surface-2)]/95 ring-1 ring-[var(--ui-border)] backdrop-blur-md shadow-2xl flex items-center gap-1.5 transition-all duration-300 animate-in fade-in slide-in-from-right-2">
                     <button
                         onClick={() => regenFileInputRef.current?.click()}
-                        className="p-2 text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                        className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
                         title="Attach reference image(s)"
                     >
                         <Plus size={15} />
@@ -207,7 +207,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                     />
                     <button
                         onClick={handleRegenerate}
-                        className="h-8 px-3 rounded-full bg-white text-black hover:bg-gray-200 text-xs font-semibold transition-all active:scale-95 whitespace-nowrap"
+                        className="h-8 px-3 rounded-full bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)] text-xs font-semibold transition-all active:scale-95 whitespace-nowrap"
                     >
                         Regenerate
                     </button>
@@ -216,7 +216,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                             setIsRegenOpen(false);
                             setRegenImages([]);
                         }}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+                        className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
                         title="Close"
                     >
                         <X size={14} />
@@ -227,7 +227,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
             {(isWriting && editImages.length > 0) && (
                 <div className="flex items-center gap-1 max-w-[180px] overflow-x-auto scrollbar-hide">
                     {editImages.map((img, idx) => (
-                        <div key={idx} className="relative h-8 w-8 rounded-md overflow-hidden border border-white/10 shrink-0">
+                        <div key={idx} className="relative h-8 w-8 rounded-md overflow-hidden border border-[var(--ui-border)] shrink-0">
                             <img src={img} alt="edit-attachment" className="h-full w-full object-cover" />
                             <button
                                 onClick={() => setEditImages((prev) => prev.filter((_, i) => i !== idx))}
@@ -243,7 +243,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
             {(isRegenOpen && regenImages.length > 0) && (
                 <div className="flex items-center gap-1 max-w-[120px] overflow-x-auto scrollbar-hide">
                     {regenImages.map((img, idx) => (
-                        <div key={idx} className="relative h-8 w-8 rounded-md overflow-hidden border border-white/10 shrink-0">
+                        <div key={idx} className="relative h-8 w-8 rounded-md overflow-hidden border border-[var(--ui-border)] shrink-0">
                             <img src={img} alt="regen-attachment" className="h-full w-full object-cover" />
                             <button
                                 onClick={() => setRegenImages((prev) => prev.filter((_, i) => i !== idx))}
@@ -263,7 +263,7 @@ const ToolbarButton = ({ icon, title, onClick, className = '' }: { icon: React.R
     <button
         title={title}
         onClick={onClick}
-        className={`p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-all active:scale-90 ${className}`}
+        className={`p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all active:scale-90 ${className}`}
     >
         {icon}
     </button>

@@ -3,12 +3,13 @@
 // ============================================================================
 
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { useChatStore, useDesignStore, useCanvasStore, useEditStore } from '../../stores';
+import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import TextType from '../ui/TextType';
+import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 
 const FEEDBACK_BUCKETS = {
     early: [
@@ -96,12 +97,12 @@ function renderInlineRichText(text: string): ReactNode[] {
             }
             const token = tokenMatch[0];
             out.push(
-                <span key={`${prefix}-color-${tokenIndex++}`} className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md bg-white/[0.05] border border-white/10 align-middle">
+                <span key={`${prefix}-color-${tokenIndex++}`} className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md bg-[var(--ui-surface-3)] border border-[var(--ui-border)] align-middle">
                     <span
-                        className="inline-block w-2.5 h-2.5 rounded-full border border-white/20"
+                        className="inline-block w-2.5 h-2.5 rounded-full border border-[var(--ui-border-light)]"
                         style={{ backgroundColor: token }}
                     />
-                    <code className="text-[11px] leading-none text-cyan-200">{token}</code>
+                    <code className="text-[11px] leading-none text-[var(--ui-primary)]">{token}</code>
                 </span>
             );
             cursor = tokenMatch.index + token.length;
@@ -120,8 +121,8 @@ function renderInlineRichText(text: string): ReactNode[] {
         }
         const tag = match[1].toLowerCase();
         const content = match[2];
-        if (tag === 'b') nodes.push(<strong key={`rb-${key++}`} className="font-semibold text-amber-300">{renderColorTokens(content, `b-${key}`)}</strong>);
-        if (tag === 'i') nodes.push(<em key={`ri-${key++}`} className="italic text-slate-300">{renderColorTokens(content, `i-${key}`)}</em>);
+        if (tag === 'b') nodes.push(<strong key={`rb-${key++}`} className="font-semibold text-[var(--ui-primary-hover)]">{renderColorTokens(content, `b-${key}`)}</strong>);
+        if (tag === 'i') nodes.push(<em key={`ri-${key++}`} className="italic text-[var(--ui-text-muted)]">{renderColorTokens(content, `i-${key}`)}</em>);
         lastIndex = pattern.lastIndex;
     }
 
@@ -140,9 +141,9 @@ function renderPlainChunk(text: string, keyPrefix: string): ReactNode[] {
 
     return lines.map((line, idx) => {
         if (line.startsWith('- ')) {
-            return <li key={`${keyPrefix}-li-${idx}`} className="ml-5 list-disc mb-1 text-gray-200">{renderInlineRichText(line.slice(2).trim())}</li>;
+            return <li key={`${keyPrefix}-li-${idx}`} className="ml-5 list-disc mb-1 text-[var(--ui-text)]">{renderInlineRichText(line.slice(2).trim())}</li>;
         }
-        return <p key={`${keyPrefix}-p-${idx}`} className="mb-2 text-gray-200 leading-relaxed">{renderInlineRichText(line)}</p>;
+        return <p key={`${keyPrefix}-p-${idx}`} className="mb-2 text-[var(--ui-text)] leading-relaxed">{renderInlineRichText(line)}</p>;
     });
 }
 
@@ -163,11 +164,11 @@ function renderTaggedDescription(text: string): ReactNode {
         const tag = match[1].toLowerCase();
         const content = match[2].trim();
         const inline = renderInlineRichText(content);
-        if (tag === 'h1') nodes.push(<h1 key={`h1-${key++}`} className="text-base font-semibold text-white mb-1.5">{inline}</h1>);
-        if (tag === 'h2') nodes.push(<h2 key={`h2-${key++}`} className="text-[14px] font-semibold text-white mb-1">{inline}</h2>);
-        if (tag === 'h3') nodes.push(<h3 key={`h3-${key++}`} className="text-[13px] font-semibold text-gray-100 mb-1">{inline}</h3>);
-        if (tag === 'p') nodes.push(<p key={`p-${key++}`} className="mb-1.5 text-[13px] text-gray-200 leading-relaxed">{inline}</p>);
-        if (tag === 'li') nodes.push(<li key={`li-${key++}`} className="ml-4 list-disc mb-1 text-[13px] text-gray-200">{inline}</li>);
+        if (tag === 'h1') nodes.push(<h1 key={`h1-${key++}`} className="text-base font-semibold text-[var(--ui-text)] mb-1.5">{inline}</h1>);
+        if (tag === 'h2') nodes.push(<h2 key={`h2-${key++}`} className="text-[14px] font-semibold text-[var(--ui-text)] mb-1">{inline}</h2>);
+        if (tag === 'h3') nodes.push(<h3 key={`h3-${key++}`} className="text-[13px] font-semibold text-[var(--ui-text)] mb-1">{inline}</h3>);
+        if (tag === 'p') nodes.push(<p key={`p-${key++}`} className="mb-1.5 text-[13px] text-[var(--ui-text)] leading-relaxed">{inline}</p>);
+        if (tag === 'li') nodes.push(<li key={`li-${key++}`} className="ml-4 list-disc mb-1 text-[13px] text-[var(--ui-text)]">{inline}</li>);
         cursor = match.index + match[0].length;
     }
 
@@ -184,7 +185,7 @@ function renderTaggedDescription(text: string): ReactNode {
         <>
             {source.split(/(\*\*.*?\*\*)/g).map((part, i) =>
                 part.startsWith('**') && part.endsWith('**')
-                    ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+                    ? <strong key={i} className="font-semibold text-[var(--ui-text)]">{part.slice(2, -2)}</strong>
                     : part
             )}
         </>
@@ -429,7 +430,6 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
-    const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -451,7 +451,37 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, doc, setFocusNodeId, setFocusNodeIds, removeBoard } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
+    const { modelProfile, setModelProfile, pushToast } = useUiStore();
     const assistantMsgIdRef = useRef<string>('');
+    const notificationGuideShownRef = useRef(false);
+
+    const ensureNotificationPermission = async () => {
+        const permission = await requestBrowserNotificationPermissionIfNeeded();
+        if ((permission === 'default' || permission === 'denied') && !notificationGuideShownRef.current) {
+            notificationGuideShownRef.current = true;
+            pushToast({
+                kind: 'guide',
+                title: 'Background alerts are off',
+                message: 'Allow browser notifications if you want completion alerts while you are in another tab.',
+                durationMs: 7000,
+            });
+        }
+    };
+
+    const notifySuccess = (title: string, message: string) => {
+        pushToast({ kind: 'success', title, message });
+        notifyWhenInBackground(title, message);
+    };
+
+    const notifyInfo = (title: string, message: string) => {
+        pushToast({ kind: 'info', title, message });
+        notifyWhenInBackground(title, message);
+    };
+
+    const notifyError = (title: string, message: string) => {
+        pushToast({ kind: 'error', title, message });
+        notifyWhenInBackground(title, message);
+    };
 
     const getScreenPreview = (screenId: string) => {
         return spec?.screens.find((s) => s.screenId === screenId) || null;
@@ -673,6 +703,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            notifyError('No internet connection', 'Reconnect and try generating again.');
+            return;
+        }
+        void ensureNotificationPermission();
 
         const imagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
         const platformToUse = incomingPlatform || selectedPlatform;
@@ -830,6 +865,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 if (generatedIds.length > 0) {
                     setFocusNodeIds(generatedIds);
                 }
+                notifySuccess(
+                    'Generation complete',
+                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`
+                );
                 console.info('[UI] generate: complete (fast model)', { screens: regen.designSpec.screens.length });
                 return;
             }
@@ -950,6 +989,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 if (fallbackIds.length > 0) {
                     setFocusNodeIds(fallbackIds);
                 }
+                notifySuccess(
+                    'Generation complete',
+                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`
+                );
                 console.info('[UI] generate: complete (fallback json)', { screens: regen.designSpec.screens.length });
                 return;
             }
@@ -977,6 +1020,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             if (generatedIds.length > 0) {
                 setFocusNodeIds(generatedIds);
             }
+            notifySuccess(
+                'Generation complete',
+                `Created ${completedCount} screen${completedCount === 1 ? '' : 's'}.`
+            );
             console.info('[UI] generate: complete (stream)', { screens: completedCount });
         } catch (error) {
             if ((error as Error).name === 'AbortError') {
@@ -988,6 +1035,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         thinkingMs: Date.now() - startTime,
                     }
                 });
+                notifyInfo('Generation stopped', 'The request was cancelled.');
                 return;
             }
             updateMessage(assistantMsgId, {
@@ -998,6 +1046,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     thinkingMs: Date.now() - startTime,
                 }
             });
+            notifyError('Generation failed', (error as Error).message || 'Unable to generate screens.');
             console.error('[UI] generate: error', error);
         } finally {
             setAbortController(null);
@@ -1025,6 +1074,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
 const handleEdit = async () => {
         if (!prompt.trim() || isGenerating || !spec) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            notifyError('No internet connection', 'Reconnect and try editing again.');
+            return;
+        }
+        void ensureNotificationPermission();
 
         const selectedId = doc.selection.selectedBoardId;
         const targetScreen = spec.screens.find(s => s.screenId === selectedId);
@@ -1086,6 +1140,7 @@ const handleEdit = async () => {
                     thinkingMs: Date.now() - startTime,
                 }
             });
+            notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`);
         } catch (error) {
             updateScreen(targetScreen.screenId, targetScreen.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
             updateMessage(assistantMsgId, {
@@ -1096,6 +1151,7 @@ const handleEdit = async () => {
                     thinkingMs: Date.now() - startTime,
                 }
             });
+            notifyError('Edit failed', (error as Error).message || 'Unable to apply changes.');
         } finally {
             setAbortController(null);
             setGenerating(false);
@@ -1138,6 +1194,7 @@ const handleEdit = async () => {
             content: 'Generation cancelled.',
             status: 'error',
         });
+        notifyInfo('Generation cancelled', 'Stopped and removed incomplete screens.');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1161,7 +1218,7 @@ const handleEdit = async () => {
                     ? Smile
                     : CircleStar;
     const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-slate-400/15 text-slate-200 ring-slate-300/30 hover:bg-slate-400/20'
+        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
         : stylePreset === 'vibrant'
             ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
             : stylePreset === 'luxury'
@@ -1173,7 +1230,7 @@ const handleEdit = async () => {
     return (
         <>
             <div
-                className={`group flex flex-col h-full text-gray-200 font-sans border-r border-[#2B2F37] transition-all duration-300 ease-in-out relative bg-[#171A20] ${isCollapsed ? 'w-0 border-r-0' : 'w-[var(--chat-width)]'
+                className={`group flex flex-col h-full text-[var(--ui-text)] font-sans border-r border-[var(--ui-border)] transition-all duration-300 ease-in-out relative bg-[var(--ui-surface-1)] ${isCollapsed ? 'w-0 border-r-0' : 'w-[var(--chat-width)]'
                     }`}
             >
                 {/* Collapse Button Header */}
@@ -1181,7 +1238,7 @@ const handleEdit = async () => {
                     <div className="absolute top-4 -right-12 z-20">
                         <button
                             onClick={() => setIsCollapsed(!isCollapsed)}
-                            className={`p-2 rounded-lg bg-[#22262D] text-gray-400 hover:text-white border border-white/10 shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            className={`p-2 rounded-lg bg-[var(--ui-surface-4)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] border border-[var(--ui-border)] shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                                 }`}
                             title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
                         >
@@ -1192,17 +1249,17 @@ const handleEdit = async () => {
 
                 <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                     {/* Header / Date */}
-                    <div className="py-4 px-5 flex items-center justify-between border-b border-[#2B2F37] bg-[#171A20] sticky top-0 z-10">
+                    <div className="py-4 px-5 flex items-center justify-between border-b border-[var(--ui-border)] bg-[var(--ui-surface-1)] sticky top-0 z-10">
                         <div className="leading-tight">
-                            <p className="text-[13px] font-semibold text-gray-100 tracking-wide">Chat</p>
-                            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.12em]">
+                            <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">Chat</p>
+                            <p className="text-[10px] font-medium text-[var(--ui-text-subtle)] uppercase tracking-[0.12em]">
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </p>
                         </div>
                         {!isEditMode && (
                             <button
                                 onClick={() => setIsCollapsed(true)}
-                                className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                                className="p-2 rounded-lg hover:bg-[var(--ui-surface-3)] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] transition-colors"
                                 title="Collapse Sidebar"
                             >
                                 <ChevronLeft size={16} />
@@ -1214,12 +1271,12 @@ const handleEdit = async () => {
                     <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide">
                         {messages.length === 0 && (
                             <div className="flex flex-col items-center justify-center h-full text-[#A1A1AA] text-center px-4 opacity-0 animate-fade-in" style={{ animationFillMode: 'forwards' }}>
-                                <div className="w-full max-w-[300px] p-5 rounded-2xl bg-[#1D2129] border border-[#2B2F37] shadow-lg">
-                                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-3 border border-white/10">
-                                        <ArrowUp size={20} className="text-gray-300" />
+                                <div className="w-full max-w-[300px] p-5 rounded-2xl bg-[var(--ui-surface-3)] border border-[var(--ui-border)] shadow-lg">
+                                    <div className="w-12 h-12 rounded-2xl bg-[var(--ui-surface-3)] flex items-center justify-center mx-auto mb-3 border border-[var(--ui-border)]">
+                                        <ArrowUp size={20} className="text-[var(--ui-text-muted)]" />
                                     </div>
-                                    <h2 className="text-lg font-medium text-white mb-1">What are we building?</h2>
-                                    <p className="text-sm text-gray-400 leading-relaxed">Describe your app idea to generate screens.</p>
+                                    <h2 className="text-lg font-medium text-[var(--ui-text)] mb-1">What are we building?</h2>
+                                    <p className="text-sm text-[var(--ui-text-muted)] leading-relaxed">Describe your app idea to generate screens.</p>
                                 </div>
                             </div>
                         )}
@@ -1242,12 +1299,12 @@ const handleEdit = async () => {
                                                     <button
                                                         key={`${message.id}-${screenId}`}
                                                         onClick={() => setFocusNodeId(screenId)}
-                                                        className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-sm p-1.5 transition-all hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99]"
+                                                        className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] backdrop-blur-sm p-1.5 transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)] active:scale-[0.99]"
                                                         style={{ width: THUMB_W + 12 }}
                                                         title={`Focus ${label} on canvas`}
                                                     >
                                                         <div
-                                                            className="rounded-lg overflow-hidden border border-white/10 bg-transparent relative"
+                                                            className="rounded-lg overflow-hidden border border-[var(--ui-border)] bg-transparent relative"
                                                             style={{
                                                                 width: THUMB_W,
                                                                 height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
@@ -1286,10 +1343,10 @@ const handleEdit = async () => {
                                                                     );
                                                                 })()
                                                             ) : (
-                                                                <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500">No preview</div>
+                                                                <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">No preview</div>
                                                             )}
                                                         </div>
-                                                        <div className="mt-1 text-[10px] text-gray-300 font-semibold truncate">{label}</div>
+                                                        <div className="mt-1 text-[10px] text-[var(--ui-text-muted)] font-semibold truncate">{label}</div>
                                                     </button>
                                                 );
                                             })}
@@ -1310,12 +1367,12 @@ const handleEdit = async () => {
                                                             <button
                                                                 key={`${message.id}-${screenId}`}
                                                                 onClick={() => setFocusNodeId(screenId)}
-                                                                className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-sm p-1.5 transition-all hover:bg-white/[0.08] hover:border-white/20 active:scale-[0.99]"
+                                                                className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] backdrop-blur-sm p-1.5 transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)] active:scale-[0.99]"
                                                                 style={{ width: THUMB_W + 12 }}
                                                                 title={`Focus ${label} on canvas`}
                                                             >
                                                                 <div
-                                                                    className="rounded-lg overflow-hidden border border-white/10 bg-transparent relative"
+                                                                    className="rounded-lg overflow-hidden border border-[var(--ui-border)] bg-transparent relative"
                                                                     style={{
                                                                         width: THUMB_W,
                                                                         height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
@@ -1354,27 +1411,27 @@ const handleEdit = async () => {
                                                                             );
                                                                         })()
                                                                     ) : (
-                                                                        <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500">No preview</div>
+                                                                        <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">No preview</div>
                                                                     )}
                                                                 </div>
-                                                                <div className="mt-1 text-[10px] text-gray-300 font-semibold truncate">{label}</div>
+                                                                <div className="mt-1 text-[10px] text-[var(--ui-text-muted)] font-semibold truncate">{label}</div>
                                                             </button>
                                                         );
                                                     })}
                                                 {message.images && message.images.map((img, idx) => (
-                                                    <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-white/10 shadow-sm group">
+                                                    <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-[var(--ui-border)] shadow-sm group">
                                                         <img src={img} alt="attached" className="w-full h-full object-cover" />
                                                     </div>
                                                 ))}
                                             </div>
                                         )}
-                                        <div className="bg-[#2C2C2E] px-5 py-3 rounded-[24px] rounded-tr-sm text-[15px] text-gray-100 shadow-sm ring-1 ring-white/5">
+                                        <div className="bg-[var(--ui-surface-3)] px-5 py-3 rounded-[24px] rounded-tr-sm text-[15px] text-[var(--ui-text)] shadow-sm ring-1 ring-[var(--ui-border)]">
                                             {message.content}
                                         </div>
                                         <div className="flex items-center justify-end w-full pr-1">
                                             <button
                                                 onClick={() => handleCopyMessage(message.id, message.content)}
-                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                                className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] transition-all"
                                                 title="Copy"
                                             >
                                                 {copiedMessageIds[message.id]
@@ -1387,9 +1444,9 @@ const handleEdit = async () => {
                                     <div className="w-full max-w-[95%] space-y-2">
                                         {/* Thinking Accordion */}
                                         {message.status === 'pending' ? (
-                                            <div className="animate-pulse flex items-center gap-3 px-4 py-3 bg-[#2C2C2E]/30 rounded-2xl border border-white/5 w-fit">
+                                            <div className="animate-pulse flex items-center gap-3 px-4 py-3 bg-[var(--ui-surface-3)] rounded-2xl border border-[var(--ui-border)] w-fit">
                                                 <Loader2 size={16} className="animate-spin text-indigo-400" />
-                                                <span className="text-sm text-gray-400 font-medium">Generating designs...</span>
+                                                <span className="text-sm text-[var(--ui-text-muted)] font-medium">Generating designs...</span>
                                             </div>
                                         ) : (
                                             <div className="space-y-2">
@@ -1397,16 +1454,16 @@ const handleEdit = async () => {
                                                     const thinkingSeconds = getThinkingSeconds(message);
                                                     if (!thinkingSeconds) return null;
                                                     return (
-                                                        <div className="flex items-center gap-2 text-xs text-gray-400 px-2">
+                                                        <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted)] px-2">
                                                             <Lightbulb size={13} />
                                                             <span>Thought for {thinkingSeconds} second{thinkingSeconds === 1 ? '' : 's'}</span>
                                                         </div>
                                                     );
                                                 })()}
-                                                <div className="text-[13px] leading-relaxed whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out text-gray-200 bg-transparent px-2">
+                                                <div className="text-[13px] leading-relaxed whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out text-[var(--ui-text)] bg-transparent px-2">
                                                 {message.status === 'streaming' ? (
                                                     message.meta?.thinkingStopped ? (
-                                                        <span className="text-[13px] font-medium text-gray-300">Rendering remaining screens...</span>
+                                                        <span className="text-[13px] font-medium text-[var(--ui-text-muted)]">Rendering remaining screens...</span>
                                                     ) : (
                                                         <TextType
                                                             key={`${message.id}-${String(message.meta?.feedbackKey ?? message.content)}`}
@@ -1419,7 +1476,7 @@ const handleEdit = async () => {
                                                                             ? FEEDBACK_BUCKETS.wrap
                                                                             : FEEDBACK_BUCKETS.early
                                                             }
-                                                            className="text-[13px] font-medium text-gray-300"
+                                                            className="text-[13px] font-medium text-[var(--ui-text-muted)]"
                                                             typingSpeed={75}
                                                             deletingSpeed={50}
                                                             pauseDuration={1500}
@@ -1451,7 +1508,7 @@ const handleEdit = async () => {
                                                     <TypedTaggedText
                                                         key={`${message.id}-${message.content}`}
                                                         text={message.content}
-                                                        className="text-[13px] font-medium text-gray-100"
+                                                        className="text-[13px] font-medium text-[var(--ui-text)]"
                                                         speed={12}
                                                     />
                                                 ) : (
@@ -1461,7 +1518,7 @@ const handleEdit = async () => {
                                                 <div className="flex items-center gap-2 px-1">
                                                     <button
                                                         onClick={() => handleCopyMessage(message.id, message.content)}
-                                                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+                                                        className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all"
                                                         title="Copy"
                                                     >
                                                         {copiedMessageIds[message.id]
@@ -1472,21 +1529,21 @@ const handleEdit = async () => {
                                                         <>
                                                                 <button
                                                                     onClick={() => handleReaction(message.id, 'like')}
-                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'like' ? 'text-emerald-300 bg-emerald-500/15' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'like' ? 'text-emerald-300 bg-emerald-500/15' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}`}
                                                                     title="Like"
                                                                 >
                                                                 <ThumbsUp size={14} />
                                                             </button>
                                                                 <button
                                                                     onClick={() => handleReaction(message.id, 'dislike')}
-                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'dislike' ? 'text-rose-300 bg-rose-500/15' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                                                                    className={`p-1.5 rounded-md transition-all ${(message.meta?.reaction as string) === 'dislike' ? 'text-rose-300 bg-rose-500/15' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}`}
                                                                     title="Dislike"
                                                                 >
                                                                 <ThumbsDown size={14} />
                                                             </button>
                                                             <button
                                                                 onClick={() => handleShareMessage(message.id, message.content)}
-                                                                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+                                                                className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all"
                                                                 title="Share"
                                                             >
                                                                 <Share2 size={14} />
@@ -1504,20 +1561,20 @@ const handleEdit = async () => {
                     </div>
 
                     {/* Chat Input Container */}
-                    <div className="mx-4 mb-6 relative bg-[#2C2C2E] rounded-[20px] p-3 shadow-2xl transition-all flex flex-col gap-2">
+                    <div className="mx-4 mb-6 relative bg-[var(--ui-surface-3)] rounded-[20px] p-3 shadow-2xl transition-all flex flex-col gap-2">
 
                         {/* Text Area & Images */}
                         <div className="flex-1 min-w-0">
                             {images.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-2 px-1 pb-2 border-b border-white/5">
+                                <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-2 px-1 pb-2 border-b border-[var(--ui-border)]">
                                     {images.map((img, idx) => (
-                                        <div key={idx} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-white/10 shrink-0">
+                                        <div key={idx} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-[var(--ui-border)] shrink-0">
                                             <img src={img} alt="upload" className="w-full h-full object-cover" />
                                             <button
                                                 onClick={() => removeImage(idx)}
-                                                className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="absolute inset-0 bg-black/45 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                             >
-                                                <X size={14} className="text-white" />
+                                                <X size={14} className="text-[var(--ui-text)]" />
                                             </button>
                                         </div>
                                     ))}
@@ -1532,7 +1589,7 @@ const handleEdit = async () => {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Describe your UI idea..."
                                 disabled={isGenerating}
-                                className="no-focus-ring w-full bg-transparent text-gray-100 text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-gray-500 px-2 py-1 leading-relaxed"
+                                className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[var(--ui-text-subtle)] px-2 py-1 leading-relaxed"
                                 style={{ border: 'none', boxShadow: 'none' }}
                             />
                         </div>
@@ -1544,7 +1601,7 @@ const handleEdit = async () => {
                             <div className="flex items-center gap-2">
                                 {/* Attach Button */}
                                 <button
-                                    className="w-9 h-9 flex items-center justify-center rounded-full bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-all ring-1 ring-white/5"
+                                    className="w-9 h-9 flex items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all ring-1 ring-[var(--ui-border)]"
                                     onClick={() => fileInputRef.current?.click()}
                                     title="Add Image"
                                 >
@@ -1552,14 +1609,14 @@ const handleEdit = async () => {
                                 </button>
 
                                 {/* Platform Selector (Pill) */}
-                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
                                             onClick={() => setPlatform(p)}
                                             className={`p-1.5 rounded-full transition-all ${selectedPlatform === p
-                                                ? 'bg-gray-600 text-white shadow-sm'
-                                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                                                ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-sm'
+                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
@@ -1573,13 +1630,13 @@ const handleEdit = async () => {
 
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
-                                            : 'text-amber-400 hover:text-amber-200 hover:bg-white/5'
+                                            ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
+                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-3)]'
                                             }`}
                                         title="Fast model"
                                     >
@@ -1589,8 +1646,8 @@ const handleEdit = async () => {
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
-                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-white/5'
+                                            ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
+                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-[var(--ui-surface-3)]'
                                             }`}
                                         title="Quality model"
                                     >
@@ -1606,7 +1663,7 @@ const handleEdit = async () => {
                                         <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 w-40 bg-[#1C1C1E] border border-white/10 rounded-xl shadow-2xl p-2 z-50">
+                                        <div className="absolute bottom-12 right-0 w-40 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
                                             {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
                                                 <button
                                                     key={preset}
@@ -1615,8 +1672,8 @@ const handleEdit = async () => {
                                                         setShowStyleMenu(false);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-indigo-500/20 text-indigo-200'
-                                                        : 'text-gray-300 hover:bg-white/10'
+                                                        ? 'bg-indigo-500/20 text-[var(--ui-text)]'
+                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
                                                         }`}
                                                 >
                                                     {preset}
@@ -1640,12 +1697,12 @@ const handleEdit = async () => {
                                     }}
                                     disabled={actionDisabled}
                                     className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${isGenerating
-                                        ? 'bg-white/10 text-white hover:bg-white/15 ring-1 ring-white/15'
+                                        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border-light)]'
                                         : isRecording
                                             ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
                                             : showSendAction
-                                                ? 'bg-indigo-500 text-white hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
-                                                : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 ring-1 ring-white/5'
+                                                ? 'bg-indigo-500 text-[var(--ui-text)] hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                                : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
                                         }`}
                                     title={isGenerating
                                         ? 'Stop generation'
@@ -1660,7 +1717,7 @@ const handleEdit = async () => {
                                     {actionIsStop ? (
                                         <Square size={14} className="fill-current" />
                                     ) : showSendAction ? (
-                                        <ArrowUp size={20} className="text-white" />
+                                        <ArrowUp size={20} className="text-[var(--ui-text)]" />
                                     ) : (
                                         <Mic size={15} />
                                     )}
@@ -1682,3 +1739,8 @@ const handleEdit = async () => {
         </>
     );
 }
+
+
+
+
+
