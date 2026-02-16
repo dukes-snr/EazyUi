@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, Mic, Monitor, Paperclip, Smartphone, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
+import { ArrowUp, CircleStar, Gem, LineSquiggle, Mic, Monitor, Palette, Paperclip, Smartphone, Smile, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/hero-bg2.jpg';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -296,6 +296,28 @@ export function LandingPage({ onStart }: LandingPageProps) {
 
     const patternCards = useMemo(() => PATTERN_LIBRARY[activePatternTab], [activePatternTab]);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
+    const hasPromptText = prompt.trim().length > 0;
+    const showSendAction = hasPromptText;
+    const actionIsStop = isRecording;
+    const actionDisabled = isTranscribing && !isRecording;
+    const StyleIcon = stylePreset === 'minimal'
+        ? LineSquiggle
+        : stylePreset === 'vibrant'
+            ? Palette
+            : stylePreset === 'luxury'
+                ? Gem
+                : stylePreset === 'playful'
+                    ? Smile
+                    : CircleStar;
+    const styleButtonTone = stylePreset === 'minimal'
+        ? 'bg-slate-400/15 text-slate-200 ring-slate-300/30 hover:bg-slate-400/20'
+        : stylePreset === 'vibrant'
+            ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
+            : stylePreset === 'luxury'
+                ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
+                : stylePreset === 'playful'
+                    ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
+                    : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
 
     return (
         <div className="h-screen w-screen overflow-y-auto bg-[#06070B] text-white relative">
@@ -446,7 +468,7 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
-                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'fast'
+                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
                                             ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
                                             : 'text-amber-400 hover:text-amber-200 hover:bg-white/5'
                                             }`}
@@ -457,7 +479,7 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
-                                        className={`h-8 px-2.5 rounded-full text-[11px] font-semibold transition-all inline-flex items-center gap-1.5 ${modelProfile === 'quality'
+                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
                                             ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
                                             : 'text-indigo-400 hover:text-indigo-200 hover:bg-white/5'
                                             }`}
@@ -470,10 +492,10 @@ export function LandingPage({ onStart }: LandingPageProps) {
                                     <button
                                         type="button"
                                         onClick={() => setShowStyleMenu(v => !v)}
-                                        className="h-9 px-3 rounded-full bg-white/5 text-gray-300 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-white/5 hover:bg-white/10 transition-all"
+                                        className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
                                         title="Select style preset"
                                     >
-                                        Style: {stylePreset}
+                                        <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
                                         <div className="absolute bottom-12 right-0 w-40 bg-[#1C1C1E] border border-white/10 rounded-xl shadow-2xl p-2 z-50">
@@ -499,26 +521,27 @@ export function LandingPage({ onStart }: LandingPageProps) {
 
                                 <button
                                     type="button"
-                                    onClick={handleMicToggle}
-                                    disabled={isTranscribing}
-                                    className={`h-9 w-9 rounded-full text-[12px] transition-colors flex items-center justify-center ${isRecording
+                                    onClick={() => {
+                                        if (isRecording) {
+                                            handleMicToggle();
+                                            return;
+                                        }
+                                        if (showSendAction) {
+                                            submit();
+                                            return;
+                                        }
+                                        handleMicToggle();
+                                    }}
+                                    disabled={actionDisabled}
+                                    className={`h-9 w-9 rounded-full text-[12px] font-semibold transition-colors flex items-center justify-center ${isRecording
                                         ? 'bg-rose-500/20 text-rose-200'
-                                        : 'bg-white/10 text-gray-200 hover:bg-white/15'
-                                        } ${isTranscribing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                    title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Record voice'}
+                                        : showSendAction
+                                            ? 'bg-white text-[#222736] hover:bg-gray-200'
+                                            : 'bg-white/10 text-gray-200 hover:bg-white/15'
+                                        } ${actionDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    title={isRecording ? 'Stop recording' : showSendAction ? 'Send prompt' : isTranscribing ? 'Transcribing...' : 'Record voice'}
                                 >
-                                    {isRecording ? <Square size={13} className="fill-current" /> : <Mic size={14} />}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={submit}
-                                    disabled={!prompt.trim()}
-                                    className={`h-9 w-9 rounded-full text-[12px] font-semibold transition-colors flex items-center justify-center ${prompt.trim()
-                                        ? 'bg-white text-[#222736] hover:bg-gray-200'
-                                        : 'bg-white/10 text-gray-500 cursor-not-allowed'
-                                        }`}
-                                >
-                                    <ArrowUp size={15} />
+                                    {actionIsStop ? <Square size={13} className="fill-current" /> : showSendAction ? <ArrowUp size={15} /> : <Mic size={14} />}
                                 </button>
                             </div>
                         </div>
