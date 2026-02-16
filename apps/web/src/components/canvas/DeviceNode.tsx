@@ -49,17 +49,38 @@ function injectEditorScript(html: string, screenId: string) {
   const style = document.createElement('style');
   style.textContent = EDIT_SELECTOR + ' { cursor: pointer; }\\n' +
     '.__eazyui-hover { position: absolute; border: 2px dashed rgba(99,102,241,.9); box-shadow: 0 0 0 1px rgba(99,102,241,.4); pointer-events: none; z-index: 999999; }\\n' +
-    '.__eazyui-selected { position: absolute; border: 2px solid rgba(16,185,129,.95); box-shadow: 0 0 0 1px rgba(16,185,129,.4); pointer-events: none; z-index: 999999; }';
+    '.__eazyui-selected { position: absolute; border: 2px solid rgba(16,185,129,.95); box-shadow: 0 0 0 1px rgba(16,185,129,.4); pointer-events: none; z-index: 999999; }\\n' +
+    '.__eazyui-selection-hud { position: absolute; display: none; align-items: center; justify-content: space-between; gap: 6px; padding: 0; background: transparent; border: none; transform: translateY(-100%); pointer-events: auto; z-index: 1000000; }\\n' +
+    '.__eazyui-selection-hud-tag { text-transform: lowercase; font-weight: 600; color: #f8fafc; border: 1px solid rgba(20,184,166,.45); border-radius: 6px; background: rgba(15,23,42,.96); padding: 4px 8px; }\\n' +
+    '.__eazyui-selection-hud-btn { all: unset; cursor: pointer; color: #fecaca; font-size: 11px; font-weight: 600; line-height: 1; border: 1px solid rgba(248,113,113,.45); border-radius: 6px; background: rgba(127,29,29,.72); padding: 4px 8px; }\\n' +
+    '.__eazyui-selection-hud-btn:hover { background: rgba(153,27,27,.85); color: #fee2e2; }\\n' +
+    '.__eazyui-hover-tag { position: absolute; display: none; transform: translateY(-100%); text-transform: lowercase; font-weight: 600; font-size: 11px; line-height: 1; color: #dbeafe; border: 1px solid rgba(59,130,246,.5); border-radius: 6px; background: rgba(30,58,138,.82); padding: 4px 8px; pointer-events: none; z-index: 1000000; }';
   document.head.appendChild(style);
 
   const hoverBox = document.createElement('div');
   hoverBox.className = '__eazyui-hover';
   hoverBox.style.display = 'none';
+  const hoverTag = document.createElement('div');
+  hoverTag.className = '__eazyui-hover-tag';
+  hoverTag.style.display = 'none';
   const selectBox = document.createElement('div');
   selectBox.className = '__eazyui-selected';
   selectBox.style.display = 'none';
+  const selectionHud = document.createElement('div');
+  selectionHud.className = '__eazyui-selection-hud';
+  const selectionHudTag = document.createElement('span');
+  selectionHudTag.className = '__eazyui-selection-hud-tag';
+  const selectionHudDelete = document.createElement('button');
+  selectionHudDelete.type = 'button';
+  selectionHudDelete.className = '__eazyui-selection-hud-btn';
+  selectionHudDelete.title = 'Delete selected element';
+  selectionHudDelete.textContent = '🗑';
+  selectionHud.appendChild(selectionHudTag);
+  selectionHud.appendChild(selectionHudDelete);
   document.body.appendChild(hoverBox);
+  document.body.appendChild(hoverTag);
   document.body.appendChild(selectBox);
+  document.body.appendChild(selectionHud);
 
   let hoverEl = null;
   let selectedEl = null;
@@ -81,6 +102,12 @@ function injectEditorScript(html: string, screenId: string) {
   function setBox(box, el) {
     if (!el) {
       box.style.display = 'none';
+      if (box === hoverBox) {
+        hoverTag.style.display = 'none';
+      }
+      if (box === selectBox) {
+        selectionHud.style.display = 'none';
+      }
       return;
     }
     const rect = el.getBoundingClientRect();
@@ -98,6 +125,25 @@ function injectEditorScript(html: string, screenId: string) {
       box.style.borderRadius = frameRadius || window.getComputedStyle(el).borderRadius;
     } else {
       box.style.borderRadius = window.getComputedStyle(el).borderRadius;
+    }
+
+    if (isSelectedBox) {
+      selectionHud.style.display = 'flex';
+      selectionHud.style.left = rect.left + scrollX + 'px';
+      selectionHud.style.top = rect.top + scrollY + 'px';
+      selectionHudTag.textContent = tag || 'element';
+      return;
+    }
+
+    if (box === hoverBox) {
+      if (!selectedEl) {
+        hoverTag.style.display = 'block';
+        hoverTag.style.left = rect.left + scrollX + 'px';
+        hoverTag.style.top = rect.top + scrollY + 'px';
+        hoverTag.textContent = tag || 'element';
+      } else {
+        hoverTag.style.display = 'none';
+      }
     }
   }
 
@@ -239,6 +285,15 @@ function injectEditorScript(html: string, screenId: string) {
     setBox(selectBox, null);
   }
 
+  function requestDeleteSelection() {
+    if (!selectedEl) return;
+    const tag = (selectedEl.tagName || '').toLowerCase();
+    if (ROOT_TAGS.has(tag)) return;
+    const uid = selectedEl.getAttribute('data-uid');
+    if (!uid) return;
+    window.parent.postMessage({ type: 'editor/request_delete', screenId: SCREEN_ID, uid }, '*');
+  }
+
   function getEditable(el) {
     if (!el) return null;
     if (el.closest) return el.closest(EDIT_SELECTOR);
@@ -256,12 +311,21 @@ function injectEditorScript(html: string, screenId: string) {
   document.addEventListener('mouseleave', () => setBox(hoverBox, null), true);
 
   document.addEventListener('click', (event) => {
+    if (selectionHud.contains(event.target) || hoverTag.contains(event.target)) {
+      return;
+    }
     const target = getEditable(event.target);
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
     selectElement(target);
   }, true);
+
+  selectionHudDelete.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    requestDeleteSelection();
+  });
 
   window.addEventListener('scroll', () => {
     if (hoverEl) setBox(hoverBox, hoverEl);
@@ -297,6 +361,16 @@ function injectEditorScript(html: string, screenId: string) {
       (patch.remove || []).forEach((cls) => target.classList.remove(cls));
       (patch.add || []).forEach((cls) => target.classList.add(cls));
     }
+    if (patch.op === 'delete_node') {
+      const deletingSelected = selectedEl && selectedEl === target;
+      target.remove();
+      if (deletingSelected) {
+        clearSelection();
+        const container = getScreenContainer();
+        if (container) selectElement(container);
+      }
+      return;
+    }
     if (selectedEl && selectedEl === target) {
       setBox(selectBox, selectedEl);
       window.parent.postMessage({ type: 'editor/select', screenId: SCREEN_ID, payload: buildInfo(target) }, '*');
@@ -327,6 +401,9 @@ function injectEditorScript(html: string, screenId: string) {
     }
     if (data.type === 'editor/clear_selection') {
       clearSelection();
+    }
+    if (data.type === 'editor/delete_selected') {
+      requestDeleteSelection();
     }
   });
 

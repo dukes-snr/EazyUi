@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditPanel } from './components/edit/EditPanel';
+import { LayersPanel } from './components/edit/LayersPanel';
 import { LandingPage } from './components/landing/LandingPage';
 import type { DesignModelProfile } from './constants/designModels';
 
@@ -132,6 +133,7 @@ function App() {
     return (
         <div className={`app-layout ${isEditMode ? 'edit-mode' : ''}`}>
             <ChatPanel initialRequest={initialRequest} />
+            <LayersPanel />
             <CanvasWorkspace />
             <EditPanel />
         </div>

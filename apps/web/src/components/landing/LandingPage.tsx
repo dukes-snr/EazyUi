@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, CircleStar, Gem, LineSquiggle, Mic, Monitor, Palette, Paperclip, Smartphone, Smile, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
+import { ArrowUp, CircleStar, Gauge, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, TrendingUp, Wand2, Workflow, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/hero-bg2.jpg';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -138,12 +138,75 @@ const PATTERN_LIBRARY: Record<PatternTab, PatternCard[]> = {
         },
     ],
 };
+
+const EXPERIENCE_BLOCKS = [
+    {
+        title: 'Idea to polished screen in minutes',
+        description: 'Generate complete layouts with spacing, hierarchy, and visual rhythm that feel crafted.',
+        stat: '< 90 sec first draft',
+        icon: Wand2,
+        glow: 'from-cyan-400/25 to-blue-500/10',
+    },
+    {
+        title: 'Pattern-aware generation',
+        description: 'Mix proven UI patterns with your brand direction, platform rules, and product constraints.',
+        stat: '320+ reusable motifs',
+        icon: Layers3,
+        glow: 'from-indigo-400/25 to-violet-500/10',
+    },
+    {
+        title: 'Production-minded output',
+        description: 'Create screens built with implementation details, not static comps that die in handoff.',
+        stat: 'Design + build alignment',
+        icon: ShieldCheck,
+        glow: 'from-emerald-400/25 to-teal-500/10',
+    },
+] as const;
+
+const WORKFLOW_STEPS = [
+    {
+        step: '01',
+        title: 'Describe the experience',
+        description: 'Drop a focused prompt with audience, goals, and vibe. Add references when needed.',
+        icon: Workflow,
+    },
+    {
+        step: '02',
+        title: 'Refine in real-time',
+        description: 'Iterate tone, layout, and density instantly with guided style controls and model modes.',
+        icon: Gauge,
+    },
+    {
+        step: '03',
+        title: 'Ship with confidence',
+        description: 'Move from concept to production-ready screens with clean structure and strong hierarchy.',
+        icon: TrendingUp,
+    },
+] as const;
+
+const SOCIAL_PROOF = [
+    {
+        quote: 'We replaced 2 weeks of rough wireframing with a single afternoon and shipped faster.',
+        author: 'Product Lead',
+        company: 'B2B SaaS',
+    },
+    {
+        quote: 'The generated flows already respect interaction patterns. We focus on polish, not rescue.',
+        author: 'Senior Designer',
+        company: 'Fintech',
+    },
+    {
+        quote: 'Our team uses EazyUI as the first draft engine for every new feature now.',
+        author: 'Founder',
+        company: 'Consumer App',
+    },
+] as const;
 const CHIP_LABEL_MAX = 34;
 
 function toChipLabel(text: string): string {
     const clean = text.trim();
     if (clean.length <= CHIP_LABEL_MAX) return clean;
-    return `${clean.slice(0, CHIP_LABEL_MAX - 1).trimEnd()}…`;
+    return `${clean.slice(0, CHIP_LABEL_MAX - 1).trimEnd()}...`;
 }
 
 export function LandingPage({ onStart }: LandingPageProps) {
@@ -623,7 +686,134 @@ export function LandingPage({ onStart }: LandingPageProps) {
                         </div>
                     </div>
                 </section>
+
+                <section className="mx-auto mt-24 max-w-[1120px] px-2">
+                    <div className="landing-fade-up text-center">
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-cyan-200/80">Experience Layer</p>
+                        <h3 className="mt-3 text-[30px] md:text-[46px] leading-[1.08] tracking-[-0.02em] font-semibold text-white">
+                            Built for teams who ship
+                            <br />
+                            interfaces that feel premium.
+                        </h3>
+                    </div>
+
+                    <div className="mt-10 grid gap-4 md:grid-cols-3">
+                        {EXPERIENCE_BLOCKS.map((item, index) => {
+                            const Icon = item.icon;
+                            return (
+                                <article
+                                    key={item.title}
+                                    className="landing-fade-up landing-feature-card relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-[2px]"
+                                    style={{ animationDelay: `${110 + index * 130}ms` }}
+                                >
+                                    <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${item.glow} opacity-70`} />
+                                    <div className="relative">
+                                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/20 text-cyan-100">
+                                            <Icon size={18} />
+                                        </div>
+                                        <h4 className="mt-5 text-[18px] font-semibold text-white">{item.title}</h4>
+                                        <p className="mt-3 text-[14px] leading-relaxed text-slate-300">{item.description}</p>
+                                        <div className="mt-6 inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-cyan-100">
+                                            {item.stat}
+                                        </div>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+
+                <section className="mx-auto mt-24 max-w-[1120px] px-2">
+                    <div className="rounded-[30px] border border-white/10 bg-[#0d111b]/80 p-6 md:p-10">
+                        <div className="landing-fade-up text-center">
+                            <p className="text-[11px] uppercase tracking-[0.16em] text-indigo-200/80">Workflow</p>
+                            <h3 className="mt-3 text-[30px] md:text-[42px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
+                                From prompt to production,
+                                <br />
+                                with zero dead ends.
+                            </h3>
+                        </div>
+                        <div className="mt-10 grid gap-4 md:grid-cols-3">
+                            {WORKFLOW_STEPS.map((step, index) => {
+                                const Icon = step.icon;
+                                return (
+                                    <article
+                                        key={step.title}
+                                        className="landing-fade-up relative rounded-2xl border border-white/10 bg-black/20 p-5"
+                                        style={{ animationDelay: `${120 + index * 140}ms` }}
+                                    >
+                                        <div className="mb-4 flex items-center justify-between">
+                                            <span className="text-[12px] font-semibold tracking-[0.14em] text-indigo-200/80">{step.step}</span>
+                                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-400/15 text-indigo-100 ring-1 ring-indigo-300/35">
+                                                <Icon size={14} />
+                                            </span>
+                                        </div>
+                                        <h4 className="text-[17px] font-semibold text-white">{step.title}</h4>
+                                        <p className="mt-2 text-[14px] leading-relaxed text-slate-300">{step.description}</p>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="relative mx-auto mt-24 max-w-[1120px] px-2 pb-16">
+                    <div className="landing-glow-orb landing-glow-orb-left" />
+                    <div className="landing-glow-orb landing-glow-orb-right" />
+
+                    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[#090d16]/90 p-6 md:p-10">
+                        <div className="landing-fade-up text-center">
+                            <p className="text-[11px] uppercase tracking-[0.16em] text-emerald-200/85">Proof</p>
+                            <h3 className="mt-3 text-[30px] md:text-[44px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
+                                Teams use EazyUI to compress design cycles.
+                            </h3>
+                        </div>
+
+                        <div className="mt-8 grid gap-4 md:grid-cols-3">
+                            {SOCIAL_PROOF.map((item, index) => (
+                                <article
+                                    key={item.quote}
+                                    className={`landing-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-5 ${index % 2 === 0 ? 'landing-float-slow' : 'landing-float-fast'}`}
+                                    style={{ animationDelay: `${100 + index * 120}ms` }}
+                                >
+                                    <p className="text-[14px] leading-relaxed text-slate-200">"{item.quote}"</p>
+                                    <div className="mt-5">
+                                        <p className="text-[13px] font-semibold text-white">{item.author}</p>
+                                        <p className="text-[12px] text-slate-400">{item.company}</p>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+
+                        <div className="landing-fade-up mt-10 rounded-2xl border border-white/10 bg-gradient-to-r from-cyan-500/15 via-indigo-500/10 to-blue-500/15 p-6 text-center">
+                            <p className="text-[12px] uppercase tracking-[0.13em] text-cyan-100/85">Ready To Build</p>
+                            <h4 className="mt-2 text-[24px] md:text-[32px] font-semibold tracking-[-0.02em] text-white">
+                                Start your next release on a stronger canvas.
+                            </h4>
+                            <p className="mt-2 text-[14px] text-slate-200">
+                                Describe the product you want to ship and generate your first production-ready screens now.
+                            </p>
+                            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPrompt('Design a modern SaaS workspace with AI automation cards, analytics, and polished onboarding flow')}
+                                    className="rounded-full border border-cyan-200/40 bg-cyan-300/15 px-5 py-2 text-[13px] font-semibold text-cyan-100 hover:bg-cyan-300/20 transition-colors"
+                                >
+                                    Generate SaaS workspace
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPrompt('Create a premium mobile commerce experience with personalized collections and frictionless checkout')}
+                                    className="rounded-full border border-white/20 bg-white/10 px-5 py-2 text-[13px] font-semibold text-white hover:bg-white/15 transition-colors"
+                                >
+                                    Generate mobile commerce
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </main>
         </div>
     );
 }
+

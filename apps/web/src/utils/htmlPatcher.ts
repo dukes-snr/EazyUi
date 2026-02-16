@@ -4,7 +4,8 @@ export type HtmlPatch =
     | { op: 'set_text'; uid: string; text: string }
     | { op: 'set_style'; uid: string; style: Record<string, string> }
     | { op: 'set_attr'; uid: string; attr: Record<string, string> }
-    | { op: 'set_classes'; uid: string; add?: string[]; remove?: string[] };
+    | { op: 'set_classes'; uid: string; add?: string[]; remove?: string[] }
+    | { op: 'delete_node'; uid: string };
 
 type Node = any;
 
@@ -184,6 +185,13 @@ export function applyPatchToHtml(html: string, patch: HtmlPatch): string {
         const filtered = current.filter(c => !remove.includes(c));
         const next = Array.from(new Set([...filtered, ...add]));
         setAttr(target, 'class', next.join(' '));
+    }
+
+    if (patch.op === 'delete_node') {
+        const parent = target.parentNode;
+        if (parent?.childNodes) {
+            parent.childNodes = parent.childNodes.filter((child: Node) => child !== target);
+        }
     }
 
     return serialize(doc);

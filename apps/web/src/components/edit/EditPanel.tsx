@@ -3,7 +3,8 @@ import { useCanvasStore, useDesignStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { apiClient } from '../../api/client';
 import { ensureEditableUids, type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, ImagePlus, Images, Pipette, Redo2, SlidersHorizontal, Sparkles, Undo2, X } from 'lucide-react';
+import { ArrowUpLeft, ImagePlus, Maximize2, Minimize2, Pipette, Redo2, Undo2, X } from 'lucide-react';
+import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectParent, dispatchSelectScreenContainer, dispatchSelectUid } from '../../utils/editMessaging';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
@@ -63,6 +64,15 @@ function parsePadding(value?: string): PaddingValues {
     if (parts.length === 2) return { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1] };
     if (parts.length === 3) return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1] };
     return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3] };
+}
+
+function spacingSummary(value: PaddingValues): string {
+    const t = toPxValue(value.top) || '0';
+    const r = toPxValue(value.right) || '0';
+    const b = toPxValue(value.bottom) || '0';
+    const l = toPxValue(value.left) || '0';
+    if (t === r && r === b && b === l) return t;
+    return `${t} ${r} ${b} ${l}`;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -151,39 +161,6 @@ function hsvToRgb({ h, s, v }: HSV): RGB {
     else if (h < 300) { r = x; g = 0; b = c; }
     else { r = c; g = 0; b = x; }
     return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
-}
-
-function getIframeByScreenId(screenId: string) {
-    return document.querySelector(`iframe[data-screen-id="${screenId}"]`) as HTMLIFrameElement | null;
-}
-
-function clearSelectionOnOtherScreens(activeScreenId: string) {
-    const iframes = Array.from(document.querySelectorAll('iframe[data-screen-id]')) as HTMLIFrameElement[];
-    for (const iframe of iframes) {
-        const screenId = iframe.getAttribute('data-screen-id');
-        if (!screenId || screenId === activeScreenId) continue;
-        iframe.contentWindow?.postMessage({ type: 'editor/clear_selection', screenId }, '*');
-    }
-}
-
-function dispatchPatchToIframe(screenId: string, patch: HtmlPatch) {
-    const iframe = getIframeByScreenId(screenId);
-    iframe?.contentWindow?.postMessage({ type: 'editor/patch', screenId, patch }, '*');
-}
-
-function dispatchSelectParent(screenId: string, uid: string) {
-    const iframe = getIframeByScreenId(screenId);
-    iframe?.contentWindow?.postMessage({ type: 'editor/select_parent', screenId, uid }, '*');
-}
-
-function dispatchSelectUid(screenId: string, uid: string) {
-    const iframe = getIframeByScreenId(screenId);
-    iframe?.contentWindow?.postMessage({ type: 'editor/select_uid', screenId, uid }, '*');
-}
-
-function dispatchSelectScreenContainer(screenId: string) {
-    const iframe = getIframeByScreenId(screenId);
-    iframe?.contentWindow?.postMessage({ type: 'editor/select_screen_container', screenId }, '*');
 }
 
 function ScrubNumberInput({
@@ -424,6 +401,14 @@ export function EditPanel() {
     const [imageSrc, setImageSrc] = useState('');
     const [linkHref, setLinkHref] = useState('');
     const [display, setDisplay] = useState<'block' | 'flex' | 'grid'>('block');
+    const [widthMode, setWidthMode] = useState<'fixed' | 'auto' | 'hug'>('fixed');
+    const [heightMode, setHeightMode] = useState<'fixed' | 'auto' | 'hug'>('fixed');
+    const [rotate, setRotate] = useState('0');
+    const [positionType, setPositionType] = useState('static');
+    const [posX, setPosX] = useState('');
+    const [posY, setPosY] = useState('');
+    const [expandPadding, setExpandPadding] = useState(false);
+    const [expandMargin, setExpandMargin] = useState(false);
     const [flexDir, setFlexDir] = useState('flex-row');
     const [justify, setJustify] = useState('justify-start');
     const [align, setAlign] = useState('items-start');
@@ -438,7 +423,7 @@ export function EditPanel() {
     const [screenImages, setScreenImages] = useState<ScreenImageItem[]>([]);
     const [imageInputs, setImageInputs] = useState<Record<string, string>>({});
     const [uploadTargetUid, setUploadTargetUid] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'ai' | 'edit' | 'images'>('edit');
+    const [activeTab, setActiveTab] = useState<'Ai Edit' | 'style' | 'Images'>('style');
     const [aiPrompt, setAiPrompt] = useState('');
     const [isApplyingAi, setIsApplyingAi] = useState(false);
     const [aiDescription, setAiDescription] = useState('');
@@ -569,8 +554,20 @@ export function EditPanel() {
 
     useEffect(() => {
         const handler = (event: MessageEvent) => {
-            if (!event.data || event.data.type !== 'editor/select') return;
+            if (!event.data || !event.data.type) return;
             if (!isEditMode) return;
+            if (event.data.type === 'editor/request_delete') {
+                const incomingScreenId = event.data.screenId as string | undefined;
+                const uid = event.data.uid as string | undefined;
+                if (!incomingScreenId || !uid) return;
+                if (incomingScreenId !== screenId) return;
+                applyPatch({ op: 'delete_node', uid });
+                if (selected?.uid === uid) {
+                    setSelected(null);
+                }
+                return;
+            }
+            if (event.data.type !== 'editor/select') return;
             const incomingScreenId = event.data.screenId as string | undefined;
             if (!incomingScreenId) return;
             clearSelectionOnOtherScreens(incomingScreenId);
@@ -586,7 +583,7 @@ export function EditPanel() {
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec]);
+    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec, selected?.uid]);
 
     useEffect(() => {
         if (!selected) return;
@@ -595,6 +592,10 @@ export function EditPanel() {
         setTextColor(selected.computedStyle.color || '');
         setWidth(toPxValue(selected.computedStyle.width));
         setHeight(toPxValue(selected.computedStyle.height));
+        const inlineWidth = (selected.inlineStyle?.width || '').toLowerCase();
+        const inlineHeight = (selected.inlineStyle?.height || '').toLowerCase();
+        setWidthMode(inlineWidth.includes('fit-content') ? 'hug' : inlineWidth.includes('px') ? 'fixed' : 'auto');
+        setHeightMode(inlineHeight.includes('fit-content') ? 'hug' : inlineHeight.includes('px') ? 'fixed' : 'auto');
         setRadius(toPxValue(selected.computedStyle.borderRadius));
         setFontSize(toPxValue(selected.computedStyle.fontSize));
         setLineHeight(toPxValue(selected.computedStyle.lineHeight));
@@ -612,6 +613,12 @@ export function EditPanel() {
         setShowIconResults(false);
         setDisplay(selected.computedStyle.display === 'flex' ? 'flex' : selected.computedStyle.display === 'grid' ? 'grid' : 'block');
         setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || selected.computedStyle.zIndex || ''));
+        setPositionType((selected.inlineStyle?.position || selected.computedStyle.position || 'static').toLowerCase());
+        setPosX(toPxValue(selected.inlineStyle?.left || ''));
+        setPosY(toPxValue(selected.inlineStyle?.top || ''));
+        const transformValue = selected.inlineStyle?.transform || '';
+        const rotateMatch = transformValue.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/i);
+        setRotate(rotateMatch?.[1] || '0');
         const ml = selected.computedStyle.marginLeft || '';
         const mr = selected.computedStyle.marginRight || '';
         if (ml === 'auto' && mr === 'auto') setElementAlign('center');
@@ -687,6 +694,23 @@ export function EditPanel() {
             style.position = 'relative';
         }
         patchStyle(style);
+    };
+
+    const patchRotate = (next: string) => {
+        const normalized = next.trim();
+        setRotate(normalized || '0');
+        patchStyle({ transform: normalized ? `rotate(${normalized}deg)` : '' });
+    };
+
+    const patchPosition = (nextPosition: string, nextX: string, nextY: string) => {
+        setPositionType(nextPosition);
+        setPosX(nextX);
+        setPosY(nextY);
+        patchStyle({
+            position: nextPosition,
+            left: nextPosition === 'static' || !nextX ? '' : `${nextX}px`,
+            top: nextPosition === 'static' || !nextY ? '' : `${nextY}px`,
+        });
     };
 
     const applyElementAlign = (next: 'left' | 'center' | 'right') => {
@@ -861,11 +885,10 @@ RULES:
 
     return (
         <aside className="edit-panel open">
-            <div className="h-full flex bg-[#171a20] border-l border-[#2b3038] shadow-2xl">
-                <div className="flex-1 min-w-0 flex flex-col border-r border-[#2b3038]">
+            <div className="h-full flex flex-col bg-[#171a20] border-l border-[#2b3038] shadow-2xl">
                 <div className="px-4 py-3 border-b border-[#2b3038] flex items-center justify-between">
                     <div>
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Inspector</div>
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Style</div>
                         <div className="text-sm text-white/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
                     </div>
                     <button
@@ -891,11 +914,26 @@ RULES:
                     </button>
                 </div>
 
+                <div className="px-4 pt-3 pb-2 border-b border-[#2b3038]">
+                    <div className="inline-flex rounded-xl border border-white/10 bg-[#16181d] p-1 w-full">
+                        {(['Ai Edit', 'style', 'Images'] as const).map((tab) => (
+                            <button
+                                key={tab}
+                                type="button"
+                                onClick={() => setActiveTab(tab)}
+                                className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${activeTab === tab ? 'bg-[#2a2f37] text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                            >
+                                {tab}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 <div className="hide-scrollbar-panel flex-1 overflow-y-auto px-4 py-4 space-y-5 text-gray-200">
-                    {!selected && activeTab === 'edit' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
-                    {activeTab === 'ai' && (
+                    {!selected && activeTab === 'style' && <div className="text-sm text-gray-500 leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
+                    {activeTab === 'Ai Edit' && (
                         <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">AI Component Edit</div>
+                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Ai Edit</div>
                             {!selected ? (
                                 <div className="rounded-xl border border-white/10 bg-[#16181d] px-3 py-3 text-xs text-gray-400">
                                     Select a component on the canvas, then describe what to change.
@@ -992,7 +1030,7 @@ RULES:
                         </section>
                     )}
 
-                    {!!selected && activeTab === 'edit' && (
+                    {!!selected && activeTab === 'style' && (
                         <>
                             <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selection</div>
@@ -1006,6 +1044,15 @@ RULES:
                                             <ArrowUpLeft size={12} />
                                             Parent
                                         </button>
+                                        <button
+                                            onClick={() => {
+                                                applyPatch({ op: 'delete_node', uid: selected.uid });
+                                                setSelected(null);
+                                            }}
+                                            className="text-xs px-2 py-1 rounded-md bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                                        >
+                                            Delete
+                                        </button>
                                     </div>
                                 </div>
                                 {selected.breadcrumb && selected.breadcrumb.length > 0 && (
@@ -1014,6 +1061,240 @@ RULES:
                                             <button key={crumb.uid} onClick={() => dispatchSelectUid(screenId!, crumb.uid)} className="px-2 py-1 rounded-md bg-white/5 hover:bg-white/10">
                                                 {crumb.tagName.toLowerCase()}
                                             </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-gray-300">Breakpoint</div>
+                                <div className="space-y-2">
+                                    <div className="grid grid-cols-[52px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">W</div>
+                                        <div className="grid grid-cols-[1fr_84px] gap-2">
+                                            <ScrubNumberInput
+                                                value={width}
+                                                onChangeValue={(next) => {
+                                                    setWidth(next);
+                                                    if (widthMode === 'fixed') patchStyle({ width: next ? `${next}px` : '' });
+                                                }}
+                                                min={0}
+                                            />
+                                            <select
+                                                value={widthMode}
+                                                onChange={(e) => {
+                                                    const next = e.target.value as 'fixed' | 'auto' | 'hug';
+                                                    setWidthMode(next);
+                                                    patchStyle({ width: next === 'fixed' && width ? `${width}px` : next === 'hug' ? 'fit-content' : '' });
+                                                }}
+                                                className={selectBase}
+                                            >
+                                                <option className="bg-[#121219]" value="fixed">Fixed</option>
+                                                <option className="bg-[#121219]" value="hug">Hug</option>
+                                                <option className="bg-[#121219]" value="auto">Auto</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-[52px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">H</div>
+                                        <div className="grid grid-cols-[1fr_84px] gap-2">
+                                            <ScrubNumberInput
+                                                value={height}
+                                                onChangeValue={(next) => {
+                                                    setHeight(next);
+                                                    if (heightMode === 'fixed') patchStyle({ height: next ? `${next}px` : '' });
+                                                }}
+                                                min={0}
+                                            />
+                                            <select
+                                                value={heightMode}
+                                                onChange={(e) => {
+                                                    const next = e.target.value as 'fixed' | 'auto' | 'hug';
+                                                    setHeightMode(next);
+                                                    patchStyle({ height: next === 'fixed' && height ? `${height}px` : next === 'hug' ? 'fit-content' : '' });
+                                                }}
+                                                className={selectBase}
+                                            >
+                                                <option className="bg-[#121219]" value="fixed">Fixed</option>
+                                                <option className="bg-[#121219]" value="hug">Hug</option>
+                                                <option className="bg-[#121219]" value="auto">Auto</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-2">
+                                <div className="text-xs font-semibold text-gray-300">Rotate</div>
+                                <div className="grid grid-cols-[52px_1fr] items-center gap-3">
+                                    <div className="text-xs text-gray-400">R</div>
+                                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                                        <ScrubNumberInput
+                                            value={rotate}
+                                            onChangeValue={(next) => patchRotate(next)}
+                                        />
+                                        <div className="h-10 rounded-lg border border-white/10 bg-[#16181d] px-3 text-xs text-gray-400 flex items-center">deg</div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            {showLayout && (
+                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                    <div className="text-xs font-semibold text-gray-300">Layout</div>
+                                    <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Mode</div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {(['block', 'flex', 'grid'] as const).map((type) => (
+                                                <button
+                                                    key={type}
+                                                    onClick={() => {
+                                                        setDisplay(type);
+                                                        const add = type === 'block' ? [] : [type];
+                                                        applyPatch({ op: 'set_classes', uid: selected.uid, add, remove: DISPLAY_CLASSES.filter((c) => c !== type) });
+                                                    }}
+                                                    className={`rounded-lg border px-2 py-2 text-xs capitalize ${display === type ? 'border-indigo-300/70 bg-indigo-500/20 text-indigo-100' : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10'}`}
+                                                >
+                                                    {type}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {display === 'flex' && (
+                                        <div className="space-y-2">
+                                            <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                                <div className="text-xs text-gray-400">Direction</div>
+                                                <select value={flexDir} onChange={(e) => { setFlexDir(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: FLEX_DIR_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
+                                                    {FLEX_DIR_CLASSES.map((dir) => <option className="bg-[#121219]" key={dir} value={dir}>{dir}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                                <div className="text-xs text-gray-400">Align</div>
+                                                <select value={align} onChange={(e) => { setAlign(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: ALIGN_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
+                                                    {ALIGN_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                                <div className="text-xs text-gray-400">Justify</div>
+                                                <select value={justify} onChange={(e) => { setJustify(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: JUSTIFY_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
+                                                    {JUSTIFY_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                                <div className="text-xs text-gray-400">Gap</div>
+                                                <select value={gap} onChange={(e) => { setGap(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: GAP_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
+                                                    {GAP_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-gray-300">Position</div>
+                                <div className="space-y-2">
+                                    <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">X / Y</div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <ScrubNumberInput
+                                                value={posX}
+                                                onChangeValue={(next) => patchPosition(positionType, next, posY)}
+                                                placeholder="X"
+                                            />
+                                            <ScrubNumberInput
+                                                value={posY}
+                                                onChangeValue={(next) => patchPosition(positionType, posX, next)}
+                                                placeholder="Y"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Type</div>
+                                        <select
+                                            value={positionType}
+                                            onChange={(e) => patchPosition(e.target.value, posX, posY)}
+                                            className={selectBase}
+                                        >
+                                            <option className="bg-[#121219]" value="static">Static</option>
+                                            <option className="bg-[#121219]" value="relative">Relative</option>
+                                            <option className="bg-[#121219]" value="absolute">Absolute</option>
+                                            <option className="bg-[#121219]" value="fixed">Fixed</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                <div className="grid grid-cols-[72px_1fr_auto] items-center gap-3">
+                                    <div className="text-xs text-gray-400">Padding</div>
+                                    <ScrubNumberInput
+                                        value={spacingSummary(padding)}
+                                        onChangeValue={(next) => {
+                                            const clean = toPxValue(next);
+                                            if (!clean) return;
+                                            setPadding({ top: clean, right: clean, bottom: clean, left: clean });
+                                            patchStyle({ padding: `${clean}px` });
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setExpandPadding((v) => !v)}
+                                        className="h-9 w-9 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 inline-flex items-center justify-center"
+                                        title={expandPadding ? 'Collapse padding sides' : 'Expand padding sides'}
+                                    >
+                                        {expandPadding ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                                    </button>
+                                </div>
+                                {expandPadding && (
+                                    <div className="ml-[75px] grid grid-cols-2 gap-2">
+                                        {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                                            <ScrubNumberInput
+                                                key={side}
+                                                value={toPxValue(padding[side])}
+                                                onChangeValue={(next) => {
+                                                    setPadding((prev) => ({ ...prev, [side]: next }));
+                                                    patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
+                                                }}
+                                                placeholder={side}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                <div className="grid grid-cols-[72px_1fr_auto] items-center gap-3">
+                                    <div className="text-xs text-gray-400">Margin</div>
+                                    <ScrubNumberInput
+                                        value={spacingSummary(margin)}
+                                        onChangeValue={(next) => {
+                                            const clean = toPxValue(next);
+                                            if (!clean) return;
+                                            setMargin({ top: clean, right: clean, bottom: clean, left: clean });
+                                            patchStyle({ margin: `${clean}px` });
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setExpandMargin((v) => !v)}
+                                        className="h-9 w-9 rounded-lg border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 inline-flex items-center justify-center"
+                                        title={expandMargin ? 'Collapse margin sides' : 'Expand margin sides'}
+                                    >
+                                        {expandMargin ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                                    </button>
+                                </div>
+                                {expandMargin && (
+                                    <div className="ml-[75px] grid grid-cols-2 gap-2">
+                                        {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                                            <ScrubNumberInput
+                                                key={side}
+                                                value={toPxValue(margin[side])}
+                                                onChangeValue={(next) => {
+                                                    setMargin((prev) => ({ ...prev, [side]: next }));
+                                                    patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
+                                                }}
+                                                placeholder={side}
+                                            />
                                         ))}
                                     </div>
                                 )}
@@ -1184,11 +1465,12 @@ RULES:
                                 </section>
                             )}
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 grid grid-cols-2 gap-3">
-                                {showColor && (
-                                    <>
-                                        <div className="space-y-2">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Fill</div>
+                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
+                                <div className="text-xs font-semibold text-gray-300">Style & Appearance</div>
+                                <div className="space-y-2">
+                                    {showColor && (
+                                        <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                            <div className="text-xs text-gray-400">Fill</div>
                                             <ColorWheelInput
                                                 value={bgColor}
                                                 onChange={(next) => {
@@ -1197,8 +1479,10 @@ RULES:
                                                 }}
                                             />
                                         </div>
-                                        <div className="space-y-2">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Text Color</div>
+                                    )}
+                                    {showColor && (
+                                        <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                            <div className="text-xs text-gray-400">Text</div>
                                             <ColorWheelInput
                                                 value={textColor}
                                                 onChange={(next) => {
@@ -1207,50 +1491,50 @@ RULES:
                                                 }}
                                             />
                                         </div>
-                                    </>
-                                )}
-                                <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Border Color</div>
-                                    <ColorWheelInput
-                                        value={borderColor}
-                                        onChange={(next) => {
-                                            setBorderColor(next);
-                                            patchStyle({ 'border-color': next });
-                                        }}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Border Width</div>
-                                    <ScrubNumberInput
-                                        value={borderWidth}
-                                        onChangeValue={(next) => {
-                                            setBorderWidth(next);
-                                            patchStyle({ 'border-width': next ? `${next}px` : '' });
-                                        }}
-                                        min={0}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Opacity</div>
-                                    <ScrubNumberInput
-                                        value={opacity}
-                                        onChangeValue={(next) => {
-                                            setOpacity(next);
-                                            patchStyle({ opacity: next });
-                                        }}
-                                        step={0.05}
-                                        min={0}
-                                        max={1}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Shadow</div>
-                                    <select value={boxShadow} onChange={(e) => { setBoxShadow(e.target.value); patchStyle({ 'box-shadow': e.target.value }); }} className={selectBase}>
-                                        <option className="bg-[#121219]" value="">None</option>
-                                        <option className="bg-[#121219]" value="0 12px 34px rgba(0,0,0,.28)">Soft</option>
-                                        <option className="bg-[#121219]" value="0 20px 60px rgba(0,0,0,.22)">Glow</option>
-                                        <option className="bg-[#121219]" value="0 10px 40px -10px rgba(0,0,0,.35)">Deep</option>
-                                    </select>
+                                    )}
+                                    <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Border Color</div>
+                                        <ColorWheelInput
+                                            value={borderColor}
+                                            onChange={(next) => {
+                                                setBorderColor(next);
+                                                patchStyle({ 'border-color': next });
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Border</div>
+                                        <ScrubNumberInput
+                                            value={borderWidth}
+                                            onChangeValue={(next) => {
+                                                setBorderWidth(next);
+                                                patchStyle({ 'border-width': next ? `${next}px` : '' });
+                                            }}
+                                            min={0}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Opacity</div>
+                                        <ScrubNumberInput
+                                            value={opacity}
+                                            onChangeValue={(next) => {
+                                                setOpacity(next);
+                                                patchStyle({ opacity: next });
+                                            }}
+                                            step={0.05}
+                                            min={0}
+                                            max={1}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-[84px_1fr] items-center gap-3">
+                                        <div className="text-xs text-gray-400">Effect</div>
+                                        <select value={boxShadow} onChange={(e) => { setBoxShadow(e.target.value); patchStyle({ 'box-shadow': e.target.value }); }} className={selectBase}>
+                                            <option className="bg-[#121219]" value="">Add effect</option>
+                                            <option className="bg-[#121219]" value="0 12px 34px rgba(0,0,0,.28)">Soft</option>
+                                            <option className="bg-[#121219]" value="0 20px 60px rgba(0,0,0,.22)">Glow</option>
+                                            <option className="bg-[#121219]" value="0 10px 40px -10px rgba(0,0,0,.35)">Deep</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </section>
 
@@ -1406,98 +1690,12 @@ RULES:
                                 </section>
                             )}
 
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Padding</div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                        <div key={side} className="space-y-1">
-                                            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">{side}</div>
-                                            <ScrubNumberInput
-                                                value={toPxValue(padding[side])}
-                                                onChangeValue={(next) => {
-                                                    setPadding((prev) => ({ ...prev, [side]: next }));
-                                                    patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
-                                                }}
-                                                placeholder={side}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
-
-                            <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Margin</div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                        <div key={side} className="space-y-1">
-                                            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">{side}</div>
-                                            <ScrubNumberInput
-                                                value={toPxValue(margin[side])}
-                                                onChangeValue={(next) => {
-                                                    setMargin((prev) => ({ ...prev, [side]: next }));
-                                                    patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
-                                                }}
-                                                placeholder={side}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
-
-                            {showLayout && (
-                                <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Layout</div>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {(['block', 'flex', 'grid'] as const).map((type) => (
-                                            <button
-                                                key={type}
-                                                onClick={() => {
-                                                    setDisplay(type);
-                                                    const add = type === 'block' ? [] : [type];
-                                                    applyPatch({ op: 'set_classes', uid: selected.uid, add, remove: DISPLAY_CLASSES.filter((c) => c !== type) });
-                                                }}
-                                                className={`rounded-lg px-2 py-2 text-xs ${display === type ? 'bg-indigo-500/30 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'}`}
-                                            >
-                                                {type}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    {display === 'flex' && (
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="space-y-2">
-                                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Direction</div>
-                                                <select value={flexDir} onChange={(e) => { setFlexDir(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: FLEX_DIR_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {FLEX_DIR_CLASSES.map((dir) => <option className="bg-[#121219]" key={dir} value={dir}>{dir}</option>)}
-                                                </select>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Gap</div>
-                                                <select value={gap} onChange={(e) => { setGap(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: GAP_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {GAP_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
-                                                </select>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Justify</div>
-                                                <select value={justify} onChange={(e) => { setJustify(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: JUSTIFY_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {JUSTIFY_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
-                                                </select>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Align</div>
-                                                <select value={align} onChange={(e) => { setAlign(e.target.value); applyPatch({ op: 'set_classes', uid: selected.uid, add: [e.target.value], remove: ALIGN_CLASSES.filter((c) => c !== e.target.value) }); }} className={selectBase}>
-                                                    {ALIGN_CLASSES.map((entry) => <option className="bg-[#121219]" key={entry} value={entry}>{entry}</option>)}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    )}
-                                </section>
-                            )}
                         </>
                     )}
 
-                    {activeTab === 'images' && (
+                    {activeTab === 'Images' && (
                         <section className="pb-4 border-b border-[#2b3038] last:border-b-0 space-y-3">
-                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Images On Screen</div>
+                            <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Images</div>
                             <input
                                 ref={globalImageFileInputRef}
                                 type="file"
@@ -1613,36 +1811,6 @@ RULES:
                         </section>
                     )}
                 </div>
-                </div>
-                <aside className="w-[50px] flex flex-col items-center justify-start gap-3 py-4 bg-[#13161b]">
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('ai')}
-                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'ai' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
-                        aria-label="AI tab"
-                        title="AI"
-                    >
-                        <Sparkles size={18} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('edit')}
-                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'edit' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
-                        aria-label="Edit tab"
-                        title="Edit"
-                    >
-                        <SlidersHorizontal size={18} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('images')}
-                        className={`h-11 w-7 rounded-xl border flex items-center justify-center transition-colors ${activeTab === 'images' ? 'border-indigo-300/70 bg-white/0 text-indigo-300' : 'border-white/10 bg-white/0 text-gray-400 hover:bg-white/10'}`}
-                        aria-label="Images tab"
-                        title="Images"
-                    >
-                        <Images size={18} />
-                    </button>
-                </aside>
             </div>
         </aside>
     );

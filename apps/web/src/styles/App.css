@@ -19,8 +19,8 @@
 }
 
 .edit-panel.open {
-    width: 480px;
-    min-width: 480px;
+    width: 320px;
+    min-width: 320px;
 }
 
 .hide-scrollbar-panel {
@@ -32,6 +32,118 @@
     width: 0;
     height: 0;
     display: none;
+}
+
+.layers-panel {
+    width: 380px;
+    min-width: 380px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #12171e;
+    border-right: 1px solid #2a3140;
+}
+
+.layers-panel-header {
+    padding: 12px;
+    border-bottom: 1px solid #2a3140;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.layers-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #d1d5db;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.layers-screen-select {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: #171c24;
+    color: #d1d5db;
+    font-size: 12px;
+    padding: 7px 9px;
+    outline: none;
+    appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, #9ca3af 50%),
+        linear-gradient(135deg, #9ca3af 50%, transparent 50%);
+    background-position:
+        calc(100% - 16px) calc(50% - 2px),
+        calc(100% - 10px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 28px;
+}
+
+.layers-screen-select:focus {
+    border-color: rgba(99, 102, 241, 0.65);
+}
+
+.layers-tree {
+    flex: 1;
+    overflow: auto;
+    padding: 10px 12px;
+}
+
+.layers-empty {
+    padding: 12px;
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.layers-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
+    padding-right: 8px;
+}
+
+.layers-row.selected {
+    background: rgba(99, 102, 241, 0.18);
+}
+
+.layers-toggle {
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.layers-toggle:disabled {
+    opacity: 0.6;
+}
+
+.layers-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #64748b;
+}
+
+.layers-label {
+    border: none;
+    background: transparent;
+    color: #d1d5db;
+    font-size: 12px;
+    text-align: left;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0;
 }
 
 /* ============================================================================

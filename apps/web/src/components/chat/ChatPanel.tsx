@@ -1177,16 +1177,18 @@ const handleEdit = async () => {
                     }`}
             >
                 {/* Collapse Button Header */}
-                <div className="absolute top-4 -right-12 z-20">
-                    <button
-                        onClick={() => setIsCollapsed(!isCollapsed)}
-                        className={`p-2 rounded-lg bg-[#22262D] text-gray-400 hover:text-white border border-white/10 shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                            }`}
-                        title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-                    >
-                        {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-                    </button>
-                </div>
+                {!isEditMode && (
+                    <div className="absolute top-4 -right-12 z-20">
+                        <button
+                            onClick={() => setIsCollapsed(!isCollapsed)}
+                            className={`p-2 rounded-lg bg-[#22262D] text-gray-400 hover:text-white border border-white/10 shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                }`}
+                            title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                        >
+                            {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+                        </button>
+                    </div>
+                )}
 
                 <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                     {/* Header / Date */}
@@ -1197,13 +1199,15 @@ const handleEdit = async () => {
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </p>
                         </div>
-                        <button
-                            onClick={() => setIsCollapsed(true)}
-                            className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
-                            title="Collapse Sidebar"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
+                        {!isEditMode && (
+                            <button
+                                onClick={() => setIsCollapsed(true)}
+                                className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+                                title="Collapse Sidebar"
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+                        )}
                     </div>
 
                     {/* Messages */}
