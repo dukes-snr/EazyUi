@@ -10,6 +10,7 @@ import { generateDesign, editDesign, completePartialScreen, generateImageAsset, 
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
+import { getPlannerModels, runDesignPlanner, type PlannerPhase } from './services/designPlanner.js';
 
 const fastify = Fastify({
     logger: true,
@@ -94,6 +95,7 @@ fastify.get('/', async (_request, reply) => {
       <p><code>POST /api/edit</code></p>
       <p><code>POST /api/generate-image</code></p>
       <p><code>POST /api/transcribe-audio</code></p>
+      <p><code>POST /api/plan</code></p>
     </div>
   </div>
 </body>
@@ -316,8 +318,54 @@ fastify.get('/api/models', async () => {
     return {
         groq: Object.keys(GROQ_MODELS),
         nvidia: Object.keys(NVIDIA_MODELS),
+        planner: getPlannerModels(),
         defaultTextModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
     };
+});
+
+fastify.post<{
+    Body: {
+        phase?: PlannerPhase;
+        appPrompt: string;
+        platform?: 'mobile' | 'tablet' | 'desktop';
+        stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+        screenCountDesired?: number;
+        screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+        preferredModel?: string;
+    };
+}>('/api/plan', async (request, reply) => {
+    const {
+        phase = 'plan',
+        appPrompt,
+        platform,
+        stylePreset,
+        screenCountDesired,
+        screensGenerated,
+        preferredModel,
+    } = request.body;
+
+    if (!appPrompt?.trim()) {
+        return reply.status(400).send({ error: 'appPrompt is required' });
+    }
+
+    try {
+        const plan = await runDesignPlanner({
+            phase,
+            appPrompt: appPrompt.trim(),
+            platform,
+            stylePreset,
+            screenCountDesired,
+            screensGenerated,
+            preferredModel,
+        });
+        return plan;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to create planner output',
+            message: (error as Error).message,
+        });
+    }
 });
 
 fastify.get<{

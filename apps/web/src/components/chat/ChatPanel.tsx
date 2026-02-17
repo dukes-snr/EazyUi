@@ -2,9 +2,9 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useState, useRef, useEffect, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
-import { apiClient } from '../../api/client';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
@@ -62,6 +62,160 @@ function stripMarkdownBold(text: string): string {
 
 function stripUiTags(text: string): string {
     return text.replace(/\[(\/)?(h1|h2|h3|p|li|b|i)\]/gi, '');
+}
+
+function makePlannerTargetedGenerationPrompt(basePrompt: string, screenNames: string[], existingScreenNames: string[]): string {
+    const targets = screenNames.map((name) => `- ${name}`).join('\n');
+    const existing = existingScreenNames.length > 0
+        ? existingScreenNames.map((name) => `- ${name}`).join('\n')
+        : '- none';
+
+    return `${basePrompt}
+
+Follow-up generation task:
+Generate EXACTLY these screens:
+${targets}
+
+Do NOT regenerate existing screens:
+${existing}
+
+Maintain visual consistency with existing screens:
+- keep the same token palette
+- keep the same motif and typography direction
+- keep the same navigation language`;
+}
+
+function formatPostgenSuggestionText(postgen: PlannerPostgenResponse): string {
+    const gaps = postgen.gapsDetected.slice(0, 3).map((gap) => `[li]${gap}[/li]`).join('\n');
+    const next = postgen.nextScreenSuggestions
+        .slice(0, 3)
+        .map((item) => `[li][b]${item.name}[/b]: ${item.why}[/li]`)
+        .join('\n');
+
+    return `[h2]Recommended Next Screens[/h2]
+[p]Based on what is already generated, these are the highest-impact next moves.[/p]
+[h3]Gaps detected[/h3]
+${gaps || '[li]No critical gaps detected.[/li]'}
+[h3]Suggested next screens[/h3]
+${next || '[li]No additional screen suggestions.[/li]'}`;
+}
+
+type PlannerCtaPayload = {
+    callToAction?: {
+        primary?: { label: string; screenNames: string[] };
+        secondary?: { label: string; screenNames: string[] };
+    };
+    nextScreenSuggestions?: Array<{ name: string; why: string; priority: number }>;
+};
+
+type ComposerSuggestion = {
+    key: string;
+    messageId: string;
+    label: string;
+    screenNames: string[];
+    tone: 'primary' | 'secondary';
+};
+
+function buildComposerSuggestionKey(screenNames: string[]): string {
+    return screenNames.map((name) => name.trim().toLowerCase()).filter(Boolean).join('|');
+}
+
+function deriveMessageSuggestions(
+    messageId: string,
+    postgen: PlannerPostgenResponse | PlannerCtaPayload | undefined,
+    usedKeys: Set<string>
+): ComposerSuggestion[] {
+    if (!postgen) return [];
+
+    const next: ComposerSuggestion[] = [];
+    const seen = new Set<string>();
+
+    const pushSuggestion = (label: string, screenNames: string[], tone: 'primary' | 'secondary') => {
+        if (!screenNames.length) return;
+        const key = buildComposerSuggestionKey(screenNames);
+        if (!key || seen.has(key) || usedKeys.has(key)) return;
+        seen.add(key);
+        next.push({
+            key,
+            messageId,
+            label,
+            screenNames,
+            tone,
+        });
+    };
+
+    if (postgen?.callToAction?.primary) {
+        pushSuggestion(postgen.callToAction.primary.label, postgen.callToAction.primary.screenNames, 'primary');
+        if (postgen.callToAction.primary.screenNames.length > 1) {
+            postgen.callToAction.primary.screenNames.forEach((name) => {
+                pushSuggestion(`Generate ${name}`, [name], 'secondary');
+            });
+        }
+    }
+    if (postgen?.callToAction?.secondary) {
+        pushSuggestion(postgen.callToAction.secondary.label, postgen.callToAction.secondary.screenNames, 'secondary');
+        if (postgen.callToAction.secondary.screenNames.length > 1) {
+            postgen.callToAction.secondary.screenNames.forEach((name) => {
+                pushSuggestion(`Generate ${name}`, [name], 'secondary');
+            });
+        }
+    }
+
+    const extra = (postgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined))?.nextScreenSuggestions || [];
+    extra.forEach((item) => {
+        pushSuggestion(`Generate ${item.name}`, [item.name], 'secondary');
+    });
+
+    return next.slice(0, 8);
+}
+
+function buildPlanCallToAction(plan: PlannerPlanResponse): PlannerCtaPayload['callToAction'] | undefined {
+    const requested = (plan.generationSuggestion?.generateTheseNow || []).filter(Boolean);
+    const recommended = plan.recommendedScreens
+        .slice()
+        .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+        .map((item) => item.name)
+        .filter(Boolean);
+
+    const unique = [...new Set([...(requested.length > 0 ? requested : []), ...recommended])];
+    const primary = unique[0];
+    const secondary = unique[1];
+    if (!primary && !secondary) return undefined;
+
+    return {
+        primary: primary
+            ? {
+                label: `Generate ${primary}`,
+                screenNames: [primary],
+            }
+            : undefined,
+        secondary: secondary
+            ? {
+                label: `Generate ${secondary}`,
+                screenNames: [secondary],
+            }
+            : undefined,
+    };
+}
+
+function formatPlanSuggestionText(plan: PlannerPlanResponse): string {
+    const assumptions = plan.assumptions.slice(0, 4).map((item) => `[li]${item}[/li]`).join('\n');
+    const screens = plan.recommendedScreens
+        .slice()
+        .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+        .slice(0, 4)
+        .map((item) => `[li][b]${item.name}[/b]: ${item.goal || item.why || 'Core screen in the product flow.'}[/li]`)
+        .join('\n');
+    const questions = plan.questions.slice(0, 4).map((item) => `[li]${item.q}[/li]`).join('\n');
+
+    return `[h2]Plan Ready${plan.appName ? `: ${plan.appName}` : ''}[/h2]
+[p]${plan.oneLineConcept || 'Core concept and flow defined from your prompt.'}[/p]
+[h3]Recommended screens[/h3]
+${screens || '[li]No screens suggested.[/li]'}
+[h3]Assumptions[/h3]
+${assumptions || '[li]No explicit assumptions.[/li]'}
+[h3]Questions to refine[/h3]
+${questions || '[li]No blocking questions.[/li]'}`;
 }
 
 function getThinkingSeconds(message: any): number | null {
@@ -241,20 +395,45 @@ function renderTaggedDescription(text: string): ReactNode {
     );
 }
 
-function TypedTaggedText({ text, className, speed = 14 }: { text: string; className?: string; speed?: number }) {
+function TypedTaggedText({
+    text,
+    className,
+    speed = 14,
+    onDone,
+}: {
+    text: string;
+    className?: string;
+    speed?: number;
+    onDone?: () => void;
+}) {
     const [visibleCount, setVisibleCount] = useState(0);
+    const doneRef = useRef(false);
+    const onDoneRef = useRef(onDone);
 
     useEffect(() => {
+        onDoneRef.current = onDone;
+    }, [onDone]);
+
+    useEffect(() => {
+        doneRef.current = false;
         setVisibleCount(0);
         const timer = window.setInterval(() => {
             setVisibleCount((prev) => {
                 if (prev >= text.length) {
                     window.clearInterval(timer);
+                    if (!doneRef.current) {
+                        doneRef.current = true;
+                        onDoneRef.current?.();
+                    }
                     return prev;
                 }
                 return prev + 1;
             });
         }, speed);
+        if (!text.length) {
+            doneRef.current = true;
+            onDoneRef.current?.();
+        }
         return () => window.clearInterval(timer);
     }, [text, speed]);
 
@@ -475,14 +654,21 @@ type ChatPanelProps = {
 };
 
 export function ChatPanel({ initialRequest }: ChatPanelProps) {
+    const PLAN_MODE_STORAGE_KEY = 'eazyui:plan-mode';
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [planMode, setPlanMode] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem('eazyui:plan-mode') === '1';
+    });
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
+    const [typedDoneByMessageId, setTypedDoneByMessageId] = useState<Record<string, boolean>>({});
+    const [usedSuggestionKeysByMessage, setUsedSuggestionKeysByMessage] = useState<Record<string, string[]>>({});
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -557,6 +743,35 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     };
 
     const THUMB_W = 68;
+
+    useEffect(() => {
+        const validIds = new Set(messages.map((message) => message.id));
+        setTypedDoneByMessageId((prev) => {
+            let changed = false;
+            const next: Record<string, boolean> = {};
+            Object.keys(prev).forEach((id) => {
+                if (validIds.has(id)) {
+                    next[id] = prev[id];
+                } else {
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+
+        setUsedSuggestionKeysByMessage((prev) => {
+            let changed = false;
+            const next: Record<string, string[]> = {};
+            Object.keys(prev).forEach((id) => {
+                if (validIds.has(id)) {
+                    next[id] = prev[id];
+                } else {
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [messages]);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -763,15 +978,153 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
     };
 
+    const togglePlanMode = () => {
+        setPlanMode((prev) => {
+            const next = !prev;
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem(PLAN_MODE_STORAGE_KEY, next ? '1' : '0');
+            }
+            pushToast({
+                kind: 'info',
+                title: next ? 'Plan mode enabled' : 'Plan mode disabled',
+                message: next
+                    ? 'Send now runs planner-first so you can pick what to generate next.'
+                    : 'Send runs direct generation flow.',
+                durationMs: 3200,
+            });
+            return next;
+        });
+    };
+
+    const handlePlannerCta = (messageId: string, screenNames: string[], label?: string) => {
+        if (!Array.isArray(screenNames) || screenNames.length === 0 || isGenerating) return;
+        const source = useChatStore.getState().messages.find((item) => item.id === messageId);
+        const basePrompt = String(source?.meta?.plannerPrompt || '').trim();
+        if (!basePrompt) return;
+        const suggestionKey = buildComposerSuggestionKey(screenNames);
+        if (suggestionKey) {
+            setUsedSuggestionKeysByMessage((prev) => {
+                const existing = prev[messageId] || [];
+                if (existing.includes(suggestionKey)) return prev;
+                return {
+                    ...prev,
+                    [messageId]: [...existing, suggestionKey],
+                };
+            });
+        }
+
+        updateMessage(messageId, {
+            meta: {
+                ...(source?.meta || {}),
+                plannerActionAt: Date.now(),
+                plannerActionScreens: screenNames,
+            }
+        });
+
+        const visiblePrompt = (label || `Generate ${screenNames.join(' + ')}`).trim();
+        void handleGenerate(visiblePrompt, [], selectedPlatform, stylePreset, modelProfile, screenNames, basePrompt);
+    };
+
+    const handlePlanOnly = async () => {
+        const requestPrompt = prompt.trim();
+        if (!requestPrompt || isGenerating) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            notifyError('No internet connection', 'Reconnect and try planning again.');
+            return;
+        }
+
+        const imagesToSend = [...images];
+        const userMsgId = addMessage('user', requestPrompt, imagesToSend);
+        const assistantMsgId = addMessage('assistant', 'Planning your flow...');
+        updateMessage(userMsgId, { meta: { livePreview: false } });
+
+        setPrompt('');
+        setImages([]);
+        setGenerating(true);
+        startLoadingToast(
+            generationLoadingToastRef,
+            'Planning feature flow',
+            'Analyzing requirements and suggesting next screens...'
+        );
+
+        const startTime = Date.now();
+        const hasScreens = Boolean(spec?.screens?.length);
+
+        try {
+            const response = await apiClient.plan({
+                phase: hasScreens ? 'postgen' : 'plan',
+                appPrompt: requestPrompt,
+                platform: selectedPlatform,
+                stylePreset,
+                screenCountDesired: 2,
+                screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
+                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+            });
+
+            if (response.phase === 'postgen') {
+                updateMessage(assistantMsgId, {
+                    content: formatPostgenSuggestionText(response),
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        plannerPrompt: requestPrompt,
+                        plannerPostgen: response,
+                    }
+                });
+            } else {
+                const cta = buildPlanCallToAction(response);
+                const planExtras = response.recommendedScreens
+                    .slice()
+                    .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+                    .slice(0, 6)
+                    .map((item, index) => ({
+                        name: item.name,
+                        why: item.goal || item.why || 'High-value next screen from the plan.',
+                        priority: item.priority || index + 1,
+                    }));
+                updateMessage(assistantMsgId, {
+                    content: formatPlanSuggestionText(response),
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        plannerPrompt: requestPrompt,
+                        plannerPostgen: { callToAction: cta, nextScreenSuggestions: planExtras } as PlannerCtaPayload,
+                        plannerPlan: response,
+                    }
+                });
+            }
+
+            notifySuccess('Plan ready', 'Review suggested screens and generate from the CTA buttons.');
+        } catch (error) {
+            updateMessage(assistantMsgId, {
+                content: `Error: ${(error as Error).message}`,
+                status: 'error',
+                meta: {
+                    ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
+                    thinkingMs: Date.now() - startTime,
+                }
+            });
+            notifyError('Planning failed', (error as Error).message || 'Unable to create a plan.');
+        } finally {
+            setGenerating(false);
+            clearLoadingToast(generationLoadingToastRef);
+        }
+    };
+
     const handleGenerate = async (
         incomingPrompt?: string,
         incomingImages?: string[],
         incomingPlatform?: 'mobile' | 'tablet' | 'desktop',
         incomingStylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful',
-        incomingModelProfile?: DesignModelProfile
+        incomingModelProfile?: DesignModelProfile,
+        incomingTargetScreens?: string[],
+        incomingContextPrompt?: string
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
+        const appPromptForPlanning = (incomingContextPrompt ?? requestPrompt).trim();
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             notifyError('No internet connection', 'Reconnect and try generating again.');
             return;
@@ -783,6 +1136,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const styleToUse = incomingStylePreset || stylePreset;
         const modelProfileToUse = incomingModelProfile || modelProfile;
         const preferredModel = getPreferredTextModel(modelProfileToUse);
+        const existingScreenNames = (spec?.screens || []).map((screen) => screen.name);
         if (!incomingPrompt) {
             setImages([]);
         }
@@ -806,6 +1160,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 ? { width: 768, height: 1024 }
                 : { width: 375, height: 812 };
         let startTime = Date.now();
+        let plannerPlan: PlannerPlanResponse | null = null;
+        let generationPromptFromPlanner = requestPrompt;
 
         try {
             console.info('[UI] generate: start (stream)', {
@@ -815,6 +1171,32 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 images: imagesToSend,
                 modelProfile: modelProfileToUse,
             });
+
+            try {
+                const discoveryPlan = await apiClient.plan({
+                    phase: 'plan',
+                    appPrompt: appPromptForPlanning,
+                    platform: platformToUse,
+                    stylePreset: styleToUse,
+                    screenCountDesired: incomingTargetScreens?.length || 2,
+                    screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
+                    preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+                });
+                if (discoveryPlan.phase !== 'postgen') {
+                    plannerPlan = discoveryPlan;
+                    if (incomingTargetScreens && incomingTargetScreens.length > 0) {
+                        generationPromptFromPlanner = makePlannerTargetedGenerationPrompt(
+                            appPromptForPlanning,
+                            incomingTargetScreens,
+                            existingScreenNames
+                        );
+                    } else if (plannerPlan.generatorPrompt?.trim()) {
+                        generationPromptFromPlanner = plannerPlan.generatorPrompt.trim();
+                    }
+                }
+            } catch (plannerError) {
+                console.warn('[UI] planner pre-gen failed; continuing with raw prompt', plannerError);
+            }
 
             const existingBoards = useCanvasStore.getState().doc.boards;
             const startX = existingBoards.length > 0
@@ -894,7 +1276,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             if (preferredModel) {
                 const generatedIds: string[] = [];
                 const regen = await apiClient.generate({
-                    prompt: requestPrompt,
+                    prompt: generationPromptFromPlanner,
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
@@ -948,7 +1330,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             }
 
             await apiClient.generateStream({
-                prompt: requestPrompt,
+                prompt: generationPromptFromPlanner,
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
@@ -991,7 +1373,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             const repaired = await apiClient.completeScreen({
                                 screenName: event.name,
                             partialHtml: event.rawPartial,
-                            prompt: requestPrompt,
+                            prompt: generationPromptFromPlanner,
                             platform: platformToUse,
                             stylePreset: styleToUse,
                         }, controller.signal);
@@ -1007,7 +1389,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
             if (completedCount === 0) {
                 const regen = await apiClient.generate({
-                    prompt: requestPrompt,
+                    prompt: generationPromptFromPlanner,
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
@@ -1080,12 +1462,46 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 }
             }
 
+            let postgenSummary = '';
+            let postgenData: PlannerPostgenResponse | null = null;
+            try {
+                const postgen = await apiClient.plan({
+                    phase: 'postgen',
+                    appPrompt: appPromptForPlanning,
+                    platform: platformToUse,
+                    stylePreset: styleToUse,
+                    screensGenerated: createdSeqs
+                        .map((seq) => screenIdBySeq.get(seq))
+                        .filter(Boolean)
+                        .map((screenId) => {
+                            const screen = useDesignStore.getState().spec?.screens.find((item) => item.screenId === screenId);
+                            return screen ? { name: screen.name } : null;
+                        })
+                        .filter(Boolean) as Array<{ name: string }>,
+                    preferredModel: 'llama-3.3-70b-versatile',
+                });
+                if (postgen.phase === 'postgen') {
+                    postgenData = postgen;
+                    postgenSummary = formatPostgenSuggestionText(postgen);
+                }
+            } catch (plannerError) {
+                console.warn('[UI] planner post-gen failed; skipping follow-up suggestions', plannerError);
+            }
+
+            const responseSummary = finalDescription || `Generated ${completedCount} screens customized to your request.`;
+            const planningSummary = plannerPlan?.generationSuggestion?.why
+                ? `\n\n[h3]Plan rationale[/h3]\n[li]${plannerPlan.generationSuggestion.why}[/li]`
+                : '';
+            const postgenBlock = postgenSummary ? `\n\n${postgenSummary}` : '';
+
             updateMessage(assistantMsgId, {
-                content: finalDescription || `Generated ${completedCount} screens customized to your request.`,
+                content: `${responseSummary}${planningSummary}${postgenBlock}`.trim(),
                 status: 'complete',
                 meta: {
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
+                    plannerPrompt: appPromptForPlanning,
+                    plannerPostgen: postgenData || undefined,
                 }
             });
             const generatedIds = createdSeqs
@@ -1242,6 +1658,8 @@ const handleEdit = async () => {
     const handleSubmit = () => {
         if (doc.selection.selectedBoardId) {
             handleEdit();
+        } else if (planMode) {
+            handlePlanOnly();
         } else {
             handleGenerate();
         }
@@ -1592,6 +2010,11 @@ const handleEdit = async () => {
                                                         text={message.content}
                                                         className="text-[13px] font-medium text-[var(--ui-text)]"
                                                         speed={12}
+                                                        onDone={() => {
+                                                            setTypedDoneByMessageId((prev) => (
+                                                                prev[message.id] ? prev : { ...prev, [message.id]: true }
+                                                            ));
+                                                        }}
                                                     />
                                                 ) : (
                                                     renderTaggedDescription(message.content)
@@ -1633,6 +2056,32 @@ const handleEdit = async () => {
                                                         </>
                                                     )}
                                             </div>
+                                            {message.status === 'complete' && typedDoneByMessageId[message.id] && (() => {
+                                                const postgen = message.meta?.plannerPostgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined);
+                                                const used = new Set(usedSuggestionKeysByMessage[message.id] || []);
+                                                const suggestions = deriveMessageSuggestions(message.id, postgen, used);
+                                                if (suggestions.length === 0) return null;
+                                                return (
+                                                    <div className="flex flex-wrap gap-1.5 px-1 pt-1">
+                                                        {suggestions.map((item) => (
+                                                            <button
+                                                                key={`${item.messageId}-${item.key}`}
+                                                                type="button"
+                                                                onClick={() => handlePlannerCta(item.messageId, item.screenNames, item.label)}
+                                                                disabled={isGenerating}
+                                                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-sm disabled:opacity-55 disabled:cursor-not-allowed transition-colors ${item.tone === 'primary'
+                                                                    ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                                                    : 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]'
+                                                                    }`}
+                                                                title={`Generate ${item.screenNames.join(', ')}`}
+                                                            >
+                                                                <Sparkles size={12} />
+                                                                <span>{item.label}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 )}
@@ -1643,6 +2092,19 @@ const handleEdit = async () => {
 
                     {/* Chat Input Container */}
                     <div className="mx-4 mb-6 relative bg-[var(--ui-surface-1)] rounded-[20px] border border-[var(--ui-border)] p-3 shadow-2xl transition-all flex flex-col gap-2">
+                        <button
+                            type="button"
+                            onClick={togglePlanMode}
+                            className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-lg transition-colors ${planMode
+                                ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                                }`}
+                            title={planMode ? 'Disable plan mode' : 'Enable plan mode'}
+                        >
+                            <Sparkles size={12} />
+                            <span>Plan mode</span>
+                        </button>
+
 
                         {/* Text Area & Images */}
                         <div className="flex-1 min-w-0">

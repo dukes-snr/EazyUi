@@ -92,6 +92,70 @@ export interface SaveResponse {
     savedAt: string;
 }
 
+export type PlannerPhase = 'discovery' | 'plan' | 'postgen';
+
+export interface PlannerQuestion {
+    id: string;
+    q: string;
+    type?: string;
+    options?: string[];
+}
+
+export interface PlannerRecommendedScreen {
+    name: string;
+    goal?: string;
+    why?: string;
+    priority?: number;
+}
+
+export interface PlannerPlanResponse {
+    phase: 'plan' | 'discovery';
+    appName?: string;
+    oneLineConcept?: string;
+    questions: PlannerQuestion[];
+    assumptions: string[];
+    recommendedScreens: PlannerRecommendedScreen[];
+    navigationRecommendation?: {
+        pattern?: string;
+        tabs?: string[];
+    };
+    visualDirection?: {
+        mood?: string;
+        motif?: string;
+        colorNotes?: string;
+    };
+    generationSuggestion?: {
+        screenCountNow?: number;
+        generateNow?: boolean;
+        generateTheseNow?: string[];
+        why?: string;
+    };
+    generatorPrompt: string;
+}
+
+export interface PlannerPostgenResponse {
+    phase: 'postgen';
+    whatYouHave: string[];
+    gapsDetected: string[];
+    nextScreenSuggestions: Array<{ name: string; why: string; priority: number }>;
+    callToAction?: {
+        primary?: { label: string; screenNames: string[] };
+        secondary?: { label: string; screenNames: string[] };
+    };
+}
+
+export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse;
+
+export interface PlannerRequest {
+    phase?: PlannerPhase;
+    appPrompt: string;
+    platform?: 'mobile' | 'tablet' | 'desktop';
+    stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+    screenCountDesired?: number;
+    screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+    preferredModel?: string;
+}
+
 export interface ProjectResponse {
     projectId: string;
     designSpec: HtmlDesignSpec;
@@ -192,6 +256,14 @@ class ApiClient {
         return this.request<SaveResponse>('/save', {
             method: 'POST',
             body: JSON.stringify(request),
+        });
+    }
+
+    async plan(request: PlannerRequest, signal?: AbortSignal): Promise<PlannerResponse> {
+        return this.request<PlannerResponse>('/plan', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
         });
     }
 
