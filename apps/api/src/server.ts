@@ -16,6 +16,41 @@ const fastify = Fastify({
     bodyLimit: parseInt(process.env.API_BODY_LIMIT || `${25 * 1024 * 1024}`, 10),
 });
 
+let renderBrowserPromise: Promise<any> | null = null;
+
+async function getRenderBrowser() {
+    if (!renderBrowserPromise) {
+        renderBrowserPromise = (async () => {
+            const load = new Function('return import("playwright")') as () => Promise<any>;
+            const playwright = await load();
+            return playwright.chromium.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            });
+        })();
+    }
+    return renderBrowserPromise;
+}
+
+function isBlockedProxyHost(hostname: string): boolean {
+    const host = hostname.trim().toLowerCase();
+    if (!host) return true;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) return true;
+
+    // Block direct private IPv4 ranges.
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        const parts = host.split('.').map((p) => Number(p));
+        const [a, b] = parts;
+        if (a === 10) return true;
+        if (a === 127) return true;
+        if (a === 0) return true;
+        if (a === 169 && b === 254) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 192 && b === 168) return true;
+    }
+    return false;
+}
+
 // Register CORS
 await fastify.register(cors, {
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -285,6 +320,62 @@ fastify.get('/api/models', async () => {
     };
 });
 
+fastify.get<{
+    Querystring: {
+        url?: string;
+    };
+}>('/api/proxy-image', async (request, reply) => {
+    const rawUrl = String(request.query.url || '').trim();
+    if (!rawUrl) {
+        return reply.status(400).send({ error: 'url query param is required' });
+    }
+
+    let target: URL;
+    try {
+        target = new URL(rawUrl);
+    } catch {
+        return reply.status(400).send({ error: 'Invalid url' });
+    }
+
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+        return reply.status(400).send({ error: 'Only http/https URLs are allowed' });
+    }
+    if (isBlockedProxyHost(target.hostname)) {
+        return reply.status(403).send({ error: 'Blocked host' });
+    }
+
+    try {
+        const upstream = await fetch(target.toString(), {
+            method: 'GET',
+            headers: {
+                // Some image hosts require a UA/referrer-like header.
+                'user-agent': 'EazyUI-ImageProxy/1.0',
+            },
+        });
+        if (!upstream.ok) {
+            return reply.status(502).send({ error: `Upstream image request failed (${upstream.status})` });
+        }
+
+        const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+        if (!contentType.startsWith('image/')) {
+            return reply.status(415).send({ error: 'Upstream response is not an image' });
+        }
+
+        const cacheControl = upstream.headers.get('cache-control') || 'public, max-age=1800';
+        const buffer = Buffer.from(await upstream.arrayBuffer());
+        return reply
+            .header('Content-Type', contentType)
+            .header('Cache-Control', cacheControl)
+            .send(buffer);
+    } catch (error) {
+        fastify.log.error({ err: error, target: target.toString() }, 'proxy-image: failed');
+        return reply.status(500).send({
+            error: 'Failed to proxy image',
+            message: (error as Error).message,
+        });
+    }
+});
+
 fastify.get('/api/debug/groq-last-chat', async (_request, reply) => {
     const debug = getLastGroqChatDebug();
     if (!debug) {
@@ -299,6 +390,58 @@ fastify.get('/api/debug/nvidia-last-chat', async (_request, reply) => {
         return reply.status(404).send({ error: 'No NVIDIA chat call has been captured yet.' });
     }
     return debug;
+});
+
+fastify.post<{
+    Body: {
+        html: string;
+        width?: number;
+        height?: number;
+        scale?: number;
+    };
+}>('/api/render-screen-image', async (request, reply) => {
+    const html = String(request.body?.html || '');
+    const width = Math.max(240, Math.min(2400, Number(request.body?.width || 375)));
+    const height = Math.max(240, Math.min(3200, Number(request.body?.height || 812)));
+    const scale = Math.max(1, Math.min(3, Number(request.body?.scale || 2)));
+
+    if (!html.trim()) {
+        return reply.status(400).send({ error: 'html is required' });
+    }
+
+    try {
+        const browser = await getRenderBrowser();
+        const context = await browser.newContext({
+            viewport: { width, height },
+            deviceScaleFactor: scale,
+        });
+        const page = await context.newPage();
+        try {
+            await page.setContent(html, {
+                waitUntil: 'networkidle',
+                timeout: 25000,
+            });
+            await page.waitForTimeout(200);
+            const image = await page.screenshot({
+                type: 'png',
+                fullPage: false,
+            });
+            return {
+                pngBase64: image.toString('base64'),
+                width,
+                height,
+                scale,
+            };
+        } finally {
+            await context.close();
+        }
+    } catch (error) {
+        fastify.log.error({ err: error }, 'render-screen-image: failed');
+        return reply.status(500).send({
+            error: 'Failed to render image',
+            message: (error as Error).message,
+        });
+    }
 });
 
 fastify.post<{
@@ -471,3 +614,13 @@ try {
     fastify.log.error(err);
     process.exit(1);
 }
+
+process.on('SIGINT', async () => {
+    try {
+        const browser = await renderBrowserPromise;
+        if (browser) await browser.close();
+    } catch {
+        // ignore cleanup errors
+    }
+    process.exit(0);
+});

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { DesignModelProfile } from '../constants/designModels';
 
 export type ThemeMode = 'dark' | 'light';
-export type ToastKind = 'info' | 'success' | 'error' | 'guide';
+export type ToastKind = 'info' | 'success' | 'error' | 'guide' | 'loading';
 
 export type ToastItem = {
     id: string;
@@ -28,6 +28,7 @@ type UiState = {
     toggleTheme: () => void;
     setModelProfile: (profile: DesignModelProfile) => void;
     pushToast: (toast: PushToastInput) => string;
+    updateToast: (id: string, updates: Partial<Omit<ToastItem, 'id' | 'createdAt'>>) => void;
     removeToast: (id: string) => void;
     clearToasts: () => void;
 };
@@ -49,6 +50,7 @@ function getInitialModelProfile(): DesignModelProfile {
 }
 
 function defaultToastDuration(kind: ToastKind): number {
+    if (kind === 'loading') return 0;
     if (kind === 'error') return 5500;
     if (kind === 'guide') return 6500;
     return 3800;
@@ -86,12 +88,17 @@ export const useUiStore = create<UiState>((set, get) => ({
         };
 
         set((state) => ({ toasts: [...state.toasts, toast] }));
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && toast.durationMs > 0) {
             window.setTimeout(() => {
                 get().removeToast(id);
             }, toast.durationMs);
         }
         return id;
+    },
+    updateToast: (id, updates) => {
+        set((state) => ({
+            toasts: state.toasts.map((toast) => (toast.id === id ? { ...toast, ...updates } : toast)),
+        }));
     },
     removeToast: (id) => {
         set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));

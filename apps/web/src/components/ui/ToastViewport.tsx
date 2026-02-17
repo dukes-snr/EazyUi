@@ -1,4 +1,4 @@
-import { CheckCircle2, Info, Lightbulb, TriangleAlert, X } from 'lucide-react';
+import { CheckCircle2, Info, Lightbulb, Loader2, TriangleAlert, X } from 'lucide-react';
 import { useUiStore } from '../../stores';
 import type { ToastItem } from '../../stores/ui-store';
 
@@ -24,6 +24,13 @@ function toastTone(kind: ToastItem['kind']) {
             borderClass: 'border-amber-500/40',
         };
     }
+    if (kind === 'loading') {
+        return {
+            icon: Loader2,
+            iconClass: 'text-[var(--ui-primary)]',
+            borderClass: 'border-[var(--ui-primary)]/40',
+        };
+    }
     return {
         icon: Info,
         iconClass: 'text-indigo-400',
@@ -45,7 +52,7 @@ export function ToastViewport() {
                         className={`pointer-events-auto rounded-2xl border ${tone.borderClass} bg-[var(--ui-popover)] shadow-2xl backdrop-blur-sm ring-1 ring-[var(--ui-border)]`}
                     >
                         <div className="flex items-start gap-3 p-3">
-                            <Icon size={16} className={`mt-0.5 shrink-0 ${tone.iconClass}`} />
+                            <Icon size={16} className={`mt-0.5 shrink-0 ${tone.iconClass} ${toast.kind === 'loading' ? 'animate-spin' : ''}`} />
                             <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-semibold text-[var(--ui-text)]">{toast.title}</div>
                                 {toast.message && (

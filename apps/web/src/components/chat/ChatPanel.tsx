@@ -2,13 +2,12 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
-import TextType from '../ui/TextType';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 
 const FEEDBACK_BUCKETS = {
@@ -75,6 +74,56 @@ function getThinkingSeconds(message: any): number | null {
         return Math.max(1, Math.round((Date.now() - startedAt) / 1000));
     }
     return null;
+}
+
+type ProcessStepLabel = {
+    present: string;
+    past: string;
+};
+
+function getProcessSteps(message: any): ProcessStepLabel[] {
+    const isEditFlow = Boolean(message?.screenRef);
+    if (isEditFlow) {
+        return [
+            { present: 'Analyzing selected screen', past: 'Analyzed selected screen' },
+            { present: 'Planning targeted updates', past: 'Planned targeted updates' },
+            { present: 'Applying structure and styles', past: 'Applied structure and styles' },
+            { present: 'Finalizing edit output', past: 'Finalized edit output' },
+        ];
+    }
+    return [
+        { present: 'Analyzing user intent', past: 'Analyzed user intent' },
+        { present: 'Exploring visual trends', past: 'Explored visual trends' },
+        { present: 'Collecting references', past: 'Collected references' },
+        { present: 'Rendering screens', past: 'Rendered screens' },
+    ];
+}
+
+function getProcessProgress(message: any, steps: ProcessStepLabel[]): { doneUntil: number; activeAt: number } {
+    if (message?.status === 'complete') {
+        return { doneUntil: steps.length - 1, activeAt: -1 };
+    }
+    if (message?.status === 'pending') {
+        return { doneUntil: -1, activeAt: 0 };
+    }
+    if (message?.status === 'streaming') {
+        if (message?.meta?.thinkingStopped) {
+            return { doneUntil: Math.max(0, steps.length - 2), activeAt: steps.length - 1 };
+        }
+        const startMs = Number(message?.meta?.feedbackStart || 0);
+        const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
+        // Reveal a new step about every 12s so all 4 are visible well before 50s.
+        const activeAt = Math.min(steps.length - 1, Math.floor(elapsedMs / 12000));
+        return { doneUntil: activeAt - 1, activeAt };
+    }
+    return { doneUntil: -1, activeAt: -1 };
+}
+
+function getProcessVisibleCount(message: any, steps: ProcessStepLabel[]): number {
+    const progress = getProcessProgress(message, steps);
+    if (progress.activeAt >= 0) return Math.min(steps.length, progress.activeAt + 1);
+    if (progress.doneUntil >= 0) return Math.min(steps.length, progress.doneUntil + 1);
+    return 1;
 }
 
 function renderInlineRichText(text: string): ReactNode[] {
@@ -451,9 +500,29 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, doc, setFocusNodeId, setFocusNodeIds, removeBoard } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
-    const { modelProfile, setModelProfile, pushToast } = useUiStore();
+    const { modelProfile, setModelProfile, pushToast, removeToast } = useUiStore();
     const assistantMsgIdRef = useRef<string>('');
     const notificationGuideShownRef = useRef(false);
+    const generationLoadingToastRef = useRef<string | null>(null);
+    const editLoadingToastRef = useRef<string | null>(null);
+
+    const startLoadingToast = (targetRef: MutableRefObject<string | null>, title: string, message: string) => {
+        if (targetRef.current) {
+            removeToast(targetRef.current);
+        }
+        targetRef.current = pushToast({
+            kind: 'loading',
+            title,
+            message,
+            durationMs: 0,
+        });
+    };
+
+    const clearLoadingToast = (targetRef: MutableRefObject<string | null>) => {
+        if (!targetRef.current) return;
+        removeToast(targetRef.current);
+        targetRef.current = null;
+    };
 
     const ensureNotificationPermission = async () => {
         const permission = await requestBrowserNotificationPermissionIfNeeded();
@@ -723,6 +792,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         assistantMsgIdRef.current = assistantMsgId;
         updateMessage(userMsgId, { meta: { livePreview: false } });
 
+        startLoadingToast(
+            generationLoadingToastRef,
+            'Generating screens',
+            'Working on your design. This can take a little while for richer screens.'
+        );
         setPrompt('');
         setGenerating(true);
 
@@ -1051,6 +1125,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         } finally {
             setAbortController(null);
             setGenerating(false);
+            clearLoadingToast(generationLoadingToastRef);
         }
     };
 
@@ -1107,6 +1182,11 @@ const handleEdit = async () => {
             }
         });
         const currentPrompt = prompt;
+        startLoadingToast(
+            editLoadingToastRef,
+            'Applying edit',
+            'Updating the selected screen...'
+        );
         setPrompt('');
         setGenerating(true);
         const startTime = Date.now();
@@ -1155,6 +1235,7 @@ const handleEdit = async () => {
         } finally {
             setAbortController(null);
             setGenerating(false);
+            clearLoadingToast(editLoadingToastRef);
         }
     };
 
@@ -1169,6 +1250,8 @@ const handleEdit = async () => {
     const handleStop = () => {
         abortGeneration();
         setAbortController(null);
+        clearLoadingToast(generationLoadingToastRef);
+        clearLoadingToast(editLoadingToastRef);
 
         const currentSpec = useDesignStore.getState().spec;
         const currentBoards = useCanvasStore.getState().doc.boards;
@@ -1425,7 +1508,7 @@ const handleEdit = async () => {
                                                 ))}
                                             </div>
                                         )}
-                                        <div className="bg-[var(--ui-surface-3)] px-5 py-3 rounded-[24px] rounded-tr-sm text-[15px] text-[var(--ui-text)] shadow-sm ring-1 ring-[var(--ui-border)]">
+                                        <div className="bg-[var(--ui-surface-3)] px-5 py-3 rounded-[24px]  text-[15px] text-[var(--ui-text)] shadow-sm ring-1 ring-[var(--ui-border)]">
                                             {message.content}
                                         </div>
                                         <div className="flex items-center justify-end w-full pr-1">
@@ -1442,67 +1525,66 @@ const handleEdit = async () => {
                                     </div>
                                 ) : (
                                     <div className="w-full max-w-[95%] space-y-2">
-                                        {/* Thinking Accordion */}
-                                        {message.status === 'pending' ? (
-                                            <div className="animate-pulse flex items-center gap-3 px-4 py-3 bg-[var(--ui-surface-3)] rounded-2xl border border-[var(--ui-border)] w-fit">
-                                                <Loader2 size={16} className="animate-spin text-indigo-400" />
-                                                <span className="text-sm text-[var(--ui-text-muted)] font-medium">Generating designs...</span>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                {(() => {
-                                                    const thinkingSeconds = getThinkingSeconds(message);
-                                                    if (!thinkingSeconds) return null;
-                                                    return (
-                                                        <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted)] px-2">
-                                                            <Lightbulb size={13} />
-                                                            <span>Thought for {thinkingSeconds} second{thinkingSeconds === 1 ? '' : 's'}</span>
-                                                        </div>
-                                                    );
-                                                })()}
-                                                <div className="text-[13px] leading-relaxed whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out text-[var(--ui-text)] bg-transparent px-2">
+                                        {(message.status === 'pending' || message.status === 'streaming') && (() => {
+                                            const steps = getProcessSteps(message);
+                                            const progress = getProcessProgress(message, steps);
+                                            const visibleCount = getProcessVisibleCount(message, steps);
+                                            return (
+                                                <div className="px-2 py-1">
+                                                    <ul className="space-y-2.5">
+                                                        {steps.slice(0, visibleCount).map((step, idx) => {
+                                                            const isDone = idx <= progress.doneUntil;
+                                                            const isActive = idx === progress.activeAt;
+                                                            const showConnector = idx < visibleCount - 1;
+                                                            const displayLabel = isDone ? step.past : step.present;
+                                                            return (
+                                                                <li
+                                                                    key={`${message.id}-step-${idx}`}
+                                                                    className="relative flex items-center gap-2.5 text-sm"
+                                                                    style={{ transitionDelay: `${idx * 120}ms` }}
+                                                                >
+                                                                    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center">
+                                                                        {showConnector && (
+                                                                            <span className="absolute top-4 left-1/2 h-4 w-px -translate-x-1/2 bg-[var(--ui-border)]" />
+                                                                        )}
+                                                                        {isDone ? (
+                                                                            <Check size={13} className="text-emerald-400" />
+                                                                        ) : isActive ? (
+                                                                            <Loader2 size={13} className="text-indigo-400 animate-spin" />
+                                                                        ) : (
+                                                                            <span className="h-2.5 w-2.5 rounded-sm border border-[var(--ui-border-light)] bg-transparent" />
+                                                                        )}
+                                                                    </span>
+                                                                    <span className={`${isDone || isActive ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'}`}>{displayLabel}</span>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            );
+                                        })()}
+                                        <div className="space-y-2">
+                                            {message.status === 'complete' && (() => {
+                                                const thinkingSeconds = getThinkingSeconds(message);
+                                                if (!thinkingSeconds) return null;
+                                                return (
+                                                    <div className="flex items-center gap-2 text-xs text-[var(--ui-text-muted)] px-2">
+                                                        <Lightbulb size={13} />
+                                                        <span>Thought for {thinkingSeconds} second{thinkingSeconds === 1 ? '' : 's'}</span>
+                                                    </div>
+                                                );
+                                            })()}
+                                            <div className="text-[13px] leading-relaxed whitespace-pre-wrap font-book transition-opacity duration-700 ease-in-out text-[var(--ui-text)] bg-transparent px-2">
                                                 {message.status === 'streaming' ? (
                                                     message.meta?.thinkingStopped ? (
                                                         <span className="text-[13px] font-medium text-[var(--ui-text-muted)]">Rendering remaining screens...</span>
                                                     ) : (
-                                                        <TextType
-                                                            key={`${message.id}-${String(message.meta?.feedbackKey ?? message.content)}`}
-                                                            text={
-                                                                message.meta?.feedbackPhase === 'working'
-                                                                    ? FEEDBACK_BUCKETS.working
-                                                                    : message.meta?.feedbackPhase === 'late'
-                                                                        ? FEEDBACK_BUCKETS.late
-                                                                        : message.meta?.feedbackPhase === 'wrap'
-                                                                            ? FEEDBACK_BUCKETS.wrap
-                                                                            : FEEDBACK_BUCKETS.early
-                                                            }
-                                                            className="text-[13px] font-medium text-[var(--ui-text-muted)]"
-                                                            typingSpeed={75}
-                                                            deletingSpeed={50}
-                                                            pauseDuration={1500}
-                                                            showCursor
-                                                            cursorCharacter="_"
-                                                            cursorBlinkDuration={0.5}
-                                                            variableSpeed={undefined}
-                                                            loop
-                                                            onSentenceComplete={() => {
-                                                                const start = (message.meta?.feedbackStart as number) || Date.now();
-                                                                const elapsed = Date.now() - start;
-                                                                let phase: keyof typeof FEEDBACK_BUCKETS = 'early';
-                                                                if (elapsed >= 10000 && elapsed < 20000) phase = 'working';
-                                                                if (elapsed >= 20000 && elapsed < 30000) phase = 'late';
-                                                                if (elapsed >= 30000) phase = 'wrap';
-                                                                if (phase !== message.meta?.feedbackPhase) {
-                                                                    updateMessage(message.id, {
-                                                                        meta: {
-                                                                            ...message.meta,
-                                                                            feedbackPhase: phase,
-                                                                            feedbackKey: Date.now()
-                                                                        }
-                                                                    });
-                                                                }
-                                                            }}
-                                                        />
+                                                        <>
+                                                            {/* Typing animation intentionally disabled.
+                                                            <TextType ... />
+                                                            */}
+                                                            <span className="text-[13px] font-medium text-[var(--ui-text-muted)]">Working on your screens...</span>
+                                                        </>
                                                     )
                                                 ) : message.status === 'complete' ? (
                                                     <TypedTaggedText
@@ -1514,8 +1596,8 @@ const handleEdit = async () => {
                                                 ) : (
                                                     renderTaggedDescription(message.content)
                                                 )}
-                                                </div>
-                                                <div className="flex items-center gap-2 px-1">
+                                            </div>
+                                            <div className="flex items-center gap-2 px-1">
                                                     <button
                                                         onClick={() => handleCopyMessage(message.id, message.content)}
                                                         className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all"
@@ -1550,9 +1632,8 @@ const handleEdit = async () => {
                                                             </button>
                                                         </>
                                                     )}
-                                                </div>
                                             </div>
-                                        )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -1561,7 +1642,7 @@ const handleEdit = async () => {
                     </div>
 
                     {/* Chat Input Container */}
-                    <div className="mx-4 mb-6 relative bg-[var(--ui-surface-3)] rounded-[20px] p-3 shadow-2xl transition-all flex flex-col gap-2">
+                    <div className="mx-4 mb-6 relative bg-[var(--ui-surface-1)] rounded-[20px] border border-[var(--ui-border)] p-3 shadow-2xl transition-all flex flex-col gap-2">
 
                         {/* Text Area & Images */}
                         <div className="flex-1 min-w-0">
@@ -1739,8 +1820,3 @@ const handleEdit = async () => {
         </>
     );
 }
-
-
-
-
-
