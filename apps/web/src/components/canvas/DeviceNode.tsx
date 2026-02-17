@@ -2,6 +2,7 @@ import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
+import { BatteryFull, Signal, Wifi } from 'lucide-react';
 import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
@@ -11,13 +12,73 @@ import '../../styles/DeviceFrames.css';
 function injectHeightScript(html: string, screenId: string) {
     const script = `
 <script>
-  const reportHeight = () => {
-    const height = document.documentElement.scrollHeight || document.body.scrollHeight;
-    window.parent.postMessage({ type: 'resize', height, screenId: '${screenId}' }, '*');
-  };
-  window.onload = reportHeight;
-  const resizeObserver = new ResizeObserver(reportHeight);
-  resizeObserver.observe(document.body);
+  (function() {
+    const SCREEN_ID = '${screenId}';
+    const MIN_HEIGHT = 320;
+    const MAX_HEIGHT = 12000;
+    let rafId = 0;
+
+    const clamp = (value) => Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(value || MIN_HEIGHT)));
+
+    const computeFullHeight = () => {
+      const body = document.body;
+      const html = document.documentElement;
+      const metrics = [
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        body ? body.clientHeight : 0,
+        html ? html.scrollHeight : 0,
+        html ? html.offsetHeight : 0,
+        html ? html.clientHeight : 0,
+      ];
+
+      let maxBottom = 0;
+      const all = document.body ? document.body.querySelectorAll('*') : [];
+      for (const el of all) {
+        const rect = el.getBoundingClientRect();
+        const bottom = rect.bottom + (window.scrollY || 0);
+        if (Number.isFinite(bottom)) maxBottom = Math.max(maxBottom, bottom);
+      }
+      metrics.push(maxBottom);
+      return clamp(Math.max(...metrics));
+    };
+
+    const reportHeight = () => {
+      const height = computeFullHeight();
+      window.parent.postMessage({ type: 'resize', height, screenId: SCREEN_ID }, '*');
+    };
+
+    const scheduleReport = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(reportHeight);
+    };
+
+    window.addEventListener('load', scheduleReport, { once: true });
+    window.addEventListener('resize', scheduleReport);
+    window.addEventListener('DOMContentLoaded', scheduleReport);
+
+    const ro = new ResizeObserver(scheduleReport);
+    if (document.body) ro.observe(document.body);
+    ro.observe(document.documentElement);
+
+    const mo = new MutationObserver(scheduleReport);
+    if (document.body) {
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    }
+
+    const imgs = Array.from(document.images || []);
+    imgs.forEach((img) => {
+      if (!img.complete) {
+        img.addEventListener('load', scheduleReport, { once: true });
+        img.addEventListener('error', scheduleReport, { once: true });
+      }
+    });
+
+    setTimeout(scheduleReport, 50);
+    setTimeout(scheduleReport, 250);
+    setTimeout(scheduleReport, 800);
+    setTimeout(scheduleReport, 1600);
+  })();
 </script>`;
 
     if (html.includes('</body>')) {
@@ -38,6 +99,46 @@ function injectScrollbarHide(html: string) {
         return html.replace('</head>', `${styleTag}\n</head>`);
     }
     return `${styleTag}\n${html}`;
+}
+
+function injectStatusBarContentInset(html: string, insetPx: number) {
+    const safeInset = Math.max(0, Math.round(insetPx || 0));
+    if (!safeInset) return html;
+
+    const styleTag = `
+<style id="eazyui-statusbar-inset">
+  :root { --eazyui-statusbar-inset: ${safeInset}px; }
+  body {
+    padding-top: var(--eazyui-statusbar-inset) !important;
+    box-sizing: border-box;
+  }
+  body > [class*="fixed"][class*="top-0"],
+  body > [class*="sticky"][class*="top-0"],
+  body > [style*="position: fixed"][style*="top: 0"],
+  body > [style*="position:sticky"][style*="top:0"] {
+    top: var(--eazyui-statusbar-inset) !important;
+  }
+</style>`;
+
+    if (html.includes('</head>')) {
+        return html.replace('</head>', `${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${html}`;
+}
+
+function extractTokenColor(html: string, tokenName: 'text' | 'bg'): string | null {
+    const source = html || '';
+    const patterns = [
+        new RegExp(`${tokenName}\\s*:\\s*["']([^"']+)["']`, 'i'),
+        new RegExp(`${tokenName}\\s*:\\s*\`([^\`]+)\``, 'i'),
+    ];
+
+    for (const pattern of patterns) {
+        const fromSource = source.match(pattern);
+        if (fromSource?.[1]?.trim()) return fromSource[1].trim();
+    }
+
+    return null;
 }
 
 function injectEditorScript(html: string, screenId: string) {
@@ -435,13 +536,24 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
+    const statusBarColor = extractTokenColor(String(data.html || ''), 'text') || '#111111';
+    const statusBarStyle = {
+        paddingTop: 16,
+        paddingBottom: 8,
+        paddingX: 24,
+        fontSize: 14,
+        fontWeight: 500,
+        iconSize: 18,
+        iconGap: 6,
+    } as const;
+    const statusBarInset = statusBarStyle.paddingTop + statusBarStyle.paddingBottom + statusBarStyle.fontSize;
     const [contentHeight, setContentHeight] = useState(initialHeight);
     const handleAction = useCallback(async (action: string, payload?: any) => {
         if (!data.screenId) return;
 
         switch (action) {
             case 'desktop':
-                updateScreen(data.screenId as string, data.html as string, undefined, 1280, 800);
+                updateScreen(data.screenId as string, data.html as string, undefined, 1280, Math.max(initialHeight, 1200));
                 break;
             case 'tablet':
                 updateScreen(data.screenId as string, data.html as string, undefined, 768, 1024);
@@ -590,14 +702,25 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             if (event.data?.type === 'resize' && event.data?.screenId === data.screenId) {
                 const newHeight = event.data.height;
                 if (newHeight && newHeight > 100) {
-                    setContentHeight(newHeight);
+                    const normalized = Math.max(320, Math.min(12000, Math.round(newHeight)));
+                    setContentHeight(normalized);
+                    if (Math.abs(normalized - initialHeight) >= 24) {
+                        updateScreen(
+                            data.screenId as string,
+                            data.html as string,
+                            data.status as any,
+                            width,
+                            normalized,
+                            data.label as string
+                        );
+                    }
                 }
             }
         };
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [isDesktop, data.screenId]);
+    }, [isDesktop, data.screenId, updateScreen, data.html, data.status, width, initialHeight, data.label]);
 
     // Reset height when html changes or is no longer streaming
     useEffect(() => {
@@ -612,7 +735,10 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
-    const baseHtml = injectScrollbarHide(data.html as string);
+    const noScrollbarHtml = injectScrollbarHide(data.html as string);
+    const baseHtml = isDesktop
+        ? noScrollbarHtml
+        : injectStatusBarContentInset(noScrollbarHtml, statusBarInset);
     const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
     const injectedHtml = isDesktop && data.screenId
         ? injectHeightScript(withEditor, data.screenId as string)
@@ -721,11 +847,42 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     )}
 
                     <div style={{ position: 'absolute', top: isDesktop && showBrowserHeader ? 40 : 0, left: 0, right: 0, bottom: 0 }}>
+                        <div
+                            style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                minHeight: statusBarInset,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: `${statusBarStyle.paddingTop}px ${statusBarStyle.paddingX}px ${statusBarStyle.paddingBottom}px`,
+                                zIndex: 20,
+                                pointerEvents: 'none',
+                                background: 'transparent',
+                                color: statusBarColor,
+                                fontSize: statusBarStyle.fontSize,
+                                fontWeight: statusBarStyle.fontWeight,
+                                lineHeight: 1,
+                            }}
+                        >
+                            <span style={{ letterSpacing: 0.1 }}>9:41</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: statusBarStyle.iconGap }}>
+                                <Signal size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
+                                <Wifi size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
+                                <BatteryFull size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
+                            </span>
+                        </div>
                         <iframe
                             srcDoc={stableSrcDoc}
                             title="Preview"
                             data-screen-id={data.screenId}
                             style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
                                 width: '100%',
                                 height: '100%',
                                 border: 'none',

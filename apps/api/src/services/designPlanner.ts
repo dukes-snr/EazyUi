@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { GROQ_MODELS, groqChatCompletion, isGroqModel, type GroqModelId } from './groq.provider.js';
 
-export type PlannerPhase = 'discovery' | 'plan' | 'postgen';
+export type PlannerPhase = 'discovery' | 'plan' | 'postgen' | 'route';
 
 const PlannerQuestionSchema = z.object({
     id: z.string(),
@@ -63,9 +63,22 @@ const PlannerPostgenResponseSchema = z.object({
     }).optional(),
 });
 
+const PlannerRouteResponseSchema = z.object({
+    phase: z.literal('route'),
+    intent: z.enum(['new_app', 'add_screen', 'edit_existing_screen']),
+    reason: z.string().default(''),
+    appContextPrompt: z.string().optional(),
+    targetScreenName: z.string().optional(),
+    matchedExistingScreenName: z.string().optional(),
+    referenceExistingScreenName: z.string().optional(),
+    generateTheseNow: z.array(z.string()).default([]),
+    editInstruction: z.string().optional(),
+});
+
 export type PlannerPlanResponse = z.infer<typeof PlannerPlanResponseSchema>;
 export type PlannerPostgenResponse = z.infer<typeof PlannerPostgenResponseSchema>;
-export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse;
+export type PlannerRouteResponse = z.infer<typeof PlannerRouteResponseSchema>;
+export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
 
 export type PlannerInput = {
     phase: PlannerPhase;
@@ -129,19 +142,46 @@ function parseJsonSafe<T = any>(text: string): T {
 }
 
 function buildSystemPrompt(phase: PlannerPhase): string {
+    if (phase === 'route') {
+        return `You are an intent router for UI design actions.
+Return JSON only.
+
+Output schema:
+{
+  "phase": "route",
+  "intent": "new_app | add_screen | edit_existing_screen",
+  "reason": "short reason",
+  "appContextPrompt": "full app context prompt to keep style consistency",
+  "targetScreenName": "Home",
+  "matchedExistingScreenName": "Dashboard",
+  "referenceExistingScreenName": "Account",
+  "generateTheseNow": ["Account"],
+  "editInstruction": "regenerate with cleaner hierarchy"
+}
+
+Rules:
+- If user asks to regenerate/update/rework an existing screen by name -> edit_existing_screen.
+- If user asks to match/design like another existing screen, set referenceExistingScreenName.
+- If user asks for a new screen inside existing app -> add_screen.
+- If user asks for a new app concept unrelated to existing screens -> new_app.
+- Keep reason very short.
+- generateTheseNow should include 1-3 screen names when intent is add_screen.
+- appContextPrompt should preserve existing app context when app exists.`;
+    }
+
     if (phase === 'postgen') {
-        return `You are a product-focused mobile UI planner.
+        return `You are a product-focused UI/UX planner.
 Return JSON only. Do not return markdown.
 
 Output schema:
 {
   "phase": "postgen",
-  "whatYouHave": ["Dashboard"],
+  "whatYouHave": ["Profile"],
   "gapsDetected": ["string"],
-  "nextScreenSuggestions": [{ "name": "Create Habit", "why": "string", "priority": 1 }],
+  "nextScreenSuggestions": [{ "name": "Home Feed", "why": "string", "priority": 1 }],
   "callToAction": {
-    "primary": { "label": "Generate Create Habit", "screenNames": ["Create Habit"] },
-    "secondary": { "label": "Generate Challenges + Profile", "screenNames": ["Challenges", "Profile & Settings"] }
+    "primary": { "label": "Generate Home Feed", "screenNames": ["Home Feed"] },
+    "secondary": { "label": "Generate Explore + Messages", "screenNames": ["Explore", "Messages"] }
   }
 }
 
@@ -149,10 +189,13 @@ Rules:
 - Be concrete and actionable.
 - Prioritize suggestions by core-loop completion first.
 - Limit nextScreenSuggestions to 3 items max.
-- Keep CTA labels short.`;
+- Keep CTA labels short.
+- Suggestions MUST stay in the same product domain as appPrompt + alreadyGeneratedScreens.
+- Do NOT inject unrelated domains (e.g., habits, fintech, food) unless explicitly present in appPrompt/screens.
+- Use existing screen names and semantics to infer the product context and continue that context.`;
     }
 
-    return `You are a product-focused mobile UI planner.
+    return `You are a product-focused UI/UX planner.
 Return JSON only. Do not return markdown.
 
 Output schema:
@@ -178,6 +221,8 @@ Rules:
 - Ask up to 6 high-value questions max.
 - If info is missing, make explicit assumptions instead of blocking.
 - recommendedScreens should be ordered by priority.
+- Keep recommendations in the same product domain implied by appPrompt.
+- Do NOT default to habit-tracker style suggestions unless appPrompt explicitly indicates that domain.
 - generatorPrompt must include:
   1) product concept
   2) platform + style direction
@@ -205,7 +250,12 @@ alreadyGeneratedScreens:
 ${screens || 'none'}
 
 If phase is "postgen", use alreadyGeneratedScreens to find gaps and propose next screens.
-If phase is "plan" or "discovery", define the best initial flow and which screens to generate now.`;
+If phase is "plan" or "discovery", define the best initial flow and which screens to generate now.
+
+Domain lock:
+- Treat appPrompt + alreadyGeneratedScreens as the source of truth for product domain.
+- Continue the same domain and user journey.
+- Reject unrelated fallback templates.`;
 }
 
 function sleep(ms: number) {
@@ -256,6 +306,12 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
     }
 
     const raw = parseJsonSafe<any>(completion.text || '{}');
+    if (input.phase === 'route') {
+        return PlannerRouteResponseSchema.parse({
+            phase: 'route',
+            ...raw,
+        });
+    }
     if (input.phase === 'postgen') {
         return PlannerPostgenResponseSchema.parse({
             phase: 'postgen',

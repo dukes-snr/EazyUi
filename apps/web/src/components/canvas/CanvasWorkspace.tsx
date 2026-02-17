@@ -36,7 +36,52 @@ function CanvasWorkspaceContent() {
     const { isEditMode } = useEditStore();
     const { isGenerating } = useChatStore();
     const { recordSnapshot } = useHistoryStore();
-    const { setCenter, fitView } = useReactFlow();
+    const { setCenter, fitView, setViewport } = useReactFlow();
+
+    const getNodeSize = useCallback((node: Node) => {
+        const width = node.measured?.width ?? (node.data?.width as number) ?? 375;
+        const height = node.measured?.height ?? (node.data?.height as number) ?? 812;
+        return { width, height };
+    }, []);
+
+    const getCanvasViewportSize = useCallback(() => {
+        const el = document.querySelector('.canvas-workspace .react-flow') as HTMLElement | null;
+        return {
+            width: Math.max(320, el?.clientWidth || window.innerWidth),
+            height: Math.max(320, el?.clientHeight || window.innerHeight),
+        };
+    }, []);
+
+    const focusNodesTopAligned = useCallback((targetNodes: Node[], duration = 800) => {
+        if (!targetNodes.length) return;
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        targetNodes.forEach((node) => {
+            const { width, height } = getNodeSize(node);
+            minX = Math.min(minX, node.position.x);
+            minY = Math.min(minY, node.position.y);
+            maxX = Math.max(maxX, node.position.x + width);
+            maxY = Math.max(maxY, node.position.y + height);
+        });
+
+        const boundsWidth = Math.max(1, maxX - minX);
+        const viewport = getCanvasViewportSize();
+        const sidePadding = 72;
+        const topPadding = 40;
+
+        // For desktop focus, fit mostly by width and keep top in view.
+        const zoomByWidth = (viewport.width - sidePadding * 2) / boundsWidth;
+        const zoom = Math.max(0.05, Math.min(1.1, zoomByWidth));
+
+        const x = viewport.width / 2 - ((minX + boundsWidth / 2) * zoom);
+        const y = topPadding - minY * zoom;
+
+        setViewport({ x, y, zoom }, { duration });
+    }, [getCanvasViewportSize, getNodeSize, setViewport]);
 
     // Initialize nodes from doc.boards and spec.screens
     const initialNodes = useMemo(() => {
@@ -75,16 +120,20 @@ function CanvasWorkspaceContent() {
 
             if (targetNode) {
                 // Calculate center of the node
-                const width = targetNode.measured?.width ?? (targetNode.data?.width as number) ?? 375;
-                const height = targetNode.measured?.height ?? (targetNode.data?.height as number) ?? 812;
+                const { width, height } = getNodeSize(targetNode);
+                const isDesktopNode = width >= 1024;
 
-                const centerX = targetNode.position.x + width / 2;
-                const centerY = targetNode.position.y + height / 2;
+                if (isDesktopNode) {
+                    focusNodesTopAligned([targetNode], 800);
+                } else {
+                    const centerX = targetNode.position.x + width / 2;
+                    const centerY = targetNode.position.y + height / 2;
 
-                setCenter(centerX, centerY, {
-                    zoom: 1,
-                    duration: 800
-                });
+                    setCenter(centerX, centerY, {
+                        zoom: 1,
+                        duration: 800
+                    });
+                }
 
                 // Also select it to give visual feedback
                 selectNodes([focusNodeId]);
@@ -92,7 +141,7 @@ function CanvasWorkspaceContent() {
                 setFocusNodeId(null);
             }
         }
-    }, [focusNodeId, setCenter, setFocusNodeId, nodes, selectNodes]);
+    }, [focusNodeId, getNodeSize, focusNodesTopAligned, setCenter, setFocusNodeId, nodes, selectNodes]);
 
     // Handle focusing a group of nodes from chat/edit flows
     useEffect(() => {
@@ -103,15 +152,27 @@ function CanvasWorkspaceContent() {
             return;
         }
 
-        fitView({
-            nodes: existing.map((id) => ({ id })),
-            padding: 0.2,
-            duration: 900,
-            maxZoom: 1.1,
+        const targetNodes = existing
+            .map((id) => nodes.find((node) => node.id === id))
+            .filter(Boolean) as Node[];
+        const hasDesktop = targetNodes.some((node) => {
+            const { width } = getNodeSize(node);
+            return width >= 1024;
         });
+
+        if (hasDesktop) {
+            focusNodesTopAligned(targetNodes, 900);
+        } else {
+            fitView({
+                nodes: existing.map((id) => ({ id })),
+                padding: 0.2,
+                duration: 900,
+                maxZoom: 1.1,
+            });
+        }
         selectNodes(existing);
         setFocusNodeIds(null);
-    }, [focusNodeIds, fitView, nodes, selectNodes, setFocusNodeIds]);
+    }, [focusNodeIds, fitView, focusNodesTopAligned, getNodeSize, nodes, selectNodes, setFocusNodeIds]);
 
     // Update nodes when structure or selection changes
     // But avoid resetting positions while users are interacting via React Flow

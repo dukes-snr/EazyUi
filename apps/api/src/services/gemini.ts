@@ -75,6 +75,15 @@ const GENERATION_CONFIG = {
     maxOutputTokens: 16384,
 };
 
+function getGenerationConfig(hasReferenceImages: boolean) {
+    if (!hasReferenceImages) return GENERATION_CONFIG;
+    return {
+        ...GENERATION_CONFIG,
+        temperature: 0.35,
+        topP: 0.85,
+    };
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -241,6 +250,14 @@ ICONS (MANDATORY):
 - For non-brand interface icons, use Material Symbols Rounded.
 `;
 
+const DEVICE_CHROME_RULES = `
+DEVICE CHROME (MANDATORY):
+- Do NOT design or render a mobile OS status bar inside screen HTML.
+- Prohibited status-bar elements include: time text (e.g., 9:41), signal/wifi/battery icons, notch-only rows, or any top strip that mimics OS chrome.
+- The runtime device node renders status bar chrome globally. Your HTML must start with app content only.
+- If needed, add top spacing for app content using padding/margin, but never include OS status bar UI.
+`;
+
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
 
 TASK: Generate a set of HTML screens for the requested UI design.
@@ -333,6 +350,7 @@ ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
+${DEVICE_CHROME_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 `;
@@ -406,6 +424,7 @@ ${TOKEN_CONTRACT}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
+${DEVICE_CHROME_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 
@@ -437,7 +456,8 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 4. Preserve data-uid and data-editable attributes on existing elements.
 5. You MAY restructure layout to achieve the instruction.
 6. PROHIBITED: Do NOT use "source.unsplash.com" or other non-whitelisted image domains.
-7. Do NOT use markdown fences.
+7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
+8. Do NOT use markdown fences.
 
 Current HTML:
 `;
@@ -462,6 +482,7 @@ Rules:
 - Use those semantic tokens for major surfaces and CTA.
 - Avoid invented class names that are not valid Tailwind utilities.
 - Brand icons must use Iconify + Simple Icons (never placeholder text like LOGO_GOOGLE).
+- Do NOT include mobile OS status bar rows (time/signal/wifi/battery); runtime provides this chrome.
 - Do not include reasoning, analysis, notes, or planning text.
 - No markdown fences.
 `;
@@ -478,6 +499,7 @@ Rules:
 - Include Plus Jakarta Sans + one display font + Material Symbols Rounded.
 - Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
 - Keep markup concise and visually rich; avoid long repeated sections.
+- Do NOT include a mobile OS status bar row (time/signal/wifi/battery).
 - No reasoning or markdown.
 `;
 const FAST_EDIT_HTML_PROMPT = `Edit the HTML to match the user instruction.
@@ -488,6 +510,7 @@ Rules:
 - Keep full valid HTML document.
 - Keep existing data-uid and data-editable attributes where present.
 - Brand icons must use Iconify + Simple Icons (no placeholder text).
+- Do NOT include mobile OS status bar UI (time/signal/wifi/battery row).
 - No markdown fences.
 `;
 
@@ -524,7 +547,7 @@ const FAST_IMAGE_FALLBACKS = [
 const PLATFORM_DIMENSIONS: Record<string, { width: number; height: number }> = {
     mobile: { width: 375, height: 812 },
     tablet: { width: 768, height: 1024 },
-    desktop: { width: 1280, height: 800 },
+    desktop: { width: 1280, height: 1200 },
     watch: { width: 184, height: 224 },
 };
 
@@ -540,12 +563,68 @@ export interface GenerateOptions {
     preferredModel?: string;
 }
 
+function extractInlineImageParts(images: string[]) {
+    const parts: any[] = [];
+    images.forEach((img) => {
+        const matches = img.match(/^data:(.+);base64,(.+)$/);
+        if (matches) {
+            parts.push({
+                inlineData: { data: matches[2], mimeType: matches[1] }
+            });
+        }
+    });
+    return parts;
+}
+
+async function analyzeReferenceImages(images: string[]): Promise<string> {
+    if (!images.length) return '';
+    const imageParts = extractInlineImageParts(images).slice(0, 3);
+    if (!imageParts.length) return '';
+
+    const analysisPrompt = `Analyze the attached UI reference image(s) for generation guidance.
+Return concise JSON only with fields:
+{
+  "designType": "app/website/dashboard/etc",
+  "visualTone": "short phrase",
+  "palette": { "primary": "#hex", "secondary": "#hex", "background": "#hex", "surface": "#hex", "text": "#hex", "accent": "#hex" },
+  "layoutStructure": ["hero + cards", "sidebar + content", "..."],
+  "componentPatterns": ["rounded cards", "pill chips", "minimal nav", "..."],
+  "typographyNotes": "short notes",
+  "spacingDensity": "compact|balanced|airy",
+  "mustKeepCues": ["list of strongest visual cues to preserve"]
+}`;
+
+    try {
+        const result = await model.generateContent({
+            contents: [{
+                role: 'user',
+                parts: [{ text: analysisPrompt }, ...imageParts],
+            }],
+            generationConfig: {
+                temperature: 0.2,
+                topP: 0.85,
+                maxOutputTokens: 1200,
+            },
+        });
+        const raw = (result.response.text() || '').trim();
+        if (!raw) return '';
+        const compact = raw.replace(/```json|```/gi, '').trim();
+        return `IMAGE REFERENCE ANALYSIS (HARD GUIDANCE):\n${compact}\nUse this analysis to match palette, layout structure, spacing rhythm, and component style from the reference image(s).`;
+    } catch (error) {
+        console.warn('[Gemini] analyzeReferenceImages failed; continuing without structured image analysis', error);
+        return 'Attached image(s) are reference-first. Prioritize matching their palette, layout structure, component style, and visual hierarchy over generic patterns.';
+    }
+}
+
 export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
+    const generationConfig = getGenerationConfig(images.length > 0);
+    const imageAnalysis = await analyzeReferenceImages(images);
 
     const imageGuidance = images.length > 0
-        ? `Use the attached image(s) to infer palette, typography mood, spacing density, and material finish. Do not copy the layout 1:1 unless told to do so explicitly.`
+        ? `Use the attached image(s) as PRIMARY reference. Match palette, typography mood, spacing density, component shapes, and layout hierarchy. Do not ignore reference cues.
+If the text request is ambiguous (e.g., "as seen", "like this"), preserve the same app domain and information architecture as the reference image(s).`
         : '';
 
     const baseUserPrompt = `
@@ -554,6 +633,7 @@ Platform: ${platform} (${dimensions.width}x${dimensions.height})
 Style: ${stylePreset}
 Generate a maximum of 4 complete screens.
 ${imageGuidance}
+${imageAnalysis}
 `;
 
     const fastBaseUserPrompt = `
@@ -562,21 +642,13 @@ Platform: ${platform} (${dimensions.width}x${dimensions.height})
 Style: ${stylePreset}
 Generate exactly 1 complete main screen.
 ${imageGuidance}
+${imageAnalysis}
 `;
 
     const buildParts = (userPrompt: string) => {
         const parts: any[] = [{ text: GENERATE_HTML_PROMPT + '\n\n' + userPrompt }];
 
-        if (images.length > 0) {
-            images.forEach(img => {
-                const matches = img.match(/^data:(.+);base64,(.+)$/);
-                if (matches) {
-                    parts.push({
-                        inlineData: { data: matches[2], mimeType: matches[1] }
-                    });
-                }
-            });
-        }
+        parts.push(...extractInlineImageParts(images));
 
         return parts;
     };
@@ -597,8 +669,8 @@ ${imageGuidance}
                         systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
-                        temperature: 0.52,
-                        topP: 0.9,
+                        temperature: images.length > 0 ? 0.32 : 0.52,
+                        topP: images.length > 0 ? 0.85 : 0.9,
                         responseFormat: 'json_object',
                         thinking: false,
                     })
@@ -607,8 +679,8 @@ ${imageGuidance}
                         systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
-                        temperature: 0.52,
-                        topP: 0.9,
+                        temperature: images.length > 0 ? 0.32 : 0.52,
+                        topP: images.length > 0 ? 0.85 : 0.9,
                         reasoningEffort: 'low',
                         responseFormat: 'json_object',
                     }));
@@ -635,7 +707,7 @@ ${imageGuidance}
                 throw error;
             }
         }
-        return generateDesignOnce(buildParts(promptText), resolvedPreferredModel);
+        return generateDesignOnce(buildParts(promptText), resolvedPreferredModel, generationConfig);
     };
 
     let initialResponse = await generateOnce(isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt);
@@ -672,22 +744,19 @@ ${imageGuidance}
 export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [] } = options;
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
+    const generationConfig = getGenerationConfig(images.length > 0);
+    const imageAnalysis = await analyzeReferenceImages(images);
 
-    const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.`;
+    const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
+${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
+${imageAnalysis}`;
     const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
 
-    if (images.length > 0) {
-        images.forEach(img => {
-            const matches = img.match(/^data:(.+);base64,(.+)$/);
-            if (matches) {
-                parts.push({ inlineData: { data: matches[2], mimeType: matches[1] } });
-            }
-        });
-    }
+    parts.push(...extractInlineImageParts(images));
 
     const result = await model.generateContentStream({
         contents: [{ role: 'user', parts }],
-        generationConfig: GENERATION_CONFIG,
+        generationConfig,
     });
 
     let totalChars = 0;
@@ -1060,12 +1129,16 @@ function recoverHtmlFromMalformedFastOutput(raw: string): string | null {
     return null;
 }
 
-async function generateDesignOnce(parts: any[], preferredModelName?: string): Promise<ParsedDesign> {
+async function generateDesignOnce(
+    parts: any[],
+    preferredModelName?: string,
+    generationConfig = GENERATION_CONFIG
+): Promise<ParsedDesign> {
     console.info('[Gemini] generateDesignOnce: start');
     const activeModel = preferredModelName ? getGenerativeModel(preferredModelName).model : model;
     const result = await activeModel.generateContent({
         contents: [{ role: 'user', parts }],
-        generationConfig: GENERATION_CONFIG,
+        generationConfig,
     });
     const responseText = result.response.text();
     console.info(`[Gemini] generateDesignOnce: received ${responseText.length} chars`);

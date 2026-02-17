@@ -17,7 +17,7 @@ interface Screen {
 const DEVICE_DIMENSIONS: Record<string, { width: number; height: number }> = {
     mobile: { width: 375, height: 812 },
     tablet: { width: 768, height: 1024 },
-    desktop: { width: 1280, height: 800 },
+    desktop: { width: 1280, height: 1200 },
     none: { width: 375, height: 812 }, // Default fallbacks
 };
 

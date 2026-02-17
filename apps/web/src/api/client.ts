@@ -92,7 +92,7 @@ export interface SaveResponse {
     savedAt: string;
 }
 
-export type PlannerPhase = 'discovery' | 'plan' | 'postgen';
+export type PlannerPhase = 'discovery' | 'plan' | 'postgen' | 'route';
 
 export interface PlannerQuestion {
     id: string;
@@ -144,7 +144,19 @@ export interface PlannerPostgenResponse {
     };
 }
 
-export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse;
+export interface PlannerRouteResponse {
+    phase: 'route';
+    intent: 'new_app' | 'add_screen' | 'edit_existing_screen';
+    reason: string;
+    appContextPrompt?: string;
+    targetScreenName?: string;
+    matchedExistingScreenName?: string;
+    referenceExistingScreenName?: string;
+    generateTheseNow: string[];
+    editInstruction?: string;
+}
+
+export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
 
 export interface PlannerRequest {
     phase?: PlannerPhase;
