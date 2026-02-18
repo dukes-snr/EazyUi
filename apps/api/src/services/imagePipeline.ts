@@ -183,10 +183,11 @@ function shouldGenerate(attrs: Record<string, string>): boolean {
 
 function replaceImgSrc(tag: string, newSrc: string): string {
   const safe = newSrc.replace(/"/g, '&quot;');
-  if (/\bsrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i.test(tag)) {
-    return tag.replace(/\bsrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, `src="${safe}"`);
+  let next = tag.replace(/\s+srcset\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  if (/\bsrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i.test(next)) {
+    return next.replace(/\bsrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, `src="${safe}"`);
   }
-  return tag.replace(/<img\b/i, `<img src="${safe}"`);
+  return next.replace(/<img\b/i, `<img src="${safe}"`);
 }
 
 function extractImageSlots(

@@ -2,7 +2,7 @@ import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
-import { BatteryFull, Signal, Wifi } from 'lucide-react';
+import { BatteryFull, ImagePlus, Signal, Wifi } from 'lucide-react';
 import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
@@ -139,6 +139,10 @@ function extractTokenColor(html: string, tokenName: 'text' | 'bg'): string | nul
     }
 
     return null;
+}
+
+function hasPlaceholderImages(html: string): boolean {
+    return /https?:\/\/placehold\.net\//i.test(String(html || ''));
 }
 
 function injectEditorScript(html: string, screenId: string) {
@@ -528,11 +532,11 @@ function injectEditorScript(html: string, screenId: string) {
 
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
-    const { updateScreen, removeScreen } = useDesignStore();
+    const { updateScreen, removeScreen, spec, selectedPlatform } = useDesignStore();
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
-    const { modelProfile } = useUiStore();
+    const { modelProfile, pushToast, removeToast } = useUiStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -548,6 +552,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     } as const;
     const statusBarInset = statusBarStyle.paddingTop + statusBarStyle.paddingBottom + statusBarStyle.fontSize;
     const [contentHeight, setContentHeight] = useState(initialHeight);
+    const [isGeneratingImages, setIsGeneratingImages] = useState(false);
     const handleAction = useCallback(async (action: string, payload?: any) => {
         if (!data.screenId) return;
 
@@ -686,6 +691,83 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
+    const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(String(data.html || ''));
+
+    const handleGenerateScreenImages = useCallback(async () => {
+        if (!data.screenId || isGeneratingImages) return;
+
+        const selectedIds = (selected && selectedCount > 1)
+            ? (doc.selection.selectedNodeIds || [])
+            : [data.screenId as string];
+
+        const targetIds = Array.from(new Set(selectedIds.filter(Boolean)));
+        const sourceScreens = (spec?.screens || [])
+            .filter((screen) => targetIds.includes(screen.screenId) && hasPlaceholderImages(screen.html));
+
+        if (!sourceScreens.length) {
+            pushToast({
+                kind: 'info',
+                title: 'No placeholder images',
+                message: 'Selected screens already have generated images.',
+            });
+            return;
+        }
+
+        setIsGeneratingImages(true);
+        const loadingToastId = pushToast({
+            kind: 'loading',
+            title: 'Generating images',
+            message: `Processing ${sourceScreens.length} screen${sourceScreens.length === 1 ? '' : 's'}...`,
+            durationMs: 0,
+        });
+
+        try {
+            const response = await apiClient.synthesizeScreenImages({
+                appPrompt: spec?.name || String(data.label || 'Generated UI'),
+                platform: selectedPlatform,
+                screens: sourceScreens.map((screen) => ({
+                    screenId: screen.screenId,
+                    name: screen.name,
+                    html: screen.html,
+                    width: screen.width,
+                    height: screen.height,
+                })),
+                maxImages: 14,
+            });
+
+            response.screens.forEach((screen) => {
+                if (!screen.screenId) return;
+                const existing = (useDesignStore.getState().spec?.screens || []).find((item) => item.screenId === screen.screenId);
+                if (!existing) return;
+                updateScreen(
+                    screen.screenId,
+                    screen.html,
+                    'complete',
+                    existing.width,
+                    existing.height,
+                    existing.name
+                );
+                if (isEditMode && editScreenId === screen.screenId) {
+                    setActiveScreen(screen.screenId, screen.html);
+                }
+            });
+
+            pushToast({
+                kind: 'success',
+                title: 'Images generated',
+                message: `Updated ${sourceScreens.length} screen${sourceScreens.length === 1 ? '' : 's'}.`,
+            });
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Image generation failed',
+                message: (error as Error).message || 'Unable to generate images for selected screens.',
+            });
+        } finally {
+            removeToast(loadingToastId);
+            setIsGeneratingImages(false);
+        }
+    }, [data.screenId, data.label, selected, selectedCount, doc.selection.selectedNodeIds, spec?.screens, spec?.name, selectedPlatform, pushToast, removeToast, isGeneratingImages, updateScreen, isEditMode, editScreenId, setActiveScreen]);
 
     // Determine device type based on width
     const isDesktop = width >= 1024;
@@ -791,6 +873,18 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     onAction={handleAction}
                 />
             </NodeToolbar>
+
+            {canGenerateScreenImages && (
+                <button
+                    type="button"
+                    onClick={() => void handleGenerateScreenImages()}
+                    disabled={isGeneratingImages}
+                    className="absolute -top-6 -right-6 z-20 w-9 h-9 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center shadow-md"
+                    title={selected && selectedCount > 1 ? 'Generate images for selected screens' : 'Generate images for this screen'}
+                >
+                    <ImagePlus size={12} />
+                </button>
+            )}
 
             {/* Premium iPhone/Desktop/Tablet Frame */}
             <div

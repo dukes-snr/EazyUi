@@ -215,35 +215,8 @@ fastify.post<{
     try {
         fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel }, 'generate: start');
         const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel });
-        const normalizedPlatform = normalizePlatform(platform);
-        const normalizedStyle = normalizeStyle(stylePreset);
-        let synthesizedStats: Record<string, unknown> | undefined;
-        try {
-            const synthesized = await synthesizeImagesForScreens(
-                designSpec.screens.map((screen) => ({
-                    screenId: screen.screenId,
-                    name: screen.name,
-                    html: screen.html,
-                    width: screen.width,
-                    height: screen.height,
-                })),
-                {
-                    appPrompt: prompt,
-                    stylePreset: normalizedStyle,
-                    platform: normalizedPlatform,
-                    preferredModel: 'image',
-                }
-            );
-            designSpec.screens = designSpec.screens.map((screen, index) => ({
-                ...screen,
-                html: synthesized.screens[index]?.html || screen.html,
-            }));
-            synthesizedStats = synthesized.stats as unknown as Record<string, unknown>;
-        } catch (pipelineError) {
-            fastify.log.warn({ err: pipelineError }, 'generate: image synthesis failed, returning original screen images');
-        }
         const versionId = uuidv4();
-        fastify.log.info({ screens: designSpec.screens.length, imageStats: synthesizedStats }, 'generate: complete');
+        fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
 
         return { designSpec, versionId };
     } catch (error) {

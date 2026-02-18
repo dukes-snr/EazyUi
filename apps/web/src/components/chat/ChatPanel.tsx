@@ -2,7 +2,7 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type HtmlScreen } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -54,6 +54,67 @@ function injectThumbScrollbarHide(html: string) {
         return html.replace('</head>', `${styleTag}\n</head>`);
     }
     return `${styleTag}\n${html}`;
+}
+
+function normalizePlaceholderCatalogInHtml(html: string): string {
+    if (!html || !/<img\b/i.test(html)) return html;
+    const generic = [
+        'https://placehold.net/1200x600.png',
+        'https://placehold.net/800x600.png',
+        'https://placehold.net/600x400.png',
+        'https://placehold.net/600x800.png',
+        'https://placehold.net/400x600.png',
+        'https://placehold.net/600x600.png',
+        'https://placehold.net/400x400.png',
+    ];
+    const map = [
+        'https://placehold.net/map-1200x600.png',
+        'https://placehold.net/map-600x400.png',
+        'https://placehold.net/map-400x600.png',
+        'https://placehold.net/map-600x600.png',
+        'https://placehold.net/map-400x400.png',
+    ];
+    const avatar = [
+        'https://placehold.net/avatar.svg',
+        'https://placehold.net/avatar.png',
+        'https://placehold.net/avatar-2.svg',
+        'https://placehold.net/avatar-2.png',
+        'https://placehold.net/avatar-3.svg',
+        'https://placehold.net/avatar-3.png',
+        'https://placehold.net/avatar-4.svg',
+        'https://placehold.net/avatar-4.png',
+        'https://placehold.net/avatar-5.svg',
+        'https://placehold.net/avatar-5.png',
+    ];
+    const allowed = new Set([...generic, ...map, ...avatar]);
+    let g = 0;
+    let m = 0;
+    let a = 0;
+
+    return html.replace(/<img\b[^>]*>/gi, (tag) => {
+        const srcMatch = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i);
+        const currentSrc = (srcMatch?.[2] || '').trim();
+        if (allowed.has(currentSrc)) return tag;
+
+        const context = `${tag} ${currentSrc}`.toLowerCase();
+        const isMap = /map|location|route|pin|geo/.test(context);
+        const isAvatar = /avatar|profile|user|person|creator|author|commenter/.test(context);
+        const dims = currentSrc.match(/(\d{2,4})x(\d{2,4})/i);
+        const w = dims ? Number(dims[1]) : 0;
+        const h = dims ? Number(dims[2]) : 0;
+        const ratio = w > 0 && h > 0 ? w / h : 1;
+
+        const nextSrc = isMap
+            ? (ratio >= 1.8 ? map[0] : ratio >= 1.3 ? map[1] : ratio <= 0.78 ? map[2] : ratio > 0.9 && ratio < 1.1 ? map[3] : map[m++ % map.length])
+            : isAvatar
+                ? avatar[a++ % avatar.length]
+                : (ratio >= 1.8 ? generic[0] : ratio >= 1.25 ? generic[1] : ratio <= 0.7 ? generic[3] : ratio <= 0.85 ? generic[4] : ratio > 0.9 && ratio < 1.1 ? generic[6] : generic[g++ % generic.length]);
+
+        if (srcMatch) {
+            return tag.replace(/\bsrc\s*=\s*(["'])(.*?)\1/i, `src="${nextSrc}"`);
+        }
+        return tag.replace(/<img\b/i, `<img src="${nextSrc}"`);
+    });
 }
 
 function stripMarkdownBold(text: string): string {
@@ -763,6 +824,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
     const [typedDoneByMessageId, setTypedDoneByMessageId] = useState<Record<string, boolean>>({});
     const [usedSuggestionKeysByMessage, setUsedSuggestionKeysByMessage] = useState<Record<string, string[]>>({});
+    const [activeAssistantByUser, setActiveAssistantByUser] = useState<Record<string, string>>({});
     const [viewerImage, setViewerImage] = useState<{ src: string; alt?: string } | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
@@ -837,61 +899,38 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         return spec?.screens.find((s) => s.screenId === screenId) || null;
     };
 
-    const synthesizeGeneratedScreenImages = async (
-        screenIds: string[],
-        appPrompt: string,
-        platformToUse: 'mobile' | 'tablet' | 'desktop',
-        styleToUse: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful',
-        signal?: AbortSignal
-    ) => {
-        const uniqueIds = Array.from(new Set(screenIds.filter(Boolean)));
-        if (!uniqueIds.length) return;
-
-        const currentScreens = useDesignStore.getState().spec?.screens || [];
-        const payloadScreens = uniqueIds
-            .map((screenId) => currentScreens.find((screen) => screen.screenId === screenId))
-            .filter(Boolean)
-            .map((screen) => ({
-                screenId: screen!.screenId,
-                name: screen!.name,
-                html: screen!.html,
-                width: screen!.width,
-                height: screen!.height,
-            }));
-
-        if (!payloadScreens.length) return;
-
-        try {
-            const result = await apiClient.synthesizeScreenImages({
-                appPrompt,
-                platform: platformToUse,
-                stylePreset: styleToUse,
-                screens: payloadScreens,
-                maxImages: 14,
-            }, signal);
-
-            result.screens.forEach((updatedScreen) => {
-                const targetId = updatedScreen.screenId;
-                if (!targetId) return;
-                const existing = useDesignStore.getState().spec?.screens.find((screen) => screen.screenId === targetId);
-                if (!existing) return;
-                updateScreen(
-                    targetId,
-                    updatedScreen.html,
-                    'complete',
-                    existing.width,
-                    existing.height,
-                    existing.name
-                );
-            });
-
-            console.info('[UI] image synthesis complete', result.stats);
-        } catch (error) {
-            console.warn('[UI] image synthesis failed; continuing with original images', error);
-        }
-    };
-
     const THUMB_W = 68;
+
+    const assistantBranchesByUser = useMemo(() => {
+        const map: Record<string, string[]> = {};
+        messages.forEach((message) => {
+            if (message.role !== 'assistant') return;
+            const parentUserId = String((message.meta as any)?.parentUserId || '').trim();
+            if (!parentUserId) return;
+            if (!map[parentUserId]) map[parentUserId] = [];
+            map[parentUserId].push(message.id);
+        });
+        return map;
+    }, [messages]);
+
+    useEffect(() => {
+        setActiveAssistantByUser((prev) => {
+            const next: Record<string, string> = {};
+            let changed = false;
+            Object.entries(assistantBranchesByUser).forEach(([userId, branchIds]) => {
+                const existing = prev[userId];
+                const value = existing && branchIds.includes(existing) ? existing : branchIds[branchIds.length - 1];
+                if (existing !== value) changed = true;
+                if (value) next[userId] = value;
+            });
+            if (Object.keys(prev).length !== Object.keys(next).length) changed = true;
+            return changed ? next : prev;
+        });
+    }, [assistantBranchesByUser]);
+
+    const setActiveBranchForUser = (userId: string, assistantId: string) => {
+        setActiveAssistantByUser((prev) => ({ ...prev, [userId]: assistantId }));
+    };
 
     useEffect(() => {
         if (!viewerImage) return;
@@ -1204,22 +1243,41 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         );
     };
 
-    const handlePlanOnly = async () => {
-        const requestPrompt = prompt.trim();
+    const handlePlanOnly = async (
+        existingUserMessageId?: string,
+        overridePrompt?: string,
+        overrideImages?: string[]
+    ) => {
+        const requestPrompt = (overridePrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             notifyError('No internet connection', 'Reconnect and try planning again.');
             return;
         }
 
-        const imagesToSend = [...images];
-        const userMsgId = addMessage('user', requestPrompt, imagesToSend);
+        const imagesToSend = overrideImages ? [...overrideImages] : [...images];
+        const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Planning your flow...');
-        updateMessage(userMsgId, { meta: { livePreview: false } });
+        updateMessage(userMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
+                livePreview: false,
+                requestKind: 'plan',
+            }
+        });
+        updateMessage(assistantMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
+                parentUserId: userMsgId,
+            }
+        });
+        setActiveBranchForUser(userMsgId, assistantMsgId);
 
-        setPrompt('');
-        setImages([]);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (!existingUserMessageId) {
+            setPrompt('');
+            setImages([]);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
         setGenerating(true);
         startLoadingToast(
             generationLoadingToastRef,
@@ -1322,7 +1380,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         incomingTargetScreens?: string[],
         incomingContextPrompt?: string,
         incomingExistingScreenNames?: string[],
-        incomingStyleReference?: string
+        incomingStyleReference?: string,
+        existingUserMessageId?: string
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
@@ -1343,14 +1402,27 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const existingScreenNames = (incomingExistingScreenNames && incomingExistingScreenNames.length > 0)
             ? [...incomingExistingScreenNames]
             : (spec?.screens || []).map((screen) => screen.name);
-        if (!incomingPrompt) {
+        if (!incomingPrompt && !existingUserMessageId) {
             setImages([]);
         }
 
-        const userMsgId = addMessage('user', requestPrompt, imagesToSend);
+        const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Warming up the studio...');
         assistantMsgIdRef.current = assistantMsgId;
-        updateMessage(userMsgId, { meta: { livePreview: false } });
+        updateMessage(userMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
+                livePreview: false,
+                requestKind: 'generate',
+            }
+        });
+        updateMessage(assistantMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                parentUserId: userMsgId,
+            }
+        });
+        setActiveBranchForUser(userMsgId, assistantMsgId);
 
         startLoadingToast(
             generationLoadingToastRef,
@@ -1555,12 +1627,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     }
                     if (event.type === 'screen_preview') {
                         const screenId = ensureScreen(event.seq, event.name);
-                        updateScreen(screenId, event.html, 'streaming', effectiveDimensions.width, effectiveDimensions.height, event.name);
+                        updateScreen(screenId, normalizePlaceholderCatalogInHtml(event.html), 'streaming', effectiveDimensions.width, effectiveDimensions.height, event.name);
                         continue;
                     }
                     if (event.type === 'screen_complete') {
                         const screenId = ensureScreen(event.seq, event.name);
-                        updateScreen(screenId, event.html, 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
+                        updateScreen(screenId, normalizePlaceholderCatalogInHtml(event.html), 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
                         completedCount += 1;
                     }
                 }
@@ -1589,7 +1661,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             console.warn('[UI] stream finalize: complete-screen failed, using best effort HTML', repairError);
                         }
                     }
-                    updateScreen(screenId, finalHtml, 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
+                    updateScreen(screenId, normalizePlaceholderCatalogInHtml(finalHtml), 'complete', effectiveDimensions.width, effectiveDimensions.height, event.name);
                     completedCount += 1;
                 }
             }
@@ -1668,17 +1740,6 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     updateScreen(screenId, current.html, 'complete', current.width, current.height, current.name);
                 }
             }
-
-            const generatedIdsForSynthesis = createdSeqs
-                .map((seq) => screenIdBySeq.get(seq))
-                .filter(Boolean) as string[];
-            await synthesizeGeneratedScreenImages(
-                generatedIdsForSynthesis,
-                appPromptForPlanning,
-                platformToUse,
-                styleToUse,
-                controller.signal
-            );
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
@@ -1792,7 +1853,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
     }, [initialRequest, messages.length, isGenerating]);
 
-    const handleEditForScreen = async (targetScreen: HtmlScreen, instruction: string, attachedImages?: string[]) => {
+    const handleEditForScreen = async (
+        targetScreen: HtmlScreen,
+        instruction: string,
+        attachedImages?: string[],
+        existingUserMessageId?: string
+    ) => {
         if (!instruction.trim() || isGenerating) return;
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             notifyError('No internet connection', 'Reconnect and try editing again.');
@@ -1807,10 +1873,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         } as const;
 
         const editImages = Array.isArray(attachedImages) ? attachedImages : [];
-        const userMsgId = addMessage('user', instruction, editImages.length ? editImages : undefined, screenRef);
+        const userMsgId = existingUserMessageId || addMessage('user', instruction, editImages.length ? editImages : undefined, screenRef);
         const assistantMsgId = addMessage('assistant', `Updating...`, undefined, screenRef);
         updateMessage(userMsgId, {
             meta: {
+                ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
+                requestKind: 'edit',
+                livePreview: false,
                 screenSnapshots: {
                     [targetScreen.screenId]: {
                         screenId: targetScreen.screenId,
@@ -1831,7 +1900,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         setPrompt((prev) => (prev.trim() === instruction.trim() ? '' : prev));
         setGenerating(true);
         const startTime = Date.now();
-        updateMessage(assistantMsgId, { meta: { livePreview: true, feedbackStart: startTime } });
+        updateMessage(assistantMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                livePreview: true,
+                feedbackStart: startTime,
+                parentUserId: userMsgId,
+            }
+        });
+        setActiveBranchForUser(userMsgId, assistantMsgId);
 
         try {
             setFocusNodeId(targetScreen.screenId);
@@ -1978,6 +2055,53 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
     };
 
+    const handleRetryUserMessage = async (userMessageId: string) => {
+        if (isGenerating) return;
+        const source = messages.find((message) => message.id === userMessageId && message.role === 'user');
+        if (!source) return;
+
+        const requestKind = String((source.meta as any)?.requestKind || 'generate');
+        const retryPrompt = source.content || '';
+        const retryImages = Array.isArray(source.images) ? source.images : [];
+
+        if (requestKind === 'plan') {
+            await handlePlanOnly(userMessageId, retryPrompt, retryImages);
+            return;
+        }
+
+        if (requestKind === 'edit' && source.screenRef?.id) {
+            const target = useDesignStore.getState().spec?.screens.find((screen) => screen.screenId === source.screenRef?.id);
+            if (target) {
+                await handleEditForScreen(target, retryPrompt, retryImages, userMessageId);
+                return;
+            }
+        }
+
+        await handleGenerate(
+            retryPrompt,
+            retryImages,
+            selectedPlatform,
+            stylePreset,
+            modelProfile,
+            undefined,
+            retryPrompt,
+            undefined,
+            undefined,
+            userMessageId
+        );
+    };
+
+    const cycleAssistantBranch = (userMessageId: string, direction: 'prev' | 'next') => {
+        const branches = assistantBranchesByUser[userMessageId] || [];
+        if (branches.length < 2) return;
+        const activeId = activeAssistantByUser[userMessageId] || branches[branches.length - 1];
+        const currentIndex = Math.max(0, branches.indexOf(activeId));
+        const nextIndex = direction === 'prev'
+            ? (currentIndex - 1 + branches.length) % branches.length
+            : (currentIndex + 1) % branches.length;
+        setActiveBranchForUser(userMessageId, branches[nextIndex]);
+    };
+
     const handleStop = () => {
         abortGeneration();
         setAbortController(null);
@@ -2095,7 +2219,17 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             </div>
                         )}
 
-                        {messages.map((message) => (
+                        {messages.map((message) => {
+                            if (message.role === 'assistant') {
+                                const parentUserId = String((message.meta as any)?.parentUserId || '').trim();
+                                if (parentUserId) {
+                                    const activeId = activeAssistantByUser[parentUserId];
+                                    if (activeId && activeId !== message.id) {
+                                        return null;
+                                    }
+                                }
+                            }
+                            return (
                             <div
                                 key={message.id}
                                 className={`flex flex-col gap-2 ${message.role === 'user' ? 'items-end' : 'items-start'}`}
@@ -2250,6 +2384,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                         </div>
                                         <div className="flex items-center justify-end w-full pr-1">
                                             <button
+                                                onClick={() => void handleRetryUserMessage(message.id)}
+                                                disabled={isGenerating}
+                                                className="px-2 py-1 rounded-md text-[11px] font-medium text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                                title="Retry this request as a new response branch"
+                                            >
+                                                Retry
+                                            </button>
+                                            <button
                                                 onClick={() => handleCopyMessage(message.id, message.content)}
                                                 className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] transition-all"
                                                 title="Copy"
@@ -2301,6 +2443,33 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                             );
                                         })()}
                                         <div className="space-y-2">
+                                            {(() => {
+                                                const parentUserId = String((message.meta as any)?.parentUserId || '').trim();
+                                                if (!parentUserId) return null;
+                                                const branches = assistantBranchesByUser[parentUserId] || [];
+                                                if (branches.length < 2) return null;
+                                                const activeId = activeAssistantByUser[parentUserId] || branches[branches.length - 1];
+                                                const index = Math.max(0, branches.indexOf(activeId));
+                                                return (
+                                                    <div className="flex items-center gap-2 text-[11px] text-[var(--ui-text-muted)] px-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => cycleAssistantBranch(parentUserId, 'prev')}
+                                                            className="px-2 py-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]"
+                                                        >
+                                                            Previous
+                                                        </button>
+                                                        <span>{index + 1}/{branches.length}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => cycleAssistantBranch(parentUserId, 'next')}
+                                                            className="px-2 py-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]"
+                                                        >
+                                                            Next
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
                                             {message.status === 'complete' && (() => {
                                                 const thinkingSeconds = getThinkingSeconds(message);
                                                 if (!thinkingSeconds) return null;
@@ -2405,7 +2574,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                     </div>
                                 )}
                             </div>
-                        ))}
+                        );
+                        })}
                         <div ref={messagesEndRef} />
                     </div>
 
