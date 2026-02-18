@@ -763,6 +763,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
     const [typedDoneByMessageId, setTypedDoneByMessageId] = useState<Record<string, boolean>>({});
     const [usedSuggestionKeysByMessage, setUsedSuggestionKeysByMessage] = useState<Record<string, string[]>>({});
+    const [viewerImage, setViewerImage] = useState<{ src: string; alt?: string } | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -836,7 +837,72 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         return spec?.screens.find((s) => s.screenId === screenId) || null;
     };
 
+    const synthesizeGeneratedScreenImages = async (
+        screenIds: string[],
+        appPrompt: string,
+        platformToUse: 'mobile' | 'tablet' | 'desktop',
+        styleToUse: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful',
+        signal?: AbortSignal
+    ) => {
+        const uniqueIds = Array.from(new Set(screenIds.filter(Boolean)));
+        if (!uniqueIds.length) return;
+
+        const currentScreens = useDesignStore.getState().spec?.screens || [];
+        const payloadScreens = uniqueIds
+            .map((screenId) => currentScreens.find((screen) => screen.screenId === screenId))
+            .filter(Boolean)
+            .map((screen) => ({
+                screenId: screen!.screenId,
+                name: screen!.name,
+                html: screen!.html,
+                width: screen!.width,
+                height: screen!.height,
+            }));
+
+        if (!payloadScreens.length) return;
+
+        try {
+            const result = await apiClient.synthesizeScreenImages({
+                appPrompt,
+                platform: platformToUse,
+                stylePreset: styleToUse,
+                screens: payloadScreens,
+                maxImages: 14,
+            }, signal);
+
+            result.screens.forEach((updatedScreen) => {
+                const targetId = updatedScreen.screenId;
+                if (!targetId) return;
+                const existing = useDesignStore.getState().spec?.screens.find((screen) => screen.screenId === targetId);
+                if (!existing) return;
+                updateScreen(
+                    targetId,
+                    updatedScreen.html,
+                    'complete',
+                    existing.width,
+                    existing.height,
+                    existing.name
+                );
+            });
+
+            console.info('[UI] image synthesis complete', result.stats);
+        } catch (error) {
+            console.warn('[UI] image synthesis failed; continuing with original images', error);
+        }
+    };
+
     const THUMB_W = 68;
+
+    useEffect(() => {
+        if (!viewerImage) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setViewerImage(null);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [viewerImage]);
 
     useEffect(() => {
         const validIds = new Set(messages.map((message) => message.id));
@@ -1153,6 +1219,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
         setPrompt('');
         setImages([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
         setGenerating(true);
         startLoadingToast(
             generationLoadingToastRef,
@@ -1602,6 +1669,17 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 }
             }
 
+            const generatedIdsForSynthesis = createdSeqs
+                .map((seq) => screenIdBySeq.get(seq))
+                .filter(Boolean) as string[];
+            await synthesizeGeneratedScreenImages(
+                generatedIdsForSynthesis,
+                appPromptForPlanning,
+                platformToUse,
+                styleToUse,
+                controller.signal
+            );
+
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
             try {
@@ -1807,6 +1885,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const requestPrompt = prompt.trim();
         if (!requestPrompt || isGenerating) return;
         const attachedImages = [...images];
+        if (attachedImages.length > 0) {
+            setImages([]);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
         const imageDrivenRequest = attachedImages.length > 0
             && /(as seen|this image|this screenshot|match this|based on (the )?image|like this|same as this)/i.test(requestPrompt);
 
@@ -2151,9 +2233,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                                         );
                                                     })}
                                                 {message.images && message.images.map((img, idx) => (
-                                                    <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-[var(--ui-border)] shadow-sm group">
+                                                    <button
+                                                        key={idx}
+                                                        type="button"
+                                                        onClick={() => setViewerImage({ src: img, alt: `attachment-${idx + 1}` })}
+                                                        className="relative w-20 h-20 rounded-xl overflow-hidden border border-[var(--ui-border)] shadow-sm group focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+                                                        title="Open image"
+                                                    >
                                                         <img src={img} alt="attached" className="w-full h-full object-cover" />
-                                                    </div>
+                                                    </button>
                                                 ))}
                                             </div>
                                         )}
@@ -2510,6 +2598,31 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     />
                 </div>
             </div>
+            {viewerImage && (
+                <div
+                    className="fixed inset-0 z-[120] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => setViewerImage(null)}
+                >
+                    <div
+                        className="relative w-full max-w-5xl max-h-[92vh] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] shadow-2xl p-2"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setViewerImage(null)}
+                            className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white hover:bg-black/75 flex items-center justify-center transition-colors z-10"
+                            title="Close viewer"
+                        >
+                            <X size={16} />
+                        </button>
+                        <img
+                            src={viewerImage.src}
+                            alt={viewerImage.alt || 'image preview'}
+                            className="block w-full h-auto max-h-[88vh] object-contain rounded-xl"
+                        />
+                    </div>
+                </div>
+            )}
         </>
     );
 }

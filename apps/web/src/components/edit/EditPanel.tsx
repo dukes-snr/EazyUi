@@ -924,11 +924,12 @@ RULES:
                                 key={tab}
                                 type="button"
                                 onClick={() => setActiveTab(tab)}
-                                className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${activeTab === tab ? 'bg-[var(--ui-tab-active-bg)] text-[var(--ui-text)] shadow-sm' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'}`}
+                                className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${activeTab === tab ? 'bg-[var(--ui-tab-active-bg)] text-[var(--ui-text)] shadow-sm' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'}`}
                             >
-                                {tab}
+                                {tab === 'blocks' ? 'AI Edit' : tab === 'style' ? 'Edit' : 'Images'}
                             </button>
-                        ))}
+                        ))
+                        }
                     </div>
                 </div>
 
@@ -936,7 +937,7 @@ RULES:
                     {!selected && activeTab === 'style' && <div className="text-sm text-[var(--ui-text-subtle)] leading-relaxed">Hover a layer in the canvas and click to select it.</div>}
                     {activeTab === 'blocks' && (
                         <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-3">
-                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Blocks</div>
+                            <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">AI Edit</div>
                             {!selected ? (
                                 <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-muted)]">
                                     Select a component on the canvas, then describe what to change.

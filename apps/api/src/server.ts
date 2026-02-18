@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
 import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
+import { synthesizeImagesForScreens } from './services/imagePipeline.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
@@ -18,6 +19,19 @@ const fastify = Fastify({
 });
 
 let renderBrowserPromise: Promise<any> | null = null;
+
+type PlatformKind = 'mobile' | 'tablet' | 'desktop';
+type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+
+function normalizePlatform(input?: string): PlatformKind | undefined {
+    if (input === 'mobile' || input === 'tablet' || input === 'desktop') return input;
+    return undefined;
+}
+
+function normalizeStyle(input?: string): StyleKind | undefined {
+    if (input === 'modern' || input === 'minimal' || input === 'vibrant' || input === 'luxury' || input === 'playful') return input;
+    return undefined;
+}
 
 async function getRenderBrowser() {
     if (!renderBrowserPromise) {
@@ -201,8 +215,35 @@ fastify.post<{
     try {
         fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel }, 'generate: start');
         const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel });
+        const normalizedPlatform = normalizePlatform(platform);
+        const normalizedStyle = normalizeStyle(stylePreset);
+        let synthesizedStats: Record<string, unknown> | undefined;
+        try {
+            const synthesized = await synthesizeImagesForScreens(
+                designSpec.screens.map((screen) => ({
+                    screenId: screen.screenId,
+                    name: screen.name,
+                    html: screen.html,
+                    width: screen.width,
+                    height: screen.height,
+                })),
+                {
+                    appPrompt: prompt,
+                    stylePreset: normalizedStyle,
+                    platform: normalizedPlatform,
+                    preferredModel: 'image',
+                }
+            );
+            designSpec.screens = designSpec.screens.map((screen, index) => ({
+                ...screen,
+                html: synthesized.screens[index]?.html || screen.html,
+            }));
+            synthesizedStats = synthesized.stats as unknown as Record<string, unknown>;
+        } catch (pipelineError) {
+            fastify.log.warn({ err: pipelineError }, 'generate: image synthesis failed, returning original screen images');
+        }
         const versionId = uuidv4();
-        fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
+        fastify.log.info({ screens: designSpec.screens.length, imageStats: synthesizedStats }, 'generate: complete');
 
         return { designSpec, versionId };
     } catch (error) {
@@ -243,6 +284,51 @@ fastify.post<{
         fastify.log.error(error);
         return reply.status(500).send({
             error: 'Failed to edit design',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        appPrompt: string;
+        stylePreset?: string;
+        platform?: string;
+        preferredModel?: string;
+        maxImages?: number;
+        screens: Array<{
+            screenId?: string;
+            name: string;
+            html: string;
+            width?: number;
+            height?: number;
+        }>;
+    };
+}>('/api/synthesize-screen-images', async (request, reply) => {
+    const { appPrompt, stylePreset, platform, preferredModel, maxImages, screens } = request.body;
+
+    if (!appPrompt?.trim()) {
+        return reply.status(400).send({ error: 'appPrompt is required' });
+    }
+    if (!Array.isArray(screens) || screens.length === 0) {
+        return reply.status(400).send({ error: 'screens is required' });
+    }
+
+    try {
+        const normalizedPlatform = normalizePlatform(platform);
+        const normalizedStyle = normalizeStyle(stylePreset);
+        const result = await synthesizeImagesForScreens(screens, {
+            appPrompt: appPrompt.trim(),
+            stylePreset: normalizedStyle,
+            platform: normalizedPlatform,
+            preferredModel: preferredModel || 'image',
+            maxImages,
+        });
+        return result;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to synthesize screen images',
             message: (error as Error).message,
         });
     }

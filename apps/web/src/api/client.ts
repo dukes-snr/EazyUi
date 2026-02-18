@@ -62,6 +62,39 @@ export interface GenerateImageResponse {
     description?: string;
 }
 
+export interface SynthesizeScreenImagesRequest {
+    appPrompt: string;
+    stylePreset?: string;
+    platform?: string;
+    preferredModel?: string;
+    maxImages?: number;
+    screens: Array<{
+        screenId?: string;
+        name: string;
+        html: string;
+        width?: number;
+        height?: number;
+    }>;
+}
+
+export interface SynthesizeScreenImagesResponse {
+    screens: Array<{
+        screenId?: string;
+        name: string;
+        html: string;
+        width?: number;
+        height?: number;
+    }>;
+    stats: {
+        totalSlots: number;
+        uniqueIntents: number;
+        generated: number;
+        reusedFromCache: number;
+        reusedWithinRun: number;
+        skipped: number;
+    };
+}
+
 export interface CompleteScreenRequest {
     screenName: string;
     partialHtml: string;
@@ -242,6 +275,17 @@ class ApiClient {
 
     async generateImage(request: GenerateImageRequest, signal?: AbortSignal): Promise<GenerateImageResponse> {
         return this.request<GenerateImageResponse>('/generate-image', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async synthesizeScreenImages(
+        request: SynthesizeScreenImagesRequest,
+        signal?: AbortSignal
+    ): Promise<SynthesizeScreenImagesResponse> {
+        return this.request<SynthesizeScreenImagesResponse>('/synthesize-screen-images', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

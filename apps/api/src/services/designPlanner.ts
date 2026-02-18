@@ -90,6 +90,20 @@ export type PlannerInput = {
     preferredModel?: string;
 };
 
+export type ImagePromptPlannerInput = {
+    appPrompt: string;
+    platform?: 'mobile' | 'tablet' | 'desktop';
+    stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+    intents: Array<{
+        id: string;
+        screenName: string;
+        alt?: string;
+        aspect?: string;
+        srcHint?: string;
+    }>;
+    preferredModel?: string;
+};
+
 function pickPlannerModel(phase: PlannerPhase, preferredModel?: string): GroqModelId {
     if (isGroqModel(preferredModel)) return preferredModel;
     if (phase === 'discovery') return 'llama-3.1-8b-instant';
@@ -332,4 +346,115 @@ export function getPlannerModels() {
         'qwen/qwen3-32b',
     ] as const;
     return candidates.filter((id) => id in GROQ_MODELS);
+}
+
+type PlannedImagePrompt = {
+    id: string;
+    prompt: string;
+};
+
+type ImagePromptPlannerResponse = {
+    prompts: PlannedImagePrompt[];
+};
+
+const ImagePromptPlannerResponseSchema = z.object({
+    prompts: z.array(z.object({
+        id: z.string(),
+        prompt: z.string(),
+    })).default([]),
+});
+
+function buildImagePromptPlannerSystemPrompt() {
+    return `You are a visual prompt writer for image generation.
+Return JSON only.
+
+Output schema:
+{
+  "prompts": [
+    { "id": "slot-id", "prompt": "high quality image prompt" }
+  ]
+}
+
+Rules:
+- Keep each prompt simple, direct, and standalone.
+- Do NOT mention aspect ratios or tokens like 1:1, 4:5, 16:9.
+- Do NOT mention app UI terms (screen, app, dashboard, mobile UI).
+- Prefer concise natural language in the style of:
+  - "Indoor selfie portrait, relaxed pose, warm natural light, minimal background, high-resolution."
+  - "A photorealistic close-up portrait of [subject], soft window light, natural mood, high detail, 4k."
+- Keep each prompt around 12-28 words.
+- Include clear subject + scene + lighting + mood/style when possible.
+- Add a short exclusion at the end: "no text, no watermark, no logos."
+- Return one prompt per input id.`;
+}
+
+function buildImagePromptPlannerUserPrompt(input: ImagePromptPlannerInput) {
+    const intents = input.intents
+        .map((intent, idx) => `${idx + 1}. id=${intent.id}
+screenName=${intent.screenName}
+alt=${intent.alt || 'none'}
+aspect=${intent.aspect || '1:1'}
+srcHint=${intent.srcHint || 'none'}`)
+        .join('\n\n');
+
+    return `appPrompt=${input.appPrompt}
+platform=${input.platform || 'mobile'}
+stylePreset=${input.stylePreset || 'modern'}
+
+imageIntents:
+${intents || 'none'}
+
+Return prompts that are production-ready for image generation and consistent across screens.`;
+}
+
+export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<Map<string, string>> {
+    if (!input.intents.length) return new Map();
+
+    const primaryModel = (isGroqModel(input.preferredModel) ? input.preferredModel : 'llama-3.3-70b-versatile') as GroqModelId;
+    const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
+        ? 'llama-3.1-8b-instant'
+        : 'llama-3.3-70b-versatile';
+
+    const modelsToTry: GroqModelId[] = [primaryModel, fallbackModel];
+    let completion: Awaited<ReturnType<typeof groqChatCompletion>> | null = null;
+    let lastError: unknown = null;
+
+    for (const model of modelsToTry) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                completion = await groqChatCompletion({
+                    model,
+                    systemPrompt: buildImagePromptPlannerSystemPrompt(),
+                    prompt: buildImagePromptPlannerUserPrompt(input),
+                    maxCompletionTokens: 2600,
+                    temperature: 0.35,
+                    topP: 0.9,
+                    responseFormat: 'json_object',
+                });
+                break;
+            } catch (error) {
+                lastError = error;
+                if (attempt === 0 && isTransientNetworkError(error)) {
+                    await sleep(400 + Math.round(Math.random() * 450));
+                    continue;
+                }
+                break;
+            }
+        }
+        if (completion) break;
+    }
+
+    if (!completion) {
+        throw (lastError instanceof Error ? lastError : new Error('Image prompt planner request failed'));
+    }
+
+    const raw = parseJsonSafe<ImagePromptPlannerResponse>(completion.text || '{}');
+    const parsed = ImagePromptPlannerResponseSchema.parse(raw);
+    const mapping = new Map<string, string>();
+    parsed.prompts.forEach((entry) => {
+        const key = (entry.id || '').trim();
+        const prompt = (entry.prompt || '').trim();
+        if (key && prompt) mapping.set(key, prompt);
+    });
+    return mapping;
 }

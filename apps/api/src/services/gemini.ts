@@ -180,20 +180,44 @@ TOKEN USAGE RULES:
 `;
 
 const IMAGE_WHITELIST = `
-IMAGES (STRICT):
-You may ONLY use these exact image URLs (you may change query params like w/h/fit/q, but the base must match):
+IMAGES (STRICT, PLACEHOLDER-FIRST):
+For INITIAL screen generation, use placeholder URLs from placeholder.net only.
+These placeholders are temporary and will be replaced later by generated assets.
 
-- Nature:   https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05
-- Tech:     https://images.unsplash.com/photo-1488590528505-98d2b5aba04b
-- People:   https://images.unsplash.com/photo-1539571696357-5a69c17a67c6
-- Travel:   https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1
-- Abstract: https://images.unsplash.com/photo-1541701494587-cb58502866ab
-- Food:     https://images.unsplash.com/photo-1504674900247-0877df9cc836
-- Business: https://images.unsplash.com/photo-1486406146926-c627a92ad1ab
+Generic content images:
+- https://placehold.net/400x400.png
+- https://placehold.net/600x600.png
+- https://placehold.net/400x600.png
+- https://placehold.net/600x800.png
+- https://placehold.net/600x400.png
+- https://placehold.net/800x600.png
+- https://placehold.net/1200x600.png
 
-FORBIDDEN:
-- Any other domain (pexels.com, source.unsplash.com, etc.)
-- If you need more images, reuse the allowed ones with different crops.
+Map images (use for maps/location blocks):
+- https://placehold.net/map-400x400.png
+- https://placehold.net/map-600x600.png
+- https://placehold.net/map-400x600.png
+- https://placehold.net/map-600x400.png
+- https://placehold.net/map-1200x600.png
+
+Avatar / people images (use for profile/user chips/comments/creators):
+- https://placehold.net/avatar.svg
+- https://placehold.net/avatar.png
+- https://placehold.net/avatar-2.svg
+- https://placehold.net/avatar-2.png
+- https://placehold.net/avatar-3.svg
+- https://placehold.net/avatar-3.png
+- https://placehold.net/avatar-4.svg
+- https://placehold.net/avatar-4.png
+- https://placehold.net/avatar-5.svg
+- https://placehold.net/avatar-5.png
+
+Rules:
+- Choose placeholder type by context:
+  - map/location -> map placeholders
+  - user/profile/people -> avatar placeholders
+  - everything else -> generic placeholders
+- Do not use Unsplash/Pexels/source.unsplash or other image domains in initial HTML.
 `;
 
 const ANTI_GENERIC_RULES = `
@@ -228,14 +252,11 @@ const MAP_SCREEN_RULES = `
 MAP SCREENS (MANDATORY RULES):
 - Do NOT use Google Maps/Mapbox scripts or API keys.
 - Do NOT use external map SDK scripts in generated HTML.
-- Create a map mock using CSS gradients + optional SVG routes.
-- The map mock should include subtle grid lines + noise + land/water gradients.
-- The map must have 3 layers:
-  1) base map background (gradients + faint roads)
-  2) map pins + route overlay (SVG)
-  3) UI chrome (search bar, chips, bottom sheet)
-- Include at least 1-3 pins, one search UI, and a bottom sheet or pinned place card.
-- Add an optional route line when context implies trip/directions.
+- Use a map placeholder image for initial render, e.g.:
+  - https://placehold.net/map-600x400.png
+  - https://placehold.net/map-1200x600.png
+- You may overlay pins/routes/chips/search UI over the placeholder map.
+- Include at least 1-3 pins, one search UI, and a bottom sheet or pinned place card where relevant.
 - Ensure proper contrast over map surfaces (cards/chips/text must remain legible).
 `;
 
@@ -515,28 +536,54 @@ Rules:
 `;
 
 const FAST_UNSPLASH_IMAGE_RULES = `
-Fast image policy:
-- Use only these exact Unsplash bases (query params allowed):
-  - https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05
-  - https://images.unsplash.com/photo-1488590528505-98d2b5aba04b
-  - https://images.unsplash.com/photo-1539571696357-5a69c17a67c6
-  - https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1
-  - https://images.unsplash.com/photo-1541701494587-cb58502866ab
-  - https://images.unsplash.com/photo-1504674900247-0877df9cc836
-  - https://images.unsplash.com/photo-1486406146926-c627a92ad1ab
-- Prefer thematic, high-quality photos that match the prompt domain.
-- Every <img> src should be a full Unsplash URL with query params, e.g. ?auto=format&fit=crop&w=1200&q=80.
-- Avoid placeholder domains (e.g. via.placeholder.com) and broken image hosts.
+Fast image policy (placeholder-first):
+- For initial HTML generation, use placeholder.net URLs only.
+- Generic image placeholders:
+  - https://placehold.net/400x400.png
+  - https://placehold.net/600x600.png
+  - https://placehold.net/400x600.png
+  - https://placehold.net/600x800.png
+  - https://placehold.net/600x400.png
+  - https://placehold.net/800x600.png
+  - https://placehold.net/1200x600.png
+- Map placeholders:
+  - https://placehold.net/map-400x400.png
+  - https://placehold.net/map-600x600.png
+  - https://placehold.net/map-400x600.png
+  - https://placehold.net/map-600x400.png
+  - https://placehold.net/map-1200x600.png
+- Avatar placeholders:
+  - https://placehold.net/avatar.png
+  - https://placehold.net/avatar-2.png
+  - https://placehold.net/avatar-3.png
+  - https://placehold.net/avatar-4.png
+  - https://placehold.net/avatar-5.png
 `;
 
 const FAST_IMAGE_FALLBACKS = [
-    'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80',
-    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80',
+    'https://placehold.net/1200x600.png',
+    'https://placehold.net/800x600.png',
+    'https://placehold.net/600x400.png',
+    'https://placehold.net/600x800.png',
+    'https://placehold.net/400x600.png',
+    'https://placehold.net/600x600.png',
+    'https://placehold.net/400x400.png',
+] as const;
+
+const FAST_MAP_IMAGE_FALLBACKS = [
+    'https://placehold.net/map-1200x600.png',
+    'https://placehold.net/map-600x400.png',
+    'https://placehold.net/map-400x600.png',
+    'https://placehold.net/map-600x600.png',
+    'https://placehold.net/map-400x400.png',
+] as const;
+
+const FAST_AVATAR_IMAGE_FALLBACKS = [
+    'https://placehold.net/avatar.png',
+    'https://placehold.net/avatar-2.png',
+    'https://placehold.net/avatar-3.png',
+    'https://placehold.net/avatar-4.png',
+    'https://placehold.net/avatar-5.png',
 ] as const;
 
 
@@ -1044,11 +1091,25 @@ function normalizeFastFrameworkAssets(html: string): string {
 
 function enforceFastWorkingImageUrls(html: string): string {
     if (!html || !/<img\b/i.test(html)) return html;
-    let index = 0;
-    return html.replace(/(<img\b[^>]*\bsrc=)(["']).*?\2/gi, (_match, prefix: string) => {
-        const src = FAST_IMAGE_FALLBACKS[index % FAST_IMAGE_FALLBACKS.length];
-        index += 1;
-        return `${prefix}"${src}"`;
+    let genericIndex = 0;
+    let mapIndex = 0;
+    let avatarIndex = 0;
+
+    return html.replace(/<img\b[^>]*>/gi, (tag: string) => {
+        const context = tag.toLowerCase();
+        const isMap = /map|location|route|pin|geo/.test(context);
+        const isAvatar = /avatar|profile|user|person|creator|author/.test(context);
+
+        const src = isMap
+            ? FAST_MAP_IMAGE_FALLBACKS[mapIndex++ % FAST_MAP_IMAGE_FALLBACKS.length]
+            : isAvatar
+                ? FAST_AVATAR_IMAGE_FALLBACKS[avatarIndex++ % FAST_AVATAR_IMAGE_FALLBACKS.length]
+                : FAST_IMAGE_FALLBACKS[genericIndex++ % FAST_IMAGE_FALLBACKS.length];
+
+        if (/\bsrc\s*=\s*(["']).*?\1/i.test(tag)) {
+            return tag.replace(/\bsrc\s*=\s*(["']).*?\1/i, `src="${src}"`);
+        }
+        return tag.replace(/<img\b/i, `<img src="${src}"`);
     });
 }
 
