@@ -299,7 +299,7 @@ function CanvasWorkspaceContent() {
             >
                 <Background
                     variant={BackgroundVariant.Dots}
-                    gap={14}
+                    gap={10}
                     size={2}
                     color="var(--ui-canvas-dot)"
                 />

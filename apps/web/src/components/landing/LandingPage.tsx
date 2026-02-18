@@ -3,6 +3,7 @@ import { ArrowUp, CircleStar, Gauge, Gem, Layers3, LineSquiggle, Mic, Monitor, P
 import heroBg2 from '../../assets/hero-bg2.jpg';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
+import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import TextType from '../ui/TextType';
 
 type LandingPageProps = {
@@ -13,6 +14,7 @@ type LandingPageProps = {
         stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile: DesignModelProfile;
     }) => void;
+    onNavigate: (path: string) => void;
 };
 
 // const TRUSTED_BRANDS = ['Startups', 'Product Teams', 'Agencies', 'Founders', 'Designers', 'Developers', 'Studios'];
@@ -40,57 +42,59 @@ type PatternCard = {
 };
 
 const MOBBIN_SCREEN_IMAGES = [
-    'https://i.postimg.cc/5Nk5nbfm/Ui-(1).jpg',
-    'https://i.postimg.cc/jdk6ZtR8/Ui-(2).jpg',
-    'https://i.postimg.cc/NfP8pBQr/Ui-(3).jpg',
-    'https://i.postimg.cc/5Nk5nbfC/Ui-(4).jpg',
-    'https://i.postimg.cc/bNF03pqn/Ui-(5).jpg',
-    'https://i.postimg.cc/kXhNfq7K/Ui-(6).jpg',
+    'https://i.postimg.cc/WzNH44Vx/01-profile.png',
+    'https://i.postimg.cc/kGHvdMgc/03-cooking-mode-step-by-step.png',
+    'https://i.postimg.cc/nrFPLLZ8/03-pin-detail.png',
+    'https://i.postimg.cc/3NfnJCnZ/03-challenges.png',
+    'https://i.postimg.cc/L59bssSc/02-home-feed.png',
+    'https://i.postimg.cc/tJv2Ct25/01-dashboard.png',
+    'https://i.postimg.cc/bNF03pqn/Ui_(5).jpg',
+
 ] as const;
 
 const PATTERN_LIBRARY: Record<PatternTab, PatternCard[]> = {
     Screens: [
         {
-            title: 'Account Setup',
-            prompt: 'Design an account setup mobile screen with progressive questions and avatar choices.',
+            title: 'Profile',
+            prompt: 'Design a profile screen with avatar header, editable personal details, and clear settings/actions.',
             accent: 'from-sky-500/45 to-indigo-500/25',
             image: MOBBIN_SCREEN_IMAGES[0],
         },
         {
-            title: 'Streaming Home',
-            prompt: 'Create a streaming app home screen with featured hero, category tabs, and media cards.',
+            title: 'Cooking',
+            prompt: 'Create a cooking mode step-by-step screen with recipe progress, ingredient guidance, and timer-friendly controls.',
             accent: 'from-fuchsia-500/40 to-slate-500/20',
             image: MOBBIN_SCREEN_IMAGES[1],
         },
         {
-            title: 'Subscription Paywall',
-            prompt: 'Generate a paywall screen with annual/monthly options and strong CTA hierarchy.',
+            title: 'Image detail',
+            prompt: 'Generate an image pin detail screen with large media preview, save/share actions, and related inspiration cards.',
             accent: 'from-amber-500/45 to-orange-500/25',
             image: MOBBIN_SCREEN_IMAGES[2],
         },
         {
-            title: 'Login',
-            prompt: 'Build a login/auth screen with social options, secure inputs, and create-account path.',
+            title: 'Leaderboard',
+            prompt: 'Build a challenges leaderboard screen with ranked participants, progress indicators, and reward highlights.',
             accent: 'from-violet-500/45 to-cyan-500/20',
             image: MOBBIN_SCREEN_IMAGES[3],
         },
         { 
-            title: 'Settings',
-            prompt: 'Design a settings dashboard with grouped controls, toggles, and profile summary.', 
+            title: 'Feed',
+            prompt: 'Design a home feed screen with content cards, discovery sections, and quick interactions for engagement.', 
             accent: 'from-slate-600/50 to-zinc-500/20', 
             image: MOBBIN_SCREEN_IMAGES[4] 
         },
         { 
-            title: 'Checkout',
-            prompt: 'Create a checkout screen with address, delivery options, and sticky payment CTA.', 
+            title: 'Dashboard',
+            prompt: 'Create a dashboard screen with KPI summary cards, recent activity, and concise performance trends.', 
             accent: 'from-zinc-400/35 to-slate-500/20', 
             image: MOBBIN_SCREEN_IMAGES[5] 
         },
         { 
-            title: 'Collections',
-            prompt: 'Generate a product collection screen with cards, wishlist actions, and filters.', 
+            title: 'Achievement',
+            prompt: 'Generate an achievements screen with milestone badges, progress tracking, and unlocked reward states.', 
             accent: 'from-emerald-500/35 to-cyan-500/20', 
-            image: MOBBIN_SCREEN_IMAGES[0] 
+            image: MOBBIN_SCREEN_IMAGES[6] 
         },
     ],
     'UI Elements': [
@@ -202,6 +206,11 @@ const SOCIAL_PROOF = [
     },
 ] as const;
 const CHIP_LABEL_MAX = 34;
+const MARKETING_NAV_LINKS = [
+    { label: 'Templates', path: '/templates' },
+    { label: 'Pricing', path: '/pricing' },
+    { label: 'Learn', path: '/learn' },
+] as const;
 
 function toChipLabel(text: string): string {
     const clean = text.trim();
@@ -209,7 +218,7 @@ function toChipLabel(text: string): string {
     return `${clean.slice(0, CHIP_LABEL_MAX - 1).trimEnd()}...`;
 }
 
-export function LandingPage({ onStart }: LandingPageProps) {
+export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
@@ -400,18 +409,42 @@ export function LandingPage({ onStart }: LandingPageProps) {
 
             <header className="relative z-10 h-14 border-b border-white/5">
                 <div className="mx-auto h-full max-w-[1160px] px-6 flex items-center justify-between">
-                    <div className="h-5 w-5 rounded-full bg-white/10 text-[10px] flex items-center justify-center text-white/80">A</div>
-                    <div className="hidden lg:flex items-center gap-7 text-[11px] uppercase tracking-[0.08em] text-gray-400">
-                        <span>Create</span>
-                        <span>Templates</span>
-                        <span>Components</span>
-                        <span>Assets</span>
-                        <span>Skills</span>
-                        <span>Learn</span>
-                        <span>Pricing</span>
-                        <span>Changelog</span>
+                    <button
+                        type="button"
+                        onClick={() => onNavigate('/')}
+                        className="inline-flex items-center gap-2 text-left"
+                    >
+                        <span className="h-6 w-6 rounded-full bg-white/10 text-[11px] flex items-center justify-center text-white/80">E</span>
+                        <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-200">EazyUI</span>
+                    </button>
+                    <div className="hidden lg:flex items-center gap-2">
+                        {MARKETING_NAV_LINKS.map((item) => (
+                            <button
+                                key={item.label}
+                                type="button"
+                                onClick={() => onNavigate(item.path)}
+                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                            >
+                                {item.label}
+                            </button>
+                        ))}
                     </div>
-                    <button className="text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white transition-colors">Sign in</button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('/app')}
+                            className="hidden sm:inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
+                        >
+                            Try now
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('/app')}
+                            className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
+                        >
+                            Open app
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -756,6 +789,11 @@ export function LandingPage({ onStart }: LandingPageProps) {
                         </div>
                     </div>
                 </section>
+
+                <GlassPricingSection
+                    className="mt-24"
+                    onGetStarted={() => setPrompt('Design a premium fintech pricing and subscription flow with annual billing emphasis')}
+                />
 
                 <section className="relative mx-auto mt-24 max-w-[1120px] px-2 pb-16">
                     <div className="landing-glow-orb landing-glow-orb-left" />
