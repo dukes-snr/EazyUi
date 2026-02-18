@@ -7,7 +7,22 @@
     height: 100vh;
     width: 100vw;
     overflow: hidden;
-    background: var(--color-bg);
+    /* gap: 8px; */
+    padding: 16px;
+    box-sizing: border-box;
+    background:
+        var(--color-bg);
+}
+
+.app-canvas-shell {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    /* border: 1px solid var(--ui-border-light); */
+    border-radius: 20px;
+    background: var(--ui-surface-1);
 }
 
 .edit-panel {
@@ -156,13 +171,15 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: var(--color-surface);
-    border-right: 1px solid var(--color-border);
+    background: transparent;
+    border-right: none;
+    border-radius: 16px;
+    overflow: hidden;
 }
 
 .chat-header {
     padding: var(--space-4);
-    border-bottom: 1px solid var(--color-border);
+    /* border-bottom: 1px solid var(--color-border); */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -306,6 +323,7 @@
 
 .canvas-workspace {
     flex: 1;
+    min-width: 0;
     height: 100%;
     position: relative;
     overflow: hidden;

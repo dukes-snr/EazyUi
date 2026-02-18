@@ -390,6 +390,7 @@ fastify.post<{
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         screenCountDesired?: number;
         screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+        referenceImages?: string[];
         preferredModel?: string;
     };
 }>('/api/plan', async (request, reply) => {
@@ -400,6 +401,7 @@ fastify.post<{
         stylePreset,
         screenCountDesired,
         screensGenerated,
+        referenceImages,
         preferredModel,
     } = request.body;
 
@@ -415,6 +417,7 @@ fastify.post<{
             stylePreset,
             screenCountDesired,
             screensGenerated,
+            referenceImages,
             preferredModel,
         });
         return plan;
@@ -525,10 +528,16 @@ fastify.post<{
         const page = await context.newPage();
         try {
             await page.setContent(html, {
-                waitUntil: 'networkidle',
-                timeout: 25000,
+                waitUntil: 'domcontentloaded',
+                timeout: 20000,
             });
-            await page.waitForTimeout(200);
+            // Best-effort settle without hard dependency on external CDN/network-idle.
+            try {
+                await page.waitForLoadState('networkidle', { timeout: 1500 });
+            } catch {
+                // ignore
+            }
+            await page.waitForTimeout(180);
             const image = await page.screenshot({
                 type: 'png',
                 fullPage: false,

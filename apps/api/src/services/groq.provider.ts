@@ -11,6 +11,7 @@ export const GROQ_MODELS = {
     'llama-3.1-8b-instant': { name: 'Llama 3.1 8B Instant', contextWindow: 131072 },
     'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B Versatile', contextWindow: 131072 },
     'meta-llama/llama-4-scout-17b-16e-instruct': { name: 'Llama 4 Scout 17B', contextWindow: 131072 },
+    'meta-llama/llama-4-maverick-17b-128e-instruct': { name: 'Llama 4 Maverick 17B', contextWindow: 131072 },
     'qwen/qwen3-32b': { name: 'Qwen 3 32B', contextWindow: 131072 },
     'moonshotai/kimi-k2-instruct': { name: 'Kimi K2 Instruct', contextWindow: 131072 },
 } as const;
@@ -23,7 +24,15 @@ type GroqLastChatDebug = {
     model: string;
     requestBody: {
         model: string;
-        messages: Array<{ role: 'system' | 'user'; content: string }>;
+        messages: Array<{
+            role: 'system' | 'user' | 'assistant';
+            content:
+                | string
+                | Array<
+                    | { type: 'text'; text: string }
+                    | { type: 'image_url'; image_url: { url: string } }
+                >;
+        }>;
         max_tokens: number;
         temperature: number;
         top_p: number;
@@ -109,7 +118,15 @@ export async function groqChatCompletion(input: {
     temperature?: number;
     topP?: number;
     responseFormat?: 'json_object';
-    messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    messages?: Array<{
+        role: 'system' | 'user' | 'assistant';
+        content:
+            | string
+            | Array<
+                | { type: 'text'; text: string }
+                | { type: 'image_url'; image_url: { url: string } }
+            >;
+    }>;
     maxCompletionTokens?: number;
     reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
     stop?: string[] | null;

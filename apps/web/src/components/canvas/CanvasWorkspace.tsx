@@ -278,7 +278,6 @@ function CanvasWorkspaceContent() {
                 nodeTypes={nodeTypes}
                 fitView
                 fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
-                className="canvas-gallery-bg"
                 minZoom={0.05}
                 maxZoom={2}
 
@@ -300,8 +299,8 @@ function CanvasWorkspaceContent() {
             >
                 <Background
                     variant={BackgroundVariant.Dots}
-                    gap={20}
-                    size={1}
+                    gap={14}
+                    size={2}
                     color="var(--ui-canvas-dot)"
                 />
                 <Controls

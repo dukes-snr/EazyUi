@@ -179,7 +179,7 @@ export interface PlannerPostgenResponse {
 
 export interface PlannerRouteResponse {
     phase: 'route';
-    intent: 'new_app' | 'add_screen' | 'edit_existing_screen';
+    intent: 'new_app' | 'add_screen' | 'edit_existing_screen' | 'chat_assist';
     reason: string;
     appContextPrompt?: string;
     targetScreenName?: string;
@@ -187,6 +187,9 @@ export interface PlannerRouteResponse {
     referenceExistingScreenName?: string;
     generateTheseNow: string[];
     editInstruction?: string;
+    assistantResponse?: string;
+    recommendNextScreens?: boolean;
+    nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number }>;
 }
 
 export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
@@ -198,7 +201,22 @@ export interface PlannerRequest {
     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     screenCountDesired?: number;
     screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+    referenceImages?: string[];
     preferredModel?: string;
+}
+
+export interface RenderScreenImageRequest {
+    html: string;
+    width?: number;
+    height?: number;
+    scale?: number;
+}
+
+export interface RenderScreenImageResponse {
+    pngBase64: string;
+    width: number;
+    height: number;
+    scale: number;
 }
 
 export interface ProjectResponse {
@@ -317,6 +335,14 @@ class ApiClient {
 
     async plan(request: PlannerRequest, signal?: AbortSignal): Promise<PlannerResponse> {
         return this.request<PlannerResponse>('/plan', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async renderScreenImage(request: RenderScreenImageRequest, signal?: AbortSignal): Promise<RenderScreenImageResponse> {
+        return this.request<RenderScreenImageResponse>('/render-screen-image', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

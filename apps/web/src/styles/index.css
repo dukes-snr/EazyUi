@@ -11,11 +11,11 @@
 :root,
 [data-theme='dark'] {
   /* Core app theme tokens */
-  --ui-bg: #0A0E14;
-  --ui-surface-1: #12171E;
-  --ui-surface-2: #16181D;
-  --ui-surface-3: #1D2129;
-  --ui-surface-4: #22262D;
+  --ui-bg: #0f0f0f;
+  --ui-surface-1: #1b1b1b;
+  --ui-surface-2: #171717;
+  --ui-surface-3: #1f1f1f;
+  --ui-surface-4: #212429;
   --ui-popover: #121219;
   --ui-border: #2A3140;
   --ui-border-light: #3A4250;
@@ -24,9 +24,9 @@
   --ui-text-subtle: #5A6472;
   --ui-primary: #6366F1;
   --ui-primary-hover: #818CF8;
-  --ui-canvas-dot: #2a313b;
+  --ui-canvas-dot: #484949;
   --ui-tab-active-bg: #2a2f37;
-  --ui-canvas-profile-bg: rgba(12, 16, 26, 0.94);
+  --ui-canvas-profile-bg: var(--ui-surface-3);
   --ui-canvas-profile-border: rgba(255, 255, 255, 0.12);
   --ui-canvas-profile-hover: rgba(255, 255, 255, 0.08);
 
@@ -99,9 +99,9 @@
   --ui-text-subtle: #64748B;
   --ui-primary: #4F46E5;
   --ui-primary-hover: #4338CA;
-  --ui-canvas-dot: #7f8ea6;
+  --ui-canvas-dot: #959595;
   --ui-tab-active-bg: #ffffff;
-  --ui-canvas-profile-bg: rgba(255, 255, 255, 0.94);
+  --ui-canvas-profile-bg: var(--ui-surface-3);
   --ui-canvas-profile-border: rgba(15, 23, 42, 0.16);
   --ui-canvas-profile-hover: rgba(15, 23, 42, 0.07);
 

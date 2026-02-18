@@ -164,9 +164,11 @@ function App() {
     return (
         <div className={`app-layout ${isEditMode ? 'edit-mode' : ''}`}>
             <ChatPanel initialRequest={initialRequest} />
-            <LayersPanel />
-            <CanvasWorkspace />
-            <EditPanel />
+            <div className="app-canvas-shell">
+                <LayersPanel />
+                <CanvasWorkspace />
+                <EditPanel />
+            </div>
             <ToastViewport />
         </div>
     );

@@ -65,14 +65,21 @@ const PlannerPostgenResponseSchema = z.object({
 
 const PlannerRouteResponseSchema = z.object({
     phase: z.literal('route'),
-    intent: z.enum(['new_app', 'add_screen', 'edit_existing_screen']),
+    intent: z.enum(['new_app', 'add_screen', 'edit_existing_screen', 'chat_assist']),
     reason: z.string().default(''),
-    appContextPrompt: z.string().optional(),
-    targetScreenName: z.string().optional(),
-    matchedExistingScreenName: z.string().optional(),
-    referenceExistingScreenName: z.string().optional(),
+    appContextPrompt: z.string().nullable().optional().transform((v) => v ?? undefined),
+    targetScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
+    matchedExistingScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
+    referenceExistingScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
     generateTheseNow: z.array(z.string()).default([]),
-    editInstruction: z.string().optional(),
+    editInstruction: z.string().nullable().optional().transform((v) => v ?? undefined),
+    assistantResponse: z.string().nullable().optional().transform((v) => v ?? undefined),
+    recommendNextScreens: z.boolean().optional().default(false),
+    nextScreenSuggestions: z.array(z.object({
+        name: z.string(),
+        why: z.string().default(''),
+        priority: z.number().int().positive().optional(),
+    })).optional().default([]),
 });
 
 export type PlannerPlanResponse = z.infer<typeof PlannerPlanResponseSchema>;
@@ -87,6 +94,7 @@ export type PlannerInput = {
     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     screenCountDesired?: number;
     screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+    referenceImages?: string[];
     preferredModel?: string;
 };
 
@@ -106,6 +114,7 @@ export type ImagePromptPlannerInput = {
 
 function pickPlannerModel(phase: PlannerPhase, preferredModel?: string): GroqModelId {
     if (isGroqModel(preferredModel)) return preferredModel;
+    if (phase === 'route') return 'meta-llama/llama-4-maverick-17b-128e-instruct';
     if (phase === 'discovery') return 'llama-3.1-8b-instant';
     return 'llama-3.3-70b-versatile';
 }
@@ -157,27 +166,43 @@ function parseJsonSafe<T = any>(text: string): T {
 
 function buildSystemPrompt(phase: PlannerPhase): string {
     if (phase === 'route') {
-        return `You are an intent router for UI design actions.
+        return `You are a conversational UI design assistant that also routes actions.
 Return JSON only.
 
 Output schema:
 {
   "phase": "route",
-  "intent": "new_app | add_screen | edit_existing_screen",
+  "intent": "new_app | add_screen | edit_existing_screen | chat_assist",
   "reason": "short reason",
   "appContextPrompt": "full app context prompt to keep style consistency",
   "targetScreenName": "Home",
   "matchedExistingScreenName": "Dashboard",
   "referenceExistingScreenName": "Account",
   "generateTheseNow": ["Account"],
-  "editInstruction": "regenerate with cleaner hierarchy"
+  "editInstruction": "regenerate with cleaner hierarchy",
+  "assistantResponse": "conversational answer for critique/idea/help requests",
+  "recommendNextScreens": false,
+  "nextScreenSuggestions": [{ "name": "Explore", "why": "why it helps", "priority": 1 }]
 }
 
 Rules:
+- Default to chat_assist unless user clearly asks to generate/add/edit screens.
 - If user asks to regenerate/update/rework an existing screen by name -> edit_existing_screen.
 - If user asks to match/design like another existing screen, set referenceExistingScreenName.
 - If user asks for a new screen inside existing app -> add_screen.
 - If user asks for a new app concept unrelated to existing screens -> new_app.
+- If user asks for critique, feedback, app ideas, UX advice, strategy, or general conversation without explicit generation/edit action -> chat_assist.
+- If user asks to describe/explain/analyze what a referenced screen looks like, ALWAYS use chat_assist.
+- For chat_assist, provide assistantResponse as concise natural chat assistant text (not robotic JSON style), with practical suggestions.
+- For chat_assist, write as a senior UI/UX designer and use rich tags in assistantResponse:
+  [h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i].
+- Structure should adapt to user intent, not fixed section names.
+- For critique requests, you may use sections like summary/strengths/issues/improvements.
+- For ideation requests (e.g., "pitch this app idea"), provide a product pitch format:
+  app concept, audience, key features, visual direction, and why it will work.
+- Avoid generic one-liners; ground feedback in concrete UI details (hierarchy, spacing, contrast, typography, layout, interaction cues).
+- Set recommendNextScreens=true only if the user explicitly asks what to build next / next screens / suggestions for next flow.
+- Do NOT recommend next screens in normal conversation unless explicitly requested.
 - Keep reason very short.
 - generateTheseNow should include 1-3 screen names when intent is add_screen.
 - appContextPrompt should preserve existing app context when app exists.`;
@@ -269,7 +294,11 @@ If phase is "plan" or "discovery", define the best initial flow and which screen
 Domain lock:
 - Treat appPrompt + alreadyGeneratedScreens as the source of truth for product domain.
 - Continue the same domain and user journey.
-- Reject unrelated fallback templates.`;
+- Reject unrelated fallback templates.
+
+Reference images:
+- If provided, use attached images as visual source of truth for critique/style/layout analysis.
+- In critique requests, cite concrete visual observations from the image(s).`;
 }
 
 function sleep(ms: number) {
@@ -281,8 +310,78 @@ function isTransientNetworkError(error: unknown): boolean {
     return /ECONNRESET|ETIMEDOUT|fetch failed|network|socket hang up/i.test(message);
 }
 
+function isAssistLikeRequest(prompt: string): boolean {
+    const text = (prompt || '').toLowerCase();
+    return /(describe|critique|criticize|review|analy[sz]e|analysis|feedback|what .*look|app idea|ideas|brainstorm|suggestion|ux advice|improve this)/i.test(text);
+}
+
+function isNextScreenRequest(prompt: string): boolean {
+    const text = (prompt || '').toLowerCase();
+    return /(what next|next screen|next screens|recommend.*screen|suggest.*screen|what should i build next|flow next)/i.test(text);
+}
+
+async function generateAssistFallbackResponse(input: PlannerInput, model: GroqModelId): Promise<string> {
+    const referenceImages = (input.referenceImages || []).filter(Boolean).slice(0, 3);
+    const assistInstruction = `You are a senior UI/UX designer assisting in-product.
+Respond conversationally and directly to the user's request.
+If the user asks to describe or critique a referenced screen, ground the answer in concrete visual observations (layout, hierarchy, color, spacing, typography, components, affordances).
+Keep it concise but substantive (not too short).
+Do not output JSON.
+
+Formatting requirement: use these tags in output where helpful:
+[h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i]
+
+Use a structured response, but choose section names based on user intent.
+Do not force one rigid template for all requests.
+
+Guidance:
+- Critique/analysis: include strengths, issues, and concrete improvements.
+- Pitch/idea requests: include app name ideas, product concept, core loop, key screens/features, and visual direction.
+- General questions: answer directly with concise sections and actionable points.
+`;
+    const userPrompt = `User request:
+${input.appPrompt}
+
+Known screen names:
+${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n') || 'none'}`;
+
+    const multimodalCapable = model === 'meta-llama/llama-4-maverick-17b-128e-instruct' && referenceImages.length > 0;
+    const completion = await groqChatCompletion(multimodalCapable ? {
+        model,
+        prompt: '',
+        messages: [
+            {
+                role: 'user',
+                content: [
+                    { type: 'text', text: `${assistInstruction}\n\n${userPrompt}` },
+                    ...referenceImages.map((url) => ({
+                        type: 'image_url' as const,
+                        image_url: { url },
+                    })),
+                ],
+            },
+        ],
+        maxCompletionTokens: 900,
+        temperature: 0.35,
+        topP: 0.9,
+    } : {
+        model,
+        systemPrompt: assistInstruction,
+        prompt: userPrompt,
+        maxCompletionTokens: 900,
+        temperature: 0.35,
+        topP: 0.9,
+    });
+    return (completion.text || '').trim();
+}
+
 export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResponse> {
-    const primaryModel = pickPlannerModel(input.phase, input.preferredModel);
+    const hasReferenceImages = (input.referenceImages || []).filter(Boolean).length > 0;
+    const forcedRouteVisionModel: GroqModelId | null =
+        input.phase === 'route' && hasReferenceImages
+            ? 'meta-llama/llama-4-maverick-17b-128e-instruct'
+            : null;
+    const primaryModel = forcedRouteVisionModel || pickPlannerModel(input.phase, input.preferredModel);
     const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
         ? 'llama-3.1-8b-instant'
         : 'llama-3.3-70b-versatile';
@@ -293,15 +392,53 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
     for (const model of modelsToTry) {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                completion = await groqChatCompletion({
-                    model,
-                    systemPrompt: buildSystemPrompt(input.phase),
-                    prompt: buildUserPrompt(input),
-                    maxCompletionTokens: 2300,
-                    temperature: 0.3,
-                    topP: 0.85,
-                    responseFormat: 'json_object',
-                });
+                const referenceImages = (input.referenceImages || []).filter(Boolean).slice(0, 3);
+                const canUseVisionRoute =
+                    input.phase === 'route'
+                    && model === 'meta-llama/llama-4-maverick-17b-128e-instruct'
+                    && referenceImages.length > 0;
+
+                if (canUseVisionRoute) {
+                    // Use Groq multimodal shape for route/critique tasks on Maverick.
+                    completion = await groqChatCompletion({
+                        model,
+                        prompt: '',
+                        messages: [
+                            {
+                                role: 'user',
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: `${buildSystemPrompt(input.phase)}
+
+${buildUserPrompt(input)}
+
+Return JSON only.`,
+                                    },
+                                    ...referenceImages.map((url) => ({
+                                        type: 'image_url' as const,
+                                        image_url: { url },
+                                    })),
+                                ],
+                            },
+                        ],
+                        maxCompletionTokens: 2300,
+                        temperature: 0.3,
+                        topP: 0.85,
+                        // JSON response_format can conflict with multimodal on some Groq routes/models.
+                        responseFormat: undefined,
+                    });
+                } else {
+                    completion = await groqChatCompletion({
+                        model,
+                        systemPrompt: buildSystemPrompt(input.phase),
+                        prompt: buildUserPrompt(input),
+                        maxCompletionTokens: 2300,
+                        temperature: 0.3,
+                        topP: 0.85,
+                        responseFormat: 'json_object',
+                    });
+                }
                 break;
             } catch (error) {
                 lastError = error;
@@ -321,10 +458,57 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
 
     const raw = parseJsonSafe<any>(completion.text || '{}');
     if (input.phase === 'route') {
-        return PlannerRouteResponseSchema.parse({
+        const parsedRoute = PlannerRouteResponseSchema.parse({
             phase: 'route',
             ...raw,
         });
+        if (parsedRoute.intent === 'chat_assist') {
+            if (!parsedRoute.assistantResponse?.trim()) {
+                try {
+                    const assistText = await generateAssistFallbackResponse(input, primaryModel);
+                    return {
+                        ...parsedRoute,
+                        assistantResponse: assistText || 'Here is a direct response based on your request.',
+                    };
+                } catch {
+                    return {
+                        ...parsedRoute,
+                        assistantResponse: 'Here is a direct response based on your request.',
+                    };
+                }
+            }
+            if (!isNextScreenRequest(input.appPrompt)) {
+                return {
+                    ...parsedRoute,
+                    recommendNextScreens: false,
+                    nextScreenSuggestions: [],
+                };
+            }
+            return parsedRoute;
+        }
+        if (isAssistLikeRequest(input.appPrompt)) {
+            try {
+                const assistText = await generateAssistFallbackResponse(input, primaryModel);
+                return {
+                    ...parsedRoute,
+                    intent: 'chat_assist',
+                    reason: parsedRoute.reason || 'assist-like request',
+                    assistantResponse: assistText || parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
+                    recommendNextScreens: isNextScreenRequest(input.appPrompt),
+                    nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                };
+            } catch {
+                return {
+                    ...parsedRoute,
+                    intent: 'chat_assist',
+                    reason: parsedRoute.reason || 'assist-like request',
+                    assistantResponse: parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
+                    recommendNextScreens: isNextScreenRequest(input.appPrompt),
+                    nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                };
+            }
+        }
+        return parsedRoute;
     }
     if (input.phase === 'postgen') {
         return PlannerPostgenResponseSchema.parse({
@@ -341,6 +525,7 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
 
 export function getPlannerModels() {
     const candidates = [
+        'meta-llama/llama-4-maverick-17b-128e-instruct',
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
         'qwen/qwen3-32b',

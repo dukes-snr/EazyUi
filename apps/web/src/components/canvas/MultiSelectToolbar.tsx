@@ -22,6 +22,7 @@ import { useChatStore } from '../../stores/chat-store';
 import { useUiStore } from '../../stores/ui-store';
 import { apiClient } from '../../api/client';
 import { getPreferredTextModel } from '../../constants/designModels';
+import { toTaggedErrorMessage } from '../../utils/userFacingErrors';
 
 type MenuType = 'align' | 'space' | 'generate' | 'edit' | 'more' | null;
 
@@ -133,7 +134,7 @@ export const MultiSelectToolbar = memo(() => {
             if ((error as Error).name === 'AbortError') {
                 updateMessage(assistantMsgId, { content: 'Multi-screen edit cancelled.', status: 'error' });
             } else {
-                updateMessage(assistantMsgId, { content: `Error: ${(error as Error).message}`, status: 'error' });
+                updateMessage(assistantMsgId, { content: toTaggedErrorMessage(error), status: 'error' });
             }
         } finally {
             setAbortController(null);
