@@ -2,6 +2,9 @@
 // API Client - Communicate with the backend
 // ============================================================================
 
+import { auth } from '@/lib/firebase';
+import { deleteProjectFirestore, getProjectFirestore, listProjectsFirestore, saveProjectFirestore } from '@/lib/firestoreData';
+
 const API_BASE = '/api';
 
 // Types matching the backend
@@ -231,6 +234,12 @@ export interface ProjectResponse {
 }
 
 class ApiClient {
+    private requireAuthUid(): string {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('You must be logged in to access project data.');
+        return uid;
+    }
+
     private async request<T>(
         endpoint: string,
         options: RequestInit = {}
@@ -330,9 +339,13 @@ class ApiClient {
     }
 
     async save(request: SaveRequest): Promise<SaveResponse> {
-        return this.request<SaveResponse>('/save', {
-            method: 'POST',
-            body: JSON.stringify(request),
+        const uid = this.requireAuthUid();
+        return saveProjectFirestore({
+            uid,
+            projectId: request.projectId,
+            designSpec: request.designSpec,
+            canvasDoc: request.canvasDoc,
+            chatState: request.chatState,
         });
     }
 
@@ -353,17 +366,23 @@ class ApiClient {
     }
 
     async getProject(projectId: string): Promise<ProjectResponse> {
-        return this.request<ProjectResponse>(`/project/${projectId}`);
+        const uid = this.requireAuthUid();
+        const project = await getProjectFirestore(uid, projectId);
+        if (!project) throw new Error('Project not found');
+        return project;
     }
 
-    async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string }[] }> {
-        return this.request('/projects');
+    async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean }[] }> {
+        const uid = this.requireAuthUid();
+        const projects = await listProjectsFirestore(uid);
+        return { projects };
     }
 
     async deleteProject(projectId: string): Promise<{ success: boolean }> {
-        return this.request<{ success: boolean }>(`/project/${projectId}`, {
-            method: 'DELETE',
-        });
+        const uid = this.requireAuthUid();
+        const success = await deleteProjectFirestore(uid, projectId);
+        if (!success) throw new Error('Project not found');
+        return { success };
     }
 }
 

@@ -490,6 +490,8 @@ export function EditPanel() {
     }, [iconActiveIndex, showIconResults]);
 
     useEffect(() => {
+        const enableRemoteIconIndex = false;
+        if (!enableRemoteIconIndex) return;
         let alive = true;
         const tryLoadAllIcons = async () => {
             const endpoints = [

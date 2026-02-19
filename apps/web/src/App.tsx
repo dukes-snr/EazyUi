@@ -11,6 +11,7 @@ import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { LandingPage } from './components/landing/LandingPage';
 import { LearnPage } from './components/marketing/LearnPage';
 import { PricingPage } from './components/marketing/PricingPage';
+import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
 import { ToastViewport } from './components/ui/ToastViewport';
 import DemoOne from './components/ui/demo';
@@ -21,12 +22,12 @@ import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import type { ChatMessage } from './stores/chat-store';
 
-import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore } from './stores';
+import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore } from './stores';
 
 import './styles/App.css';
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
-type MarketingRoute = 'templates' | 'pricing' | 'learn';
+type MarketingRoute = 'templates' | 'pricing' | 'learn' | 'workspace';
 
 function resolveUserPhotoUrl(user: User | null): string | null {
     if (!user) return null;
@@ -74,14 +75,19 @@ function getRouteFromPath() {
     const path = window.location.pathname;
     if (path === '/app') return 'app' as const;
     if (path === '/login') return 'login' as const;
+    if (path === '/workspace') return 'workspace' as const;
     if (path === '/templates') return 'templates' as const;
     if (path === '/learn') return 'learn' as const;
     if (path === '/pricing') return 'pricing' as const;
     return 'landing' as const;
 }
 
+function createProjectId() {
+    return `project-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function App() {
-    const { spec, reset: resetDesign } = useDesignStore();
+    const { spec } = useDesignStore();
     const { doc } = useCanvasStore();
     const { messages } = useChatStore();
     const { isEditMode } = useEditStore();
@@ -102,6 +108,7 @@ function App() {
     const [authUser, setAuthUser] = useState<User | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
     const hydratedProjectIdRef = useRef<string | null>(null);
+    const hydrationRunRef = useRef(0);
     const lastSavedFingerprintRef = useRef<string>('');
     const [initialRequest, setInitialRequest] = useState<{
         id: string;
@@ -114,33 +121,32 @@ function App() {
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
 
 
-    // Initialize with empty state
-    useEffect(() => {
-        if (!spec) {
-            resetDesign();
-        }
-    }, [spec, resetDesign]);
-
     useEffect(() => {
         if (!projectId) {
             hydratedProjectIdRef.current = null;
-            return;
         }
-        if (spec) {
-            hydratedProjectIdRef.current = projectId;
-        }
-    }, [projectId, spec]);
+    }, [projectId]);
 
     useEffect(() => {
         let cancelled = false;
-        if (route !== 'app' || !projectId || isHydrating) return;
+        if (route !== 'app' || !projectId || !authReady || !authUser) return;
         if (hydratedProjectIdRef.current === projectId) return;
+        if (hydrationRunRef.current !== 0) return;
+        const targetProjectId = projectId;
+        const runId = Date.now();
+        hydrationRunRef.current = runId;
 
         setHydrating(true);
         (async () => {
             try {
-                const project = await apiClient.getProject(projectId);
+                const project = await Promise.race([
+                    apiClient.getProject(targetProjectId),
+                    new Promise<never>((_, reject) => {
+                        window.setTimeout(() => reject(new Error('Project load timed out')), 15000);
+                    }),
+                ]);
                 if (cancelled) return;
+                if (useProjectStore.getState().projectId !== targetProjectId) return;
                 const resolvedDoc = ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any);
                 useDesignStore.getState().setSpec(project.designSpec as any);
                 useCanvasStore.getState().setDoc(resolvedDoc);
@@ -151,22 +157,36 @@ function App() {
                 markSaved(project.projectId, project.updatedAt);
             } catch (error) {
                 if (cancelled) return;
-                hydratedProjectIdRef.current = null;
-                setProjectId(null);
+                if (useProjectStore.getState().projectId !== targetProjectId) return;
+                const errorMessage = (error as Error).message || '';
+                if (errorMessage.toLowerCase().includes('not found')) {
+                    useDesignStore.getState().reset();
+                    useCanvasStore.getState().reset();
+                    useChatStore.getState().hydrateSession({ messages: [] });
+                    useHistoryStore.getState().clearHistory();
+                    lastSavedFingerprintRef.current = '';
+                    hydratedProjectIdRef.current = targetProjectId;
+                    markSaved(targetProjectId, new Date().toISOString());
+                    return;
+                }
+                hydratedProjectIdRef.current = targetProjectId;
                 pushToast({
                     kind: 'error',
                     title: 'Could not restore project',
-                    message: (error as Error).message || 'Starting fresh workspace.',
+                    message: errorMessage || 'Starting fresh workspace.',
                 });
             } finally {
-                if (!cancelled) setHydrating(false);
+                if (hydrationRunRef.current === runId) {
+                    hydrationRunRef.current = 0;
+                    if (!cancelled) setHydrating(false);
+                }
             }
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [route, projectId, isHydrating, setHydrating, markSaved, setProjectId, pushToast]);
+    }, [route, projectId, setHydrating, markSaved, setProjectId, pushToast, authReady, authUser]);
 
     useEffect(() => {
         if (route !== 'app' || isHydrating || !spec) return;
@@ -273,12 +293,25 @@ function App() {
         }
         if (landingPrompt) {
             setInitialRequest({ id: `query-${Date.now()}`, prompt: landingPrompt, images: [] });
+            return;
         }
+        setInitialRequest(null);
     }, [route, landingPrompt]);
 
     const navigate = (path: string, search = '') => {
         window.history.pushState({}, '', `${path}${search}`);
         setRoute(getRouteFromPath());
+    };
+
+    const openProjectFromWorkspace = (projectId: string) => {
+        hydratedProjectIdRef.current = null;
+        setInitialRequest(null);
+        useDesignStore.getState().reset();
+        useCanvasStore.getState().reset();
+        useChatStore.getState().clearMessages();
+        useHistoryStore.getState().clearHistory();
+        setProjectId(projectId);
+        navigate('/app', `?project=${encodeURIComponent(projectId)}`);
     };
 
     const handleSignOut = async () => {
@@ -315,14 +348,55 @@ function App() {
     };
 
     useEffect(() => {
+        if (route !== 'app' || !authReady || !authUser) return;
+        const search = new URLSearchParams(window.location.search);
+        const wantsNewProject = search.get('new') === '1';
+        const requested = search.get('project')?.trim() || '';
+        if (wantsNewProject) {
+            const freshProjectId = createProjectId();
+            useDesignStore.getState().reset();
+            useCanvasStore.getState().reset();
+            useChatStore.getState().clearMessages();
+            useHistoryStore.getState().clearHistory();
+            hydratedProjectIdRef.current = null;
+            setInitialRequest(null);
+            search.delete('new');
+            search.set('project', freshProjectId);
+            window.history.replaceState({}, '', `/app?${search.toString()}`);
+            if (projectId !== freshProjectId) {
+                setProjectId(freshProjectId);
+            }
+            return;
+        }
+
+        // Deterministic routing: if URL has a project, it is the source of truth.
+        if (requested) {
+            if (requested !== projectId) {
+                hydratedProjectIdRef.current = null;
+                setProjectId(requested);
+            }
+            return;
+        }
+
+        // No project slug in URL: always mint a fresh one so /app is never sticky to old slugs.
+        const freshProjectId = createProjectId();
+        search.set('project', freshProjectId);
+        window.history.replaceState({}, '', `/app?${search.toString()}`);
+        if (projectId !== freshProjectId) {
+            hydratedProjectIdRef.current = null;
+            setProjectId(freshProjectId);
+        }
+    }, [route, authReady, authUser, projectId, setProjectId]);
+
+    useEffect(() => {
         if (!authReady) return;
-        const requiresAuth = route === 'app';
+        const requiresAuth = route === 'app' || route === 'workspace';
         if (requiresAuth && !authUser) {
             navigate('/login');
             return;
         }
         if (route === 'login' && authUser) {
-            navigate('/app');
+            navigate('/workspace');
         }
     }, [route, authReady, authUser]);
 
@@ -406,7 +480,25 @@ function App() {
         return <DemoOne onNavigate={(path) => navigate(path)} />;
     }
 
+    if ((route === 'app' || route === 'workspace') && (!authReady || (authReady && !authUser))) {
+        return (
+            <div className="h-screen w-screen bg-[#06070B] text-gray-300 grid place-items-center text-sm">
+                Loading your workspace...
+            </div>
+        );
+    }
+
     if (route !== 'app') {
+        if (route === 'workspace') {
+            return (
+                <ProjectWorkspacePage
+                    authReady={authReady}
+                    isAuthenticated={Boolean(authUser)}
+                    onNavigate={(path, search = '') => navigate(path, search)}
+                    onOpenProject={openProjectFromWorkspace}
+                />
+            );
+        }
         if (route === 'templates') {
             return <TemplatesPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }

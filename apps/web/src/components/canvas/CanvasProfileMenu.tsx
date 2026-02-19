@@ -1,42 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Save, Settings, Sun, Trash2, User as UserIcon, UserCircle2, X } from 'lucide-react';
-import { createDefaultCanvasDoc, type CanvasDoc } from '@eazyui/shared';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Download, Files, FolderOpen, Image, LogOut, Mail, Moon, Save, Settings, Sun, User as UserIcon, UserCircle2, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
-
-function ensureCanvasDocFromProject(canvasDoc: unknown, designSpec: { screens: Array<{ screenId: string; width: number; height: number }> }): CanvasDoc {
-    if (canvasDoc && typeof canvasDoc === 'object' && Array.isArray((canvasDoc as CanvasDoc).boards)) {
-        return canvasDoc as CanvasDoc;
-    }
-    const doc = createDefaultCanvasDoc(`doc-${Date.now()}`);
-    const boards = designSpec.screens.map((screen, index) => ({
-        boardId: `board-${screen.screenId}`,
-        screenId: screen.screenId,
-        x: 100 + index * (screen.width + 80),
-        y: 100,
-        width: screen.width,
-        height: screen.height,
-        deviceFrame: 'none' as const,
-        locked: false,
-        visible: true,
-    }));
-    return {
-        ...doc,
-        boards,
-    };
-}
-
-function formatSavedAt(value: string | null): string {
-    if (!value) return 'Not saved yet';
-    try {
-        return new Date(value).toLocaleString();
-    } catch {
-        return value;
-    }
-}
 
 function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
     if (!user) return null;
@@ -51,7 +19,7 @@ export function CanvasProfileMenu() {
     const { theme, toggleTheme, pushToast, removeToast, showInspector, toggleInspector } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
     const { doc, reset: resetCanvas } = useCanvasStore();
-    const { messages, clearMessages, hydrateSession } = useChatStore();
+    const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
     const { clearHistory } = useHistoryStore();
     const {
@@ -61,7 +29,6 @@ export function CanvasProfileMenu() {
         isSaving,
         autosaveEnabled,
         isHydrating,
-        setHydrating,
         setAutosaveEnabled,
         markSaved,
         setSaving,
@@ -71,11 +38,7 @@ export function CanvasProfileMenu() {
     const [openProfile, setOpenProfile] = useState(false);
     const [openExport, setOpenExport] = useState(false);
     const [openProject, setOpenProject] = useState(false);
-    const [openProjectsModal, setOpenProjectsModal] = useState(false);
     const [openProfileModal, setOpenProfileModal] = useState(false);
-    const [projects, setProjects] = useState<Array<{ id: string; name: string; updatedAt: string }>>([]);
-    const [loadingProjects, setLoadingProjects] = useState(false);
-    const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -85,15 +48,14 @@ export function CanvasProfileMenu() {
         selectedNodeIds: doc.selection.selectedNodeIds,
     });
     const selectionLabel = scope === 'selected' ? `${exportScreens.length} selected` : `${exportScreens.length} total`;
-    const projectLabel = projectId ? projectId.slice(0, 8) : 'Unsaved';
     const projectStatus = isHydrating
         ? 'Loading project...'
         : isSaving
-            ? 'Saving...'
+            ? (autosaveEnabled ? 'Auto save' : 'Saving...')
             : dirty
                 ? 'Unsaved changes'
                 : lastSavedAt
-                    ? `Saved ${formatSavedAt(lastSavedAt)}`
+                    ? 'Saved'
                     : 'Not saved yet';
     const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'You';
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
@@ -116,27 +78,6 @@ export function CanvasProfileMenu() {
         const unsub = observeAuthState((user) => setAuthUser(user));
         return () => unsub();
     }, []);
-
-    const refreshProjects = async () => {
-        setLoadingProjects(true);
-        try {
-            const list = await apiClient.listProjects();
-            setProjects(list.projects || []);
-        } catch (error) {
-            pushToast({
-                kind: 'error',
-                title: 'Failed to load projects',
-                message: (error as Error).message || 'Unable to fetch projects.',
-            });
-        } finally {
-            setLoadingProjects(false);
-        }
-    };
-
-    useEffect(() => {
-        if (!openProjectsModal) return;
-        void refreshProjects();
-    }, [openProjectsModal]);
 
     const withScreens = async (loadingTitle: string, action: () => Promise<void>) => {
         if (!spec || exportScreens.length === 0) {
@@ -201,62 +142,6 @@ export function CanvasProfileMenu() {
         }
     };
 
-    const handleLoadProject = async (id: string) => {
-        setBusyProjectId(id);
-        setHydrating(true);
-        try {
-            const project = await apiClient.getProject(id);
-            useDesignStore.getState().setSpec(project.designSpec as any);
-            useCanvasStore.getState().setDoc(ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any));
-            hydrateSession(project.chatState as any);
-            exitEdit();
-            clearHistory();
-            markSaved(project.projectId, project.updatedAt);
-            setOpenProjectsModal(false);
-            setOpenProject(false);
-            pushToast({
-                kind: 'success',
-                title: 'Project loaded',
-                message: `${project.designSpec.name || 'Project'} is ready.`,
-            });
-        } catch (error) {
-            pushToast({
-                kind: 'error',
-                title: 'Load failed',
-                message: (error as Error).message || 'Unable to load project.',
-            });
-        } finally {
-            setHydrating(false);
-            setBusyProjectId(null);
-        }
-    };
-
-    const handleDeleteProject = async (id: string) => {
-        const confirmed = window.confirm('Delete this project permanently?');
-        if (!confirmed) return;
-        setBusyProjectId(id);
-        try {
-            await apiClient.deleteProject(id);
-            if (id === projectId) {
-                resetProjectState();
-            }
-            await refreshProjects();
-            pushToast({
-                kind: 'success',
-                title: 'Project deleted',
-                message: `Project ${id.slice(0, 8)} removed.`,
-            });
-        } catch (error) {
-            pushToast({
-                kind: 'error',
-                title: 'Delete failed',
-                message: (error as Error).message || 'Unable to delete project.',
-            });
-        } finally {
-            setBusyProjectId(null);
-        }
-    };
-
     const handleNewProject = () => {
         const proceed = !dirty || window.confirm('Discard unsaved changes and start a new project?');
         if (!proceed) return;
@@ -267,6 +152,8 @@ export function CanvasProfileMenu() {
         clearHistory();
         resetProjectState();
         setOpenProject(false);
+        window.history.pushState({}, '', '/app?new=1');
+        window.dispatchEvent(new PopStateEvent('popstate'));
         pushToast({
             kind: 'info',
             title: 'New workspace',
@@ -309,61 +196,26 @@ export function CanvasProfileMenu() {
         }
     };
 
-    const sortedProjects = useMemo(
-        () => [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-        [projects]
-    );
-
     return (
         <>
             <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
-                <div className="relative">
+                <div className="canvas-profile-trigger px-2.5 gap-2">
                     <button
                         type="button"
-                        onClick={() => {
-                            setOpenProject((v) => !v);
-                            setOpenExport(false);
-                            setOpenProfile(false);
-                        }}
-                        className="canvas-profile-trigger"
-                        title="Project workspace"
+                        onClick={() => void handleSaveNow()}
+                        className="canvas-profile-avatar"
+                        title="Save project"
                     >
-                        <div className="canvas-profile-avatar">
-                            <Save size={16} />
-                        </div>
-                        <div className="canvas-profile-meta">
-                            <span className="canvas-profile-name">Project</span>
-                            <span className="canvas-profile-role">{projectLabel}</span>
-                        </div>
-                        <ChevronDown size={14} className={`transition-transform ${openProject ? 'rotate-180' : ''}`} />
+                        <Save size={16} />
                     </button>
-
-                    {openProject && (
-                        <div className="canvas-profile-menu">
-                            <div className="px-3 py-2 text-[11px] text-[var(--ui-text-subtle)] border-b border-[var(--ui-border)]">
-                                {projectStatus}
-                            </div>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => void handleSaveNow()}>
-                                <Save size={14} />
-                                <span>Save Now</span>
-                            </button>
-                            <button
-                                type="button"
-                                className="canvas-profile-menu-item"
-                                onClick={() => {
-                                    setOpenProjectsModal(true);
-                                    setOpenProject(false);
-                                }}
-                            >
-                                <FolderOpen size={14} />
-                                <span>Open Projects</span>
-                            </button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={handleNewProject}>
-                                <Settings size={14} />
-                                <span>New Project</span>
-                            </button>
-                        </div>
-                    )}
+                    <span
+                        className={`text-[11px] font-medium ${!dirty && !isSaving && !!lastSavedAt
+                            ? 'text-emerald-300'
+                            : 'text-[var(--ui-text-subtle)]'
+                            }`}
+                    >
+                        {projectStatus}
+                    </span>
                 </div>
 
                 <div className="relative">
@@ -523,6 +375,26 @@ export function CanvasProfileMenu() {
                                 type="button"
                                 className="canvas-profile-menu-item"
                                 onClick={() => {
+                                    window.history.pushState({}, '', '/workspace');
+                                    window.dispatchEvent(new PopStateEvent('popstate'));
+                                    setOpenProfile(false);
+                                }}
+                            >
+                                <FolderOpen size={14} />
+                                <span>Project Workspace</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={handleNewProject}
+                            >
+                                <Settings size={14} />
+                                <span>New Project</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={() => {
                                     toggleTheme();
                                     setOpenProfile(false);
                                 }}
@@ -564,77 +436,6 @@ export function CanvasProfileMenu() {
                     )}
                 </div>
             </div>
-
-            {openProjectsModal && (
-                <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4">
-                    <div className="w-full max-w-[760px] max-h-[78vh] overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl">
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ui-border)]">
-                            <div>
-                                <div className="text-sm font-semibold text-[var(--ui-text)]">Projects</div>
-                                <div className="text-xs text-[var(--ui-text-subtle)]">Load or delete saved workspaces.</div>
-                            </div>
-                            <button
-                                type="button"
-                                className="canvas-profile-menu-item"
-                                onClick={() => {
-                                    setOpenProjectsModal(false);
-                                }}
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <div className="p-4 flex items-center justify-between border-b border-[var(--ui-border)]">
-                            <div className="text-xs text-[var(--ui-text-subtle)]">Current: {projectId ? projectId : 'none'}</div>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => void refreshProjects()}>
-                                Refresh
-                            </button>
-                        </div>
-                        <div className="max-h-[52vh] overflow-auto p-3 space-y-2">
-                            {loadingProjects && (
-                                <div className="text-sm text-[var(--ui-text-subtle)] px-2 py-4 inline-flex items-center gap-2">
-                                    <Loader2 size={14} className="animate-spin" />
-                                    Loading projects...
-                                </div>
-                            )}
-                            {!loadingProjects && sortedProjects.length === 0 && (
-                                <div className="text-sm text-[var(--ui-text-subtle)] px-2 py-4">No saved projects yet.</div>
-                            )}
-                            {!loadingProjects && sortedProjects.map((project) => (
-                                <div
-                                    key={project.id}
-                                    className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2.5 flex items-center justify-between gap-3"
-                                >
-                                    <div className="min-w-0">
-                                        <div className="text-sm text-[var(--ui-text)] truncate">{project.name || 'Untitled project'}</div>
-                                        <div className="text-xs text-[var(--ui-text-subtle)] truncate">{project.id}</div>
-                                        <div className="text-[11px] text-[var(--ui-text-subtle)]">{formatSavedAt(project.updatedAt)}</div>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <button
-                                            type="button"
-                                            className="canvas-profile-menu-item"
-                                            disabled={busyProjectId === project.id}
-                                            onClick={() => void handleLoadProject(project.id)}
-                                        >
-                                            {busyProjectId === project.id ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
-                                            <span>Load</span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="canvas-profile-menu-item"
-                                            disabled={busyProjectId === project.id}
-                                            onClick={() => void handleDeleteProject(project.id)}
-                                        >
-                                            <Trash2 size={14} />
-                                            <span>Delete</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {openProfileModal && authUser && (
                 <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4">
