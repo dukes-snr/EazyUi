@@ -1,7 +1,8 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Boxes, ChevronDown, Globe, Shield, Sparkles, Zap } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
 import { GlassPricingSection } from './GlassPricingSection';
+import appLogo from '../../assets/Ui-logo.png';
 
 type PricingPageProps = {
     onNavigate: (path: string) => void;
@@ -124,10 +125,15 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                             <button type="button" onClick={() => onNavigate('/learn')} className="hover:text-slate-200">About the app</button>
                             <button type="button" onClick={() => onNavigate('/pricing')} className="hover:text-slate-200">Dark mode</button>
                         </div>
-                        <p>©2026 EazyUI</p>
+                        <div className="inline-flex items-center gap-2">
+                            <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
+                            <p>©2026 EazyUI</p>
+                        </div>
                     </div>
                 </footer>
             </main>
         </div>
     );
 }
+
+

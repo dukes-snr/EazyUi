@@ -23,12 +23,18 @@ db.exec(`
     name TEXT NOT NULL,
     design_spec TEXT NOT NULL,
     canvas_doc TEXT,
+    chat_state TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
   
   CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at DESC);
 `);
+
+const projectColumns = db.prepare<[], { name: string }>('PRAGMA table_info(projects)').all().map((row) => row.name);
+if (!projectColumns.includes('chat_state')) {
+    db.exec('ALTER TABLE projects ADD COLUMN chat_state TEXT');
+}
 
 // ============================================================================
 // Project Operations
@@ -39,6 +45,7 @@ interface ProjectRow {
     name: string;
     design_spec: string;
     canvas_doc: string | null;
+    chat_state: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -48,6 +55,7 @@ export interface Project {
     name: string;
     designSpec: HtmlDesignSpec;
     canvasDoc: unknown | null;
+    chatState: unknown | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -55,18 +63,20 @@ export interface Project {
 export function saveProject(
     designSpec: HtmlDesignSpec,
     canvasDoc?: unknown,
+    chatState?: unknown,
     projectId?: string
 ): { projectId: string; savedAt: string } {
     const id = projectId || uuidv4();
     const now = new Date().toISOString();
 
     const stmt = db.prepare(`
-    INSERT INTO projects (id, name, design_spec, canvas_doc, created_at, updated_at)
-    VALUES (@id, @name, @designSpec, @canvasDoc, @createdAt, @updatedAt)
+    INSERT INTO projects (id, name, design_spec, canvas_doc, chat_state, created_at, updated_at)
+    VALUES (@id, @name, @designSpec, @canvasDoc, @chatState, @createdAt, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       name = @name,
       design_spec = @designSpec,
       canvas_doc = @canvasDoc,
+      chat_state = @chatState,
       updated_at = @updatedAt
   `);
 
@@ -75,6 +85,7 @@ export function saveProject(
         name: designSpec.name,
         designSpec: JSON.stringify(designSpec),
         canvasDoc: canvasDoc ? JSON.stringify(canvasDoc) : null,
+        chatState: chatState ? JSON.stringify(chatState) : null,
         createdAt: projectId ? (db.prepare<string, Pick<ProjectRow, 'created_at'>>('SELECT created_at FROM projects WHERE id = ?').get(projectId)?.created_at || now) : now,
         updatedAt: now,
     });
@@ -92,6 +103,7 @@ export function getProject(projectId: string): Project | null {
         name: row.name,
         designSpec: JSON.parse(row.design_spec),
         canvasDoc: row.canvas_doc ? JSON.parse(row.canvas_doc) : null,
+        chatState: row.chat_state ? JSON.parse(row.chat_state) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };

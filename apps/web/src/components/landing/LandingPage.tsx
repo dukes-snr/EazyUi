@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowUp, CircleStar, Gauge, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, TrendingUp, Wand2, Workflow, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/hero-bg2.jpg';
+import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
@@ -414,7 +415,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                         onClick={() => onNavigate('/')}
                         className="inline-flex items-center gap-2 text-left"
                     >
-                        <span className="h-6 w-6 rounded-full bg-white/10 text-[11px] flex items-center justify-center text-white/80">E</span>
+                        <img src={appLogo} alt="EazyUI logo" className="h-6 w-6 object-contain" />
                         <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-200">EazyUI</span>
                     </button>
                     <div className="hidden lg:flex items-center gap-2">
@@ -850,6 +851,13 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                         </div>
                     </div>
                 </section>
+
+                <footer className="mx-auto mt-6 max-w-[1120px] border-t border-white/10 pt-6 pb-8">
+                    <div className="flex items-center justify-center gap-2 text-[12px] text-slate-400">
+                        <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
+                        <span>©2026 EazyUI</span>
+                    </div>
+                </footer>
             </main>
         </div>
     );

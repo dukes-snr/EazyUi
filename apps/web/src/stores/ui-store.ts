@@ -23,10 +23,13 @@ type PushToastInput = {
 type UiState = {
     theme: ThemeMode;
     modelProfile: DesignModelProfile;
+    showInspector: boolean;
     toasts: ToastItem[];
     setTheme: (theme: ThemeMode) => void;
     toggleTheme: () => void;
     setModelProfile: (profile: DesignModelProfile) => void;
+    setShowInspector: (show: boolean) => void;
+    toggleInspector: () => void;
     pushToast: (toast: PushToastInput) => string;
     updateToast: (id: string, updates: Partial<Omit<ToastItem, 'id' | 'createdAt'>>) => void;
     removeToast: (id: string) => void;
@@ -35,6 +38,7 @@ type UiState = {
 
 const THEME_STORAGE_KEY = 'eazyui:theme';
 const MODEL_PROFILE_STORAGE_KEY = 'eazyui:model-profile';
+const INSPECTOR_STORAGE_KEY = 'eazyui:show-inspector';
 
 function getInitialTheme(): ThemeMode {
     if (typeof window === 'undefined') return 'dark';
@@ -49,6 +53,14 @@ function getInitialModelProfile(): DesignModelProfile {
     return stored === 'fast' ? 'fast' : 'quality';
 }
 
+function getInitialShowInspector(): boolean {
+    if (typeof window === 'undefined') return false;
+    const stored = window.localStorage.getItem(INSPECTOR_STORAGE_KEY);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+    return false;
+}
+
 function defaultToastDuration(kind: ToastKind): number {
     if (kind === 'loading') return 0;
     if (kind === 'error') return 5500;
@@ -59,6 +71,7 @@ function defaultToastDuration(kind: ToastKind): number {
 export const useUiStore = create<UiState>((set, get) => ({
     theme: getInitialTheme(),
     modelProfile: getInitialModelProfile(),
+    showInspector: getInitialShowInspector(),
     toasts: [],
     setTheme: (theme) => {
         if (typeof window !== 'undefined') {
@@ -75,6 +88,16 @@ export const useUiStore = create<UiState>((set, get) => ({
             window.localStorage.setItem(MODEL_PROFILE_STORAGE_KEY, modelProfile);
         }
         set({ modelProfile });
+    },
+    setShowInspector: (showInspector) => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(INSPECTOR_STORAGE_KEY, showInspector ? '1' : '0');
+        }
+        set({ showInspector });
+    },
+    toggleInspector: () => {
+        const next = !get().showInspector;
+        get().setShowInspector(next);
     },
     pushToast: ({ kind = 'info', title, message, durationMs }) => {
         const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;

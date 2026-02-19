@@ -30,6 +30,8 @@ interface ChatState {
     updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
     removeMessage: (id: string) => void;
     clearMessages: () => void;
+    setMessages: (messages: ChatMessage[]) => void;
+    hydrateSession: (payload: { messages?: ChatMessage[] } | null | undefined) => void;
     setGenerating: (generating: boolean) => void;
     setAbortController: (controller: AbortController | null) => void;
     abortGeneration: () => void;
@@ -74,6 +76,12 @@ export const useChatStore = create<ChatState>((set) => ({
     },
 
     clearMessages: () => set({ messages: [] }),
+    setMessages: (messages) => set({ messages }),
+    hydrateSession: (payload) => set({
+        messages: Array.isArray(payload?.messages) ? payload!.messages : [],
+        isGenerating: false,
+        abortController: null,
+    }),
 
     setGenerating: (isGenerating) => set({ isGenerating }),
     setAbortController: (abortController) => set({ abortController }),

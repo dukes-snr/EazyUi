@@ -1,6 +1,6 @@
 import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
-import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
+import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { BatteryFull, ImagePlus, Signal, Wifi } from 'lucide-react';
 import Grainient from '../ui/Grainient';
@@ -536,6 +536,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
     const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
+    const { projectId, markSaved, setSaving } = useProjectStore();
     const { modelProfile, pushToast, removeToast } = useUiStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
@@ -669,7 +670,36 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 setFocusNodeId(data.screenId as string);
                 break;
             case 'save':
-                console.log('Save action');
+                if (!spec) {
+                    pushToast({
+                        kind: 'error',
+                        title: 'Nothing to save',
+                        message: 'Generate at least one screen first.',
+                    });
+                    break;
+                }
+                try {
+                    setSaving(true);
+                    const saved = await apiClient.save({
+                        projectId: projectId || undefined,
+                        designSpec: spec as any,
+                        canvasDoc: doc,
+                        chatState: { messages: useChatStore.getState().messages },
+                    });
+                    markSaved(saved.projectId, saved.savedAt);
+                    pushToast({
+                        kind: 'success',
+                        title: 'Project saved',
+                        message: `Project ${saved.projectId.slice(0, 8)} updated.`,
+                    });
+                } catch (error) {
+                    setSaving(false);
+                    pushToast({
+                        kind: 'error',
+                        title: 'Save failed',
+                        message: (error as Error).message || 'Unable to save project.',
+                    });
+                }
                 break;
             case 'edit':
                 if (data.html && data.screenId) {
@@ -688,7 +718,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
     const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(String(data.html || ''));

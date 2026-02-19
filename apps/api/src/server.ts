@@ -638,16 +638,18 @@ fastify.post<{
     Body: {
         projectId?: string;
         designSpec: HtmlDesignSpec;
+        canvasDoc?: unknown;
+        chatState?: unknown;
     };
 }>('/api/save', async (request, reply) => {
-    const { projectId, designSpec } = request.body;
+    const { projectId, designSpec, canvasDoc, chatState } = request.body;
 
     if (!designSpec) {
         return reply.status(400).send({ error: 'Design spec is required' });
     }
 
     try {
-        const result = saveProject(designSpec, undefined, projectId);
+        const result = saveProject(designSpec, canvasDoc, chatState, projectId);
         return result;
     } catch (error) {
         fastify.log.error(error);
@@ -675,6 +677,7 @@ fastify.get<{
             projectId: project.id,
             designSpec: project.designSpec,
             canvasDoc: project.canvasDoc,
+            chatState: project.chatState,
             createdAt: project.createdAt,
             updatedAt: project.updatedAt,
         };

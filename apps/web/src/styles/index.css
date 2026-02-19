@@ -80,7 +80,7 @@
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
 
   /* Layout */
-  --chat-width: 500px;
+  --chat-width: 420px;
   --inspector-width: 280px;
   --header-height: 48px;
 }

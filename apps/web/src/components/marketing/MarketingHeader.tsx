@@ -1,3 +1,5 @@
+import appLogo from '../../assets/Ui-logo.png';
+
 type MarketingHeaderProps = {
     onNavigate: (path: string) => void;
     onOpenApp: () => void;
@@ -18,7 +20,7 @@ export function MarketingHeader({ onNavigate, onOpenApp }: MarketingHeaderProps)
                     onClick={() => onNavigate('/')}
                     className="inline-flex items-center gap-2 text-left"
                 >
-                    <span className="h-6 w-6 rounded-full bg-white/10 text-[11px] flex items-center justify-center text-white/80">E</span>
+                    <img src={appLogo} alt="EazyUI logo" className="h-6 w-6 object-contain" />
                     <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-200">EazyUI</span>
                 </button>
                 <div className="hidden lg:flex items-center gap-2">

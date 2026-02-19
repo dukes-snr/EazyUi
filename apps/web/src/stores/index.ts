@@ -4,3 +4,4 @@ export { useChatStore } from './chat-store';
 export { useEditStore } from './edit-store';
 export { useHistoryStore } from './history-store';
 export { useUiStore } from './ui-store';
+export { useProjectStore } from './project-store';

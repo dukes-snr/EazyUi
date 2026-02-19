@@ -10,6 +10,7 @@ import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, Chevr
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
+import appLogo from '../../assets/Ui-logo.png';
 
 const FEEDBACK_BUCKETS = {
     early: [
@@ -265,57 +266,10 @@ function deriveMessageSuggestions(
     return next.slice(0, 8);
 }
 
-function normalizeScreenName(input: string): string {
-    return (input || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function findBestMatchingScreen(screens: HtmlScreen[], requestedName?: string): HtmlScreen | null {
-    const needle = normalizeScreenName(requestedName || '');
-    if (!needle) return null;
-
-    const exact = screens.find((screen) => normalizeScreenName(screen.name) === needle);
-    if (exact) return exact;
-
-    const contains = screens.find((screen) => {
-        const name = normalizeScreenName(screen.name);
-        return name.includes(needle) || needle.includes(name);
-    });
-    if (contains) return contains;
-
-    const needleTokens = needle.split(' ').filter(Boolean);
-    let best: HtmlScreen | null = null;
-    let bestScore = 0;
-    for (const screen of screens) {
-        const name = normalizeScreenName(screen.name);
-        const tokens = name.split(' ').filter(Boolean);
-        const score = needleTokens.reduce((sum, token) => sum + (tokens.includes(token) ? 1 : 0), 0);
-        if (score > bestScore) {
-            bestScore = score;
-            best = screen;
-        }
-    }
-    return bestScore > 0 ? best : null;
-}
-
 function extractTailwindTokenSnippet(html: string): string {
     const match = html.match(/<script[^>]*>[\s\S]*?tailwind\.config[\s\S]*?<\/script>/i);
     if (!match) return '';
     return match[0].slice(0, 2800);
-}
-
-function buildReferenceStyleEditInstruction(baseInstruction: string, referenceScreen: HtmlScreen): string {
-    const tokenSnippet = extractTailwindTokenSnippet(referenceScreen.html);
-    const tokenBlock = tokenSnippet
-        ? `\n\nReference token/style snippet from "${referenceScreen.name}":\n${tokenSnippet}`
-        : '';
-
-    return `${baseInstruction}
-
-Style transfer requirements:
-- Keep this screen's information architecture and purpose, but align visual style to "${referenceScreen.name}".
-- Reuse the same color token palette, typography tone, radius scale, spacing rhythm, and surface treatment.
-- Mirror motif patterns and component styling language from "${referenceScreen.name}" without copying layout 1:1.
-- Preserve full HTML validity and existing edit tags/attributes.${tokenBlock}`;
 }
 
 function buildContinuationStyleReference(screens: HtmlScreen[]): string {
@@ -1635,10 +1589,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         incomingExistingScreenNames?: string[],
         incomingStyleReference?: string,
         existingUserMessageId?: string,
-        incomingReferenceScreens?: HtmlScreen[]
+        incomingReferenceScreens?: HtmlScreen[],
+        allowPlannerFlow?: boolean
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
+        const usePlanner = allowPlannerFlow ?? planMode;
         const referenceScreens = incomingReferenceScreens || [];
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
@@ -1709,6 +1665,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         let startTime = Date.now();
         let plannerPlan: PlannerPlanResponse | null = null;
         let generationPromptFromPlanner = requestPromptWithReferences;
+        let plannerReferenceImages: string[] = [];
 
         try {
             console.info('[UI] generate: start (stream)', {
@@ -1718,34 +1675,35 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 images: imagesToSend,
                 modelProfile: modelProfileToUse,
             });
-            const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
-
-            try {
-                const discoveryPlan = await apiClient.plan({
-                    phase: 'plan',
-                    appPrompt: appPromptForPlanning,
-                    platform: platformToUse,
-                    stylePreset: styleToUse,
-                    screenCountDesired: incomingTargetScreens?.length || 2,
-                    screensGenerated: existingScreenNames.map((name) => ({ name })),
-                    referenceImages: plannerReferenceImages,
-                    preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-                });
-                if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
-                    plannerPlan = discoveryPlan;
-                    if (incomingTargetScreens && incomingTargetScreens.length > 0) {
-                        generationPromptFromPlanner = makePlannerTargetedGenerationPromptWithStyle(
-                            appPromptForPlanning,
-                            incomingTargetScreens,
-                            existingScreenNames,
-                            incomingStyleReference
-                        );
-                    } else if (!shouldLockToImageReference && discoveryPlan.generatorPrompt?.trim()) {
-                        generationPromptFromPlanner = discoveryPlan.generatorPrompt.trim();
+            if (usePlanner) {
+                plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
+                try {
+                    const discoveryPlan = await apiClient.plan({
+                        phase: 'plan',
+                        appPrompt: appPromptForPlanning,
+                        platform: platformToUse,
+                        stylePreset: styleToUse,
+                        screenCountDesired: incomingTargetScreens?.length || 2,
+                        screensGenerated: existingScreenNames.map((name) => ({ name })),
+                        referenceImages: plannerReferenceImages,
+                        preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+                    });
+                    if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
+                        plannerPlan = discoveryPlan;
+                        if (incomingTargetScreens && incomingTargetScreens.length > 0) {
+                            generationPromptFromPlanner = makePlannerTargetedGenerationPromptWithStyle(
+                                appPromptForPlanning,
+                                incomingTargetScreens,
+                                existingScreenNames,
+                                incomingStyleReference
+                            );
+                        } else if (!shouldLockToImageReference && discoveryPlan.generatorPrompt?.trim()) {
+                            generationPromptFromPlanner = discoveryPlan.generatorPrompt.trim();
+                        }
                     }
+                } catch (plannerError) {
+                    console.warn('[UI] planner pre-gen failed; continuing with raw prompt', plannerError);
                 }
-            } catch (plannerError) {
-                console.warn('[UI] planner pre-gen failed; continuing with raw prompt', plannerError);
             }
 
             const existingBoards = useCanvasStore.getState().doc.boards;
@@ -1862,22 +1820,24 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
-                try {
-                    const postgen = await apiClient.plan({
-                        phase: 'postgen',
-                        appPrompt: appPromptForPlanning,
-                        platform: platformToUse,
-                        stylePreset: styleToUse,
-                        screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
-                        referenceImages: plannerReferenceImages,
-                        preferredModel: 'llama-3.3-70b-versatile',
-                    });
-                    if (postgen.phase === 'postgen') {
-                        postgenData = postgen;
-                        postgenSummary = formatPostgenSuggestionText(postgen);
+                if (usePlanner) {
+                    try {
+                        const postgen = await apiClient.plan({
+                            phase: 'postgen',
+                            appPrompt: appPromptForPlanning,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                            screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
+                            referenceImages: plannerReferenceImages,
+                            preferredModel: 'llama-3.3-70b-versatile',
+                        });
+                        if (postgen.phase === 'postgen') {
+                            postgenData = postgen;
+                            postgenSummary = formatPostgenSuggestionText(postgen);
+                        }
+                    } catch (plannerError) {
+                        console.warn('[UI] planner post-gen failed (fast model path)', plannerError);
                     }
-                } catch (plannerError) {
-                    console.warn('[UI] planner post-gen failed (fast model path)', plannerError);
                 }
 
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
@@ -1891,16 +1851,18 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
-                        plannerPrompt: appPromptForPlanning,
-                        plannerPostgen: postgenData || undefined,
-                        plannerContext: {
-                            appPrompt: appPromptForPlanning,
-                            platform: platformToUse,
-                            stylePreset: styleToUse,
-                            modelProfile: modelProfileToUse,
-                            existingScreenNames: snapshotScreenNames,
-                            styleReference: snapshotStyleReference,
-                        } as PlannerSuggestionContext,
+                        ...(usePlanner ? {
+                            plannerPrompt: appPromptForPlanning,
+                            plannerPostgen: postgenData || undefined,
+                            plannerContext: {
+                                appPrompt: appPromptForPlanning,
+                                platform: platformToUse,
+                                stylePreset: styleToUse,
+                                modelProfile: modelProfileToUse,
+                                existingScreenNames: snapshotScreenNames,
+                                styleReference: snapshotStyleReference,
+                            } as PlannerSuggestionContext,
+                        } : {}),
                     }
                 });
                 if (generatedIds.length > 0) {
@@ -2018,22 +1980,24 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
-                try {
-                    const postgen = await apiClient.plan({
-                        phase: 'postgen',
-                        appPrompt: appPromptForPlanning,
-                        platform: platformToUse,
-                        stylePreset: styleToUse,
-                        screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
-                        referenceImages: plannerReferenceImages,
-                        preferredModel: 'llama-3.3-70b-versatile',
-                    });
-                    if (postgen.phase === 'postgen') {
-                        postgenData = postgen;
-                        postgenSummary = formatPostgenSuggestionText(postgen);
+                if (usePlanner) {
+                    try {
+                        const postgen = await apiClient.plan({
+                            phase: 'postgen',
+                            appPrompt: appPromptForPlanning,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                            screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
+                            referenceImages: plannerReferenceImages,
+                            preferredModel: 'llama-3.3-70b-versatile',
+                        });
+                        if (postgen.phase === 'postgen') {
+                            postgenData = postgen;
+                            postgenSummary = formatPostgenSuggestionText(postgen);
+                        }
+                    } catch (plannerError) {
+                        console.warn('[UI] planner post-gen failed (fallback json path)', plannerError);
                     }
-                } catch (plannerError) {
-                    console.warn('[UI] planner post-gen failed (fallback json path)', plannerError);
                 }
 
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
@@ -2047,16 +2011,18 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
-                        plannerPrompt: appPromptForPlanning,
-                        plannerPostgen: postgenData || undefined,
-                        plannerContext: {
-                            appPrompt: appPromptForPlanning,
-                            platform: platformToUse,
-                            stylePreset: styleToUse,
-                            modelProfile: modelProfileToUse,
-                            existingScreenNames: snapshotScreenNames,
-                            styleReference: snapshotStyleReference,
-                        } as PlannerSuggestionContext,
+                        ...(usePlanner ? {
+                            plannerPrompt: appPromptForPlanning,
+                            plannerPostgen: postgenData || undefined,
+                            plannerContext: {
+                                appPrompt: appPromptForPlanning,
+                                platform: platformToUse,
+                                stylePreset: styleToUse,
+                                modelProfile: modelProfileToUse,
+                                existingScreenNames: snapshotScreenNames,
+                                styleReference: snapshotStyleReference,
+                            } as PlannerSuggestionContext,
+                        } : {}),
                     }
                 });
                 const fallbackIds = regen.designSpec.screens
@@ -2084,32 +2050,34 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
-            try {
-                const postgen = await apiClient.plan({
-                    phase: 'postgen',
-                    appPrompt: appPromptForPlanning,
-                    platform: platformToUse,
-                    stylePreset: styleToUse,
-                    screensGenerated: createdSeqs
-                        .map((seq) => screenIdBySeq.get(seq))
-                        .filter(Boolean)
-                        .map((screenId) => {
-                            const screen = useDesignStore.getState().spec?.screens.find((item) => item.screenId === screenId);
-                            return screen ? { name: screen.name } : null;
-                        })
-                        .filter(Boolean) as Array<{ name: string }>,
-                    preferredModel: 'llama-3.3-70b-versatile',
-                });
-                if (postgen.phase === 'postgen') {
-                    postgenData = postgen;
-                    postgenSummary = formatPostgenSuggestionText(postgen);
+            if (usePlanner) {
+                try {
+                    const postgen = await apiClient.plan({
+                        phase: 'postgen',
+                        appPrompt: appPromptForPlanning,
+                        platform: platformToUse,
+                        stylePreset: styleToUse,
+                        screensGenerated: createdSeqs
+                            .map((seq) => screenIdBySeq.get(seq))
+                            .filter(Boolean)
+                            .map((screenId) => {
+                                const screen = useDesignStore.getState().spec?.screens.find((item) => item.screenId === screenId);
+                                return screen ? { name: screen.name } : null;
+                            })
+                            .filter(Boolean) as Array<{ name: string }>,
+                        preferredModel: 'llama-3.3-70b-versatile',
+                    });
+                    if (postgen.phase === 'postgen') {
+                        postgenData = postgen;
+                        postgenSummary = formatPostgenSuggestionText(postgen);
+                    }
+                } catch (plannerError) {
+                    console.warn('[UI] planner post-gen failed; skipping follow-up suggestions', plannerError);
                 }
-            } catch (plannerError) {
-                console.warn('[UI] planner post-gen failed; skipping follow-up suggestions', plannerError);
             }
 
             const responseSummary = finalDescription || `Generated ${completedCount} screens customized to your request.`;
-            const planningSummary = plannerPlan?.generationSuggestion?.why
+            const planningSummary = usePlanner && plannerPlan?.generationSuggestion?.why
                 ? `\n\n[h3]Plan rationale[/h3]\n[li]${plannerPlan.generationSuggestion.why}[/li]`
                 : '';
             const postgenBlock = postgenSummary ? `\n\n${postgenSummary}` : '';
@@ -2123,16 +2091,18 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 meta: {
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
-                    plannerPrompt: appPromptForPlanning,
-                    plannerPostgen: postgenData || undefined,
-                    plannerContext: {
-                        appPrompt: appPromptForPlanning,
-                        platform: platformToUse,
-                        stylePreset: styleToUse,
-                        modelProfile: modelProfileToUse,
-                        existingScreenNames: snapshotScreenNames,
-                        styleReference: snapshotStyleReference,
-                    } as PlannerSuggestionContext,
+                    ...(usePlanner ? {
+                        plannerPrompt: appPromptForPlanning,
+                        plannerPostgen: postgenData || undefined,
+                        plannerContext: {
+                            appPrompt: appPromptForPlanning,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                            modelProfile: modelProfileToUse,
+                            existingScreenNames: snapshotScreenNames,
+                            styleReference: snapshotStyleReference,
+                        } as PlannerSuggestionContext,
+                    } : {}),
                 }
             });
             const generatedIds = createdSeqs
@@ -2269,23 +2239,25 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
-            try {
-                const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, editImages);
-                const postgen = await apiClient.plan({
-                    phase: 'postgen',
-                    appPrompt: currentPrompt,
-                    platform: selectedPlatform,
-                    stylePreset,
-                    screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
-                    referenceImages: plannerReferenceImages,
-                    preferredModel: 'llama-3.3-70b-versatile',
-                });
-                if (postgen.phase === 'postgen') {
-                    postgenData = postgen;
-                    postgenSummary = formatPostgenSuggestionText(postgen);
+            if (planMode) {
+                try {
+                    const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, editImages);
+                    const postgen = await apiClient.plan({
+                        phase: 'postgen',
+                        appPrompt: currentPrompt,
+                        platform: selectedPlatform,
+                        stylePreset,
+                        screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
+                        referenceImages: plannerReferenceImages,
+                        preferredModel: 'llama-3.3-70b-versatile',
+                    });
+                    if (postgen.phase === 'postgen') {
+                        postgenData = postgen;
+                        postgenSummary = formatPostgenSuggestionText(postgen);
+                    }
+                } catch (plannerError) {
+                    console.warn('[UI] planner post-gen failed (edit path)', plannerError);
                 }
-            } catch (plannerError) {
-                console.warn('[UI] planner post-gen failed (edit path)', plannerError);
             }
             const snapshotScreens = useDesignStore.getState().spec?.screens || [];
             const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
@@ -2300,16 +2272,18 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 meta: {
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
-                    plannerPrompt: currentPrompt,
-                    plannerPostgen: postgenData || undefined,
-                    plannerContext: {
-                        appPrompt: currentPrompt,
-                        platform: selectedPlatform,
-                        stylePreset,
-                        modelProfile,
-                        existingScreenNames: snapshotScreenNames,
-                        styleReference: snapshotStyleReference,
-                    } as PlannerSuggestionContext,
+                    ...(planMode ? {
+                        plannerPrompt: currentPrompt,
+                        plannerPostgen: postgenData || undefined,
+                        plannerContext: {
+                            appPrompt: currentPrompt,
+                            platform: selectedPlatform,
+                            stylePreset,
+                            modelProfile,
+                            existingScreenNames: snapshotScreenNames,
+                            styleReference: snapshotStyleReference,
+                        } as PlannerSuggestionContext,
+                    } : {}),
                 }
             });
             notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`);
@@ -2337,165 +2311,26 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!requestPrompt || isGenerating) return;
         const attachedImages = [...images];
         const referenceScreens = getScreenReferencesFromComposer();
-        const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
-        const requestPromptWithReferences = referencePromptContext
-            ? `${requestPrompt}\n\n${referencePromptContext}`
-            : requestPrompt;
         setComposerScreenReferences([]);
         closeMentionMenu();
         if (attachedImages.length > 0) {
             setImages([]);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
-        const imageDrivenRequest = attachedImages.length > 0
-            && /(as seen|this image|this screenshot|match this|based on (the )?image|like this|same as this)/i.test(requestPrompt);
-
-        if (imageDrivenRequest) {
-            await handleGenerate(
-                requestPrompt,
-                attachedImages,
-                selectedPlatform,
-                stylePreset,
-                modelProfile,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                referenceScreens
-            );
-            return;
-        }
-
-        try {
-            const currentScreens = spec?.screens || [];
-            const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, attachedImages);
-            const route = await apiClient.plan({
-                phase: 'route',
-                appPrompt: requestPromptWithReferences,
-                platform: selectedPlatform,
-                stylePreset,
-                screensGenerated: currentScreens.map((screen) => ({ name: screen.name })),
-                referenceImages: plannerReferenceImages,
-                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            });
-
-            if (route.phase !== 'route') {
-                await handleGenerate(
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    referenceScreens
-                );
-                return;
-            }
-
-            if (route.intent === 'edit_existing_screen') {
-                const matched = findBestMatchingScreen(
-                    currentScreens,
-                    route.matchedExistingScreenName || route.targetScreenName || requestPrompt
-                );
-                if (matched) {
-                    const rawInstruction = (route.editInstruction || requestPrompt).trim();
-                    const reference = findBestMatchingScreen(
-                        currentScreens,
-                        route.referenceExistingScreenName || ''
-                    );
-                    const manualReference = referenceScreens.find((screen) => screen.screenId !== matched.screenId) || null;
-                    const styleReference = (reference && reference.screenId !== matched.screenId)
-                        ? reference
-                        : manualReference;
-                    const instruction = styleReference
-                        ? buildReferenceStyleEditInstruction(rawInstruction, styleReference)
-                        : rawInstruction;
-                    await handleEditForScreen(matched, instruction, attachedImages, undefined, referenceScreens);
-                    return;
-                }
-            }
-
-            if (route.intent === 'chat_assist') {
-                const userMsgId = addMessage('user', requestPrompt, attachedImages.length ? attachedImages : undefined);
-                const assistantMsgId = addMessage('assistant', route.assistantResponse || 'Here is a quick take based on your request.');
-                const referenceMeta = buildScreenReferenceMeta(referenceScreens);
-                const routeSuggestions = buildRouteChatSuggestionPayload(route);
-                updateMessage(userMsgId, {
-                    status: 'complete',
-                    meta: {
-                        ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
-                        requestKind: 'assist',
-                        livePreview: false,
-                        ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
-                    }
-                });
-                updateMessage(assistantMsgId, {
-                    status: 'complete',
-                    meta: {
-                        ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
-                        parentUserId: userMsgId,
-                        plannerRoute: route,
-                        plannerPostgen: routeSuggestions,
-                        typedComplete: false,
-                    }
-                });
-                setActiveBranchForUser(userMsgId, assistantMsgId);
-                notifySuccess('Assistant response ready', 'Planner handled this as a conversational request.');
-                return;
-            }
-
-            if (route.intent === 'add_screen') {
-                const targets = (route.generateTheseNow || []).filter(Boolean);
-                await handleGenerate(
-                    requestPrompt,
-                    attachedImages,
-                    selectedPlatform,
-                    stylePreset,
-                    modelProfile,
-                    targets.length > 0 ? targets : undefined,
-                    route.appContextPrompt || requestPrompt,
-                    undefined,
-                    undefined,
-                    undefined,
-                    referenceScreens
-                );
-                return;
-            }
-
-            await handleGenerate(
-                requestPrompt,
-                attachedImages,
-                selectedPlatform,
-                stylePreset,
-                modelProfile,
-                undefined,
-                route.appContextPrompt || requestPrompt,
-                undefined,
-                undefined,
-                undefined,
-                referenceScreens
-            );
-        } catch (error) {
-            console.warn('[UI] route planner failed; falling back to default generation flow', error);
-            await handleGenerate(
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                referenceScreens
-            );
-        }
+        await handleGenerate(
+            requestPrompt,
+            attachedImages,
+            selectedPlatform,
+            stylePreset,
+            modelProfile,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            referenceScreens,
+            false
+        );
     };
 
     const handleSubmit = () => {
@@ -2536,36 +2371,20 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
 
         if (requestKind === 'assist') {
-            const plannerReferenceImages = await buildPlannerVisionInputs(retryReferences, retryImages);
-            const route = await apiClient.plan({
-                phase: 'route',
-                appPrompt: retryPrompt,
-                platform: selectedPlatform,
+            await handleGenerate(
+                retryPrompt,
+                retryImages,
+                selectedPlatform,
                 stylePreset,
-                screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
-                referenceImages: plannerReferenceImages,
-                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            });
-            const routeSuggestions = route.phase === 'route'
-                ? buildRouteChatSuggestionPayload(route)
-                : undefined;
-            const assistantMsgId = addMessage(
-                'assistant',
-                route.phase === 'route' && route.intent === 'chat_assist'
-                    ? (route.assistantResponse || 'Here is a quick take based on your request.')
-                    : 'I could not re-run this as assist mode, so I switched back to normal generation.'
+                modelProfile,
+                undefined,
+                retryPrompt,
+                undefined,
+                undefined,
+                userMessageId,
+                retryReferences,
+                false
             );
-            updateMessage(assistantMsgId, {
-                status: 'complete',
-                meta: {
-                    ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
-                    parentUserId: userMessageId,
-                    plannerRoute: route,
-                    plannerPostgen: routeSuggestions,
-                    typedComplete: false,
-                }
-            });
-            setActiveBranchForUser(userMessageId, assistantMsgId);
             return;
         }
 
@@ -2580,7 +2399,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             undefined,
             undefined,
             userMessageId,
-            retryReferences
+            retryReferences,
+            false
         );
     };
 
@@ -2720,7 +2540,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     {/* Header / Date */}
                     <div className="py-4 px-5 flex items-center justify-between sticky top-0 z-10 bg-transparent">
                         <div className="leading-tight">
-                            <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">Chat</p>
+                            <div className="inline-flex items-center gap-2">
+                                <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
+                                <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">Chat</p>
+                            </div>
                             <p className="text-[10px] font-medium text-[var(--ui-text-subtle)] uppercase tracking-[0.12em]">
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </p>
@@ -3191,7 +3014,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Describe your UI you want to create... (type @ to reference screens)"
                                 disabled={isGenerating}
-                                className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[var(--ui-text-subtle)] px-2 py-1 leading-relaxed"
+                                className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] px-2 py-1 leading-relaxed"
                                 style={{ border: 'none', boxShadow: 'none' }}
                             />
                             {isMentionOpen && filteredMentionScreens.length > 0 && (

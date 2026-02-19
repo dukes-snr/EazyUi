@@ -118,6 +118,8 @@ export interface TranscribeAudioResponse {
 export interface SaveRequest {
     projectId?: string;
     designSpec: HtmlDesignSpec;
+    canvasDoc?: unknown;
+    chatState?: unknown;
 }
 
 export interface SaveResponse {
@@ -223,6 +225,7 @@ export interface ProjectResponse {
     projectId: string;
     designSpec: HtmlDesignSpec;
     canvasDoc: unknown;
+    chatState: unknown;
     createdAt: string;
     updatedAt: string;
 }
@@ -355,6 +358,12 @@ class ApiClient {
 
     async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string }[] }> {
         return this.request('/projects');
+    }
+
+    async deleteProject(projectId: string): Promise<{ success: boolean }> {
+        return this.request<{ success: boolean }>(`/project/${projectId}`, {
+            method: 'DELETE',
+        });
     }
 }
 
