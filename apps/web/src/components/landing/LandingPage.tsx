@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowUp, CircleStar, Gauge, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, TrendingUp, Wand2, Workflow, X, Zap } from 'lucide-react';
-import heroBg2 from '../../assets/hero-bg2.jpg';
+import heroBg2 from '../../assets/img1.jpg';
 import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -16,6 +16,15 @@ type LandingPageProps = {
         modelProfile: DesignModelProfile;
     }) => void;
     onNavigate: (path: string) => void;
+    userProfile?: {
+        name: string;
+        email: string;
+        photoUrl?: string | null;
+        emailVerified: boolean;
+    } | null;
+    onSignOut?: () => void;
+    onSendVerification?: () => void;
+    verificationBusy?: boolean;
 };
 
 // const TRUSTED_BRANDS = ['Startups', 'Product Teams', 'Agencies', 'Founders', 'Designers', 'Developers', 'Studios'];
@@ -32,9 +41,6 @@ const TYPED_PLACEHOLDER_SUGGESTIONS = [
     'Create an ecommerce home screen with search, categories, and recommendations...',
     'Generate a travel planner app with itinerary, maps, and booking cards...',
 ];
-const PATTERN_TABS = ['Screens', 'UI Elements', 'Flows'] as const;
-type PatternTab = (typeof PATTERN_TABS)[number];
-
 type PatternCard = {
     title: string;
     prompt: string;
@@ -53,96 +59,50 @@ const MOBBIN_SCREEN_IMAGES = [
 
 ] as const;
 
-const PATTERN_LIBRARY: Record<PatternTab, PatternCard[]> = {
-    Screens: [
-        {
-            title: 'Profile',
-            prompt: 'Design a profile screen with avatar header, editable personal details, and clear settings/actions.',
-            accent: 'from-sky-500/45 to-indigo-500/25',
-            image: MOBBIN_SCREEN_IMAGES[0],
-        },
-        {
-            title: 'Cooking',
-            prompt: 'Create a cooking mode step-by-step screen with recipe progress, ingredient guidance, and timer-friendly controls.',
-            accent: 'from-fuchsia-500/40 to-slate-500/20',
-            image: MOBBIN_SCREEN_IMAGES[1],
-        },
-        {
-            title: 'Image detail',
-            prompt: 'Generate an image pin detail screen with large media preview, save/share actions, and related inspiration cards.',
-            accent: 'from-amber-500/45 to-orange-500/25',
-            image: MOBBIN_SCREEN_IMAGES[2],
-        },
-        {
-            title: 'Leaderboard',
-            prompt: 'Build a challenges leaderboard screen with ranked participants, progress indicators, and reward highlights.',
-            accent: 'from-violet-500/45 to-cyan-500/20',
-            image: MOBBIN_SCREEN_IMAGES[3],
-        },
-        { 
-            title: 'Feed',
-            prompt: 'Design a home feed screen with content cards, discovery sections, and quick interactions for engagement.', 
-            accent: 'from-slate-600/50 to-zinc-500/20', 
-            image: MOBBIN_SCREEN_IMAGES[4] 
-        },
-        { 
-            title: 'Dashboard',
-            prompt: 'Create a dashboard screen with KPI summary cards, recent activity, and concise performance trends.', 
-            accent: 'from-zinc-400/35 to-slate-500/20', 
-            image: MOBBIN_SCREEN_IMAGES[5] 
-        },
-        { 
-            title: 'Achievement',
-            prompt: 'Generate an achievements screen with milestone badges, progress tracking, and unlocked reward states.', 
-            accent: 'from-emerald-500/35 to-cyan-500/20', 
-            image: MOBBIN_SCREEN_IMAGES[6] 
-        },
-    ],
-    'UI Elements': [
-        { 
-            title: 'Floating CTA Bar', 
-            prompt: 'Add a floating CTA bar with subtle blur, icon, and primary action.', 
-            accent: 'from-sky-500/45 to-cyan-500/25' 
-        },
-        { 
-            title: 'Card Grid Module', 
-            prompt: 'Design a responsive card grid module with mixed card sizes and badges.', 
-            accent: 'from-indigo-500/40 to-violet-500/25' 
-        },
-        { 
-            title: 'Pricing Toggle', 
-            prompt: 'Create a pricing toggle component with monthly/yearly states and savings label.', 
-            accent: 'from-amber-500/45 to-orange-500/25' 
-        },
-        { 
-            title: 'Segmented Filter', 
-            prompt: 'Build a segmented filter control with clear active/hover states.', 
-            accent: 'from-emerald-500/40 to-teal-500/25' 
-        },
-    ],
-    Flows: [
-        { 
-            title: 'Onboarding Flow', 
-            prompt: 'Create a 3-step onboarding flow with progress indicator and optional skip.', 
-            accent: 'from-sky-500/45 to-blue-500/25' 
-        },
-        { 
-            title: 'Signup to First Task', 
-            prompt: 'Design a signup to first-task completion flow for a SaaS product.', 
-            accent: 'from-violet-500/45 to-indigo-500/25' 
-        },
-        { 
-            title: 'Browse to Checkout', 
-            prompt: 'Generate an e-commerce browse-to-checkout conversion flow.', 
-            accent: 'from-amber-500/45 to-rose-500/25' 
-        },
-        { 
-            title: 'Profile Completion', 
-            prompt: 'Create a profile completion flow with progressive disclosure and reminders.', 
-            accent: 'from-teal-500/40 to-cyan-500/25' 
-        },
-    ],
-};
+const PATTERN_SCREENS: PatternCard[] = [
+    {
+        title: 'Profile',
+        prompt: 'Design a profile screen with avatar header, editable personal details, and clear settings/actions.',
+        accent: 'from-sky-500/45 to-indigo-500/25',
+        image: MOBBIN_SCREEN_IMAGES[0],
+    },
+    {
+        title: 'Cooking',
+        prompt: 'Create a cooking mode step-by-step screen with recipe progress, ingredient guidance, and timer-friendly controls.',
+        accent: 'from-fuchsia-500/40 to-slate-500/20',
+        image: MOBBIN_SCREEN_IMAGES[1],
+    },
+    {
+        title: 'Image detail',
+        prompt: 'Generate an image pin detail screen with large media preview, save/share actions, and related inspiration cards.',
+        accent: 'from-amber-500/45 to-orange-500/25',
+        image: MOBBIN_SCREEN_IMAGES[2],
+    },
+    {
+        title: 'Leaderboard',
+        prompt: 'Build a challenges leaderboard screen with ranked participants, progress indicators, and reward highlights.',
+        accent: 'from-violet-500/45 to-cyan-500/20',
+        image: MOBBIN_SCREEN_IMAGES[3],
+    },
+    {
+        title: 'Feed',
+        prompt: 'Design a home feed screen with content cards, discovery sections, and quick interactions for engagement.',
+        accent: 'from-slate-600/50 to-zinc-500/20',
+        image: MOBBIN_SCREEN_IMAGES[4]
+    },
+    {
+        title: 'Dashboard',
+        prompt: 'Create a dashboard screen with KPI summary cards, recent activity, and concise performance trends.',
+        accent: 'from-zinc-400/35 to-slate-500/20',
+        image: MOBBIN_SCREEN_IMAGES[5]
+    },
+    {
+        title: 'Achievement',
+        prompt: 'Generate an achievements screen with milestone badges, progress tracking, and unlocked reward states.',
+        accent: 'from-emerald-500/35 to-cyan-500/20',
+        image: MOBBIN_SCREEN_IMAGES[6]
+    },
+];
 
 const EXPERIENCE_BLOCKS = [
     {
@@ -212,6 +172,17 @@ const MARKETING_NAV_LINKS = [
     { label: 'Pricing', path: '/pricing' },
     { label: 'Learn', path: '/learn' },
 ] as const;
+const FOOTER_PRIMARY_LINKS = [
+    { label: 'Home', path: '/' },
+    { label: 'Templates', path: '/templates' },
+    { label: 'Pricing', path: '/pricing' },
+    { label: 'Learn', path: '/learn' },
+    { label: 'Open App', path: '/app' },
+] as const;
+const FOOTER_POLICIES = [
+    { label: 'Terms & Conditions', path: '/learn' },
+    { label: 'Privacy Policy', path: '/learn' },
+] as const;
 
 function toChipLabel(text: string): string {
     const clean = text.trim();
@@ -219,14 +190,13 @@ function toChipLabel(text: string): string {
     return `${clean.slice(0, CHIP_LABEL_MAX - 1).trimEnd()}...`;
 }
 
-export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
+export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy = false }: LandingPageProps) {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
-    const [activePatternTab, setActivePatternTab] = useState<PatternTab>('Screens');
     const [isPromptFocused, setIsPromptFocused] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -367,7 +337,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
         };
     }, [showStyleMenu]);
 
-    const patternCards = useMemo(() => PATTERN_LIBRARY[activePatternTab], [activePatternTab]);
+    const patternCards = useMemo(() => PATTERN_SCREENS, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
@@ -383,7 +353,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                     ? Smile
                     : CircleStar;
     const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-slate-400/15 text-slate-200 ring-slate-300/30 hover:bg-slate-400/20'
+        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
         : stylePreset === 'vibrant'
             ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
             : stylePreset === 'luxury'
@@ -431,44 +401,98 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                         ))}
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => onNavigate('/app')}
-                            className="hidden sm:inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
-                        >
-                            Try now
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => onNavigate('/app')}
-                            className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
-                        >
-                            Open app
-                        </button>
+                        {userProfile ? (
+                            <>
+                                <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-2.5 py-1.5">
+                                    {userProfile.photoUrl ? (
+                                        <img
+                                            src={userProfile.photoUrl}
+                                            alt={userProfile.name}
+                                            className="h-6 w-6 rounded-full object-cover border border-white/20"
+                                            onError={(e) => {
+                                                const fallbackName = userProfile.name || userProfile.email || 'User';
+                                                const img = e.currentTarget;
+                                                img.onerror = null;
+                                                img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+                                            }}
+                                        />
+                                    ) : (
+                                        <div className="h-6 w-6 rounded-full bg-white/15 text-[11px] font-semibold text-white inline-flex items-center justify-center">
+                                            {(userProfile.name || userProfile.email || 'U').slice(0, 1).toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className="leading-tight">
+                                        <p className="text-[11px] text-gray-200 max-w-[170px] truncate">{userProfile.name}</p>
+                                        <p className="text-[10px] text-gray-400 max-w-[170px] truncate">{userProfile.email}</p>
+                                    </div>
+                                </div>
+                                {!userProfile.emailVerified && (
+                                    <button
+                                        type="button"
+                                        onClick={onSendVerification}
+                                        disabled={verificationBusy}
+                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-amber-200/40 bg-amber-300/10 px-3 text-[11px] uppercase tracking-[0.08em] text-amber-100 hover:bg-amber-300/20 transition-colors disabled:opacity-60"
+                                    >
+                                        {verificationBusy ? 'Sending...' : 'Verify email'}
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate('/app')}
+                                    className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
+                                >
+                                    Open app
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={onSignOut}
+                                    className="h-8 rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
+                                >
+                                    Sign out
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate('/login')}
+                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
+                                >
+                                    Log in
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate('/login')}
+                                    className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
+                                >
+                                    Sign up
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
             </header>
 
-            <main className="relative z-10 px-4 md:px-[12%] lg:px-[20%] pt-8 md:pt-12 pb-16">
+            <main className="relative z-10 px-4 md:px-[12%] lg:px-[20%] pt-8 md:pt-12 pb-0">
                 <section className="mx-auto max-w-[980px] text-center min-h-[55vh] flex flex-col items-center justify-center">
                     <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
                         Design better UI with <span className="text-blue-300 italic">EazyUI</span>
                     </h1>
                     <p className="mt-2 text-[20px] md:text-[30px] text-gray-300">Generate production-ready app screens and landing pages from a single prompt.</p>
 
-                    <div className="mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[#5a6172] bg-[#2C313D] shadow-[0_10px_30px_rgba(0,0,0,0.28)] p-3 md:p-4 text-left">
+                    <div className="mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl p-3 md:p-4 text-left">
                         <div className="relative">
                             {!prompt.trim() && !isPromptFocused && (
-                                <div className="pointer-events-none absolute left-2 top-1 right-2 text-[16px] text-gray-400 text-left">
+                                <div className="pointer-events-none absolute left-2 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
                                     <TextType
                                         text={TYPED_PLACEHOLDER_SUGGESTIONS}
-                                        className="text-[16px] text-gray-400 text-left"
+                                        className="text-[16px] text-[var(--ui-text-subtle)] text-left"
                                         typingSpeed={62}
                                         deletingSpeed={38}
                                         pauseDuration={2200}
                                         showCursor
                                         cursorCharacter="_"
-                                        cursorClassName="text-gray-500"
+                                        cursorClassName="text-[var(--ui-text-subtle)]"
                                         loop
                                     />
                                 </div>
@@ -485,7 +509,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                     }
                                 }}
                                 placeholder=""
-                                className="no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-[#2C313D] px-2 py-1 text-[16px] text-left text-gray-100 placeholder:text-[16px] placeholder:text-gray-400 outline-none border-0 focus:border-0 ring-0 focus:ring-0"
+                                className="no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0"
                                 style={{ border: 'none', boxShadow: 'none' }}
                             />
                         </div>
@@ -497,12 +521,12 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                         <img
                                             src={img}
                                             alt="attachment"
-                                            className="h-10 w-10 rounded-md border border-white/10 object-cover"
+                                            className="h-10 w-10 rounded-md border border-[var(--ui-border)] object-cover"
                                         />
                                         <button
                                             type="button"
                                             onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                                            className="absolute top-0 right-0 h-4 w-4 rounded-full bg-black/70 border border-white/20 text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                                            className="absolute top-0 right-0 h-4 w-4 rounded-full bg-black/70 border border-[var(--ui-border-light)] text-[var(--ui-text)] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                                             title="Remove attachment"
                                         >
                                             <X size={10} />
@@ -512,7 +536,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                             </div>
                         )}
 
-                        <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                        <div className="flex items-center justify-between pt-2 border-t border-[var(--ui-border)]">
                             <div className="flex items-center gap-2.5">
                                 <input
                                     ref={fileInputRef}
@@ -525,7 +549,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                 <button
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
+                                    className="h-8 rounded-md px-2.5 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] transition-colors  flex items-center justify-center gap-1.5"
                                     title="Attach images"
                                 >
                                     <Paperclip size={17} />
@@ -538,15 +562,15 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                     <Figma size={13} />
                                     <span className="text-[12px]">Import</span>
                                 </button> */}
-                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
                                             type="button"
                                             onClick={() => setPlatform(p)}
                                             className={`p-1.5 rounded-full transition-all ${platform === p
-                                                ? 'bg-gray-600 text-white shadow-sm'
-                                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                                                ? 'bg-[var(--ui-primary)] text-[var(--ui-text)] shadow-sm'
+                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
@@ -561,13 +585,13 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                             </div>
 
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center bg-white/5 rounded-full p-1 ring-1 ring-white/5">
+                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-300/40'
-                                            : 'text-amber-400 hover:text-amber-200 hover:bg-white/5'
+                                            ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
+                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-3)]'
                                             }`}
                                         title="Fast model"
                                     >
@@ -577,8 +601,8 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-300/40'
-                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-white/5'
+                                            ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
+                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-[var(--ui-surface-3)]'
                                             }`}
                                         title="Quality model"
                                     >
@@ -595,7 +619,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                         <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 w-40 bg-[#1C1C1E] border border-white/10 rounded-xl shadow-2xl p-2 z-50">
+                                        <div className="absolute bottom-12 right-0 w-40 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
                                             {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
                                                 <button
                                                     key={preset}
@@ -605,8 +629,8 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                                         setShowStyleMenu(false);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-indigo-500/20 text-indigo-200'
-                                                        : 'text-gray-300 hover:bg-white/10'
+                                                        ? 'bg-indigo-500/20 text-[var(--ui-text)]'
+                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
                                                         }`}
                                                 >
                                                     {preset}
@@ -631,10 +655,10 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                                     }}
                                     disabled={actionDisabled}
                                     className={`h-9 w-9 rounded-full text-[12px] font-semibold transition-colors flex items-center justify-center ${isRecording
-                                        ? 'bg-rose-500/20 text-rose-200'
+                                        ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
                                         : showSendAction
-                                            ? 'bg-white text-[#222736] hover:bg-gray-200'
-                                            : 'bg-white/10 text-gray-200 hover:bg-white/15'
+                                            ? 'bg-indigo-500 text-[var(--ui-text)] hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                            : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
                                         } ${actionDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     title={isRecording ? 'Stop recording' : showSendAction ? 'Send prompt' : isTranscribing ? 'Transcribing...' : 'Record voice'}
                                 >
@@ -671,30 +695,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                 </section> */}
 
                 <section className="relative left-1/2 right-1/2 mt-14 -ml-[50vw] -mr-[50vw] w-screen text-center">
-                    <div className="mx-auto max-w-[1200px] px-4 md:px-6">
-                        <h2 className="text-[36px] md:text-[56px] leading-[1.06] font-semibold tracking-[-0.03em] text-white">
-                            Find design patterns
-                            <br />
-                            in seconds.
-                        </h2>
-                        <div className="mt-5 inline-flex items-center gap-1 rounded-full bg-white/10 p-1 border border-white/10">
-                            {PATTERN_TABS.map((tab) => (
-                                <button
-                                    key={tab}
-                                    type="button"
-                                    onClick={() => setActivePatternTab(tab)}
-                                    className={`h-8 px-3 rounded-full text-[12px] transition-colors ${activePatternTab === tab
-                                        ? 'bg-white text-[#111521] font-semibold'
-                                        : 'text-gray-300 hover:bg-white/10'
-                                        }`}
-                                >
-                                    {tab}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="mt-8 relative overflow-hidden px-3 md:px-4">
+                    <div className="relative overflow-hidden px-3 md:px-4">
                         <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_right,rgba(6,7,11,1),rgba(6,7,11,0))]" />
                         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_left,rgba(6,7,11,1),rgba(6,7,11,0))]" />
                         <div
@@ -758,7 +759,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                 </section>
 
                 <section className="mx-auto mt-24 max-w-[1120px] px-2">
-                    <div className="rounded-[30px] border border-white/10 bg-[#0d111b]/80 p-6 md:p-10">
+                    <div className="rounded-[30px] border border-white/10 bg-[#06070B] p-6 md:p-10">
                         <div className="landing-fade-up text-center">
                             <p className="text-[11px] uppercase tracking-[0.16em] text-indigo-200/80">Workflow</p>
                             <h3 className="mt-3 text-[30px] md:text-[42px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
@@ -800,7 +801,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                     <div className="landing-glow-orb landing-glow-orb-left" />
                     <div className="landing-glow-orb landing-glow-orb-right" />
 
-                    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[#090d16]/90 p-6 md:p-10">
+                    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[#06070B] p-6 md:p-10">
                         <div className="landing-fade-up text-center">
                             <p className="text-[11px] uppercase tracking-[0.16em] text-emerald-200/85">Proof</p>
                             <h3 className="mt-3 text-[30px] md:text-[44px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
@@ -824,7 +825,7 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                             ))}
                         </div>
 
-                        <div className="landing-fade-up mt-10 rounded-2xl border border-white/10 bg-gradient-to-r from-cyan-500/15 via-indigo-500/10 to-blue-500/15 p-6 text-center">
+                        <div className="landing-fade-up mt-10 rounded-2xl border border-white/10 bg-[#06070B] p-6 text-center">
                             <p className="text-[12px] uppercase tracking-[0.13em] text-cyan-100/85">Ready To Build</p>
                             <h4 className="mt-2 text-[24px] md:text-[32px] font-semibold tracking-[-0.02em] text-white">
                                 Start your next release on a stronger canvas.
@@ -852,10 +853,79 @@ export function LandingPage({ onStart, onNavigate }: LandingPageProps) {
                     </div>
                 </section>
 
-                <footer className="mx-auto mt-6 max-w-[1120px] border-t border-white/10 pt-6 pb-8">
-                    <div className="flex items-center justify-center gap-2 text-[12px] text-slate-400">
-                        <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                        <span>©2026 EazyUI</span>
+                <footer className="relative left-1/2 right-1/2 mt-8 -ml-[50vw] -mr-[50vw] w-screen overflow-hidden bg-[#06070B] px-5 pb-0 pt-7 md:px-8 md:pt-8">
+                    <div className="mx-auto max-w-[1320px]">
+                    <div className="relative grid gap-8 text-center md:grid-cols-3">
+                        <div className="flex flex-col items-center">
+                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Explore</p>
+                            <div className="mt-3 flex flex-col items-center gap-2">
+                                {FOOTER_PRIMARY_LINKS.map((item) => (
+                                    <button
+                                        key={item.label}
+                                        type="button"
+                                        onClick={() => onNavigate(item.path)}
+                                        className="text-[13px] text-slate-300 hover:text-white transition-colors"
+                                    >
+                                        {item.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col items-center">
+                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Follow Us</p>
+                            <p className="mt-3 text-[13px] text-slate-200">team@eazyui.com</p>
+                            <p className="mt-1 text-[13px] text-slate-200">+1 (408) 555-0199</p>
+                            <div className="mt-4 flex items-center gap-2 md:justify-center">
+                                {[Layers3, Workflow, Sparkles, Palette].map((Icon, index) => (
+                                    <button
+                                        key={`${index}`}
+                                        type="button"
+                                        className="h-9 w-9 rounded-[10px] border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white transition-colors inline-flex items-center justify-center"
+                                        title="Social link"
+                                    >
+                                        <Icon size={15} />
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col items-center">
+                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Address</p>
+                            <p className="mt-3 text-[13px] leading-relaxed text-slate-200">
+                                421 North Street,
+                                <br />
+                                Suite 400, San Francisco,
+                                <br />
+                                California, US.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="relative mt-7 flex flex-col items-center justify-center gap-3 border-t border-white/10 pt-4 text-[12px] text-slate-400 md:flex-row">
+                        <p>© 2026 EazyUI. All rights reserved.</p>
+                        <div className="flex items-center gap-5">
+                            {FOOTER_POLICIES.map((item) => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => onNavigate(item.path)}
+                                    className="hover:text-slate-200 transition-colors"
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="relative mt-7 overflow-hidden px-2 py-4">
+                        <div className="flex items-end justify-center gap-3 md:gap-6">
+                            <img src={appLogo} alt="EazyUI logo" className="h-[130px] w-[130px] md:h-[190px] md:w-[190px] object-contain shrink-0" />
+                            <p className="text-[72px] leading-none tracking-[-0.06em] font-semibold text-white/95 sm:text-[112px] md:text-[170px]">
+                                EAZYUI
+                            </p>
+                        </div>
+                    </div>
                     </div>
                 </footer>
             </main>

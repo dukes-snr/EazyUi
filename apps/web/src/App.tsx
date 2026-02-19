@@ -13,9 +13,12 @@ import { LearnPage } from './components/marketing/LearnPage';
 import { PricingPage } from './components/marketing/PricingPage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
 import { ToastViewport } from './components/ui/ToastViewport';
+import DemoOne from './components/ui/demo';
 import type { DesignModelProfile } from './constants/designModels';
 import { apiClient } from './api/client';
 import { createDefaultCanvasDoc, type CanvasDoc } from '@eazyui/shared';
+import type { User } from 'firebase/auth';
+import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore } from './stores';
@@ -24,6 +27,15 @@ import './styles/App.css';
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
 type MarketingRoute = 'templates' | 'pricing' | 'learn';
+
+function resolveUserPhotoUrl(user: User | null): string | null {
+    if (!user) return null;
+    if (user.photoURL) return user.photoURL;
+    const providerPhoto = user.providerData.find((p) => Boolean(p?.photoURL))?.photoURL;
+    if (providerPhoto) return providerPhoto;
+    const fallbackName = user.displayName || user.email?.split('@')[0] || 'User';
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+}
 
 function ensureCanvasDocFromProject(canvasDoc: unknown, designSpec: { screens: Array<{ screenId: string; width: number; height: number }> }): CanvasDoc {
     if (canvasDoc && typeof canvasDoc === 'object' && Array.isArray((canvasDoc as CanvasDoc).boards)) {
@@ -61,6 +73,7 @@ function getProjectFingerprint(
 function getRouteFromPath() {
     const path = window.location.pathname;
     if (path === '/app') return 'app' as const;
+    if (path === '/login') return 'login' as const;
     if (path === '/templates') return 'templates' as const;
     if (path === '/learn') return 'learn' as const;
     if (path === '/pricing') return 'pricing' as const;
@@ -84,7 +97,10 @@ function App() {
         setSaving,
         setProjectId,
     } = useProjectStore();
-    const [route, setRoute] = useState<'landing' | 'app' | MarketingRoute>(getRouteFromPath());
+    const [route, setRoute] = useState<'landing' | 'app' | 'login' | MarketingRoute>(getRouteFromPath());
+    const [authReady, setAuthReady] = useState(false);
+    const [authUser, setAuthUser] = useState<User | null>(null);
+    const [verificationBusy, setVerificationBusy] = useState(false);
     const hydratedProjectIdRef = useRef<string | null>(null);
     const lastSavedFingerprintRef = useRef<string>('');
     const [initialRequest, setInitialRequest] = useState<{
@@ -95,6 +111,7 @@ function App() {
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
     } | null>(null);
+    const authPhotoUrl = resolveUserPhotoUrl(authUser);
 
 
     // Initialize with empty state
@@ -210,6 +227,14 @@ function App() {
         return () => window.removeEventListener('popstate', onPopState);
     }, []);
 
+    useEffect(() => {
+        const unsub = observeAuthState((user) => {
+            setAuthUser(user);
+            setAuthReady(true);
+        });
+        return () => unsub();
+    }, []);
+
     const landingPrompt = useMemo(() => {
         if (route !== 'app') return '';
         return new URLSearchParams(window.location.search).get('prompt')?.trim() || '';
@@ -255,6 +280,51 @@ function App() {
         window.history.pushState({}, '', `${path}${search}`);
         setRoute(getRouteFromPath());
     };
+
+    const handleSignOut = async () => {
+        try {
+            await signOutCurrentUser();
+            navigate('/login');
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Sign out failed',
+                message: (error as Error).message || 'Could not sign out.',
+            });
+        }
+    };
+
+    const handleSendVerification = async () => {
+        try {
+            setVerificationBusy(true);
+            await sendCurrentUserVerificationEmail();
+            pushToast({
+                kind: 'info',
+                title: 'Verification email sent',
+                message: 'Check your inbox to verify your account.',
+            });
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Verification failed',
+                message: (error as Error).message || 'Could not send verification email.',
+            });
+        } finally {
+            setVerificationBusy(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!authReady) return;
+        const requiresAuth = route === 'app';
+        if (requiresAuth && !authUser) {
+            navigate('/login');
+            return;
+        }
+        if (route === 'login' && authUser) {
+            navigate('/app');
+        }
+    }, [route, authReady, authUser]);
 
     // Keyboard shortcuts
     useEffect(() => {
@@ -314,6 +384,15 @@ function App() {
     if (route === 'landing') {
         return (
             <LandingPage
+                userProfile={authUser ? {
+                    name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
+                    email: authUser.email || '',
+                    photoUrl: authPhotoUrl,
+                    emailVerified: authUser.emailVerified,
+                } : null}
+                onSignOut={handleSignOut}
+                onSendVerification={handleSendVerification}
+                verificationBusy={verificationBusy}
                 onStart={({ prompt, images, platform, stylePreset, modelProfile }) => {
                     window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile }));
                     navigate('/app');
@@ -321,6 +400,10 @@ function App() {
                 onNavigate={(path) => navigate(path)}
             />
         );
+    }
+
+    if (route === 'login') {
+        return <DemoOne onNavigate={(path) => navigate(path)} />;
     }
 
     if (route !== 'app') {

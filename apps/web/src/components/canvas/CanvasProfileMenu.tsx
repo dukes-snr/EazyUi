@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Download, Files, FolderOpen, Image, Loader2, Moon, Save, Settings, Sun, Trash2, UserCircle2 } from 'lucide-react';
+import { ChevronDown, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Save, Settings, Sun, Trash2, User as UserIcon, UserCircle2, X } from 'lucide-react';
 import { createDefaultCanvasDoc, type CanvasDoc } from '@eazyui/shared';
+import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
+import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
 function ensureCanvasDocFromProject(canvasDoc: unknown, designSpec: { screens: Array<{ screenId: string; width: number; height: number }> }): CanvasDoc {
     if (canvasDoc && typeof canvasDoc === 'object' && Array.isArray((canvasDoc as CanvasDoc).boards)) {
@@ -36,6 +38,15 @@ function formatSavedAt(value: string | null): string {
     }
 }
 
+function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
+    if (!user) return null;
+    if (user.photoURL) return user.photoURL;
+    const providerPhoto = user.providerData.find((p) => Boolean(p?.photoURL))?.photoURL;
+    if (providerPhoto) return providerPhoto;
+    const fallbackName = user.displayName || user.email?.split('@')[0] || 'User';
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+}
+
 export function CanvasProfileMenu() {
     const { theme, toggleTheme, pushToast, removeToast, showInspector, toggleInspector } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
@@ -61,9 +72,12 @@ export function CanvasProfileMenu() {
     const [openExport, setOpenExport] = useState(false);
     const [openProject, setOpenProject] = useState(false);
     const [openProjectsModal, setOpenProjectsModal] = useState(false);
+    const [openProfileModal, setOpenProfileModal] = useState(false);
     const [projects, setProjects] = useState<Array<{ id: string; name: string; updatedAt: string }>>([]);
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
+    const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+    const [verificationBusy, setVerificationBusy] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
@@ -81,6 +95,8 @@ export function CanvasProfileMenu() {
                 : lastSavedAt
                     ? `Saved ${formatSavedAt(lastSavedAt)}`
                     : 'Not saved yet';
+    const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'You';
+    const authPhotoUrl = resolveUserPhotoUrl(authUser);
 
     useEffect(() => {
         if (!openProfile && !openExport && !openProject) return;
@@ -95,6 +111,11 @@ export function CanvasProfileMenu() {
         document.addEventListener('pointerdown', onPointerDown);
         return () => document.removeEventListener('pointerdown', onPointerDown);
     }, [openProfile, openExport, openProject]);
+
+    useEffect(() => {
+        const unsub = observeAuthState((user) => setAuthUser(user));
+        return () => unsub();
+    }, []);
 
     const refreshProjects = async () => {
         setLoadingProjects(true);
@@ -251,6 +272,41 @@ export function CanvasProfileMenu() {
             title: 'New workspace',
             message: 'Started a fresh project.',
         });
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await signOutCurrentUser();
+            setOpenProfile(false);
+            window.history.pushState({}, '', '/login');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Sign out failed',
+                message: (error as Error).message || 'Could not sign out.',
+            });
+        }
+    };
+
+    const handleSendVerification = async () => {
+        try {
+            setVerificationBusy(true);
+            await sendCurrentUserVerificationEmail();
+            pushToast({
+                kind: 'info',
+                title: 'Verification email sent',
+                message: 'Check your inbox to verify your account.',
+            });
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Verification failed',
+                message: (error as Error).message || 'Could not send verification email.',
+            });
+        } finally {
+            setVerificationBusy(false);
+        }
     };
 
     const sortedProjects = useMemo(
@@ -417,21 +473,52 @@ export function CanvasProfileMenu() {
                             setOpenExport(false);
                             setOpenProject(false);
                         }}
-                        className="canvas-profile-trigger"
+                        className="h-11 w-11 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] inline-flex items-center justify-center hover:bg-[var(--ui-canvas-profile-hover)] transition-colors"
                         title="Profile and settings"
                     >
-                        <div className="canvas-profile-avatar">
-                            <UserCircle2 size={16} />
+                        <div className="canvas-profile-avatar canvas-profile-avatar-lg">
+                            {authPhotoUrl ? (
+                                <img
+                                    src={authPhotoUrl}
+                                    alt={authDisplayName}
+                                    className="h-full w-full rounded-full object-cover"
+                                    onError={(e) => {
+                                        const fallbackName = authDisplayName || 'User';
+                                        const img = e.currentTarget;
+                                        img.onerror = null;
+                                        img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+                                    }}
+                                />
+                            ) : (
+                                <UserCircle2 size={16} />
+                            )}
                         </div>
-                        <div className="canvas-profile-meta">
-                            <span className="canvas-profile-name">You</span>
-                            <span className="canvas-profile-role">Designer</span>
-                        </div>
-                        <ChevronDown size={14} className={`transition-transform ${openProfile ? 'rotate-180' : ''}`} />
                     </button>
 
                     {openProfile && (
                         <div className="canvas-profile-menu">
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={() => {
+                                    setOpenProfile(false);
+                                    setOpenProfileModal(true);
+                                }}
+                            >
+                                <UserIcon size={14} />
+                                <span>Profile</span>
+                            </button>
+                            {!authUser?.emailVerified && (
+                                <button
+                                    type="button"
+                                    className="canvas-profile-menu-item"
+                                    onClick={() => void handleSendVerification()}
+                                    disabled={verificationBusy}
+                                >
+                                    <Mail size={14} />
+                                    <span>{verificationBusy ? 'Sending verification...' : 'Verify Email'}</span>
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 className="canvas-profile-menu-item"
@@ -464,6 +551,14 @@ export function CanvasProfileMenu() {
                             >
                                 <Save size={14} />
                                 <span>{autosaveEnabled ? 'Disable' : 'Enable'} Autosave</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={() => void handleSignOut()}
+                            >
+                                <LogOut size={14} />
+                                <span>Log Out</span>
                             </button>
                         </div>
                     )}
@@ -536,6 +631,60 @@ export function CanvasProfileMenu() {
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {openProfileModal && authUser && (
+                <div className="fixed inset-0 z-[120] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4">
+                    <div className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ui-border)]">
+                            <div>
+                                <div className="text-sm font-semibold text-[var(--ui-text)]">Profile</div>
+                                <div className="text-xs text-[var(--ui-text-subtle)]">Your authenticated account details.</div>
+                            </div>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={() => setOpenProfileModal(false)}
+                            >
+                                <X size={14} />
+                                <span>Close</span>
+                            </button>
+                        </div>
+
+                        <div className="p-4">
+                            <div className="flex items-center gap-3">
+                                {authPhotoUrl ? (
+                                    <img src={authPhotoUrl} alt={authDisplayName} className="h-12 w-12 rounded-full object-cover border border-[var(--ui-border)]" />
+                                ) : (
+                                    <div className="h-12 w-12 rounded-full bg-[var(--ui-surface-3)] border border-[var(--ui-border)] inline-flex items-center justify-center text-[var(--ui-text)]">
+                                        <UserCircle2 size={22} />
+                                    </div>
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-[var(--ui-text)] truncate">{authDisplayName}</p>
+                                    <p className="text-xs text-[var(--ui-text-muted)] truncate">{authUser.email || 'No email'}</p>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 space-y-2 text-xs">
+                                <div className="flex items-center justify-between rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <span className="text-[var(--ui-text-subtle)]">UID</span>
+                                    <span className="text-[var(--ui-text)] max-w-[250px] truncate">{authUser.uid}</span>
+                                </div>
+                                <div className="flex items-center justify-between rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <span className="text-[var(--ui-text-subtle)]">Provider</span>
+                                    <span className="text-[var(--ui-text)]">{authUser.providerData[0]?.providerId || 'email/password'}</span>
+                                </div>
+                                <div className="flex items-center justify-between rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                    <span className="text-[var(--ui-text-subtle)]">Email Verified</span>
+                                    <span className={authUser.emailVerified ? 'text-emerald-300' : 'text-amber-300'}>
+                                        {authUser.emailVerified ? 'Yes' : 'No'}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

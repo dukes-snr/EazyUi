@@ -427,6 +427,11 @@ textarea::placeholder {
   justify-content: center;
 }
 
+.canvas-profile-avatar-lg {
+  width: 36px;
+  height: 36px;
+}
+
 .canvas-profile-meta {
   display: flex;
   flex-direction: column;
