@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppWindow, Braces, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
+import { AppWindow, Braces, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
@@ -84,7 +84,13 @@ export function CanvasProfileMenu() {
     };
 
     const handleSaveNow = async () => {
-        if (!spec) return;
+        if (!spec || isSaving) return;
+        const savingToastId = pushToast({
+            kind: 'loading',
+            title: 'Saving canvas',
+            message: 'Persisting screens, chat, and canvas state...',
+            durationMs: 0,
+        });
         try {
             setSaving(true);
             const saved = await apiClient.save({ projectId: projectId || undefined, designSpec: spec as any, canvasDoc: doc, chatState: { messages } });
@@ -93,6 +99,8 @@ export function CanvasProfileMenu() {
         } catch (error) {
             setSaving(false);
             pushToast({ kind: 'error', title: 'Save failed', message: (error as Error).message || 'Unable to save project.' });
+        } finally {
+            removeToast(savingToastId);
         }
     };
 
@@ -101,7 +109,7 @@ export function CanvasProfileMenu() {
         if (!proceed) return;
         resetDesign(); resetCanvas(); exitEdit(); clearMessages(); clearHistory(); resetProjectState();
         setOpenSettingsModal(false);
-        window.history.pushState({}, '', '/app?new=1');
+        window.history.pushState({}, '', '/app/projects/new');
         window.dispatchEvent(new PopStateEvent('popstate'));
     };
 
@@ -110,7 +118,7 @@ export function CanvasProfileMenu() {
             await signOutCurrentUser();
             setOpenProfile(false);
             setOpenSettingsModal(false);
-            window.history.pushState({}, '', '/login');
+            window.history.pushState({}, '', '/auth/login');
             window.dispatchEvent(new PopStateEvent('popstate'));
         } catch (error) {
             pushToast({ kind: 'error', title: 'Sign out failed', message: (error as Error).message || 'Could not sign out.' });
@@ -140,7 +148,15 @@ export function CanvasProfileMenu() {
         <>
             <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
                 <div className="canvas-profile-trigger px-2.5 gap-2">
-                    <button type="button" onClick={() => void handleSaveNow()} className="canvas-profile-avatar" title="Save project"><Save size={16} /></button>
+                    <button
+                        type="button"
+                        onClick={() => void handleSaveNow()}
+                        disabled={isSaving}
+                        className="canvas-profile-avatar"
+                        title={isSaving ? 'Saving project...' : 'Save project'}
+                    >
+                        {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    </button>
                     <span className={`text-[11px] font-medium ${!dirty && !isSaving && !!lastSavedAt ? 'text-emerald-300' : 'text-[var(--ui-text-subtle)]'}`}>{projectStatus}</span>
                 </div>
 
@@ -235,7 +251,7 @@ export function CanvasProfileMenu() {
                                 )}
                                 {settingsTab === 'workspace' && (
                                     <div className="max-w-[840px] flex flex-wrap gap-3">
-                                        <button type="button" onClick={() => { window.history.pushState({}, '', '/workspace'); window.dispatchEvent(new PopStateEvent('popstate')); setOpenSettingsModal(false); }} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Open Project Workspace</button>
+                                        <button type="button" onClick={() => { window.history.pushState({}, '', '/app/projects'); window.dispatchEvent(new PopStateEvent('popstate')); setOpenSettingsModal(false); }} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Open Project Workspace</button>
                                         <button type="button" onClick={handleNewProject} className="h-10 rounded-xl bg-indigo-600 px-4 text-sm text-white hover:bg-indigo-500">New Project</button>
                                         <button type="button" onClick={() => void handleSaveNow()} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Save now</button>
                                     </div>

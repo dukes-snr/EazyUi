@@ -24,11 +24,21 @@ import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser 
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore } from './stores';
+import logo from './assets/Ui-logo.png';
 
 import './styles/App.css';
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
-type MarketingRoute = 'templates' | 'pricing' | 'learn' | 'workspace';
+type RouteInfo =
+    | { kind: 'landing' }
+    | { kind: 'login' }
+    | { kind: 'templates' }
+    | { kind: 'learn' }
+    | { kind: 'pricing' }
+    | { kind: 'app-home' }
+    | { kind: 'app-projects' }
+    | { kind: 'app-project-new' }
+    | { kind: 'app-project-canvas'; projectId: string; screenId?: string };
 
 function resolveUserPhotoUrl(user: User | null): string | null {
     if (!user) return null;
@@ -72,15 +82,30 @@ function getProjectFingerprint(
     return `${designSpec.updatedAt}::${boards}::${chat}`;
 }
 
-function getRouteFromPath() {
+function getRouteFromPath(): RouteInfo {
     const path = window.location.pathname;
-    if (path === '/app') return 'app' as const;
-    if (path === '/login') return 'login' as const;
-    if (path === '/workspace') return 'workspace' as const;
-    if (path === '/templates') return 'templates' as const;
-    if (path === '/learn') return 'learn' as const;
-    if (path === '/pricing') return 'pricing' as const;
-    return 'landing' as const;
+    const segments = path.split('/').filter(Boolean);
+
+    if (path === '/auth/login' || path === '/login') return { kind: 'login' };
+    if (path === '/templates') return { kind: 'templates' };
+    if (path === '/learn') return { kind: 'learn' };
+    if (path === '/pricing') return { kind: 'pricing' };
+
+    if (path === '/workspace') return { kind: 'app-home' }; // legacy route support
+    if (path === '/app') return { kind: 'app-home' };
+    if (path === '/app/projects') return { kind: 'app-projects' };
+    if (path === '/app/projects/new') return { kind: 'app-project-new' };
+
+    if (segments[0] === 'app' && segments[1] === 'projects' && segments[2]) {
+        const projectId = decodeURIComponent(segments[2]);
+        if (segments[3] === 'canvas') {
+            const screenId = segments[4] ? decodeURIComponent(segments[4]) : undefined;
+            return { kind: 'app-project-canvas', projectId, screenId };
+        }
+        return { kind: 'app-project-canvas', projectId };
+    }
+
+    return { kind: 'landing' };
 }
 
 function createProjectId() {
@@ -105,7 +130,7 @@ function App() {
         setSaving,
         setProjectId,
     } = useProjectStore();
-    const [route, setRoute] = useState<'landing' | 'app' | 'login' | MarketingRoute>(getRouteFromPath());
+    const [route, setRoute] = useState<RouteInfo>(getRouteFromPath());
     const [authReady, setAuthReady] = useState(false);
     const [authUser, setAuthUser] = useState<User | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
@@ -124,6 +149,10 @@ function App() {
         modelProfile?: DesignModelProfile;
     } | null>(null);
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
+    const isCanvasRoute = route.kind === 'app-project-canvas';
+    const activeProjectIdFromRoute = route.kind === 'app-project-canvas'
+        ? route.projectId
+        : null;
 
 
     useEffect(() => {
@@ -134,7 +163,7 @@ function App() {
 
     useEffect(() => {
         let cancelled = false;
-        if (route !== 'app' || !projectId || !authReady || !authUser) return;
+        if (!isCanvasRoute || !projectId || !authReady || !authUser) return;
         if (hydratedProjectIdRef.current === projectId) return;
         if (hydrationRunRef.current !== 0) return;
         const targetProjectId = projectId;
@@ -195,10 +224,10 @@ function App() {
         return () => {
             cancelled = true;
         };
-    }, [route, projectId, setHydrating, markSaved, setProjectId, pushToast, authReady, authUser]);
+    }, [isCanvasRoute, projectId, setHydrating, markSaved, setProjectId, pushToast, authReady, authUser]);
 
     useEffect(() => {
-        if (route !== 'app' || isHydrating || !spec) return;
+        if (!isCanvasRoute || isHydrating || !spec) return;
         const fingerprint = getProjectFingerprint(spec as any, doc as any, messages as any);
         if (!fingerprint) return;
         if (projectId && hydratedProjectIdRef.current !== projectId) return;
@@ -209,18 +238,18 @@ function App() {
         if (fingerprint !== lastSavedFingerprintRef.current) {
             markDirty();
         }
-    }, [spec?.updatedAt, doc.boards, messages, route, isHydrating, markDirty, spec, doc, projectId]);
+    }, [spec?.updatedAt, doc.boards, messages, isCanvasRoute, isHydrating, markDirty, spec, doc, projectId]);
 
     useEffect(() => {
-        if (route !== 'app' || isHydrating || !spec || dirty) return;
+        if (!isCanvasRoute || isHydrating || !spec || dirty) return;
         const fingerprint = getProjectFingerprint(spec as any, doc as any, messages as any);
         if (fingerprint) {
             lastSavedFingerprintRef.current = fingerprint;
         }
-    }, [route, isHydrating, dirty, spec?.updatedAt, doc.boards, messages, spec, doc]);
+    }, [isCanvasRoute, isHydrating, dirty, spec?.updatedAt, doc.boards, messages, spec, doc]);
 
     useEffect(() => {
-        if (route !== 'app') return;
+        if (!isCanvasRoute) return;
         if (!autosaveEnabled || !dirty || !spec || isHydrating || isSaving) return;
         if (Date.now() < autosavePausedUntilRef.current) return;
 
@@ -259,7 +288,7 @@ function App() {
         return () => {
             window.clearTimeout(timer);
         };
-    }, [route, autosaveEnabled, dirty, spec, isHydrating, isSaving, projectId, doc, messages, markSaved, setSaving, pushToast]);
+    }, [isCanvasRoute, autosaveEnabled, dirty, spec, isHydrating, isSaving, projectId, doc, messages, markSaved, setSaving, pushToast]);
 
     useEffect(() => {
         const onPopState = () => setRoute(getRouteFromPath());
@@ -276,12 +305,12 @@ function App() {
     }, []);
 
     const landingPrompt = useMemo(() => {
-        if (route !== 'app') return '';
+        if (!isCanvasRoute) return '';
         return new URLSearchParams(window.location.search).get('prompt')?.trim() || '';
-    }, [route]);
+    }, [isCanvasRoute]);
 
     useEffect(() => {
-        if (route !== 'app') return;
+        if (!isCanvasRoute) return;
         const staged = window.sessionStorage.getItem(LANDING_DRAFT_KEY);
         if (staged) {
             try {
@@ -316,12 +345,36 @@ function App() {
             return;
         }
         setInitialRequest(null);
-    }, [route, landingPrompt]);
+    }, [isCanvasRoute, landingPrompt]);
 
     const navigate = (path: string, search = '') => {
         window.history.pushState({}, '', `${path}${search}`);
         setRoute(getRouteFromPath());
     };
+
+    const renderBrandedLoader = () => (
+        <div className="h-screen w-screen bg-[--ui-bg]">
+            <style>{`
+                @keyframes project-loader-sweep {
+                    0% { transform: translateX(-100%); opacity: 0.35; }
+                    50% { opacity: 1; }
+                    100% { transform: translateX(100%); opacity: 0.35; }
+                }
+            `}</style>
+            <div className="grid h-full place-items-center">
+                <div className="flex flex-col items-center">
+                    <img src={logo} alt="EazyUI" className="h-6 w-6 object-contain" />
+                    <div className="relative mt-4 h-[3px] w-[140px] overflow-hidden rounded-full bg-white/10">
+                        <div className="absolute inset-y-0 left-0 w-full bg-gradient-to-r from-transparent via-[#3B82F6] to-transparent blur-[1px]" />
+                        <div
+                            className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-transparent via-[#60A5FA] to-[#2563EB] shadow-[0_0_18px_rgba(59,130,246,0.85)]"
+                            style={{ animation: 'project-loader-sweep 1.35s ease-in-out infinite' }}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 
     const openProjectFromWorkspace = (projectId: string) => {
         hydratedProjectIdRef.current = null;
@@ -333,13 +386,13 @@ function App() {
             useHistoryStore.getState().clearHistory();
         });
         setProjectId(projectId);
-        navigate('/app', `?project=${encodeURIComponent(projectId)}`);
+        navigate(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
     };
 
     const handleSignOut = async () => {
         try {
             await signOutCurrentUser();
-            navigate('/login');
+            navigate('/auth/login');
         } catch (error) {
             pushToast({
                 kind: 'error',
@@ -370,57 +423,44 @@ function App() {
     };
 
     useEffect(() => {
-        if (route !== 'app' || !authReady || !authUser) return;
-        const search = new URLSearchParams(window.location.search);
-        const wantsNewProject = search.get('new') === '1';
-        const requested = search.get('project')?.trim() || '';
-        if (wantsNewProject) {
-            const freshProjectId = createProjectId();
-            unstable_batchedUpdates(() => {
-                useDesignStore.getState().reset();
-                useCanvasStore.getState().reset();
-                useChatStore.getState().clearMessages();
-                useHistoryStore.getState().clearHistory();
-            });
-            hydratedProjectIdRef.current = null;
-            setInitialRequest(null);
-            search.delete('new');
-            search.set('project', freshProjectId);
-            window.history.replaceState({}, '', `/app?${search.toString()}`);
-            if (projectId !== freshProjectId) {
-                setProjectId(freshProjectId);
-            }
-            return;
-        }
-
-        // Deterministic routing: if URL has a project, it is the source of truth.
-        if (requested) {
-            if (requested !== projectId) {
-                hydratedProjectIdRef.current = null;
-                setProjectId(requested);
-            }
-            return;
-        }
-
-        // No project slug in URL: always mint a fresh one so /app is never sticky to old slugs.
+        if (!authReady || !authUser) return;
+        if (route.kind !== 'app-project-new') return;
         const freshProjectId = createProjectId();
-        search.set('project', freshProjectId);
-        window.history.replaceState({}, '', `/app?${search.toString()}`);
-        if (projectId !== freshProjectId) {
+        unstable_batchedUpdates(() => {
+            useDesignStore.getState().reset();
+            useCanvasStore.getState().reset();
+            useChatStore.getState().clearMessages();
+            useHistoryStore.getState().clearHistory();
+        });
+        hydratedProjectIdRef.current = null;
+        setInitialRequest(null);
+        setProjectId(freshProjectId);
+        navigate(`/app/projects/${encodeURIComponent(freshProjectId)}/canvas`);
+    }, [route, authReady, authUser, setProjectId]);
+
+    useEffect(() => {
+        if (!authReady || !authUser) return;
+        if (!activeProjectIdFromRoute) return;
+        if (activeProjectIdFromRoute !== projectId) {
             hydratedProjectIdRef.current = null;
-            setProjectId(freshProjectId);
+            setProjectId(activeProjectIdFromRoute);
         }
-    }, [route, authReady, authUser, projectId, setProjectId]);
+    }, [authReady, authUser, activeProjectIdFromRoute, projectId, setProjectId]);
 
     useEffect(() => {
         if (!authReady) return;
-        const requiresAuth = route === 'app' || route === 'workspace';
+        const requiresAuth = route.kind.startsWith('app-');
         if (requiresAuth && !authUser) {
-            navigate('/login');
+            navigate('/auth/login');
             return;
         }
-        if (route === 'login' && authUser) {
-            navigate('/workspace');
+        if (route.kind === 'login' && authUser) {
+            const stagedDraft = window.sessionStorage.getItem(LANDING_DRAFT_KEY);
+            if (stagedDraft) {
+                navigate('/app/projects/new');
+                return;
+            }
+            navigate('/app');
         }
     }, [route, authReady, authUser]);
 
@@ -479,7 +519,7 @@ function App() {
         };
     }, [pushToast]);
 
-    if (route === 'landing') {
+    if (route.kind === 'landing') {
         return (
             <LandingPage
                 userProfile={authUser ? {
@@ -493,27 +533,27 @@ function App() {
                 verificationBusy={verificationBusy}
                 onStart={({ prompt, images, platform, stylePreset, modelProfile }) => {
                     window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile }));
-                    navigate('/app');
+                    navigate('/app/projects/new');
                 }}
                 onNavigate={(path) => navigate(path)}
             />
         );
     }
 
-    if (route === 'login') {
+    if (route.kind === 'login') {
         return <DemoOne onNavigate={(path) => navigate(path)} />;
     }
 
-    if ((route === 'app' || route === 'workspace') && (!authReady || (authReady && !authUser))) {
-        return (
-            <div className="h-screen w-screen bg-[#06070B] text-gray-300 grid place-items-center text-sm">
-                Loading your workspace...
-            </div>
-        );
+    if (route.kind.startsWith('app-') && (!authReady || (authReady && !authUser))) {
+        return renderBrandedLoader();
     }
 
-    if (route !== 'app') {
-        if (route === 'workspace') {
+    if (isCanvasRoute && isHydrating) {
+        return renderBrandedLoader();
+    }
+
+    if (!isCanvasRoute) {
+        if (route.kind === 'app-home' || route.kind === 'app-projects') {
             return (
                 <ProjectWorkspacePage
                     authReady={authReady}
@@ -523,10 +563,13 @@ function App() {
                 />
             );
         }
-        if (route === 'templates') {
+        if (route.kind === 'app-project-new') {
+            return renderBrandedLoader();
+        }
+        if (route.kind === 'templates') {
             return <TemplatesPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
-        if (route === 'pricing') {
+        if (route.kind === 'pricing') {
             return <PricingPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
         return <LearnPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;

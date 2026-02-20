@@ -691,6 +691,12 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     });
                     break;
                 }
+                const savingToastId = pushToast({
+                    kind: 'loading',
+                    title: 'Saving canvas',
+                    message: 'Persisting screens, chat, and canvas state...',
+                    durationMs: 0,
+                });
                 try {
                     setSaving(true);
                     const saved = await apiClient.save({
@@ -712,6 +718,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         title: 'Save failed',
                         message: (error as Error).message || 'Unable to save project.',
                     });
+                } finally {
+                    removeToast(savingToastId);
                 }
                 break;
             case 'edit':
@@ -731,7 +739,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast, removeToast]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
     const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(String(data.html || ''));

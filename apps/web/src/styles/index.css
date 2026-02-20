@@ -10,6 +10,8 @@
 
 :root,
 [data-theme='dark'] {
+  --ui-cursor-default: url('/cursor-logo-32.png') 8 8, auto;
+
   /* Core app theme tokens */
   --ui-bg: #0f0f0f;
   --ui-surface-1: #1b1b1b;
@@ -136,6 +138,7 @@ body {
   font-size: var(--font-size-base);
   color: var(--color-text);
   background-color: var(--color-bg);
+  cursor: var(--ui-cursor-default);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.2s ease, color 0.2s ease;
@@ -205,6 +208,13 @@ select {
   padding: var(--space-2) var(--space-3);
   outline: none;
   transition: border-color 0.15s ease;
+  cursor: text;
+}
+
+a,
+[role='button'],
+summary {
+  cursor: pointer;
 }
 
 input:focus,

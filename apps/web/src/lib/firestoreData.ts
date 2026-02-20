@@ -16,6 +16,7 @@ import { db, storage } from "./firebase";
 
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1";
 let storageUploadsTemporarilyDisabled = false;
+const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
 
 type SaveProjectInput = {
   uid: string;
@@ -64,10 +65,73 @@ type ProjectMetaData = {
   updatedAt: string;
 };
 
+const MAX_PERSISTED_MESSAGE_CONTENT_LENGTH = 24_000;
+const MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048;
+const MAX_PERSISTED_IMAGE_COUNT = 8;
+const MAX_PERSISTED_SCREEN_ID_COUNT = 32;
+
 function isValidDesignSpec(value: unknown): value is HtmlDesignSpec {
   if (!value || typeof value !== "object") return false;
   const candidate = value as HtmlDesignSpec;
   return Array.isArray(candidate.screens) && typeof candidate.name === "string";
+}
+
+function sanitizeMessageContent(value: unknown): string {
+  const text = typeof value === "string" ? value : "";
+  if (text.length <= MAX_PERSISTED_MESSAGE_CONTENT_LENGTH) return text;
+  return text.slice(0, MAX_PERSISTED_MESSAGE_CONTENT_LENGTH);
+}
+
+function sanitizePersistedImages(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const normalized = item.trim();
+    if (!normalized) continue;
+    // Inline data URLs can be very large and break Firestore document limits.
+    if (normalized.startsWith("data:")) continue;
+    if (normalized.length > MAX_PERSISTED_IMAGE_URL_LENGTH) continue;
+    out.push(normalized);
+    if (out.length >= MAX_PERSISTED_IMAGE_COUNT) break;
+  }
+  return out;
+}
+
+function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+
+  const copyString = (key: string, max = 256) => {
+    const v = raw[key];
+    if (typeof v !== "string") return;
+    next[key] = v.length <= max ? v : v.slice(0, max);
+  };
+  const copyBoolean = (key: string) => {
+    const v = raw[key];
+    if (typeof v === "boolean") next[key] = v;
+  };
+  const copyNumber = (key: string) => {
+    const v = raw[key];
+    if (typeof v === "number" && Number.isFinite(v)) next[key] = v;
+  };
+
+  copyString("requestKind", 64);
+  copyString("parentUserId", 128);
+  copyString("modelProfile", 128);
+  copyBoolean("typedComplete");
+  copyBoolean("livePreview");
+  copyNumber("thinkingMs");
+  copyNumber("feedbackStart");
+
+  if (Array.isArray(raw.screenIds)) {
+    next.screenIds = raw.screenIds
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      .slice(0, MAX_PERSISTED_SCREEN_ID_COUNT);
+  }
+
+  return Object.keys(next).length > 0 ? next : null;
 }
 
 function makeId() {
@@ -99,8 +163,26 @@ function isStorageCorsOrNetworkError(error: unknown): boolean {
     message.includes("xmlhttprequest") ||
     message.includes("network") ||
     message.includes("err_failed") ||
+    message.includes("timed out") ||
     code.includes("storage/unknown")
   );
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, ms);
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ projectId: string; savedAt: string }> {
@@ -120,9 +202,13 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   if (!storageUploadsTemporarilyDisabled) {
     try {
       const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
-      await uploadString(snapshotRef, JSON.stringify(snapshot), "raw", {
-        contentType: "application/json",
-      });
+      await withTimeout(
+        uploadString(snapshotRef, JSON.stringify(snapshot), "raw", {
+          contentType: "application/json",
+        }),
+        STORAGE_UPLOAD_TIMEOUT_MS,
+        "Snapshot upload"
+      );
       resolvedSnapshotPath = snapshotPath;
     } catch (error) {
       if (isStorageCorsOrNetworkError(error)) {
@@ -171,9 +257,13 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     if (fullHtml.length > 0 && !storageUploadsTemporarilyDisabled) {
       htmlPath = `screens/${screen.screenId}.html`;
       try {
-        await uploadString(ref(storage, `users/${uid}/projects/${id}/${htmlPath}`), fullHtml, "raw", {
-          contentType: "text/html",
-        });
+        await withTimeout(
+          uploadString(ref(storage, `users/${uid}/projects/${id}/${htmlPath}`), fullHtml, "raw", {
+            contentType: "text/html",
+          }),
+          STORAGE_UPLOAD_TIMEOUT_MS,
+          `Screen HTML upload (${screen.screenId})`
+        );
       } catch (error) {
         htmlPath = undefined;
         if (isStorageCorsOrNetworkError(error)) {
@@ -207,14 +297,16 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     for (const msg of messages.slice(-250)) {
       const msgId = String(msg.id || makeId());
       const msgRef = doc(db, "users", uid, "projects", id, "chats", "default", "messages", msgId);
+      const persistedImages = sanitizePersistedImages(msg.images);
+      const persistedMeta = sanitizePersistedMeta(msg.meta);
       messageBatch.set(msgRef, stripUndefinedDeep({
         id: msgId,
         role: msg.role || "assistant",
-        content: msg.content || "",
+        content: sanitizeMessageContent(msg.content),
         status: msg.status || "complete",
         timestamp: msg.timestamp || now,
-        images: Array.isArray(msg.images) ? msg.images : [],
-        meta: msg.meta || null,
+        images: persistedImages,
+        meta: persistedMeta,
       }));
     }
     await messageBatch.commit();

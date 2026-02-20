@@ -54,7 +54,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
       } else {
         await signInWithEmail(cleanEmail, password);
       }
-      onNavigate("/workspace");
+      onNavigate("/app");
     } catch (err) {
       setError(userMessage(err));
     } finally {
@@ -68,7 +68,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
       setError(null);
       setInfo(null);
       await signInWithGooglePopup();
-      onNavigate("/workspace");
+      onNavigate("/app");
     } catch (err) {
       setError(userMessage(err));
     } finally {

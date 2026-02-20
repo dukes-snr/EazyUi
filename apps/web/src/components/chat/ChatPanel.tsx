@@ -372,6 +372,18 @@ function buildPlanCallToAction(plan: PlannerPlanResponse): PlannerCtaPayload['ca
     };
 }
 
+function normalizeSuggestedProjectName(value: string | undefined): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return raw.replace(/^["'`]+|["'`]+$/g, '').slice(0, 72).trim();
+}
+
+function isGenericProjectName(value: string | undefined): boolean {
+    const name = String(value || '').trim().toLowerCase();
+    if (!name) return true;
+    return ['untitled', 'untitled project', 'new design', 'new project', 'chat'].includes(name);
+}
+
 function buildRouteChatSuggestionPayload(route: {
     recommendNextScreens?: boolean;
     nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number }>;
@@ -1049,6 +1061,31 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         notifyWhenInBackground(title, message);
     };
 
+    const applyProjectName = (projectName: string) => {
+        const nextName = normalizeSuggestedProjectName(projectName);
+        if (!nextName) return;
+        const currentSpec = useDesignStore.getState().spec;
+        const now = new Date().toISOString();
+
+        if (!currentSpec) {
+            useDesignStore.getState().setSpec({
+                id: uuidv4(),
+                name: nextName,
+                screens: [],
+                createdAt: now,
+                updatedAt: now,
+            });
+            return;
+        }
+
+        if (currentSpec.name?.trim() === nextName) return;
+        useDesignStore.getState().setSpec({
+            ...currentSpec,
+            name: nextName,
+            updatedAt: now,
+        });
+    };
+
     const screenPreviewById = useMemo(() => {
         const map = new Map<string, HtmlScreen>();
         (spec?.screens || []).forEach((screen) => map.set(screen.screenId, screen));
@@ -1686,6 +1723,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     }
                 });
             } else if (response.phase === 'plan' || response.phase === 'discovery') {
+                const plannedName = normalizeSuggestedProjectName(response.appName);
+                if (plannedName) {
+                    applyProjectName(plannedName);
+                }
                 const cta = buildPlanCallToAction(response);
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
                 const planExtras = response.recommendedScreens
@@ -1755,6 +1796,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
         const usePlanner = allowPlannerFlow ?? planMode;
+        const hasPriorScreens = (spec?.screens?.length || 0) > 0;
+        const hasPriorUserMessages = messages.some((message) => message.role === 'user');
+        const shouldNameProjectOnFirstRequest = !hasPriorScreens && !hasPriorUserMessages && isGenericProjectName(spec?.name);
         const referenceScreens = incomingReferenceScreens || [];
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
@@ -1824,6 +1868,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 : { width: 375, height: 812 };
         let startTime = Date.now();
         let plannerPlan: PlannerPlanResponse | null = null;
+        let plannerSuggestedProjectName = '';
         let generationPromptFromPlanner = requestPromptWithReferences;
         let plannerReferenceImages: string[] = [];
 
@@ -1835,7 +1880,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 images: imagesToSend,
                 modelProfile: modelProfileToUse,
             });
-            if (usePlanner) {
+            if (usePlanner || shouldNameProjectOnFirstRequest) {
                 plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
                 try {
                     const discoveryPlan = await apiClient.plan({
@@ -1850,6 +1895,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     });
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
+                        plannerSuggestedProjectName = normalizeSuggestedProjectName(discoveryPlan.appName);
                         if (incomingTargetScreens && incomingTargetScreens.length > 0) {
                             generationPromptFromPlanner = makePlannerTargetedGenerationPromptWithStyle(
                                 appPromptForPlanning,
@@ -2025,6 +2071,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         } : {}),
                     }
                 });
+                if (plannerSuggestedProjectName) {
+                    applyProjectName(plannerSuggestedProjectName);
+                }
                 if (generatedIds.length > 0) {
                     setFocusNodeIds(generatedIds);
                 }
@@ -2185,6 +2234,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         } : {}),
                     }
                 });
+                if (plannerSuggestedProjectName) {
+                    applyProjectName(plannerSuggestedProjectName);
+                }
                 const fallbackIds = regen.designSpec.screens
                     .map((_, index) => screenIdBySeq.get(createdSeqs[index] as number))
                     .filter(Boolean) as string[];
@@ -2265,6 +2317,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     } : {}),
                 }
             });
+            if (plannerSuggestedProjectName) {
+                applyProjectName(plannerSuggestedProjectName);
+            }
             const generatedIds = createdSeqs
                 .map((seq) => screenIdBySeq.get(seq))
                 .filter(Boolean) as string[];
@@ -2703,7 +2758,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         <div className="leading-tight">
                             <div className="inline-flex items-center gap-2">
                                 <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                                <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">Chat</p>
+                                <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
                             </div>
                             <p className="text-[10px] font-medium text-[var(--ui-text-subtle)] uppercase tracking-[0.12em]">
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
