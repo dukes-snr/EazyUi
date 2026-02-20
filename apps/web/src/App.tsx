@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { unstable_batchedUpdates } from 'react-dom';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditPanel } from './components/edit/EditPanel';
@@ -95,6 +96,7 @@ function App() {
     const {
         projectId,
         dirty,
+        isSaving,
         autosaveEnabled,
         isHydrating,
         setHydrating,
@@ -110,6 +112,9 @@ function App() {
     const hydratedProjectIdRef = useRef<string | null>(null);
     const hydrationRunRef = useRef(0);
     const lastSavedFingerprintRef = useRef<string>('');
+    const autosaveFailureCountRef = useRef(0);
+    const autosavePausedUntilRef = useRef(0);
+    const autosaveToastSuppressUntilRef = useRef(0);
     const [initialRequest, setInitialRequest] = useState<{
         id: string;
         prompt: string;
@@ -148,9 +153,11 @@ function App() {
                 if (cancelled) return;
                 if (useProjectStore.getState().projectId !== targetProjectId) return;
                 const resolvedDoc = ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any);
-                useDesignStore.getState().setSpec(project.designSpec as any);
-                useCanvasStore.getState().setDoc(resolvedDoc);
-                useChatStore.getState().hydrateSession(project.chatState as any);
+                unstable_batchedUpdates(() => {
+                    useDesignStore.getState().setSpec(project.designSpec as any);
+                    useCanvasStore.getState().setDoc(resolvedDoc);
+                    useChatStore.getState().hydrateSession(project.chatState as any);
+                });
                 const loadedMessages = Array.isArray((project.chatState as any)?.messages) ? (project.chatState as any).messages : [];
                 lastSavedFingerprintRef.current = getProjectFingerprint(project.designSpec as any, resolvedDoc, loadedMessages);
                 hydratedProjectIdRef.current = project.projectId;
@@ -160,10 +167,12 @@ function App() {
                 if (useProjectStore.getState().projectId !== targetProjectId) return;
                 const errorMessage = (error as Error).message || '';
                 if (errorMessage.toLowerCase().includes('not found')) {
-                    useDesignStore.getState().reset();
-                    useCanvasStore.getState().reset();
-                    useChatStore.getState().hydrateSession({ messages: [] });
-                    useHistoryStore.getState().clearHistory();
+                    unstable_batchedUpdates(() => {
+                        useDesignStore.getState().reset();
+                        useCanvasStore.getState().reset();
+                        useChatStore.getState().hydrateSession({ messages: [] });
+                        useHistoryStore.getState().clearHistory();
+                    });
                     lastSavedFingerprintRef.current = '';
                     hydratedProjectIdRef.current = targetProjectId;
                     markSaved(targetProjectId, new Date().toISOString());
@@ -212,7 +221,8 @@ function App() {
 
     useEffect(() => {
         if (route !== 'app') return;
-        if (!autosaveEnabled || !dirty || !spec || isHydrating) return;
+        if (!autosaveEnabled || !dirty || !spec || isHydrating || isSaving) return;
+        if (Date.now() < autosavePausedUntilRef.current) return;
 
         const timer = window.setTimeout(async () => {
             try {
@@ -226,12 +236,22 @@ function App() {
                 lastSavedFingerprintRef.current = getProjectFingerprint(spec as any, doc as any, messages as any);
                 hydratedProjectIdRef.current = saved.projectId;
                 markSaved(saved.projectId, saved.savedAt);
+                autosaveFailureCountRef.current = 0;
+                autosavePausedUntilRef.current = 0;
             } catch (error) {
-                pushToast({
-                    kind: 'error',
-                    title: 'Autosave failed',
-                    message: (error as Error).message || 'Could not autosave the project.',
-                });
+                const nextFailureCount = autosaveFailureCountRef.current + 1;
+                autosaveFailureCountRef.current = nextFailureCount;
+                const backoffMs = Math.min(60_000, 2_000 * (2 ** (nextFailureCount - 1)));
+                const resumeAt = Date.now() + backoffMs;
+                autosavePausedUntilRef.current = resumeAt;
+                if (Date.now() >= autosaveToastSuppressUntilRef.current) {
+                    pushToast({
+                        kind: 'error',
+                        title: 'Autosave paused',
+                        message: `Retrying in ${Math.max(2, Math.round(backoffMs / 1000))}s. ${(error as Error).message || 'Could not autosave the project.'}`,
+                    });
+                    autosaveToastSuppressUntilRef.current = Date.now() + 12_000;
+                }
                 setSaving(false);
             }
         }, 1800);
@@ -239,7 +259,7 @@ function App() {
         return () => {
             window.clearTimeout(timer);
         };
-    }, [route, autosaveEnabled, dirty, spec, isHydrating, projectId, doc, messages, markSaved, setSaving, pushToast]);
+    }, [route, autosaveEnabled, dirty, spec, isHydrating, isSaving, projectId, doc, messages, markSaved, setSaving, pushToast]);
 
     useEffect(() => {
         const onPopState = () => setRoute(getRouteFromPath());
@@ -306,10 +326,12 @@ function App() {
     const openProjectFromWorkspace = (projectId: string) => {
         hydratedProjectIdRef.current = null;
         setInitialRequest(null);
-        useDesignStore.getState().reset();
-        useCanvasStore.getState().reset();
-        useChatStore.getState().clearMessages();
-        useHistoryStore.getState().clearHistory();
+        unstable_batchedUpdates(() => {
+            useDesignStore.getState().reset();
+            useCanvasStore.getState().reset();
+            useChatStore.getState().clearMessages();
+            useHistoryStore.getState().clearHistory();
+        });
         setProjectId(projectId);
         navigate('/app', `?project=${encodeURIComponent(projectId)}`);
     };
@@ -354,10 +376,12 @@ function App() {
         const requested = search.get('project')?.trim() || '';
         if (wantsNewProject) {
             const freshProjectId = createProjectId();
-            useDesignStore.getState().reset();
-            useCanvasStore.getState().reset();
-            useChatStore.getState().clearMessages();
-            useHistoryStore.getState().clearHistory();
+            unstable_batchedUpdates(() => {
+                useDesignStore.getState().reset();
+                useCanvasStore.getState().reset();
+                useChatStore.getState().clearMessages();
+                useHistoryStore.getState().clearHistory();
+            });
             hydratedProjectIdRef.current = null;
             setInitialRequest(null);
             search.delete('new');

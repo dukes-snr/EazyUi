@@ -1,5 +1,6 @@
 import { CheckCircle2, ChevronRight, Info, Loader2, TriangleAlert, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { CanvasHelp } from '../canvas/CanvasHelp';
 import { useUiStore } from '../../stores';
 
 type TipItem = {
@@ -27,8 +28,14 @@ const DEFAULT_TIPS: TipItem[] = [
     },
 ];
 
+const TIPS_DISMISSED_STORAGE_KEY = 'eazyui:tips:dismissed';
+
 export function ToastViewport() {
     const { toasts, theme } = useUiStore();
+    const [tipsDisabled, setTipsDisabled] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem(TIPS_DISMISSED_STORAGE_KEY) === '1';
+    });
     const [dismissedTipIds, setDismissedTipIds] = useState<Record<string, true>>({});
 
     const loadingToasts = useMemo(() => toasts.filter((toast) => toast.kind === 'loading'), [toasts]);
@@ -37,18 +44,22 @@ export function ToastViewport() {
         [toasts]
     );
 
-    const tips = DEFAULT_TIPS.filter((tip) => !dismissedTipIds[tip.id]);
+    const tips = tipsDisabled ? [] : DEFAULT_TIPS.filter((tip) => !dismissedTipIds[tip.id]);
     const activeTip = tips[0];
     const activeJobs = loadingToasts.length;
     const isLight = theme === 'light';
 
     const dismissTips = () => {
         if (!activeTip) return;
+        setTipsDisabled(true);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(TIPS_DISMISSED_STORAGE_KEY, '1');
+        }
         setDismissedTipIds((prev) => ({ ...prev, [activeTip.id]: true }));
     };
 
     return (
-        <div className="pointer-events-none fixed bottom-5 right-5 z-[1200] flex w-[min(92vw,300px)] flex-col items-end gap-2.5">
+        <div className="pointer-events-none fixed bottom-5 right-5 z-[1200] flex w-[min(94vw,640px)] flex-col items-end gap-1.5">
             {tips.length > 0 && (
                 <div className="pointer-events-auto relative w-full max-w-[300px]">
                     <div className={`absolute -top-6 left-5 right-7 h-[230px] rounded-[18px] ${isLight ? 'bg-slate-400/18' : 'bg-slate-700/20'}`} />
@@ -83,47 +94,53 @@ export function ToastViewport() {
                 </div>
             )}
 
-            <div className={`pointer-events-auto w-full max-w-[300px] rounded-[14px] border px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.25)] ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)]' : 'border-white/10 bg-[var(--ui-surface-2)]'}`}>
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        {activeJobs > 0 ? (
-                            <Loader2 size={15} className="text-emerald-300 animate-spin" />
-                        ) : (
-                            <span className="h-2 w-2 rounded-full bg-[var(--ui-text-subtle)]" />
-                        )}
-                        <div className="text-[clamp(15px,2.9vw,20px)] leading-none font-semibold text-[var(--ui-text)]">Queue</div>
-                        <div className={`text-[clamp(14px,2.7vw,18px)] leading-none font-medium ${activeJobs > 0 ? 'text-emerald-300' : 'text-[var(--ui-text-muted)]'}`}>
-                            {activeJobs} active
+            <div className=" flex flex-col-reverse sm:flex-row sm:items-end sm:justify-end gap-4">
+                <div className={`pointer-events-auto w-[300px] max-w-[300px] rounded-[14px] border px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.25)] ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)]' : 'border-white/10 bg-[var(--ui-surface-2)]'}`}>
+                    <div className="w-full flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            {activeJobs > 0 ? (
+                                <Loader2 size={15} className="text-emerald-300 animate-spin" />
+                            ) : (
+                                <span className="h-2 w-2 rounded-full bg-[var(--ui-text-subtle)]" />
+                            )}
+                            <div className="text-[clamp(15px,2.9vw,20px)] leading-none font-semibold text-[var(--ui-text)]">Queue</div>
+                            <div className={`text-[clamp(14px,2.7vw,18px)] leading-none font-medium ${activeJobs > 0 ? 'text-emerald-300' : 'text-[var(--ui-text-muted)]'}`}>
+                                {activeJobs} active
+                            </div>
                         </div>
+                        <ChevronRight size={20} className="text-[var(--ui-text-muted)]" />
                     </div>
-                    <ChevronRight size={20} className="text-[var(--ui-text-muted)]" />
-                </div>
-                <div className="mt-2.5 space-y-1.5">
-                    {eventToasts.length === 0 ? (
-                        <div className="text-[11px] text-[var(--ui-text-subtle)]">No recent notifications</div>
-                    ) : (
-                        eventToasts.map((toast) => {
-                            const Icon = toast.kind === 'success'
-                                ? CheckCircle2
-                                : toast.kind === 'error'
-                                    ? TriangleAlert
-                                    : Info;
-                            const iconClass = toast.kind === 'success'
-                                ? 'text-emerald-300'
-                                : toast.kind === 'error'
-                                    ? 'text-rose-300'
-                                    : 'text-sky-300';
-                            return (
-                                <div key={toast.id} className="flex items-start gap-2 text-[11px] leading-snug text-[var(--ui-text-muted)]">
-                                    <Icon size={12} className={`mt-0.5 shrink-0 ${iconClass}`} />
-                                    <div className="min-w-0">
-                                        <div className="truncate font-medium text-[var(--ui-text)]">{toast.title}</div>
-                                        {toast.message ? <div className="truncate text-[var(--ui-text-subtle)]">{toast.message}</div> : null}
+                    <div className="mt-2.5 space-y-1.5">
+                        {eventToasts.length === 0 ? (
+                            <div className="text-[11px] text-[var(--ui-text-subtle)]">No recent notifications</div>
+                        ) : (
+                            eventToasts.map((toast) => {
+                                const Icon = toast.kind === 'success'
+                                    ? CheckCircle2
+                                    : toast.kind === 'error'
+                                        ? TriangleAlert
+                                        : Info;
+                                const iconClass = toast.kind === 'success'
+                                    ? 'text-emerald-300'
+                                    : toast.kind === 'error'
+                                        ? 'text-rose-300'
+                                        : 'text-sky-300';
+                                return (
+                                    <div key={toast.id} className="flex items-start gap-2 text-[11px] leading-snug text-[var(--ui-text-muted)]">
+                                        <Icon size={12} className={`mt-0.5 shrink-0 ${iconClass}`} />
+                                        <div className="min-w-0">
+                                            <div className="truncate font-medium text-[var(--ui-text)]">{toast.title}</div>
+                                            {toast.message ? <div className="truncate text-[var(--ui-text-subtle)]">{toast.message}</div> : null}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })
-                    )}
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+
+                <div className="pointer-events-auto sm:w-auto flex justify-end">
+                    <CanvasHelp />
                 </div>
             </div>
         </div>

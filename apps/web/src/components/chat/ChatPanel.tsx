@@ -44,7 +44,23 @@ const FEEDBACK_BUCKETS = {
     ],
 };
 
+const INITIAL_MESSAGE_RENDER_COUNT = 36;
+const MESSAGE_RENDER_STEP = 24;
+
 function injectThumbScrollbarHide(html: string) {
+    const warningFilterScript = `
+<script>
+  (function () {
+    const blocked = 'cdn.tailwindcss.com should not be used in production';
+    const originalWarn = console.warn;
+    console.warn = function (...args) {
+      const first = String(args && args.length ? args[0] : '');
+      if (first.includes(blocked)) return;
+      return originalWarn.apply(console, args);
+    };
+  })();
+</script>`;
+
     const styleTag = `
 <style>
   ::-webkit-scrollbar { width: 0; height: 0; }
@@ -53,9 +69,9 @@ function injectThumbScrollbarHide(html: string) {
 </style>`;
 
     if (html.includes('</head>')) {
-        return html.replace('</head>', `${styleTag}\n</head>`);
+        return html.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
     }
-    return `${styleTag}\n${html}`;
+    return `${warningFilterScript}\n${styleTag}\n${html}`;
 }
 
 function normalizePlaceholderCatalogInHtml(html: string): string {
@@ -469,6 +485,100 @@ function getProcessVisibleCount(message: any, steps: ProcessStepLabel[]): number
     return 1;
 }
 
+type ScreenPreviewLike = {
+    name?: string;
+    html?: string;
+    width?: number;
+    height?: number;
+};
+
+function ScreenReferenceThumb({
+    screenId,
+    preview,
+    label,
+    thumbWidth,
+    onFocus,
+}: {
+    screenId: string;
+    preview: ScreenPreviewLike | null;
+    label: string;
+    thumbWidth: number;
+    onFocus: (id: string) => void;
+}) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [mountIframe, setMountIframe] = useState(false);
+
+    useEffect(() => {
+        if (mountIframe) return;
+        const target = containerRef.current;
+        if (!target) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    setMountIframe(true);
+                    observer.disconnect();
+                }
+            },
+            { root: null, rootMargin: '260px 0px' }
+        );
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, [mountIframe]);
+
+    const sourceW = preview?.width || 375;
+    const sourceH = preview?.height || 812;
+    const thumbH = preview ? Math.max(1, Math.round(thumbWidth * (sourceH / sourceW))) : 170;
+    const scale = Math.min(thumbWidth / sourceW, thumbH / sourceH);
+    const scaledW = Math.max(1, Math.floor(sourceW * scale));
+    const scaledH = Math.max(1, Math.floor(sourceH * scale));
+    const offsetX = Math.floor((thumbWidth - scaledW) / 2);
+    const offsetY = Math.floor((thumbH - scaledH) / 2);
+
+    return (
+        <button
+            key={screenId}
+            onClick={() => onFocus(screenId)}
+            className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] backdrop-blur-sm p-1.5 transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)] active:scale-[0.99]"
+            style={{ width: thumbWidth + 12 }}
+            title={`Focus ${label} on canvas`}
+        >
+            <div
+                ref={containerRef}
+                className="rounded-lg overflow-hidden border border-[var(--ui-border)] bg-transparent relative"
+                style={{ width: thumbWidth, height: thumbH }}
+            >
+                {preview?.html ? (
+                    mountIframe ? (
+                        <div className="absolute left-0 top-0" style={{ width: thumbWidth, height: thumbH }}>
+                            <iframe
+                                srcDoc={injectThumbScrollbarHide(preview.html)}
+                                title={`preview-${screenId}`}
+                                sandbox="allow-scripts"
+                                scrolling="no"
+                                className="pointer-events-none absolute"
+                                style={{
+                                    width: sourceW,
+                                    height: sourceH,
+                                    transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+                                    transformOrigin: 'top left',
+                                    border: '0',
+                                }}
+                            />
+                        </div>
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">
+                            Preview
+                        </div>
+                    )
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">No preview</div>
+                )}
+            </div>
+            <div className="mt-1 text-[10px] text-[var(--ui-text-muted)] font-semibold truncate">{label}</div>
+        </button>
+    );
+}
+
 function renderInlineRichText(text: string): ReactNode[] {
     const nodes: ReactNode[] = [];
     const pattern = /\[(b|i)\]([\s\S]*?)\[\/\1\]/gi;
@@ -866,10 +976,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
     const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
     const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+    const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_MESSAGE_RENDER_COUNT);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
     const initialRequestSubmittedRef = useRef<string | null>(null);
+    const previousMessageLengthRef = useRef(0);
+    const previousScrollMessageLengthRef = useRef(0);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -936,9 +1049,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         notifyWhenInBackground(title, message);
     };
 
-    const getScreenPreview = (screenId: string) => {
-        return spec?.screens.find((s) => s.screenId === screenId) || null;
-    };
+    const screenPreviewById = useMemo(() => {
+        const map = new Map<string, HtmlScreen>();
+        (spec?.screens || []).forEach((screen) => map.set(screen.screenId, screen));
+        return map;
+    }, [spec?.screens]);
+
+    const getScreenPreview = (screenId: string) => screenPreviewById.get(screenId) || null;
 
     const THUMB_W = 68;
 
@@ -1051,10 +1168,53 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     }, [messages]);
 
+    useEffect(() => {
+        const previousLength = previousMessageLengthRef.current;
+        const nextLength = messages.length;
+        previousMessageLengthRef.current = nextLength;
+
+        if (nextLength === 0) {
+            setRenderedMessageCount(INITIAL_MESSAGE_RENDER_COUNT);
+            return;
+        }
+
+        // During normal chat usage, keep newly appended messages visible immediately.
+        const appendedCount = nextLength - previousLength;
+        if (appendedCount > 0 && previousLength > 0) {
+            setRenderedMessageCount((current) => Math.min(nextLength, current + appendedCount));
+            return;
+        }
+
+        // On hydration (large jump from 0 -> many), render a small batch first for faster first paint.
+        if (previousLength === 0 && nextLength > INITIAL_MESSAGE_RENDER_COUNT) {
+            setRenderedMessageCount(INITIAL_MESSAGE_RENDER_COUNT);
+            return;
+        }
+
+        setRenderedMessageCount((current) => Math.min(nextLength, current));
+    }, [messages.length]);
+
+    useEffect(() => {
+        if (renderedMessageCount >= messages.length) return;
+        const timer = window.setTimeout(() => {
+            setRenderedMessageCount((current) => Math.min(messages.length, current + MESSAGE_RENDER_STEP));
+        }, 80);
+        return () => window.clearTimeout(timer);
+    }, [renderedMessageCount, messages.length]);
+
+    const visibleMessages = useMemo(() => {
+        if (messages.length <= renderedMessageCount) return messages;
+        return messages.slice(-renderedMessageCount);
+    }, [messages, renderedMessageCount]);
+
     // Auto-scroll to bottom
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        if (!messagesEndRef.current) return;
+        const previousLength = previousScrollMessageLengthRef.current;
+        const largeJump = messages.length - previousLength > 12;
+        previousScrollMessageLengthRef.current = messages.length;
+        messagesEndRef.current.scrollIntoView({ behavior: largeJump ? 'auto' : 'smooth' });
+    }, [messages.length]);
 
     useEffect(() => {
         if (!isGenerating) return;
@@ -2515,6 +2675,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 : stylePreset === 'playful'
                     ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
                     : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+    const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
 
     return (
         <>
@@ -2561,6 +2722,18 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide">
+                        {hiddenMessageCount > 0 && (
+                            <div className="flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setRenderedMessageCount(messages.length)}
+                                    className="px-3 py-1.5 rounded-full text-[11px] font-medium bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]"
+                                >
+                                    Load {hiddenMessageCount} older message{hiddenMessageCount === 1 ? '' : 's'}
+                                </button>
+                            </div>
+                        )}
+
                         {messages.length === 0 && (
                             <div className="flex flex-col items-center justify-center h-full text-[#A1A1AA] text-center px-4 opacity-0 animate-fade-in" style={{ animationFillMode: 'forwards' }}>
                                 <div className="w-full max-w-[300px] p-5 rounded-2xl bg-transparent shadow-none">
@@ -2573,7 +2746,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             </div>
                         )}
 
-                        {messages.map((message) => {
+                        {visibleMessages.map((message) => {
                             if (message.role === 'assistant') {
                                 const parentUserId = String((message.meta as any)?.parentUserId || '').trim();
                                 if (parentUserId) {
@@ -2598,58 +2771,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                                 const preview = snapshotPreview || getScreenPreview(screenId);
                                                 const label = preview?.name || message.screenRef?.label || 'Screen';
                                                 return (
-                                                    <button
+                                                    <ScreenReferenceThumb
                                                         key={`${message.id}-${screenId}`}
-                                                        onClick={() => setFocusNodeId(screenId)}
-                                                        className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] backdrop-blur-sm p-1.5 transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)] active:scale-[0.99]"
-                                                        style={{ width: THUMB_W + 12 }}
-                                                        title={`Focus ${label} on canvas`}
-                                                    >
-                                                        <div
-                                                            className="rounded-lg overflow-hidden border border-[var(--ui-border)] bg-transparent relative"
-                                                            style={{
-                                                                width: THUMB_W,
-                                                                height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
-                                                            }}
-                                                        >
-                                                            {preview?.html ? (
-                                                                (() => {
-                                                                    const sourceW = preview.width || 375;
-                                                                    const sourceH = preview.height || 812;
-                                                                    const thumbH = Math.max(1, Math.round(THUMB_W * (sourceH / sourceW)));
-                                                                    const scale = Math.min(THUMB_W / sourceW, thumbH / sourceH);
-                                                                    const scaledW = Math.max(1, Math.floor(sourceW * scale));
-                                                                    const scaledH = Math.max(1, Math.floor(sourceH * scale));
-                                                                    const offsetX = Math.floor((THUMB_W - scaledW) / 2);
-                                                                    const offsetY = Math.floor((thumbH - scaledH) / 2);
-                                                                    return (
-                                                                        <div
-                                                                            className="absolute left-0 top-0"
-                                                                            style={{ width: THUMB_W, height: thumbH }}
-                                                                        >
-                                                                            <iframe
-                                                                                srcDoc={injectThumbScrollbarHide(preview.html)}
-                                                                                title={`preview-${screenId}`}
-                                                                                sandbox="allow-scripts allow-same-origin"
-                                                                                scrolling="no"
-                                                                                className="pointer-events-none absolute"
-                                                                                style={{
-                                                                                    width: sourceW,
-                                                                                    height: sourceH,
-                                                                                    transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
-                                                                                    transformOrigin: 'top left',
-                                                                                    border: '0',
-                                                                                }}
-                                                                            />
-                                                                        </div>
-                                                                    );
-                                                                })()
-                                                            ) : (
-                                                                <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">No preview</div>
-                                                            )}
-                                                        </div>
-                                                        <div className="mt-1 text-[10px] text-[var(--ui-text-muted)] font-semibold truncate">{label}</div>
-                                                    </button>
+                                                        screenId={screenId}
+                                                        preview={preview}
+                                                        label={label}
+                                                        thumbWidth={THUMB_W}
+                                                        onFocus={setFocusNodeId}
+                                                    />
                                                 );
                                             })}
                                     </div>
@@ -2666,58 +2795,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                                         const preview = snapshotPreview || getScreenPreview(screenId);
                                                         const label = preview?.name || message.screenRef?.label || 'Screen';
                                                         return (
-                                                            <button
+                                                            <ScreenReferenceThumb
                                                                 key={`${message.id}-${screenId}`}
-                                                                onClick={() => setFocusNodeId(screenId)}
-                                                                className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] backdrop-blur-sm p-1.5 transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)] active:scale-[0.99]"
-                                                                style={{ width: THUMB_W + 12 }}
-                                                                title={`Focus ${label} on canvas`}
-                                                            >
-                                                                <div
-                                                                    className="rounded-lg overflow-hidden border border-[var(--ui-border)] bg-transparent relative"
-                                                                    style={{
-                                                                        width: THUMB_W,
-                                                                        height: preview ? Math.max(1, Math.round(THUMB_W * ((preview.height || 812) / (preview.width || 375)))) : 170,
-                                                                    }}
-                                                                >
-                                                                    {preview?.html ? (
-                                                                        (() => {
-                                                                            const sourceW = preview.width || 375;
-                                                                            const sourceH = preview.height || 812;
-                                                                            const thumbH = Math.max(1, Math.round(THUMB_W * (sourceH / sourceW)));
-                                                                            const scale = Math.min(THUMB_W / sourceW, thumbH / sourceH);
-                                                                            const scaledW = Math.max(1, Math.floor(sourceW * scale));
-                                                                            const scaledH = Math.max(1, Math.floor(sourceH * scale));
-                                                                            const offsetX = Math.floor((THUMB_W - scaledW) / 2);
-                                                                            const offsetY = Math.floor((thumbH - scaledH) / 2);
-                                                                            return (
-                                                                                <div
-                                                                                    className="absolute left-0 top-0"
-                                                                                    style={{ width: THUMB_W, height: thumbH }}
-                                                                                >
-                                                                                    <iframe
-                                                                                        srcDoc={injectThumbScrollbarHide(preview.html)}
-                                                                                        title={`preview-${screenId}`}
-                                                                                        sandbox="allow-scripts allow-same-origin"
-                                                                                        scrolling="no"
-                                                                                        className="pointer-events-none absolute"
-                                                                                        style={{
-                                                                                            width: sourceW,
-                                                                                            height: sourceH,
-                                                                                            transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
-                                                                                            transformOrigin: 'top left',
-                                                                                            border: '0',
-                                                                                        }}
-                                                                                    />
-                                                                                </div>
-                                                                            );
-                                                                        })()
-                                                                    ) : (
-                                                                        <div className="w-full h-full flex items-center justify-center text-[10px] text-[var(--ui-text-subtle)]">No preview</div>
-                                                                    )}
-                                                                </div>
-                                                                <div className="mt-1 text-[10px] text-[var(--ui-text-muted)] font-semibold truncate">{label}</div>
-                                                            </button>
+                                                                screenId={screenId}
+                                                                preview={preview}
+                                                                label={label}
+                                                                thumbWidth={THUMB_W}
+                                                                onFocus={setFocusNodeId}
+                                                            />
                                                         );
                                                     })}
                                                 {message.images && message.images.map((img, idx) => (

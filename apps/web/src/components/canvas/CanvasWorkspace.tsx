@@ -44,6 +44,14 @@ function CanvasWorkspaceContent() {
         return { width, height };
     }, []);
 
+    const screensById = useMemo(() => {
+        const map = new Map<string, NonNullable<typeof spec>['screens'][number]>();
+        (spec?.screens || []).forEach((screen) => {
+            map.set(screen.screenId, screen);
+        });
+        return map;
+    }, [spec?.screens]);
+
     const getCanvasViewportSize = useCallback(() => {
         const el = document.querySelector('.canvas-workspace .react-flow') as HTMLElement | null;
         return {
@@ -89,7 +97,7 @@ function CanvasWorkspaceContent() {
 
         // Map based on boards to respect arrangement order
         return doc.boards.map((board) => {
-            const screen = spec.screens.find(s => s.screenId === board.screenId);
+            const screen = screensById.get(board.screenId);
             if (!screen) return null;
 
             return {
@@ -104,10 +112,10 @@ function CanvasWorkspaceContent() {
                     height: screen.height,
                     status: screen.status,
                 },
-                selected: doc.selection.selectedNodeIds.includes(screen.screenId) || doc.selection.selectedBoardId === screen.screenId,
+                selected: false,
             } as Node;
         }).filter(Boolean) as Node[];
-    }, [spec, doc.boards]); // Remove selection from here to avoid re-renders on selection
+    }, [spec, doc.boards, screensById]); // Selection sync happens in dedicated effect
 
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
     const [edges, , onEdgesChange] = useEdgesState([]);
@@ -188,7 +196,7 @@ function CanvasWorkspaceContent() {
     useEffect(() => {
         if (!spec) return;
         setNodes(nds => nds.map(n => {
-            const screen = spec.screens.find(s => s.screenId === n.id);
+            const screen = screensById.get(n.id);
             if (!screen) return n;
 
             const nextData = {
@@ -206,7 +214,7 @@ function CanvasWorkspaceContent() {
                 data: nextData,
             };
         }));
-    }, [spec, setNodes]);
+    }, [spec, screensById, setNodes]);
 
     // Update nodes when structure changes or external update is triggered
     useEffect(() => {
@@ -296,6 +304,7 @@ function CanvasWorkspaceContent() {
                 // Constraints
                 translateExtent={[[-Infinity, -Infinity], [Infinity, Infinity]]}
                 nodesDraggable={!isEditMode && activeTool === 'select'} // Disable dragging while editing
+                proOptions={{ hideAttribution: true }}
             >
                 <Background
                     variant={BackgroundVariant.Dots}

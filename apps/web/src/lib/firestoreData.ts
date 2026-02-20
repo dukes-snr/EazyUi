@@ -15,6 +15,7 @@ import type { HtmlDesignSpec } from "@/api/client";
 import { db, storage } from "./firebase";
 
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1";
+let storageUploadsTemporarilyDisabled = false;
 
 type SaveProjectInput = {
   uid: string;
@@ -89,6 +90,19 @@ function stripUndefinedDeep<T>(value: T): T {
   return value;
 }
 
+function isStorageCorsOrNetworkError(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message || "").toLowerCase();
+  const code = String((error as { code?: string })?.code || "").toLowerCase();
+  return (
+    message.includes("cors") ||
+    message.includes("preflight") ||
+    message.includes("xmlhttprequest") ||
+    message.includes("network") ||
+    message.includes("err_failed") ||
+    code.includes("storage/unknown")
+  );
+}
+
 export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ projectId: string; savedAt: string }> {
   const { uid, projectId, designSpec, canvasDoc, chatState } = input;
   const id = projectId || makeId();
@@ -102,10 +116,22 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     chatState: safeChatState,
   };
   const snapshotPath = `snapshots/latest.json`;
-  const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
-  await uploadString(snapshotRef, JSON.stringify(snapshot), "raw", {
-    contentType: "application/json",
-  });
+  let resolvedSnapshotPath: string | null = null;
+  if (!storageUploadsTemporarilyDisabled) {
+    try {
+      const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
+      await uploadString(snapshotRef, JSON.stringify(snapshot), "raw", {
+        contentType: "application/json",
+      });
+      resolvedSnapshotPath = snapshotPath;
+    } catch (error) {
+      if (isStorageCorsOrNetworkError(error)) {
+        storageUploadsTemporarilyDisabled = true;
+      } else {
+        throw error;
+      }
+    }
+  }
   const projectRef = doc(db, "users", uid, "projects", id);
   const existing = await getDoc(projectRef);
   const createdAt = existing.exists() ? (existing.data().createdAt as string) || now : now;
@@ -116,7 +142,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       id,
       ownerId: uid,
       name: safeDesignSpec.name || "Untitled project",
-      snapshotPath,
+      snapshotPath: resolvedSnapshotPath,
       designSpecMeta: {
         id: safeDesignSpec.id,
         name: safeDesignSpec.name,
@@ -142,11 +168,20 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     const fullHtml = typeof screen.html === "string" ? screen.html : "";
     const canStoreFullHtml = fullHtml.length > 0 && fullHtml.length <= 800_000;
     let htmlPath: string | undefined;
-    if (fullHtml.length > 0) {
+    if (fullHtml.length > 0 && !storageUploadsTemporarilyDisabled) {
       htmlPath = `screens/${screen.screenId}.html`;
-      await uploadString(ref(storage, `users/${uid}/projects/${id}/${htmlPath}`), fullHtml, "raw", {
-        contentType: "text/html",
-      });
+      try {
+        await uploadString(ref(storage, `users/${uid}/projects/${id}/${htmlPath}`), fullHtml, "raw", {
+          contentType: "text/html",
+        });
+      } catch (error) {
+        htmlPath = undefined;
+        if (isStorageCorsOrNetworkError(error)) {
+          storageUploadsTemporarilyDisabled = true;
+        } else {
+          throw error;
+        }
+      }
     }
     screensBatch.set(screenRef, stripUndefinedDeep({
       screenId: screen.screenId,

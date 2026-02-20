@@ -88,6 +88,19 @@ function injectHeightScript(html: string, screenId: string) {
 }
 
 function injectScrollbarHide(html: string) {
+    const warningFilterScript = `
+<script>
+  (function () {
+    const blocked = 'cdn.tailwindcss.com should not be used in production';
+    const originalWarn = console.warn;
+    console.warn = function (...args) {
+      const first = String(args && args.length ? args[0] : '');
+      if (first.includes(blocked)) return;
+      return originalWarn.apply(console, args);
+    };
+  })();
+</script>`;
+
     const styleTag = `
 <style>
   ::-webkit-scrollbar { width: 0; height: 0; }
@@ -96,9 +109,9 @@ function injectScrollbarHide(html: string) {
 </style>`;
 
     if (html.includes('</head>')) {
-        return html.replace('</head>', `${styleTag}\n</head>`);
+        return html.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
     }
-    return `${styleTag}\n${html}`;
+    return `${warningFilterScript}\n${styleTag}\n${html}`;
 }
 
 function injectStatusBarContentInset(html: string, insetPx: number) {
@@ -1014,7 +1027,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
                             }}
-                            sandbox="allow-scripts allow-same-origin"
+                            sandbox="allow-scripts"
                         />
                     </div>
 
