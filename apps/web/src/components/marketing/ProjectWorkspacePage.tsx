@@ -19,6 +19,7 @@ type ProjectListItem = {
   updatedAt: string;
   screenCount?: number;
   hasSnapshot?: boolean;
+  coverImageUrl?: string;
 };
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
@@ -154,7 +155,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   }
 
   return (
-    <div className="min-h-screen w-screen bg-[--ui-bg] text-white">
+    <div className="h-screen w-screen bg-[--ui-bg] text-[var(--ui-text)]">
       <aside className="fixed inset-y-0 left-0 z-30 flex w-[74px] flex-col items-center border-r border-white/10 bg-[--ui-bg] px-3 py-4">
         <button
           type="button"
@@ -169,7 +170,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           <button
             type="button"
             onClick={() => onNavigate('/app')}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-gray-400 hover:bg-white/[0.08] hover:text-white"
+            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
             title="Workspace Home"
           >
             <House size={16} />
@@ -177,7 +178,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           <button
             type="button"
             onClick={() => onNavigate('/app/projects')}
-            className="grid h-10 w-10 place-items-center rounded-2xl bg-white/[0.10] text-white ring-1 ring-white/15"
+            className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)]"
             title="Projects"
           >
             <FolderOpen size={16} />
@@ -185,7 +186,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           <button
             type="button"
             onClick={() => onNavigate('/app/projects/new')}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-gray-400 hover:bg-white/[0.08] hover:text-white"
+            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
             title="New Project"
           >
             <Plus size={16} />
@@ -193,7 +194,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           <button
             type="button"
             onClick={() => void loadProjects()}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-gray-400 hover:bg-white/[0.08] hover:text-white"
+            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
             title="Refresh Projects"
           >
             <RefreshCcw size={16} />
@@ -204,20 +205,20 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           <button
             type="button"
             onClick={() => setOpenAvatarMenu((open) => !open)}
-            className="grid h-10 w-10 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/[0.07] text-[12px] font-medium text-gray-200 hover:border-white/30"
+            className="grid h-10 w-10 place-items-center overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[12px] font-medium text-[var(--ui-text)] hover:border-[var(--ui-border-light)]"
             title="Account"
           >
             <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
           </button>
           {openAvatarMenu && (
-            <div className="absolute bottom-0 left-[56px] w-[220px] rounded-2xl border border-white/15 bg-[#12141C] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+            <div className="absolute bottom-0 left-[56px] w-[220px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
               <div className="flex items-center gap-2">
-                <div className="h-9 w-9 overflow-hidden rounded-full border border-white/15 bg-black/30">
+                <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
                   <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{authDisplayName}</p>
-                  <p className="truncate text-[11px] text-gray-400">{authEmail}</p>
+                  <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
+                  <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
                 </div>
               </div>
               <button
@@ -233,14 +234,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         </div>
       </aside>
 
-      <div className="pl-[74px]">
+      <div className="h-screen overflow-y-auto pl-[74px]">
 
       <main className="relative mx-auto max-w-[1200px] px-4 py-10 md:px-7">
         <section className="mx-auto max-w-[860px] pt-[100px] text-center">
-          <p className="text-[44px] md:text-[58px] leading-none tracking-[-0.03em] font-semibold text-white/95">
+          <p className="text-[44px] md:text-[58px] leading-none tracking-[-0.03em] font-semibold text-[var(--ui-text)]">
             EazyUI Projects
           </p>
-          <p className="mt-3 text-[15px] text-gray-400">Type what you want to build and start a new project instantly.</p>
+          <p className="mt-3 text-[15px] text-[var(--ui-text-muted)]">Type what you want to build and start a new project instantly.</p>
 
           <form
             className="mt-8"
@@ -249,7 +250,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
               handleCreateFromPrompt();
             }}
           >
-            <div className="mx-auto w-full rounded-[20px] border border-white/10 bg-[linear-gradient(90deg,rgba(255,255,255,0.05),rgba(255,255,255,0.03))] p-3 ">
+            <div className="mx-auto w-full rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 ">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -259,9 +260,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 className="hidden"
               />
               {starterImages.length > 0 && (
-                <div className="mb-2 flex gap-2 overflow-x-auto px-1 pb-2 border-b border-white/10">
+                <div className="mb-2 flex gap-2 overflow-x-auto border-b border-[var(--ui-border)] px-1 pb-2">
                   {starterImages.map((img, idx) => (
-                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-white/15 shrink-0">
+                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[var(--ui-border)]">
                       <img src={img} alt="upload" className="w-full h-full object-cover" />
                       <button
                         type="button"
@@ -282,7 +283,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   value={starterPrompt}
                   onChange={(event) => setStarterPrompt(event.target.value)}
                   placeholder="What do you want to create?"
-                  className="h-full flex-1 border-0 bg-transparent px-3 text-[16px] text-gray-100 placeholder:text-gray-500 focus:outline-none focus:ring-0"
+                  className="h-full flex-1 border-0 bg-transparent px-3 text-[16px] text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
                 />
                 <button
                   type="submit"
@@ -298,20 +299,20 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] text-gray-300 hover:text-white hover:bg-white/[0.12] transition-all ring-1 ring-white/10"
+                    className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] transition-all hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]"
                     title="Add image"
                   >
                     <Plus size={18} />
                   </button>
-                  <div className="flex items-center bg-white/[0.06] rounded-full p-1 ring-1 ring-white/10">
+                  <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                       <button
                         key={p}
                         type="button"
                         onClick={() => setDeviceType(p)}
                         className={`p-1.5 rounded-full transition-all ${deviceType === p
-                          ? 'bg-white/[0.12] text-white shadow-sm'
-                          : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.08]'
+                          ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-sm'
+                          : 'text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text-muted)]'
                           }`}
                         title={`Generate for ${p}`}
                       >
@@ -322,13 +323,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center bg-white/[0.06] rounded-full p-1 ring-1 ring-white/10">
+                <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
                   <button
                     type="button"
                     onClick={() => setModelProfile('fast')}
                     className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                      ? 'bg-amber-500/20 text-white ring-1 ring-amber-400/40'
-                      : 'text-amber-400 hover:text-amber-200 hover:bg-white/[0.08]'
+                      ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
+                      : 'text-amber-400 hover:bg-[var(--ui-surface-4)] hover:text-amber-200'
                       }`}
                     title="Fast mode"
                   >
@@ -338,8 +339,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     type="button"
                     onClick={() => setModelProfile('quality')}
                     className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                      ? 'bg-indigo-500/20 text-white ring-1 ring-indigo-300/40'
-                      : 'text-indigo-300 hover:text-indigo-100 hover:bg-white/[0.08]'
+                      ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
+                      : 'text-indigo-300 hover:bg-[var(--ui-surface-4)] hover:text-indigo-100'
                       }`}
                     title="Quality mode"
                   >
@@ -351,9 +352,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           </form>
         </section>
 
-        <section className="mt-[200px]">
+        <section className="mt-[100px]">
           <h1 className="text-[34px] md:text-[52px] leading-[0.96] font-semibold tracking-[-0.03em]">Your Projects</h1>
-          <p className="mt-3 text-sm text-gray-400">Open, continue, or remove projects saved in Firestore/Storage.</p>
+          <p className="mt-3 text-sm text-[var(--ui-text-muted)]">Open, continue, or remove projects saved in Firestore/Storage.</p>
 
           {error && (
             <div className="mt-5 rounded-2xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -362,13 +363,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           )}
 
           {loading && (
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-gray-400">
+            <div className="mt-6 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-5 py-4 text-sm text-[var(--ui-text-muted)]">
               Loading projects...
             </div>
           )}
 
           {!loading && projects.length === 0 && (
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-7 text-sm text-gray-400">
+            <div className="mt-6 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-5 py-7 text-sm text-[var(--ui-text-muted)]">
               No projects yet. Start with New Project.
             </div>
           )}
@@ -376,17 +377,33 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           {!loading && projects.length > 0 && (
             <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
-                <article key={project.id} className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4">
+                <article key={project.id} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                  <div className="mb-3">
+                    {project.coverImageUrl ? (
+                      <div className="relative h-[260px] overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2">
+                        <img
+                          src={project.coverImageUrl}
+                          alt={`${project.name} preview`}
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : (
+                      <div className="grid h-[130px] place-items-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[11px] text-[var(--ui-text-subtle)]">
+                        Preview will appear after save
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[16px] font-semibold text-white truncate">{project.name || 'Untitled project'}</p>
-                      <p className="mt-1 text-[11px] text-gray-500 truncate">{project.id}</p>
+                      <p className="truncate text-[16px] font-semibold text-[var(--ui-text)]">{project.name || 'Untitled project'}</p>
+                      <p className="mt-1 truncate text-[11px] text-[var(--ui-text-subtle)]">{project.id}</p>
                     </div>
                     <span className={`text-[10px] uppercase tracking-[0.08em] ${project.hasSnapshot ? 'text-emerald-300' : 'text-amber-300'}`}>
                       {project.hasSnapshot ? 'Backed up' : 'Meta only'}
                     </span>
                   </div>
-                  <div className="mt-3 flex items-center justify-between text-[11px] text-gray-400">
+                  <div className="mt-3 flex items-center justify-between text-[11px] text-[var(--ui-text-muted)]">
                     <span>Updated {formatDate(project.updatedAt)}</span>
                     <span>{project.screenCount ?? 0} screens</span>
                   </div>
@@ -395,7 +412,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       type="button"
                       onClick={() => onOpenProject(project.id)}
                       disabled={busyId === project.id}
-                      className="h-8 rounded-full border border-white/20 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-200 hover:text-white hover:border-white/35 disabled:opacity-50"
+                      className="h-8 rounded-full border border-[var(--ui-border-light)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)] disabled:opacity-50"
                     >
                       <span className="inline-flex items-center gap-1.5"><FolderOpen size={12} /> Open</span>
                     </button>

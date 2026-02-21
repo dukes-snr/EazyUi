@@ -15,8 +15,10 @@ import type { HtmlDesignSpec } from "@/api/client";
 import { db, storage } from "./firebase";
 
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1";
+const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1";
 let storageUploadsTemporarilyDisabled = false;
 const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
+const PROJECT_COVER_VERSION = 2;
 
 type SaveProjectInput = {
   uid: string;
@@ -61,6 +63,11 @@ type ProjectMetaData = {
   canvasDoc?: unknown;
   chatState?: unknown;
   snapshotPath?: string;
+  coverImagePath?: string;
+  coverImageUrl?: string;
+  coverImageDataUrl?: string;
+  coverScreenIds?: string[];
+  coverVersion?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -168,6 +175,43 @@ function isStorageCorsOrNetworkError(error: unknown): boolean {
   );
 }
 
+async function renderScreenImageBase64(params: {
+  html: string;
+  width: number;
+  height: number;
+}): Promise<string | null> {
+  try {
+    const response = await fetch("/api/render-screen-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        html: params.html,
+        width: params.width,
+        height: params.height,
+        scale: 1,
+      }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { pngBase64?: string };
+    const base64 = String(payload.pngBase64 || "").trim();
+    return base64 || null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildProjectCoverDataUrl(screens: HtmlDesignSpec["screens"]): Promise<string | null> {
+  const primary = (screens || [])[0];
+  if (!primary) return null;
+  const base64 = await renderScreenImageBase64({
+    html: primary.html,
+    width: Math.max(280, Math.min(420, primary.width || 375)),
+    height: Math.max(560, Math.min(920, primary.height || 812)),
+  });
+  if (!base64) return null;
+  return `data:image/png;base64,${base64}`;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -199,7 +243,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   };
   const snapshotPath = `snapshots/latest.json`;
   let resolvedSnapshotPath: string | null = null;
-  if (!storageUploadsTemporarilyDisabled) {
+  if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
     try {
       const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
       await withTimeout(
@@ -220,7 +264,45 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   }
   const projectRef = doc(db, "users", uid, "projects", id);
   const existing = await getDoc(projectRef);
+  const existingData = existing.exists() ? (existing.data() as ProjectMetaData) : null;
   const createdAt = existing.exists() ? (existing.data().createdAt as string) || now : now;
+  const nextCoverScreenIds = (safeDesignSpec.screens || []).slice(0, 2).map((screen) => screen.screenId);
+  const existingCoverScreenIds = Array.isArray(existingData?.coverScreenIds) ? existingData!.coverScreenIds! : [];
+  let resolvedCoverImagePath: string | null = existingData?.coverImagePath || null;
+  let resolvedCoverImageUrl: string | null = existingData?.coverImageUrl || null;
+  let resolvedCoverImageDataUrl: string | null = existingData?.coverImageDataUrl || null;
+  const shouldRefreshCover = nextCoverScreenIds.length > 0 && (
+    (!resolvedCoverImageUrl && !resolvedCoverImageDataUrl)
+    || existingCoverScreenIds.join("|") !== nextCoverScreenIds.join("|")
+    || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
+  );
+
+  if (shouldRefreshCover) {
+    const coverDataUrl = await buildProjectCoverDataUrl(safeDesignSpec.screens || []);
+    if (coverDataUrl) {
+      resolvedCoverImageDataUrl = coverDataUrl;
+      if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
+        try {
+          const coverPath = "previews/cover.jpg";
+          const coverRef = ref(storage, `users/${uid}/projects/${id}/${coverPath}`);
+          await withTimeout(
+            uploadString(coverRef, coverDataUrl, "data_url"),
+            STORAGE_UPLOAD_TIMEOUT_MS,
+          "Project cover upload"
+          );
+          resolvedCoverImagePath = coverPath;
+          resolvedCoverImageUrl = await getDownloadURL(coverRef);
+          resolvedCoverImageDataUrl = null;
+        } catch (error) {
+          if (isStorageCorsOrNetworkError(error)) {
+            storageUploadsTemporarilyDisabled = true;
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+  }
 
   await setDoc(
     projectRef,
@@ -229,6 +311,11 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       ownerId: uid,
       name: safeDesignSpec.name || "Untitled project",
       snapshotPath: resolvedSnapshotPath,
+      coverImagePath: resolvedCoverImagePath,
+      coverImageUrl: resolvedCoverImageUrl,
+      coverImageDataUrl: resolvedCoverImageDataUrl,
+      coverScreenIds: nextCoverScreenIds,
+      coverVersion: PROJECT_COVER_VERSION,
       designSpecMeta: {
         id: safeDesignSpec.id,
         name: safeDesignSpec.name,
@@ -254,7 +341,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     const fullHtml = typeof screen.html === "string" ? screen.html : "";
     const canStoreFullHtml = fullHtml.length > 0 && fullHtml.length <= 800_000;
     let htmlPath: string | undefined;
-    if (fullHtml.length > 0 && !storageUploadsTemporarilyDisabled) {
+    if (fullHtml.length > 0 && ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
       htmlPath = `screens/${screen.screenId}.html`;
       try {
         await withTimeout(
@@ -467,17 +554,18 @@ export async function getProjectFirestore(uid: string, projectId: string) {
   return buildProjectFromSubcollections(uid, projectId, data);
 }
 
-export async function listProjectsFirestore(uid: string): Promise<{ id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean }[]> {
+export async function listProjectsFirestore(uid: string): Promise<{ id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string }[]> {
   const q = query(collection(db, "users", uid, "projects"), orderBy("updatedAt", "desc"), limit(50));
   const snap = await getDocs(q);
   return snap.docs.map((d) => {
-    const data = d.data() as { name?: string; updatedAt?: string; snapshotPath?: string; designSpecMeta?: { screens?: Array<unknown> } };
+    const data = d.data() as { name?: string; updatedAt?: string; snapshotPath?: string; coverImageUrl?: string; coverImageDataUrl?: string; designSpecMeta?: { screens?: Array<unknown> } };
     return {
       id: d.id,
       name: data.name || "Untitled project",
       updatedAt: data.updatedAt || "",
       screenCount: Array.isArray(data.designSpecMeta?.screens) ? data.designSpecMeta!.screens!.length : 0,
       hasSnapshot: Boolean(data.snapshotPath),
+      coverImageUrl: data.coverImageUrl || data.coverImageDataUrl || undefined,
     };
   });
 }
@@ -509,6 +597,14 @@ export async function deleteProjectFirestore(uid: string, projectId: string): Pr
       await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${data.snapshotPath}`));
     } catch {
       // ignore missing snapshot cleanup errors
+    }
+  }
+  const projectMeta = snap.data() as { coverImagePath?: string };
+  if (projectMeta.coverImagePath) {
+    try {
+      await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${projectMeta.coverImagePath}`));
+    } catch {
+      // ignore missing cover cleanup errors
     }
   }
   const screensSnap = await getDocs(collection(db, "users", uid, "projects", projectId, "screens"));

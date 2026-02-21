@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppWindow, Braces, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
+import { AppWindow, Braces, Check, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
@@ -29,13 +29,13 @@ function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
 }
 
 export function CanvasProfileMenu() {
-    const { theme, setTheme, pushToast, removeToast, showInspector, setShowInspector } = useUiStore();
+    const { theme, setTheme, pushToast, removeToast, showInspector } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
     const { doc, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
     const { clearHistory } = useHistoryStore();
-    const { projectId, lastSavedAt, dirty, isSaving, autosaveEnabled, isHydrating, setAutosaveEnabled, markSaved, setSaving, resetProjectState } = useProjectStore();
+    const { projectId, lastSavedAt, dirty, isSaving, autosaveEnabled, isHydrating, markSaved, setSaving, resetProjectState } = useProjectStore();
 
     const [openProfile, setOpenProfile] = useState(false);
     const [openExport, setOpenExport] = useState(false);
@@ -43,6 +43,9 @@ export function CanvasProfileMenu() {
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('profile');
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
+    const [transparentSidebar, setTransparentSidebar] = useState(true);
+    const [sidebarFeature, setSidebarFeature] = useState<'recent' | 'favorites' | 'activity'>('recent');
+    const [tableView, setTableView] = useState<'default' | 'compact'>('default');
     const menuRef = useRef<HTMLDivElement | null>(null);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
@@ -239,14 +242,80 @@ export function CanvasProfileMenu() {
                                     </div>
                                 )}
                                 {settingsTab === 'appearance' && (
-                                    <div className="max-w-[840px] space-y-4">
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                            <ThemeCard title="System preference" active={false} onClick={() => {}} />
-                                            <ThemeCard title="Light" active={theme === 'light'} onClick={() => setTheme('light')} />
-                                            <ThemeCard title="Dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
+                                    <div className="max-w-[980px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                                        <div className="border-b border-[var(--ui-border)] px-5 py-5">
+                                            <div className="text-xl font-semibold text-[var(--ui-text)]">Appearance</div>
+                                            <div className="mt-1 text-sm text-[var(--ui-text-subtle)]">Change how your workspace looks and behaves.</div>
                                         </div>
-                                        <ToggleRow label="Inspector panel" checked={showInspector} onChange={setShowInspector} />
-                                        <ToggleRow label="Autosave" checked={autosaveEnabled} onChange={setAutosaveEnabled} />
+
+                                        <div className="border-b border-[var(--ui-border)] px-5 py-5">
+                                            <div className="text-sm font-semibold text-[var(--ui-text)]">Interface theme</div>
+                                            <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Select or customize your UI theme.</div>
+                                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                                <ThemePreviewCard title="System preference" tone={theme} active={false} onClick={() => { }} />
+                                                <ThemePreviewCard title="Light" tone="light" active={theme === 'light'} onClick={() => setTheme('light')} />
+                                                <ThemePreviewCard title="Dark" tone="dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
+                                            </div>
+                                        </div>
+
+                                        <div className="border-b border-[var(--ui-border)] px-5 py-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <div className="text-sm font-semibold text-[var(--ui-text)]">Transparent sidebar</div>
+                                                    <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Make the workspace sidebar slightly translucent.</div>
+                                                </div>
+                                                <ToggleSwitch checked={transparentSidebar} onChange={setTransparentSidebar} />
+                                            </div>
+                                        </div>
+
+                                        <div className="border-b border-[var(--ui-border)] px-5 py-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <div className="text-sm font-semibold text-[var(--ui-text)]">Sidebar feature</div>
+                                                    <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Choose what shows by default in sidebar shortcuts.</div>
+                                                </div>
+                                                <select
+                                                    value={sidebarFeature}
+                                                    onChange={(event) => setSidebarFeature(event.target.value as 'recent' | 'favorites' | 'activity')}
+                                                    className="h-10 min-w-[220px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm text-[var(--ui-text)]"
+                                                >
+                                                    <option value="recent">Recent projects</option>
+                                                    <option value="favorites">Favorites</option>
+                                                    <option value="activity">Recent activity</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="px-5 py-5">
+                                            <div className="text-sm font-semibold text-[var(--ui-text)]">Tables view</div>
+                                            <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Adjust information density in table-like views.</div>
+                                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <TableViewCard title="Default" compact={false} active={tableView === 'default'} onClick={() => setTableView('default')} />
+                                                <TableViewCard title="Compact" compact active={tableView === 'compact'} onClick={() => setTableView('compact')} />
+                                            </div>
+                                        </div>
+
+                                        <div className="border-t border-[var(--ui-border)] px-5 py-4">
+                                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOpenSettingsModal(false)}
+                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        pushToast({ kind: 'success', title: 'Appearance saved', message: 'Your visual preferences were updated.' });
+                                                        setOpenSettingsModal(false);
+                                                    }}
+                                                    className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500"
+                                                >
+                                                    Save changes
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                                 {settingsTab === 'workspace' && (
@@ -277,21 +346,76 @@ function Field({ label, value }: { label: string; value: string }) {
     );
 }
 
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (next: boolean) => void }) {
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
     return (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
-            <div className="text-sm font-medium text-[var(--ui-text)]">{label}</div>
-            <button type="button" onClick={() => onChange(!checked)} className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'bg-indigo-600 border-indigo-500/80' : 'bg-[var(--ui-surface-1)] border-[var(--ui-border)]'}`}>
-                <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-[2px]'}`} />
-            </button>
-        </div>
+        <button
+            type="button"
+            onClick={() => onChange(!checked)}
+            className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'border-indigo-500/80 bg-indigo-600' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}
+        >
+            <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-[2px]'}`} />
+        </button>
     );
 }
 
-function ThemeCard({ title, active, onClick }: { title: string; active: boolean; onClick: () => void }) {
+function ThemePreviewCard({ title, tone, active, onClick }: { title: string; tone: 'light' | 'dark'; active: boolean; onClick: () => void }) {
+    const canvasTone = tone === 'dark'
+        ? 'bg-[#0f1116] border-[#232836]'
+        : 'bg-[#f7f8fc] border-[#dfe4ef]';
+    const topBarTone = tone === 'dark' ? 'bg-[#161a24]' : 'bg-[#eef2f8]';
+    const leftPaneTone = tone === 'dark' ? 'bg-[#1a1f2b]' : 'bg-[#e8edf5]';
+    const lineTone = tone === 'dark' ? 'bg-[#2e3648]' : 'bg-[#cfd8e8]';
+
     return (
-        <button type="button" onClick={onClick} className={`rounded-xl border p-3 text-left transition-colors ${active ? 'border-indigo-400/60 bg-indigo-500/20' : 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] hover:bg-[var(--ui-surface-3)]'}`}>
-            <div className="h-20 rounded-lg border border-[var(--ui-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))]" />
+        <button
+            type="button"
+            onClick={onClick}
+            className={`relative rounded-xl border p-2 text-left transition-colors ${active ? 'border-indigo-500/80 bg-indigo-500/10' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'}`}
+        >
+            {active && (
+                <span className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white">
+                    <Check size={12} />
+                </span>
+            )}
+            <div className={`h-[92px] overflow-hidden rounded-lg border ${canvasTone}`}>
+                <div className={`h-4 w-full ${topBarTone}`} />
+                <div className="flex h-[calc(100%-16px)]">
+                    <div className={`w-[30%] border-r ${leftPaneTone}`} />
+                    <div className="flex-1 p-2">
+                        <div className={`mb-1 h-2.5 w-[70%] rounded ${lineTone}`} />
+                        <div className={`mb-1 h-2.5 w-[85%] rounded ${lineTone}`} />
+                        <div className={`h-2.5 w-[58%] rounded ${lineTone}`} />
+                    </div>
+                </div>
+            </div>
+            <div className="mt-2 text-sm font-medium text-[var(--ui-text)]">{title}</div>
+        </button>
+    );
+}
+
+function TableViewCard({ title, compact, active, onClick }: { title: string; compact: boolean; active: boolean; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`relative rounded-xl border p-2 text-left transition-colors ${active ? 'border-indigo-500/80 bg-indigo-500/10' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'}`}
+        >
+            {active && (
+                <span className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white">
+                    <Check size={12} />
+                </span>
+            )}
+            <div className="h-[92px] overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2">
+                <div className="space-y-1">
+                    {Array.from({ length: compact ? 6 : 4 }).map((_, idx) => (
+                        <div key={idx} className={`flex items-center gap-2 rounded ${compact ? 'h-2.5' : 'h-4'}`}>
+                            <span className={`rounded-full bg-[var(--ui-surface-4)] ${compact ? 'h-2 w-2' : 'h-2.5 w-2.5'}`} />
+                            <span className="h-2 flex-1 rounded bg-[var(--ui-surface-4)]" />
+                            <span className={`rounded bg-indigo-500/35 ${compact ? 'h-2 w-8' : 'h-2.5 w-10'}`} />
+                        </div>
+                    ))}
+                </div>
+            </div>
             <div className="mt-2 text-sm font-medium text-[var(--ui-text)]">{title}</div>
         </button>
     );

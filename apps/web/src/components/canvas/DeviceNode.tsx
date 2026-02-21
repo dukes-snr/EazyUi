@@ -1035,7 +1035,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
                             }}
-                            sandbox="allow-scripts"
+                            sandbox="allow-scripts allow-same-origin"
                         />
                     </div>
 

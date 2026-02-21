@@ -17,8 +17,9 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { ChevronRight } from 'lucide-react';
 
-import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore } from '../../stores';
+import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore, useProjectStore } from '../../stores';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
@@ -32,6 +33,7 @@ const nodeTypes = {
 // Inner component to use React Flow hooks if needed
 function CanvasWorkspaceContent() {
     const { spec } = useDesignStore();
+    const { projectId } = useProjectStore();
     const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, focusNodeIds, setFocusNodeIds, lastExternalUpdate } = useCanvasStore();
     const { isEditMode } = useEditStore();
     const { isGenerating } = useChatStore();
@@ -264,6 +266,11 @@ function CanvasWorkspaceContent() {
         selectNodes([]);
     }, [selectNodes]);
 
+    const navigateTo = useCallback((path: string) => {
+        window.history.pushState({}, '', path);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    }, []);
+
     // Derived props based on active tool
     const { activeTool } = useCanvasStore();
 
@@ -275,6 +282,38 @@ function CanvasWorkspaceContent() {
 
     return (
         <div className="canvas-workspace relative h-full w-full">
+            <div className="absolute left-4 top-4 z-50">
+                <div className="inline-flex items-center ml-[50px] gap-1 text-[12px] text-[var(--ui-text-muted)]">
+                    <button
+                        type="button"
+                        onClick={() => navigateTo('/app')}
+                        className="hover:text-[var(--ui-text)]"
+                    >
+                        Home
+                    </button>
+                    <ChevronRight size={12} />
+                    <button
+                        type="button"
+                        onClick={() => navigateTo('/app/projects')}
+                        className="hover:text-[var(--ui-text)]"
+                    >
+                        Projects
+                    </button>
+                    <ChevronRight size={12} />
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (!projectId) return;
+                            navigateTo(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
+                        }}
+                        className="max-w-[170px] truncate text-[var(--ui-text)] hover:text-[var(--ui-text)]"
+                        title={spec?.name || 'Project'}
+                    >
+                        {spec?.name || 'Project'}
+                    </button>
+                </div>
+            </div>
+
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
