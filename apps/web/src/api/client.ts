@@ -372,7 +372,7 @@ class ApiClient {
         return project;
     }
 
-    async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string }[] }> {
+    async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string; coverImageUrls?: string[] }[] }> {
         const uid = this.requireAuthUid();
         const projects = await listProjectsFirestore(uid);
         return { projects };

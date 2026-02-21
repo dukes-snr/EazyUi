@@ -20,6 +20,7 @@ type ProjectListItem = {
   screenCount?: number;
   hasSnapshot?: boolean;
   coverImageUrl?: string;
+  coverImageUrls?: string[];
 };
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
@@ -379,20 +380,48 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
               {projects.map((project) => (
                 <article key={project.id} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                   <div className="mb-3">
-                    {project.coverImageUrl ? (
-                      <div className="relative h-[260px] overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2">
-                        <img
-                          src={project.coverImageUrl}
-                          alt={`${project.name} preview`}
-                          className="h-full w-full object-contain"
-                          loading="lazy"
-                        />
-                      </div>
-                    ) : (
-                      <div className="grid h-[130px] place-items-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[11px] text-[var(--ui-text-subtle)]">
-                        Preview will appear after save
-                      </div>
-                    )}
+                    {(() => {
+                      const persistedImages = (project.coverImageUrls || []).filter(Boolean);
+                      const fallbackImage = project.coverImageUrl;
+                      const primaryImage = persistedImages[0] || fallbackImage;
+                      if (!primaryImage) {
+                        return (
+                          <div className="grid h-[130px] place-items-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[11px] text-[var(--ui-text-subtle)]">
+                            Preview will appear after save
+                          </div>
+                        );
+                      }
+                      const hasMultipleScreens = (project.screenCount ?? 0) > 1;
+                      const secondaryImage = persistedImages[1] || (hasMultipleScreens ? primaryImage : undefined);
+                      const frameImages = secondaryImage ? [primaryImage, secondaryImage] : [primaryImage];
+                      return (
+                        <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden r px-3 py-4">
+                          {frameImages.map((imageUrl, index) => (
+                            <div
+                              key={`${project.id}-preview-${index}`}
+                              className={`relative overflow-hidden rounded-[18px] border border-white/15 bg-[#080A12] shadow-[0_16px_30px_rgba(0,0,0,0.5)] ${frameImages.length > 1
+                                ? index === 0
+                                  ? 'h-[220px] w-[108px] -rotate-3'
+                                  : 'h-[220px] w-[108px] rotate-3'
+                                : 'h-[230px] w-[116px]'
+                                }`}
+                            >
+                              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center pt-2">
+                                <div className="h-1.5 w-10 rounded-full bg-white/20" />
+                              </div>
+                              <div className="absolute inset-[3px] overflow-hidden rounded-[15px] bg-[#121623]">
+                                <img
+                                  src={imageUrl}
+                                  alt={`${project.name} preview ${index + 1}`}
+                                  className="h-full w-full object-cover"
+                                  loading="lazy"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
