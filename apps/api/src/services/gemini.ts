@@ -619,16 +619,18 @@ export interface GenerateOptions {
     preferredModel?: string;
 }
 
-function extractInlineImageParts(images: string[]) {
-    const parts: any[] = [];
-    images.forEach((img) => {
+type InlineImagePart = { inlineData: { data: string; mimeType: string } };
+
+function extractInlineImageParts(images: string[]): InlineImagePart[] {
+    const parts: InlineImagePart[] = [];
+    for (const img of images) {
         const matches = img.match(/^data:(.+);base64,(.+)$/);
         if (matches) {
             parts.push({
                 inlineData: { data: matches[2], mimeType: matches[1] }
             });
         }
-    });
+    }
     return parts;
 }
 

@@ -277,19 +277,24 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   ))}
                 </div>
               )}
-              <div className="flex h-14 items-center rounded-full px-1">
-                {/* <Sparkles size={16} className="shrink-0 text-gray-500" /> */}
-                <input
-                  type="text"
+              <div className="flex items-end gap-2 rounded-2xl px-1">
+                <textarea
                   value={starterPrompt}
                   onChange={(event) => setStarterPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      handleCreateFromPrompt();
+                    }
+                  }}
                   placeholder="What do you want to create?"
-                  className="h-full flex-1 border-0 bg-transparent px-3 text-[16px] text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
+                  rows={3}
+                  className="min-h-[64px] max-h-[220px] flex-1 resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
                 />
                 <button
                   type="submit"
                   disabled={!starterPrompt.trim() || creatingFromPrompt}
-                  className="w-9 h-9 rounded-[12px] flex items-center justify-center transition-all bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40"
+                  className="h-9 w-9 shrink-0 rounded-[12px] flex items-center justify-center transition-all bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40"
                   title="Create project from request"
                 >
                   <ArrowUp size={18} />

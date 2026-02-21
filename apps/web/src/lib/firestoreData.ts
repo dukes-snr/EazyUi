@@ -10,12 +10,12 @@ import {
   setDoc,
   writeBatch,
 } from "firebase/firestore";
-import { deleteObject, getBytes, getDownloadURL, listAll, ref, uploadString } from "firebase/storage";
+import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "firebase/storage";
 import type { HtmlDesignSpec } from "@/api/client";
 import { db, storage } from "./firebase";
 
-const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1";
-const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1";
+const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0";
+const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS !== "0";
 let storageUploadsTemporarilyDisabled = false;
 const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
 const PROJECT_COVER_VERSION = 3;
@@ -77,6 +77,7 @@ type ProjectMetaData = {
 
 const MAX_PERSISTED_MESSAGE_CONTENT_LENGTH = 24_000;
 const MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048;
+const MAX_INLINE_CHAT_IMAGE_DATA_URL_LENGTH = 350_000;
 const MAX_PERSISTED_IMAGE_COUNT = 8;
 const MAX_PERSISTED_SCREEN_ID_COUNT = 32;
 
@@ -92,20 +93,51 @@ function sanitizeMessageContent(value: unknown): string {
   return text.slice(0, MAX_PERSISTED_MESSAGE_CONTENT_LENGTH);
 }
 
-function sanitizePersistedImages(value: unknown): string[] {
+function sanitizeChatImagesForPersistence(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
     const normalized = item.trim();
     if (!normalized) continue;
-    // Inline data URLs can be very large and break Firestore document limits.
-    if (normalized.startsWith("data:")) continue;
-    if (normalized.length > MAX_PERSISTED_IMAGE_URL_LENGTH) continue;
-    out.push(normalized);
+    if (normalized.startsWith("data:")) {
+      if (normalized.length <= MAX_INLINE_CHAT_IMAGE_DATA_URL_LENGTH) {
+        out.push(normalized);
+      }
+    } else if (normalized.length <= MAX_PERSISTED_IMAGE_URL_LENGTH) {
+      out.push(normalized);
+    }
     if (out.length >= MAX_PERSISTED_IMAGE_COUNT) break;
   }
   return out;
+}
+
+function sanitizeChatStateForSnapshot(chatState: unknown): unknown {
+  if (!chatState || typeof chatState !== "object") return null;
+  const state = chatState as { messages?: Array<Record<string, unknown>> };
+  if (!Array.isArray(state.messages)) return null;
+  return {
+    messages: state.messages.slice(-250).map((msg, index) => ({
+      id: String(msg.id || makeId()),
+      role: msg.role || "assistant",
+      content: sanitizeMessageContent(msg.content),
+      status: msg.status || "complete",
+      timestamp: normalizeTimestampMs(msg.timestamp, Date.now() + index),
+      images: [],
+      meta: sanitizePersistedMeta(msg.meta),
+    })),
+  };
+}
+
+function normalizeTimestampMs(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+  if (typeof value === "string") {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber) && asNumber > 0) return Math.floor(asNumber);
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return fallback;
 }
 
 function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
@@ -203,44 +235,155 @@ async function renderScreenImageBase64(params: {
   }
 }
 
+function stripHeavyInlineAssetsForRender(html: string): string {
+  if (!html) return html;
+  const tinyDataUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+  return html
+    .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{20000,}/g, tinyDataUrl)
+    .replace(/url\(\s*["']?data:image\/[a-zA-Z0-9.+-]+;base64,[^)]+["']?\s*\)/g, `url('${tinyDataUrl}')`);
+}
+
+function buildFallbackCoverDataUrl(params: { screenName: string; width: number; height: number; index: number }): string {
+  const safeWidth = Math.max(280, Math.min(420, params.width || 375));
+  const safeHeight = Math.max(560, Math.min(920, params.height || 812));
+  const title = (params.screenName || "Screen").replace(/[<>&"]/g, "").slice(0, 36);
+  const hue = (params.index * 37) % 360;
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="hsl(${hue}, 65%, 24%)"/>
+      <stop offset="100%" stop-color="hsl(${(hue + 40) % 360}, 70%, 12%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="${safeWidth}" height="${safeHeight}" fill="url(#bg)"/>
+  <rect x="18" y="18" width="${safeWidth - 36}" height="${safeHeight - 36}" rx="28" fill="rgba(8,10,18,0.45)" stroke="rgba(255,255,255,0.2)"/>
+  <rect x="${Math.round((safeWidth - 120) / 2)}" y="34" width="120" height="10" rx="5" fill="rgba(255,255,255,0.25)"/>
+  <text x="40" y="${Math.round(safeHeight * 0.58)}" fill="rgba(255,255,255,0.95)" font-family="Arial, sans-serif" font-size="24" font-weight="700">${title}</text>
+  <text x="40" y="${Math.round(safeHeight * 0.65)}" fill="rgba(255,255,255,0.7)" font-family="Arial, sans-serif" font-size="13">Preview placeholder</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Promise<string[]> {
   const targets = (screens || []).slice(0, 2);
   if (targets.length === 0) return [];
-  const rendered = await Promise.all(
-    targets.map(async (screen) => {
-      const base64 = await renderScreenImageBase64({
+  const rendered: string[] = [];
+  for (let index = 0; index < targets.length; index += 1) {
+    const screen = targets[index];
+    const width = Math.max(280, Math.min(420, screen.width || 375));
+    const height = Math.max(560, Math.min(920, screen.height || 812));
+    let base64 = await renderScreenImageBase64({
+      html: screen.html,
+      width,
+      height,
+    });
+    // Retry once with a smaller viewport for heavy/complex screens.
+    if (!base64) {
+      base64 = await renderScreenImageBase64({
         html: screen.html,
-        width: Math.max(280, Math.min(420, screen.width || 375)),
-        height: Math.max(560, Math.min(920, screen.height || 812)),
+        width: Math.max(280, Math.floor(width * 0.9)),
+        height: Math.max(560, Math.floor(height * 0.9)),
       });
-      return base64 ? `data:image/png;base64,${base64}` : null;
-    })
-  );
-  return rendered.filter((item): item is string => Boolean(item));
+    }
+    // Final retry with stripped inline assets to avoid oversized payload/render failures.
+    if (!base64) {
+      base64 = await renderScreenImageBase64({
+        html: stripHeavyInlineAssetsForRender(screen.html || ""),
+        width: Math.max(280, Math.floor(width * 0.9)),
+        height: Math.max(560, Math.floor(height * 0.9)),
+      });
+    }
+    if (base64) {
+      rendered.push(`data:image/png;base64,${base64}`);
+      continue;
+    }
+    rendered.push(buildFallbackCoverDataUrl({
+      screenName: String(screen.name || "Screen"),
+      width: Number(screen.width || 375),
+      height: Number(screen.height || 812),
+      index,
+    }));
+  }
+  return rendered;
 }
 
-async function deleteStorageTree(rootPath: string): Promise<void> {
-  const rootRef = ref(storage, rootPath);
-  const queue = [rootRef];
-  while (queue.length > 0) {
-    const current = queue.pop();
-    if (!current) continue;
+function resolveStorageRefFromImageValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    if (trimmed.startsWith("gs://") || trimmed.startsWith("https://firebasestorage.googleapis.com/")) {
+      return ref(storage, trimmed);
+    }
+  } catch {
+    // ignore invalid URL refs
+  }
+  return null;
+}
+
+async function persistChatImageRefs(params: {
+  uid: string;
+  projectId: string;
+  messageId: string;
+  images: unknown;
+}): Promise<string[]> {
+  const { uid, projectId, messageId, images } = params;
+  if (!ENABLE_STORAGE_UPLOADS || storageUploadsTemporarilyDisabled) return [];
+  if (!Array.isArray(images)) return [];
+  const out: string[] = [];
+  let uploadIndex = 0;
+  for (const raw of images) {
+    if (out.length >= MAX_PERSISTED_IMAGE_COUNT) break;
+    if (typeof raw !== "string") continue;
+    const image = raw.trim();
+    if (!image) continue;
+    if (!image.startsWith("data:")) {
+      if (image.length <= MAX_PERSISTED_IMAGE_URL_LENGTH) {
+        out.push(image);
+      }
+      continue;
+    }
+    const extMatch = image.match(/^data:image\/([a-z0-9.+-]+);base64,/i);
+    const ext = (extMatch?.[1] || "png").replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+    const assetPath = `chat-attachments/${messageId}-${uploadIndex}.${ext}`;
+    uploadIndex += 1;
     try {
-      const listed = await listAll(current);
-      queue.push(...listed.prefixes);
-      await Promise.all(
-        listed.items.map(async (item) => {
-          try {
-            await deleteObject(item);
-          } catch {
-            // ignore missing object cleanup errors
-          }
-        })
+      const storageRef = ref(storage, `users/${uid}/projects/${projectId}/${assetPath}`);
+      await withTimeout(
+        uploadString(storageRef, image, "data_url"),
+        STORAGE_UPLOAD_TIMEOUT_MS,
+        `Chat attachment upload (${messageId})`
       );
-    } catch {
-      // ignore list failures to keep delete best-effort
+      out.push(await getDownloadURL(storageRef));
+    } catch (error) {
+      // Skip failed attachment upload so one bad file doesn't block project save.
     }
   }
+  return out;
+}
+
+function normalizePersistedMessages(raw: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return raw
+    .sort((a, b) => {
+      const orderA = typeof a.orderIndex === "number" && Number.isFinite(a.orderIndex) ? a.orderIndex : null;
+      const orderB = typeof b.orderIndex === "number" && Number.isFinite(b.orderIndex) ? b.orderIndex : null;
+      if (orderA !== null && orderB !== null && orderA !== orderB) return orderA - orderB;
+      const timeA = normalizeTimestampMs(a.timestamp, 0);
+      const timeB = normalizeTimestampMs(b.timestamp, 0);
+      if (timeA !== timeB) return timeA - timeB;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    })
+    .map((message) => ({
+      ...message,
+      timestamp: normalizeTimestampMs(message.timestamp, 0),
+      images: Array.isArray(message.images) ? message.images.filter((img): img is string => typeof img === "string" && img.trim().length > 0) : [],
+    }));
+}
+
+async function loadPersistedProjectMessages(uid: string, projectId: string): Promise<Array<Record<string, unknown>>> {
+  const messagesSnap = await getDocs(collection(db, "users", uid, "projects", projectId, "chats", "default", "messages"));
+  const raw = messagesSnap.docs.map((d) => d.data() as Record<string, unknown>);
+  return normalizePersistedMessages(raw);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -267,10 +410,11 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   const safeDesignSpec = stripUndefinedDeep(designSpec);
   const safeCanvasDoc = canvasDoc == null ? null : stripUndefinedDeep(canvasDoc);
   const safeChatState = chatState == null ? null : stripUndefinedDeep(chatState);
+  const snapshotChatState = sanitizeChatStateForSnapshot(safeChatState);
   const snapshot: WorkspaceSnapshot = {
     designSpec: safeDesignSpec,
     canvasDoc: safeCanvasDoc,
-    chatState: safeChatState,
+    chatState: snapshotChatState,
   };
   const snapshotPath = `snapshots/latest.json`;
   let resolvedSnapshotPath: string | null = null;
@@ -296,6 +440,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   const projectRef = doc(db, "users", uid, "projects", id);
   const existing = await getDoc(projectRef);
   const existingData = existing.exists() ? (existing.data() as ProjectMetaData) : null;
+  if (!resolvedSnapshotPath && existingData?.snapshotPath) {
+    resolvedSnapshotPath = existingData.snapshotPath;
+  }
   const createdAt = existing.exists() ? (existing.data().createdAt as string) || now : now;
   const nextCoverScreenIds = (safeDesignSpec.screens || []).slice(0, 2).map((screen) => screen.screenId);
   const existingCoverScreenIds = Array.isArray(existingData?.coverScreenIds) ? existingData!.coverScreenIds! : [];
@@ -311,6 +458,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   let resolvedCoverImagePaths: string[] = existingCoverImagePaths;
   let resolvedCoverImageUrls: string[] = existingCoverImageUrls;
   let resolvedCoverImageDataUrls: string[] = existingCoverImageDataUrls;
+  let regeneratedCover = false;
   const shouldRefreshCover = nextCoverScreenIds.length > 0 && (
     (resolvedCoverImageUrls.length === 0 && resolvedCoverImageDataUrls.length === 0 && !existingData?.coverImageUrl && !existingData?.coverImageDataUrl)
     || existingCoverScreenIds.join("|") !== nextCoverScreenIds.join("|")
@@ -320,6 +468,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   if (shouldRefreshCover) {
     const coverDataUrls = await buildProjectCoverDataUrls(safeDesignSpec.screens || []);
     if (coverDataUrls.length > 0) {
+      regeneratedCover = true;
       resolvedCoverImageDataUrls = coverDataUrls;
       resolvedCoverImagePaths = [];
       resolvedCoverImageUrls = [];
@@ -353,7 +502,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   }
 
   if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
-    const staleCoverPaths = existingCoverImagePaths.filter((path) => !resolvedCoverImagePaths.includes(path));
+    const staleCoverPaths = regeneratedCover
+      ? existingCoverImagePaths.filter((path) => !resolvedCoverImagePaths.includes(path))
+      : [];
     await Promise.all(
       staleCoverPaths.map(async (path) => {
         try {
@@ -468,25 +619,75 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
 
   // Persist chat messages in a subcollection for scalable querying.
   const messages = (safeChatState as { messages?: Array<Record<string, unknown>> } | undefined)?.messages || [];
+  const chatRef = doc(db, "users", uid, "projects", id, "chats", "default");
+  await setDoc(chatRef, { id: "default", updatedAt: now }, { merge: true });
+  const existingMessagesSnap = await getDocs(collection(db, "users", uid, "projects", id, "chats", "default", "messages"));
+  const staleAttachmentRefs = new Map<string, ReturnType<typeof ref>>();
+  existingMessagesSnap.forEach((docSnap) => {
+    const persisted = docSnap.data() as { images?: unknown };
+    if (!Array.isArray(persisted.images)) return;
+    for (const image of persisted.images) {
+      if (typeof image !== "string") continue;
+      if (!image.includes("/chat-attachments/")) continue;
+      const storageRef = resolveStorageRefFromImageValue(image);
+      if (!storageRef) continue;
+      staleAttachmentRefs.set(storageRef.fullPath, storageRef);
+    }
+  });
+  if (!existingMessagesSnap.empty) {
+    const oldMessagesBatch = writeBatch(db);
+    existingMessagesSnap.forEach((docSnap) => oldMessagesBatch.delete(docSnap.ref));
+    await oldMessagesBatch.commit();
+  }
+  if (staleAttachmentRefs.size > 0) {
+    await Promise.all(
+      Array.from(staleAttachmentRefs.values()).map(async (attachmentRef) => {
+        try {
+          await deleteObject(attachmentRef);
+        } catch {
+          // ignore missing attachment cleanup errors
+        }
+      })
+    );
+  }
   if (messages.length > 0) {
-    const chatRef = doc(db, "users", uid, "projects", id, "chats", "default");
-    await setDoc(chatRef, { id: "default", updatedAt: now }, { merge: true });
     const messageBatch = writeBatch(db);
-    for (const msg of messages.slice(-250)) {
-      const msgId = String(msg.id || makeId());
+    const sourceMessages = messages.slice(-250);
+    const persistedImageMatrix = await Promise.all(
+      sourceMessages.map(async (msg, index) => {
+        const msgId = String(msg.id || makeId());
+        const directUrls = sanitizeChatImagesForPersistence(msg.images);
+        const uploadedUrls = await persistChatImageRefs({
+          uid,
+          projectId: id,
+          messageId: msgId,
+          images: msg.images,
+        });
+        const mergedImages = Array.from(new Set([...directUrls, ...uploadedUrls]));
+        return {
+          msgId,
+          orderIndex: index,
+          images: mergedImages.slice(0, MAX_PERSISTED_IMAGE_COUNT),
+          msg,
+        };
+      })
+    );
+    persistedImageMatrix.forEach(({ msgId, orderIndex, images, msg }) => {
       const msgRef = doc(db, "users", uid, "projects", id, "chats", "default", "messages", msgId);
-      const persistedImages = sanitizePersistedImages(msg.images);
       const persistedMeta = sanitizePersistedMeta(msg.meta);
+      const timestampMs = normalizeTimestampMs(msg.timestamp, Date.now());
       messageBatch.set(msgRef, stripUndefinedDeep({
         id: msgId,
         role: msg.role || "assistant",
         content: sanitizeMessageContent(msg.content),
         status: msg.status || "complete",
-        timestamp: msg.timestamp || now,
-        images: persistedImages,
+        timestamp: timestampMs,
+        timestampIso: new Date(timestampMs).toISOString(),
+        orderIndex,
+        images,
         meta: persistedMeta,
       }));
-    }
+    });
     await messageBatch.commit();
   }
 
@@ -577,10 +778,7 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
 
   let messages: Array<Record<string, unknown>> = [];
   try {
-    const messagesSnap = await getDocs(collection(db, "users", uid, "projects", projectId, "chats", "default", "messages"));
-    messages = messagesSnap.docs
-      .map((d) => d.data() as Record<string, unknown>)
-      .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+    messages = await loadPersistedProjectMessages(uid, projectId);
   } catch {
     messages = [];
   }
@@ -619,11 +817,17 @@ export async function getProjectFirestore(uid: string, projectId: string) {
   if (data.snapshotPath && ENABLE_STORAGE_RESTORE) {
     try {
       const parsed = await loadSnapshotPayload(uid, projectId, data.snapshotPath);
+      let persistedMessages: Array<Record<string, unknown>> = [];
+      try {
+        persistedMessages = await loadPersistedProjectMessages(uid, projectId);
+      } catch {
+        persistedMessages = [];
+      }
       return {
         projectId: data.id || projectId,
         designSpec: parsed.designSpec,
         canvasDoc: parsed.canvasDoc ?? null,
-        chatState: parsed.chatState ?? null,
+        chatState: persistedMessages.length > 0 ? { messages: persistedMessages } : (parsed.chatState ?? null),
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -692,18 +896,65 @@ export async function deleteProjectFirestore(uid: string, projectId: string): Pr
   const snap = await getDoc(projectRef);
   if (!snap.exists()) return false;
   const data = snap.data() as { snapshotPath?: string };
-
-  await deleteStorageTree(`users/${uid}/projects/${projectId}`);
+  const screensSnap = await getDocs(collection(db, "users", uid, "projects", projectId, "screens"));
 
   // Best-effort subcollection cleanup.
   await deleteCollectionDocs(["users", uid, "projects", projectId, "screens"]);
   const chats = await getDocs(collection(db, "users", uid, "projects", projectId, "chats"));
+  const chatAttachmentRefs = new Map<string, ReturnType<typeof ref>>();
   for (const chat of chats.docs) {
+    const messagesSnap = await getDocs(collection(db, "users", uid, "projects", projectId, "chats", chat.id, "messages"));
+    messagesSnap.forEach((msgDoc) => {
+      const msg = msgDoc.data() as { images?: unknown };
+      if (!Array.isArray(msg.images)) return;
+      for (const image of msg.images) {
+        if (typeof image !== "string") continue;
+        if (!image.includes(`/users/${uid}/projects/${projectId}/`)) continue;
+        const storageRef = resolveStorageRefFromImageValue(image);
+        if (!storageRef) continue;
+        chatAttachmentRefs.set(storageRef.fullPath, storageRef);
+      }
+    });
     await deleteCollectionDocs(["users", uid, "projects", projectId, "chats", chat.id, "messages"]);
     await deleteDoc(chat.ref);
   }
   await deleteCollectionDocs(["users", uid, "projects", projectId, "sessions"]);
-  void data; // metadata kept for compatibility; storage cleanup now uses full tree delete
+  if (data.snapshotPath) {
+    try {
+      await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${data.snapshotPath}`));
+    } catch {
+      // ignore missing snapshot cleanup errors
+    }
+  }
+  const projectMeta = snap.data() as { coverImagePath?: string; coverImagePaths?: string[] };
+  const coverPaths = Array.isArray(projectMeta.coverImagePaths)
+    ? projectMeta.coverImagePaths
+    : (projectMeta.coverImagePath ? [projectMeta.coverImagePath] : []);
+  for (const coverPath of coverPaths) {
+    if (!coverPath) continue;
+    try {
+      await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${coverPath}`));
+    } catch {
+      // ignore missing cover cleanup errors
+    }
+  }
+  for (const d of screensSnap.docs) {
+    const s = d.data() as { htmlPath?: string };
+    if (s.htmlPath) {
+      try {
+        await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${s.htmlPath}`));
+      } catch {
+        // ignore missing screen html cleanup errors
+      }
+    }
+  }
+  for (const attachmentRef of chatAttachmentRefs.values()) {
+    try {
+      await deleteObject(attachmentRef);
+    } catch {
+      // ignore missing attachment cleanup errors
+    }
+  }
   await deleteDoc(projectRef);
   return true;
 }

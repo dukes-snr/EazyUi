@@ -408,6 +408,20 @@ textarea::placeholder {
   animation-play-state: paused;
 }
 
+.canvas-profile-trigger-2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 999px;
+  /* background: var(--ui-canvas-profile-bg); */
+  /* border: 1px solid var(--ui-canvas-profile-border); */
+  color: var(--ui-text);
+  /* box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18); */
+  /* backdrop-filter: blur(10px); */
+}
+
 .canvas-profile-trigger {
   display: inline-flex;
   align-items: center;
@@ -415,7 +429,7 @@ textarea::placeholder {
   min-height: 44px;
   padding: 6px 10px 6px 6px;
   border-radius: 999px;
-  background: var(--ui-canvas-profile-bg);
+  background: var(--ui-canvas-profile-bg); 
   border: 1px solid var(--ui-canvas-profile-border);
   color: var(--ui-text);
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.18);

@@ -150,7 +150,7 @@ export function CanvasProfileMenu() {
     return (
         <>
             <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
-                <div className="canvas-profile-trigger px-2.5 gap-2">
+                <div className="canvas-profile-trigger-2 px-2.5 gap-2">
                     <button
                         type="button"
                         onClick={() => void handleSaveNow()}
