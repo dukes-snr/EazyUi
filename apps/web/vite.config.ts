@@ -22,6 +22,8 @@ export default defineConfig({
         }
     },
     build: {
-        target: 'esnext'
+        target: 'esnext',
+        outDir: path.resolve(__dirname, '../../dist'),
+        emptyOutDir: true,
     }
 });
