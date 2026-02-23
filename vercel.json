@@ -1,6 +1,6 @@
 {
   "installCommand": "npm install --include=dev --workspace=@eazyui/web --workspace=@eazyui/shared --workspace=@eazyui/renderer --include-workspace-root",
-  "buildCommand": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web",
+  "buildCommand": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web && [ -d apps/web/dist ] && rm -rf dist && cp -r apps/web/dist dist || true",
   "outputDirectory": "dist",
   "functions": {
     "api/[...path].ts": {
