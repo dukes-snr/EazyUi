@@ -1,6 +1,6 @@
 {
   "installCommand": "npm install --include=dev --workspace=@eazyui/web --workspace=@eazyui/shared --workspace=@eazyui/renderer --include-workspace-root",
-  "buildCommand": "bash scripts/vercel-build.sh",
+  "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist",
   "functions": {
     "api/[...path].ts": {
