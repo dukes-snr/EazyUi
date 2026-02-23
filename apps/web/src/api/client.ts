@@ -5,7 +5,7 @@
 import { auth } from '@/lib/firebase';
 import { deleteProjectFirestore, getProjectFirestore, listProjectsFirestore, saveProjectFirestore } from '@/lib/firestoreData';
 
-const API_BASE = '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api';
 
 // Types matching the backend
 export interface HtmlScreen {
