@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm install --workspaces --include-workspace-root",
+  "installCommand": "npm install --workspace=@eazyui/web --workspace=@eazyui/shared --workspace=@eazyui/renderer --include-workspace-root",
   "functions": {
     "api/[...path].ts": {
       "maxDuration": 300
