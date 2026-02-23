@@ -14,7 +14,6 @@
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:api": "npm run dev --workspace=apps/api",
     "build": "npm run build --workspaces --if-present",
-    "build:vercel": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web && if [ -d apps/web/dist ]; then rm -rf dist && cp -r apps/web/dist dist; fi",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },
