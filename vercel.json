@@ -1,6 +1,6 @@
 {
   "installCommand": "npm install --include=dev --workspace=@eazyui/web --workspace=@eazyui/shared --workspace=@eazyui/renderer --include-workspace-root",
-  "buildCommand": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web && rm -rf .vercel-dist && (cp -r apps/web/dist .vercel-dist || cp -r dist .vercel-dist) && rm -rf dist && mv .vercel-dist dist",
+  "buildCommand": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web && OUT_DIR=$( [ -d apps/web/dist ] && echo apps/web/dist || ([ -d dist ] && echo dist || echo '') ) && [ -n \"$OUT_DIR\" ] && rm -rf .vercel-dist && cp -r \"$OUT_DIR\" .vercel-dist && rm -rf dist && mv .vercel-dist dist",
   "outputDirectory": "dist",
   "functions": {
     "api/[...path].ts": {
