@@ -420,7 +420,8 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   };
   const snapshotPath = `snapshots/latest.json`;
   let resolvedSnapshotPath: string | null = null;
-  if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
+  const canAttemptSnapshotUpload = ENABLE_STORAGE_UPLOADS && (!storageUploadsTemporarilyDisabled || !isAutosave);
+  if (canAttemptSnapshotUpload) {
     try {
       const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
       await withTimeout(
@@ -431,6 +432,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
         "Snapshot upload"
       );
       resolvedSnapshotPath = snapshotPath;
+      if (!isAutosave) {
+        storageUploadsTemporarilyDisabled = false;
+      }
     } catch (error) {
       if (isStorageCorsOrNetworkError(error)) {
         storageUploadsTemporarilyDisabled = true;

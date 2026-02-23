@@ -21,7 +21,7 @@
 /* Premium iPhone Frame */
 .iphone-frame {
     position: relative;
-    z-index: 10;
+    z-index: 20;
     /* aspect-ratio: 37/76; REMOVED to allow flexible widths (Tablets) */
     background: #000;
     border-radius: var(--custom-radius, var(--iphone-radius));

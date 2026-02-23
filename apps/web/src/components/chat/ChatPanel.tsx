@@ -3,10 +3,10 @@
 // ============================================================================
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore } from '../../stores';
+import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type HtmlScreen } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle } from 'lucide-react';
+import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -48,10 +48,17 @@ const INITIAL_MESSAGE_RENDER_COUNT = 36;
 const MESSAGE_RENDER_STEP = 24;
 
 function injectThumbScrollbarHide(html: string) {
-    // Thumbnails should never execute arbitrary scripts.
-    // Remove script blocks and inline on* handlers before mounting in an iframe.
-    const sanitizedHtml = String(html || '')
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    // Keep style-critical Tailwind runtime scripts so thumbnails preserve visual styling,
+    // but strip unrelated scripts and inline event handlers.
+    const rawHtml = String(html || '');
+    const sanitizedHtml = rawHtml
+        .replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs = '', body = '') => {
+            const attrText = String(attrs).toLowerCase();
+            const bodyText = String(body).toLowerCase();
+            const hasTailwindSrc = /src\s*=\s*["'][^"']*cdn\.tailwindcss\.com[^"']*["']/.test(attrText);
+            const isTailwindConfig = bodyText.includes('tailwind.config');
+            return (hasTailwindSrc || isTailwindConfig) ? full : '';
+        })
         .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
     const styleTag = `
 <style>
@@ -529,9 +536,13 @@ function ScreenReferenceThumb({
         return () => observer.disconnect();
     }, [mountIframe]);
 
-    const sourceW = preview?.width || 375;
-    const sourceH = preview?.height || 812;
-    const thumbH = preview ? Math.max(1, Math.round(thumbWidth * (sourceH / sourceW))) : 170;
+    const sourceW = Math.max(280, Math.min(1440, preview?.width || 375));
+    const rawSourceH = preview?.height || 812;
+    // Clamp very tall captured screens so thumbnails remain readable and stable.
+    const sourceH = Math.max(Math.round(sourceW * 1.1), Math.min(rawSourceH, Math.round(sourceW * 2.2)));
+    const thumbH = preview
+        ? Math.max(96, Math.min(150, Math.round(thumbWidth * (sourceH / sourceW))))
+        : 120;
     const scale = Math.min(thumbWidth / sourceW, thumbH / sourceH);
     const scaledW = Math.max(1, Math.floor(sourceW * scale));
     const scaledH = Math.max(1, Math.floor(sourceH * scale));
@@ -557,7 +568,7 @@ function ScreenReferenceThumb({
                             <iframe
                                 srcDoc={injectThumbScrollbarHide(preview.html)}
                                 title={`preview-${screenId}`}
-                                sandbox=""
+                                sandbox="allow-scripts allow-same-origin"
                                 scrolling="no"
                                 className="pointer-events-none absolute"
                                 style={{
@@ -653,9 +664,48 @@ function renderPlainChunk(text: string, keyPrefix: string): ReactNode[] {
     });
 }
 
+function normalizeSupportedHtmlTags(text: string): string {
+    return text
+        .replace(/<\s*ul(?:\s[^>]*)?>/gi, '[ul]')
+        .replace(/<\s*\/\s*ul\s*>/gi, '[/ul]')
+        .replace(/<\s*li(?:\s[^>]*)?>/gi, '[li]')
+        .replace(/<\s*\/\s*li\s*>/gi, '[/li]');
+}
+
+function renderListItems(text: string, keyPrefix: string): ReactNode[] {
+    const items: ReactNode[] = [];
+    const liPattern = /\[li\]([\s\S]*?)\[\/li\]/gi;
+    let match: RegExpExecArray | null;
+    let key = 0;
+
+    while ((match = liPattern.exec(text)) !== null) {
+        const content = match[1].trim();
+        if (!content) continue;
+        items.push(
+            <li key={`${keyPrefix}-li-${key++}`} className="text-[13px] text-[var(--ui-text)] leading-relaxed">
+                {renderInlineRichText(content)}
+            </li>
+        );
+    }
+
+    if (items.length > 0) {
+        return items;
+    }
+
+    return text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.startsWith('- '))
+        .map((line, idx) => (
+            <li key={`${keyPrefix}-li-fallback-${idx}`} className="text-[13px] text-[var(--ui-text)] leading-relaxed">
+                {renderInlineRichText(line.slice(2).trim())}
+            </li>
+        ));
+}
+
 function renderTaggedDescription(text: string): ReactNode {
-    const source = text || '';
-    const blockPattern = /\[(h1|h2|h3|p|li)\]([\s\S]*?)\[\/\1\]/gi;
+    const source = normalizeSupportedHtmlTags(text || '');
+    const blockPattern = /\[(h1|h2|h3|p|li|ul)\]([\s\S]*?)\[\/\1\]/gi;
     const nodes: ReactNode[] = [];
     let match: RegExpExecArray | null;
     let key = 0;
@@ -675,6 +725,16 @@ function renderTaggedDescription(text: string): ReactNode {
         if (tag === 'h3') nodes.push(<h3 key={`h3-${key++}`} className="text-[13px] font-semibold text-[var(--ui-text)] mb-1">{inline}</h3>);
         if (tag === 'p') nodes.push(<p key={`p-${key++}`} className="mb-1.5 text-[13px] text-[var(--ui-text)] leading-relaxed">{inline}</p>);
         if (tag === 'li') nodes.push(<li key={`li-${key++}`} className="ml-4 list-disc mb-1 text-[13px] text-[var(--ui-text)]">{inline}</li>);
+        if (tag === 'ul') {
+            const listItems = renderListItems(content, `ul-${key}`);
+            if (listItems.length > 0) {
+                nodes.push(
+                    <ul key={`ul-${key++}`} className="mb-2 ml-5 list-disc space-y-1 marker:text-[var(--ui-text-muted)]">
+                        {listItems}
+                    </ul>
+                );
+            }
+        }
         cursor = match.index + match[0].length;
     }
 
@@ -981,6 +1041,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
     const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
     const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_MESSAGE_RENDER_COUNT);
+    const [isTitleEditing, setIsTitleEditing] = useState(false);
+    const [titleDraft, setTitleDraft] = useState('');
+    const [isTitleSaving, setIsTitleSaving] = useState(false);
+    const [showScrollToLatest, setShowScrollToLatest] = useState(false);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -989,6 +1053,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const previousScrollMessageLengthRef = useRef(0);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
@@ -999,9 +1064,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
-    const { setBoards, setFocusNodeId, setFocusNodeIds, removeBoard } = useCanvasStore();
+    const { setBoards, setFocusNodeId, setFocusNodeIds, removeBoard, doc } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
     const { modelProfile, setModelProfile, pushToast, removeToast } = useUiStore();
+    const { projectId, markSaved, setSaving } = useProjectStore();
     const assistantMsgIdRef = useRef<string>('');
     const notificationGuideShownRef = useRef(false);
     const generationLoadingToastRef = useRef<string | null>(null);
@@ -1023,6 +1089,17 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!targetRef.current) return;
         removeToast(targetRef.current);
         targetRef.current = null;
+    };
+
+    const isNearBottom = () => {
+        const el = messagesContainerRef.current;
+        if (!el) return true;
+        const distance = el.scrollHeight - (el.scrollTop + el.clientHeight);
+        return distance <= 96;
+    };
+
+    const scrollToLatest = (behavior: ScrollBehavior = 'smooth') => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
     };
 
     const ensureNotificationPermission = async () => {
@@ -1123,14 +1200,78 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             let changed = false;
             Object.entries(assistantBranchesByUser).forEach(([userId, branchIds]) => {
                 const existing = prev[userId];
-                const value = existing && branchIds.includes(existing) ? existing : branchIds[branchIds.length - 1];
+                const preferredId = [...branchIds].reverse().find((id) => {
+                    const msg = messages.find((m) => m.id === id);
+                    if (!msg || msg.role !== 'assistant') return false;
+                    const status = msg.status || 'complete';
+                    if (status !== 'complete' && status !== 'error') return false;
+                    return String(msg.content || '').trim().length > 0;
+                }) || branchIds[branchIds.length - 1];
+                const value = existing && branchIds.includes(existing) ? existing : preferredId;
                 if (existing !== value) changed = true;
                 if (value) next[userId] = value;
             });
             if (Object.keys(prev).length !== Object.keys(next).length) changed = true;
             return changed ? next : prev;
         });
-    }, [assistantBranchesByUser]);
+    }, [assistantBranchesByUser, messages]);
+
+    useEffect(() => {
+        if (isTitleEditing) return;
+        setTitleDraft(spec?.name?.trim() || '');
+    }, [spec?.name, isTitleEditing]);
+
+    const commitProjectTitle = async () => {
+        if (!spec) return;
+        const nextName = titleDraft.trim();
+        if (!nextName) {
+            pushToast({
+                kind: 'error',
+                title: 'Project name required',
+                message: 'Enter a project name before saving.',
+            });
+            return;
+        }
+        if (nextName === (spec.name || '').trim()) {
+            setIsTitleEditing(false);
+            return;
+        }
+
+        const renamedSpec = {
+            ...spec,
+            name: nextName,
+            updatedAt: new Date().toISOString(),
+        };
+        useDesignStore.getState().setSpec(renamedSpec);
+        setIsTitleEditing(false);
+
+        try {
+            setIsTitleSaving(true);
+            setSaving(true);
+            const saved = await apiClient.save({
+                projectId: projectId || undefined,
+                designSpec: renamedSpec as any,
+                canvasDoc: doc,
+                chatState: { messages: useChatStore.getState().messages },
+                mode: 'manual',
+            });
+            markSaved(saved.projectId, saved.savedAt);
+            pushToast({
+                kind: 'success',
+                title: 'Project renamed',
+                message: `Saved as "${nextName}".`,
+            });
+        } catch (error) {
+            setSaving(false);
+            pushToast({
+                kind: 'error',
+                title: 'Rename save failed',
+                message: (error as Error).message || 'Could not persist the new project name.',
+            });
+        } finally {
+            setIsTitleSaving(false);
+        }
+    };
 
     const setActiveBranchForUser = (userId: string, assistantId: string) => {
         setActiveAssistantByUser((prev) => ({ ...prev, [userId]: assistantId }));
@@ -1236,14 +1377,26 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         return messages.slice(-renderedMessageCount);
     }, [messages, renderedMessageCount]);
 
-    // Auto-scroll to bottom
+    // Auto-scroll to latest message on load/new message updates.
     useEffect(() => {
-        if (!messagesEndRef.current) return;
+        if (!messagesEndRef.current || !messagesContainerRef.current) return;
         const previousLength = previousScrollMessageLengthRef.current;
         const largeJump = messages.length - previousLength > 12;
         previousScrollMessageLengthRef.current = messages.length;
-        messagesEndRef.current.scrollIntoView({ behavior: largeJump ? 'auto' : 'smooth' });
+        scrollToLatest(largeJump ? 'auto' : 'smooth');
+        setShowScrollToLatest(false);
     }, [messages.length]);
+
+    useEffect(() => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const onScroll = () => {
+            setShowScrollToLatest(!isNearBottom());
+        };
+        onScroll();
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, [messages.length, renderedMessageCount, isCollapsed]);
 
     useEffect(() => {
         if (!isGenerating) return;
@@ -2747,10 +2900,45 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                     {/* Header / Date */}
                     <div className="py-4 px-5 flex items-center justify-between sticky top-0 z-10 bg-transparent">
-                        <div className="leading-tight">
+                        <div className="leading-tight group/title">
                             <div className="inline-flex items-center gap-2">
                                 <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                                <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
+                                {isTitleEditing ? (
+                                    <input
+                                        autoFocus
+                                        value={titleDraft}
+                                        onChange={(event) => setTitleDraft(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault();
+                                                void commitProjectTitle();
+                                            }
+                                            if (event.key === 'Escape') {
+                                                setIsTitleEditing(false);
+                                                setTitleDraft(spec?.name?.trim() || '');
+                                            }
+                                        }}
+                                        onBlur={() => void commitProjectTitle()}
+                                        className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold tracking-wide text-[var(--ui-text)] outline-none"
+                                        placeholder="Project name"
+                                        disabled={isTitleSaving}
+                                    />
+                                ) : (
+                                    <>
+                                        <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setTitleDraft(spec?.name?.trim() || '');
+                                                setIsTitleEditing(true);
+                                            }}
+                                            className="p-1 rounded-md text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] opacity-0 group-hover/title:opacity-100 transition-opacity"
+                                            title="Edit project name"
+                                        >
+                                            <Pencil size={12} />
+                                        </button>
+                                    </>
+                                )}
                             </div>
                             <p className="text-[10px] font-medium text-[var(--ui-text-subtle)] uppercase tracking-[0.12em]">
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
@@ -2768,7 +2956,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     </div>
 
                     {/* Messages */}
-                    <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide">
+                    <div
+                        ref={messagesContainerRef}
+                        className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide"
+                    >
                         {hiddenMessageCount > 0 && (
                             <div className="flex justify-center">
                                 <button
@@ -3081,6 +3272,20 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         })}
                         <div ref={messagesEndRef} />
                     </div>
+
+                    {showScrollToLatest && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                scrollToLatest('smooth');
+                                setShowScrollToLatest(false);
+                            }}
+                            className="absolute right-6 bottom-[118px] z-20 h-9 w-9 rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] shadow-lg hover:bg-[var(--ui-surface-4)] transition-colors inline-flex items-center justify-center"
+                            title="Scroll to latest"
+                        >
+                            <ArrowDown size={16} />
+                        </button>
+                    )}
 
                     {/* Chat Input Container */}
                     <div className="mx-4 mb-6 relative bg-[var(--ui-surface-1)] rounded-[20px] border border-[var(--ui-border)] p-3 shadow-2xl transition-all flex flex-col gap-2">

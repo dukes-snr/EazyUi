@@ -37,6 +37,36 @@ interface ChatState {
     abortGeneration: () => void;
 }
 
+function normalizeHydratedMessages(messages: ChatMessage[]): ChatMessage[] {
+    const loadingOnlyPatterns = [
+        /^warming up/i,
+        /^planning your flow/i,
+        /^working on your screens/i,
+        /^rendering remaining screens/i,
+        /^updating\.\.\./i,
+        /^applying edits/i,
+    ];
+
+    return messages.map((message) => {
+        if (message.role !== 'assistant') return message;
+        if (message.status !== 'pending' && message.status !== 'streaming') return message;
+
+        const content = String(message.content || '').trim();
+        const isLoadingOnly = loadingOnlyPatterns.some((pattern) => pattern.test(content));
+        const hasMeaningfulContent = content.length > 0 && !isLoadingOnly;
+
+        if (hasMeaningfulContent) {
+            return { ...message, status: 'complete' };
+        }
+
+        return {
+            ...message,
+            status: 'complete',
+            content: 'Screens finished rendering. This response was restored after reload.',
+        };
+    });
+}
+
 export const useChatStore = create<ChatState>((set) => ({
     messages: [],
     isGenerating: false,
@@ -78,7 +108,9 @@ export const useChatStore = create<ChatState>((set) => ({
     clearMessages: () => set({ messages: [] }),
     setMessages: (messages) => set({ messages }),
     hydrateSession: (payload) => set({
-        messages: Array.isArray(payload?.messages) ? payload!.messages : [],
+        messages: Array.isArray(payload?.messages)
+            ? normalizeHydratedMessages(payload!.messages)
+            : [],
         isGenerating: false,
         abortController: null,
     }),

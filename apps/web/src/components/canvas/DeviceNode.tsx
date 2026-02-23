@@ -909,6 +909,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
     const frameWidth = width + (isDesktop ? 0 : borderWidth * 2);
     const frameHeight = displayHeight + (isDesktop ? 40 : borderWidth * 2); // 40px for browser header
+    const screenRadius = isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)';
+    const contentClipRadius = isDesktop ? '0 0 12px 12px' : screenRadius;
 
     // Unified premium frame
 
@@ -971,9 +973,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         bottom: borderWidth,
                         left: borderWidth,
                         right: borderWidth,
-                        borderRadius: isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)',
+                        borderRadius: screenRadius,
                         overflow: 'hidden',
                         isolation: 'isolate',
+                        clipPath: `inset(0 round ${screenRadius})`,
+                        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                     }}
                 >
                     {/* Desktop Browser Header */}
@@ -1001,7 +1005,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             right: 0,
                             bottom: 0,
                             overflow: 'hidden',
-                            borderRadius: isDesktop ? '0 0 12px 12px' : 'inherit',
+                            borderRadius: contentClipRadius,
+                            clipPath: `inset(0 round ${contentClipRadius})`,
+                            WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                         }}
                     >
                         <div
@@ -1045,7 +1051,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 border: 'none',
                                 display: 'block',
                                 overflow: 'hidden',
-                                borderRadius: 'inherit',
+                                borderRadius: contentClipRadius,
+                                clipPath: `inset(0 round ${contentClipRadius})`,
                                 pointerEvents: isEditingScreen ? 'auto' : 'none',
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',
