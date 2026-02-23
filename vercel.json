@@ -1,4 +1,5 @@
 {
+  "installCommand": "npm install --workspaces --include-workspace-root",
   "functions": {
     "api/[...path].ts": {
       "maxDuration": 300
