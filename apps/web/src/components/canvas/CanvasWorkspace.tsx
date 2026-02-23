@@ -2,7 +2,7 @@
 // Canvas Workspace Component - Interactive React Flow Canvas
 // ============================================================================
 
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback, useEffect, useRef } from 'react';
 import {
     ReactFlow,
     Background,
@@ -33,12 +33,13 @@ const nodeTypes = {
 // Inner component to use React Flow hooks if needed
 function CanvasWorkspaceContent() {
     const { spec } = useDesignStore();
-    const { projectId } = useProjectStore();
+    const { projectId, isHydrating } = useProjectStore();
     const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, focusNodeIds, setFocusNodeIds, lastExternalUpdate } = useCanvasStore();
     const { isEditMode } = useEditStore();
     const { isGenerating } = useChatStore();
     const { recordSnapshot } = useHistoryStore();
     const { setCenter, fitView, setViewport } = useReactFlow();
+    const autoFocusedProjectIdRef = useRef<string | null>(null);
 
     const getNodeSize = useCallback((node: Node) => {
         const width = node.measured?.width ?? (node.data?.width as number) ?? 375;
@@ -62,7 +63,7 @@ function CanvasWorkspaceContent() {
         };
     }, []);
 
-    const focusNodesTopAligned = useCallback((targetNodes: Node[], duration = 800) => {
+    const focusNodesTopAligned = useCallback((targetNodes: Node[], duration = 800, includeToolbarChrome = false) => {
         if (!targetNodes.length) return;
 
         let minX = Infinity;
@@ -79,13 +80,16 @@ function CanvasWorkspaceContent() {
         });
 
         const boundsWidth = Math.max(1, maxX - minX);
+        const boundsHeight = Math.max(1, maxY - minY);
         const viewport = getCanvasViewportSize();
-        const sidePadding = 72;
-        const topPadding = 40;
+        const sidePadding = includeToolbarChrome ? 110 : 72;
+        const topPadding = includeToolbarChrome ? 132 : 40;
+        const bottomPadding = includeToolbarChrome ? 56 : 40;
 
-        // For desktop focus, fit mostly by width and keep top in view.
+        // Fit by both width/height so multi-screen focus reliably keeps all frames visible.
         const zoomByWidth = (viewport.width - sidePadding * 2) / boundsWidth;
-        const zoom = Math.max(0.05, Math.min(1.1, zoomByWidth));
+        const zoomByHeight = (viewport.height - topPadding - bottomPadding) / boundsHeight;
+        const zoom = Math.max(0.05, Math.min(1.1, Math.min(zoomByWidth, zoomByHeight)));
 
         const x = viewport.width / 2 - ((minX + boundsWidth / 2) * zoom);
         const y = topPadding - minY * zoom;
@@ -134,7 +138,7 @@ function CanvasWorkspaceContent() {
                 const isDesktopNode = width >= 1024;
 
                 if (isDesktopNode) {
-                    focusNodesTopAligned([targetNode], 800);
+                    focusNodesTopAligned([targetNode], 800, true);
                 } else {
                     const centerX = targetNode.position.x + width / 2;
                     const centerY = targetNode.position.y + height / 2;
@@ -171,7 +175,7 @@ function CanvasWorkspaceContent() {
         });
 
         if (hasDesktop) {
-            focusNodesTopAligned(targetNodes, 900);
+            focusNodesTopAligned(targetNodes, 900, true);
         } else {
             fitView({
                 nodes: existing.map((id) => ({ id })),
@@ -183,6 +187,21 @@ function CanvasWorkspaceContent() {
         selectNodes(existing);
         setFocusNodeIds(null);
     }, [focusNodeIds, fitView, focusNodesTopAligned, getNodeSize, nodes, selectNodes, setFocusNodeIds]);
+
+    // After a project finishes loading, focus all screens with room for device toolbar chrome.
+    useEffect(() => {
+        if (isHydrating) {
+            autoFocusedProjectIdRef.current = null;
+        }
+    }, [isHydrating]);
+
+    useEffect(() => {
+        if (isHydrating) return;
+        if (!projectId || nodes.length === 0) return;
+        if (autoFocusedProjectIdRef.current === projectId) return;
+        focusNodesTopAligned(nodes, 900, true);
+        autoFocusedProjectIdRef.current = projectId;
+    }, [isHydrating, projectId, nodes, focusNodesTopAligned]);
 
     // Update nodes when structure or selection changes
     // But avoid resetting positions while users are interacting via React Flow

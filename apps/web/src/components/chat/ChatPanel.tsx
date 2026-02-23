@@ -48,19 +48,11 @@ const INITIAL_MESSAGE_RENDER_COUNT = 36;
 const MESSAGE_RENDER_STEP = 24;
 
 function injectThumbScrollbarHide(html: string) {
-    const warningFilterScript = `
-<script>
-  (function () {
-    const blocked = 'cdn.tailwindcss.com should not be used in production';
-    const originalWarn = console.warn;
-    console.warn = function (...args) {
-      const first = String(args && args.length ? args[0] : '');
-      if (first.includes(blocked)) return;
-      return originalWarn.apply(console, args);
-    };
-  })();
-</script>`;
-
+    // Thumbnails should never execute arbitrary scripts.
+    // Remove script blocks and inline on* handlers before mounting in an iframe.
+    const sanitizedHtml = String(html || '')
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
     const styleTag = `
 <style>
   ::-webkit-scrollbar { width: 0; height: 0; }
@@ -68,10 +60,10 @@ function injectThumbScrollbarHide(html: string) {
   html, body { -ms-overflow-style: none; scrollbar-width: none; overflow: hidden; }
 </style>`;
 
-    if (html.includes('</head>')) {
-        return html.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
+    if (sanitizedHtml.includes('</head>')) {
+        return sanitizedHtml.replace('</head>', `${styleTag}\n</head>`);
     }
-    return `${warningFilterScript}\n${styleTag}\n${html}`;
+    return `${styleTag}\n${sanitizedHtml}`;
 }
 
 function normalizePlaceholderCatalogInHtml(html: string): string {
@@ -565,7 +557,7 @@ function ScreenReferenceThumb({
                             <iframe
                                 srcDoc={injectThumbScrollbarHide(preview.html)}
                                 title={`preview-${screenId}`}
-                                sandbox="allow-scripts"
+                                sandbox=""
                                 scrolling="no"
                                 className="pointer-events-none absolute"
                                 style={{

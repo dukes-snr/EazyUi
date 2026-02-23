@@ -123,6 +123,7 @@ export interface SaveRequest {
     designSpec: HtmlDesignSpec;
     canvasDoc?: unknown;
     chatState?: unknown;
+    mode?: 'manual' | 'autosave';
 }
 
 export interface SaveResponse {
@@ -346,6 +347,7 @@ class ApiClient {
             designSpec: request.designSpec,
             canvasDoc: request.canvasDoc,
             chatState: request.chatState,
+            mode: request.mode,
         });
     }
 

@@ -943,7 +943,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 style={{
                     width: frameWidth,
                     height: frameHeight,
-                    ['--custom-radius' as any]: isDesktop ? '16px' : '44px'
+                    ['--custom-radius' as any]: isDesktop ? '16px' : '44px',
+                    ['--device-bezel-width' as any]: `${borderWidth}px`,
                 }}
             >
                 {/* Hardware Buttons (Mobile/Tablet only) */}
@@ -970,8 +971,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         bottom: borderWidth,
                         left: borderWidth,
                         right: borderWidth,
-                        borderRadius: isDesktop ? '12px' : 'calc(var(--iphone-radius) - 6px)',
+                        borderRadius: isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)',
                         overflow: 'hidden',
+                        isolation: 'isolate',
                     }}
                 >
                     {/* Desktop Browser Header */}
@@ -991,7 +993,17 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         </div>
                     )}
 
-                    <div style={{ position: 'absolute', top: isDesktop && showBrowserHeader ? 40 : 0, left: 0, right: 0, bottom: 0 }}>
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: isDesktop && showBrowserHeader ? 40 : 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            overflow: 'hidden',
+                            borderRadius: isDesktop ? '0 0 12px 12px' : 'inherit',
+                        }}
+                    >
                         <div
                             style={{
                                 position: 'absolute',
@@ -1031,6 +1043,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 width: '100%',
                                 height: '100%',
                                 border: 'none',
+                                display: 'block',
+                                overflow: 'hidden',
+                                borderRadius: 'inherit',
                                 pointerEvents: isEditingScreen ? 'auto' : 'none',
                                 opacity: isStreaming ? 0 : 1,
                                 transition: 'opacity 0.5s ease-in-out',

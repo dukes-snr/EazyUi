@@ -261,6 +261,7 @@ function App() {
                     designSpec: spec as any,
                     canvasDoc: doc,
                     chatState: { messages },
+                    mode: 'autosave',
                 });
                 lastSavedFingerprintRef.current = getProjectFingerprint(spec as any, doc as any, messages as any);
                 hydratedProjectIdRef.current = saved.projectId;

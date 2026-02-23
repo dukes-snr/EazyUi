@@ -54,7 +54,7 @@
 .iphone-bezel {
     position: absolute;
     inset: 0;
-    border: var(--iphone-bezel) solid #000;
+    border: var(--device-bezel-width, var(--iphone-bezel)) solid #000;
     border-radius: var(--custom-radius, var(--iphone-radius));
     pointer-events: none;
     z-index: 20;
@@ -67,6 +67,8 @@
     inset: 0;
     border-radius: calc(var(--iphone-radius) - 2px);
     overflow: hidden;
+    isolation: isolate;
+    contain: paint;
     background: #000;
 }
 
