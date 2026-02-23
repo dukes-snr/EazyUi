@@ -1,6 +1,7 @@
 {
   "installCommand": "npm install --include=dev --workspace=@eazyui/web --workspace=@eazyui/shared --workspace=@eazyui/renderer --include-workspace-root",
   "buildCommand": "npm run build --workspace=@eazyui/shared && npm run build --workspace=@eazyui/renderer && npm run build --workspace=@eazyui/web",
+  "outputDirectory": "apps/web/dist",
   "functions": {
     "api/[...path].ts": {
       "maxDuration": 300
