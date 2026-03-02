@@ -75,15 +75,6 @@ function injectThumbScrollbarHide(html: string) {
 
 function normalizePlaceholderCatalogInHtml(html: string): string {
     if (!html || !/<img\b/i.test(html)) return html;
-    const generic = [
-        'https://placehold.net/1200x600.png',
-        'https://placehold.net/800x600.png',
-        'https://placehold.net/600x400.png',
-        'https://placehold.net/600x800.png',
-        'https://placehold.net/400x600.png',
-        'https://placehold.net/600x600.png',
-        'https://placehold.net/400x400.png',
-    ];
     const map = [
         'https://placehold.net/map-1200x600.png',
         'https://placehold.net/map-600x400.png',
@@ -91,41 +82,28 @@ function normalizePlaceholderCatalogInHtml(html: string): string {
         'https://placehold.net/map-600x600.png',
         'https://placehold.net/map-400x400.png',
     ];
-    const avatar = [
-        'https://placehold.net/avatar.svg',
-        'https://placehold.net/avatar.png',
-        'https://placehold.net/avatar-2.svg',
-        'https://placehold.net/avatar-2.png',
-        'https://placehold.net/avatar-3.svg',
-        'https://placehold.net/avatar-3.png',
-        'https://placehold.net/avatar-4.svg',
-        'https://placehold.net/avatar-4.png',
-        'https://placehold.net/avatar-5.svg',
-        'https://placehold.net/avatar-5.png',
-    ];
-    const allowed = new Set([...generic, ...map, ...avatar]);
-    let g = 0;
     let m = 0;
-    let a = 0;
 
     return html.replace(/<img\b[^>]*>/gi, (tag) => {
         const srcMatch = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i);
         const currentSrc = (srcMatch?.[2] || '').trim();
-        if (allowed.has(currentSrc)) return tag;
-
         const context = `${tag} ${currentSrc}`.toLowerCase();
         const isMap = /map|location|route|pin|geo/.test(context);
-        const isAvatar = /avatar|profile|user|person|creator|author|commenter/.test(context);
+        if (!isMap) return tag;
         const dims = currentSrc.match(/(\d{2,4})x(\d{2,4})/i);
         const w = dims ? Number(dims[1]) : 0;
         const h = dims ? Number(dims[2]) : 0;
         const ratio = w > 0 && h > 0 ? w / h : 1;
 
-        const nextSrc = isMap
-            ? (ratio >= 1.8 ? map[0] : ratio >= 1.3 ? map[1] : ratio <= 0.78 ? map[2] : ratio > 0.9 && ratio < 1.1 ? map[3] : map[m++ % map.length])
-            : isAvatar
-                ? avatar[a++ % avatar.length]
-                : (ratio >= 1.8 ? generic[0] : ratio >= 1.25 ? generic[1] : ratio <= 0.7 ? generic[3] : ratio <= 0.85 ? generic[4] : ratio > 0.9 && ratio < 1.1 ? generic[6] : generic[g++ % generic.length]);
+        const nextSrc = ratio >= 1.8
+            ? map[0]
+            : ratio >= 1.3
+                ? map[1]
+                : ratio <= 0.78
+                    ? map[2]
+                    : ratio > 0.9 && ratio < 1.1
+                        ? map[3]
+                        : map[m++ % map.length];
 
         if (srcMatch) {
             return tag.replace(/\bsrc\s*=\s*(["'])(.*?)\1/i, `src="${nextSrc}"`);

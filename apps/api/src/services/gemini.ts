@@ -242,44 +242,17 @@ TOKEN USAGE RULES:
 `;
 
 const IMAGE_WHITELIST = `
-IMAGES (STRICT, PLACEHOLDER-FIRST):
-For INITIAL screen generation, use placeholder URLs from placeholder.net only.
-These placeholders are temporary and will be replaced later by generated assets.
-
-Generic content images:
-- https://placehold.net/400x400.png
-- https://placehold.net/600x600.png
-- https://placehold.net/400x600.png
-- https://placehold.net/600x800.png
-- https://placehold.net/600x400.png
-- https://placehold.net/800x600.png
-- https://placehold.net/1200x600.png
-
-Map images (use for maps/location blocks):
-- https://placehold.net/map-400x400.png
-- https://placehold.net/map-600x600.png
-- https://placehold.net/map-400x600.png
-- https://placehold.net/map-600x400.png
-- https://placehold.net/map-1200x600.png
-
-Avatar / people images (use for profile/user chips/comments/creators):
-- https://placehold.net/avatar.svg
-- https://placehold.net/avatar.png
-- https://placehold.net/avatar-2.svg
-- https://placehold.net/avatar-2.png
-- https://placehold.net/avatar-3.svg
-- https://placehold.net/avatar-3.png
-- https://placehold.net/avatar-4.svg
-- https://placehold.net/avatar-4.png
-- https://placehold.net/avatar-5.svg
-- https://placehold.net/avatar-5.png
-
-Rules:
-- Choose placeholder type by context:
-  - map/location -> map placeholders
-  - user/profile/people -> avatar placeholders
-  - everything else -> generic placeholders
-- Do not use Unsplash/Pexels/source.unsplash or other image domains in initial HTML.
+IMAGES (WEB URL POLICY):
+- For non-map visuals, use real internet image URLs (https URLs) that match the screen context.
+- Do NOT use placeholder.net for non-map content.
+- Keep image choices consistent with app domain and tone.
+- Prefer stable direct image URLs over short-lived random endpoints.
+- For maps/location visuals only, use placeholder map URLs from placehold.net:
+  - https://placehold.net/map-400x400.png
+  - https://placehold.net/map-600x600.png
+  - https://placehold.net/map-400x600.png
+  - https://placehold.net/map-600x400.png
+  - https://placehold.net/map-1200x600.png
 `;
 
 const ANTI_GENERIC_RULES = `
@@ -527,7 +500,7 @@ RULES:
 2. Must include <!DOCTYPE html>, <html>, <head>, <body>, and closing tags.
 3. Preserve and continue the existing design direction and content as much as possible.
 4. Keep Tailwind CDN, Google Fonts, Material Symbols, and token contract in <head>.
-5. Do not introduce non-whitelisted image domains.
+5. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
 `;
 
 const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
@@ -538,7 +511,7 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
 4. Preserve data-uid and data-editable attributes on existing elements.
 5. You MAY restructure layout to achieve the instruction.
-6. PROHIBITED: Do NOT use "source.unsplash.com" or other non-whitelisted image domains.
+6. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
 7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
 8. Do NOT use markdown fences.
 
@@ -598,39 +571,16 @@ Rules:
 `;
 
 const FAST_UNSPLASH_IMAGE_RULES = `
-Fast image policy (placeholder-first):
-- For initial HTML generation, use placeholder.net URLs only.
-- Generic image placeholders:
-  - https://placehold.net/400x400.png
-  - https://placehold.net/600x600.png
-  - https://placehold.net/400x600.png
-  - https://placehold.net/600x800.png
-  - https://placehold.net/600x400.png
-  - https://placehold.net/800x600.png
-  - https://placehold.net/1200x600.png
+Fast image policy:
+- Use real internet image URLs for non-map images.
 - Map placeholders:
   - https://placehold.net/map-400x400.png
   - https://placehold.net/map-600x600.png
   - https://placehold.net/map-400x600.png
   - https://placehold.net/map-600x400.png
   - https://placehold.net/map-1200x600.png
-- Avatar placeholders:
-  - https://placehold.net/avatar.png
-  - https://placehold.net/avatar-2.png
-  - https://placehold.net/avatar-3.png
-  - https://placehold.net/avatar-4.png
-  - https://placehold.net/avatar-5.png
+- Do NOT use placeholder.net for non-map content.
 `;
-
-const FAST_IMAGE_FALLBACKS = [
-    'https://placehold.net/1200x600.png',
-    'https://placehold.net/800x600.png',
-    'https://placehold.net/600x400.png',
-    'https://placehold.net/600x800.png',
-    'https://placehold.net/400x600.png',
-    'https://placehold.net/600x600.png',
-    'https://placehold.net/400x400.png',
-] as const;
 
 const FAST_MAP_IMAGE_FALLBACKS = [
     'https://placehold.net/map-1200x600.png',
@@ -640,22 +590,7 @@ const FAST_MAP_IMAGE_FALLBACKS = [
     'https://placehold.net/map-400x400.png',
 ] as const;
 
-const FAST_AVATAR_IMAGE_FALLBACKS = [
-    'https://placehold.net/avatar.png',
-    'https://placehold.net/avatar-2.png',
-    'https://placehold.net/avatar-3.png',
-    'https://placehold.net/avatar-4.png',
-    'https://placehold.net/avatar-5.png',
-] as const;
-
-const PLACEHOLDER_GENERIC_ALLOWED = [...FAST_IMAGE_FALLBACKS] as const;
 const PLACEHOLDER_MAP_ALLOWED = [...FAST_MAP_IMAGE_FALLBACKS] as const;
-const PLACEHOLDER_AVATAR_ALLOWED = [...FAST_AVATAR_IMAGE_FALLBACKS, 'https://placehold.net/avatar.svg', 'https://placehold.net/avatar-2.svg', 'https://placehold.net/avatar-3.svg', 'https://placehold.net/avatar-4.svg', 'https://placehold.net/avatar-5.svg'] as const;
-const PLACEHOLDER_ALLOWED_SET = new Set<string>([
-    ...PLACEHOLDER_GENERIC_ALLOWED,
-    ...PLACEHOLDER_MAP_ALLOWED,
-    ...PLACEHOLDER_AVATAR_ALLOWED,
-]);
 
 
 // ============================================================================
@@ -1762,22 +1697,18 @@ function normalizeFastFrameworkAssets(html: string): string {
 
 function enforceFastWorkingImageUrls(html: string): string {
     if (!html || !/<img\b/i.test(html)) return html;
-    let genericIndex = 0;
     let mapIndex = 0;
-    let avatarIndex = 0;
 
     return html.replace(/<img\b[^>]*>/gi, (tag: string) => {
-        const context = tag.toLowerCase();
+        const srcMatch = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i);
+        const currentSrc = (srcMatch?.[2] || '').trim();
+        const context = `${tag} ${currentSrc}`.toLowerCase();
         const isMap = /map|location|route|pin|geo/.test(context);
-        const isAvatar = /avatar|profile|user|person|creator|author/.test(context);
+        if (!isMap) return tag;
 
-        const src = isMap
-            ? FAST_MAP_IMAGE_FALLBACKS[mapIndex++ % FAST_MAP_IMAGE_FALLBACKS.length]
-            : isAvatar
-                ? FAST_AVATAR_IMAGE_FALLBACKS[avatarIndex++ % FAST_AVATAR_IMAGE_FALLBACKS.length]
-                : FAST_IMAGE_FALLBACKS[genericIndex++ % FAST_IMAGE_FALLBACKS.length];
+        const src = FAST_MAP_IMAGE_FALLBACKS[mapIndex++ % FAST_MAP_IMAGE_FALLBACKS.length];
 
-        if (/\bsrc\s*=\s*(["']).*?\1/i.test(tag)) {
+        if (srcMatch) {
             return tag.replace(/\bsrc\s*=\s*(["']).*?\1/i, `src="${src}"`);
         }
         return tag.replace(/<img\b/i, `<img src="${src}"`);
@@ -1786,46 +1717,31 @@ function enforceFastWorkingImageUrls(html: string): string {
 
 function enforcePlaceholderCatalogUrls(html: string): string {
     if (!html || !/<img\b/i.test(html)) return html;
-    let genericIndex = 0;
     let mapIndex = 0;
-    let avatarIndex = 0;
 
-    const normalizeSrcToAllowed = (tag: string, rawSrc: string): string => {
+    const normalizeMapSrc = (tag: string, rawSrc: string): string => {
         const src = (rawSrc || '').trim();
-        if (PLACEHOLDER_ALLOWED_SET.has(src)) return src;
-
         const context = `${tag} ${src}`.toLowerCase();
         const isMap = /map|location|route|pin|geo/.test(context);
-        const isAvatar = /avatar|profile|user|person|creator|author|commenter/.test(context);
+        if (!isMap) return src;
 
         const dims = src.match(/(\d{2,4})x(\d{2,4})/i);
         const w = dims ? Number(dims[1]) : 0;
         const h = dims ? Number(dims[2]) : 0;
         const ratio = w > 0 && h > 0 ? w / h : 1;
 
-        if (isMap) {
-            if (ratio >= 1.8) return 'https://placehold.net/map-1200x600.png';
-            if (ratio >= 1.3) return 'https://placehold.net/map-600x400.png';
-            if (ratio <= 0.78) return 'https://placehold.net/map-400x600.png';
-            if (w >= 500 && h >= 500) return 'https://placehold.net/map-600x600.png';
-            return PLACEHOLDER_MAP_ALLOWED[mapIndex++ % PLACEHOLDER_MAP_ALLOWED.length];
-        }
-        if (isAvatar) {
-            return PLACEHOLDER_AVATAR_ALLOWED[avatarIndex++ % PLACEHOLDER_AVATAR_ALLOWED.length];
-        }
-
-        if (ratio >= 1.8) return 'https://placehold.net/1200x600.png';
-        if (ratio >= 1.25) return 'https://placehold.net/800x600.png';
-        if (ratio <= 0.7) return 'https://placehold.net/600x800.png';
-        if (ratio <= 0.85) return 'https://placehold.net/400x600.png';
-        if (w >= 550 && h >= 550) return 'https://placehold.net/600x600.png';
-        return PLACEHOLDER_GENERIC_ALLOWED[genericIndex++ % PLACEHOLDER_GENERIC_ALLOWED.length];
+        if (ratio >= 1.8) return 'https://placehold.net/map-1200x600.png';
+        if (ratio >= 1.3) return 'https://placehold.net/map-600x400.png';
+        if (ratio <= 0.78) return 'https://placehold.net/map-400x600.png';
+        if (w >= 500 && h >= 500) return 'https://placehold.net/map-600x600.png';
+        return PLACEHOLDER_MAP_ALLOWED[mapIndex++ % PLACEHOLDER_MAP_ALLOWED.length];
     };
 
     return html.replace(/<img\b[^>]*>/gi, (tag: string) => {
         const srcMatch = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i);
         const currentSrc = srcMatch?.[2] || '';
-        const nextSrc = normalizeSrcToAllowed(tag, currentSrc);
+        const nextSrc = normalizeMapSrc(tag, currentSrc);
+        if (nextSrc === currentSrc) return tag;
         let nextTag = tag;
         if (srcMatch) {
             nextTag = nextTag.replace(/\bsrc\s*=\s*(["'])(.*?)\1/i, `src="${nextSrc}"`);
