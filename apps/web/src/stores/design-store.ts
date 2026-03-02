@@ -4,24 +4,7 @@
 
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-
-// Types matching the API response
-interface HtmlScreen {
-    screenId: string;
-    name: string;
-    html: string;
-    width: number;
-    height: number;
-    status?: 'streaming' | 'complete';
-}
-
-interface HtmlDesignSpec {
-    id: string;
-    name: string;
-    screens: HtmlScreen[];
-    createdAt: string;
-    updatedAt: string;
-}
+import type { HtmlDesignSpec, HtmlScreen, ProjectDesignSystem } from '../api/client';
 
 interface DesignState {
     // Current design spec (HTML-based)
@@ -36,6 +19,7 @@ interface DesignState {
     updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete', width?: number, height?: number, name?: string) => void;
     addScreen: (screen: HtmlScreen) => void;
     addScreens: (screens: HtmlScreen[]) => void;
+    setDesignSystem: (designSystem: ProjectDesignSystem) => void;
 
     // State management
     setLoading: (loading: boolean) => void;
@@ -133,6 +117,18 @@ export const useDesignStore = create<DesignState>((set, get) => ({
                 }
             });
         }
+    },
+
+    setDesignSystem: (designSystem) => {
+        const { spec } = get();
+        if (!spec) return;
+        set({
+            spec: {
+                ...spec,
+                designSystem,
+                updatedAt: new Date().toISOString(),
+            },
+        });
     },
 
     removeScreen: (screenId) => {

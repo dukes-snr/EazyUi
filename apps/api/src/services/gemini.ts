@@ -103,11 +103,73 @@ export interface HtmlScreen {
     height: number;
 }
 
+export interface ProjectDesignSystem {
+    version: number;
+    systemName: string;
+    intentSummary: string;
+    stylePreset: string;
+    platform: string;
+    themeMode: 'light' | 'dark' | 'mixed';
+    tokens: {
+        bg: string;
+        surface: string;
+        surface2: string;
+        text: string;
+        muted: string;
+        stroke: string;
+        accent: string;
+        accent2: string;
+    };
+    typography: {
+        displayFont: string;
+        bodyFont: string;
+        scale: {
+            display: string;
+            h1: string;
+            h2: string;
+            body: string;
+            caption: string;
+        };
+        tone: string;
+    };
+    spacing: {
+        baseUnit: number;
+        density: 'compact' | 'balanced' | 'airy';
+        rhythm: string;
+    };
+    radius: {
+        card: string;
+        control: string;
+        pill: string;
+    };
+    shadows: {
+        soft: string;
+        glow: string;
+    };
+    componentLanguage: {
+        button: string;
+        card: string;
+        input: string;
+        nav: string;
+        chips: string;
+    };
+    motion: {
+        style: string;
+        durationFastMs: number;
+        durationBaseMs: number;
+    };
+    rules: {
+        do: string[];
+        dont: string[];
+    };
+}
+
 export interface HtmlDesignSpec {
     id: string;
     name: string;
     screens: HtmlScreen[];
     description?: string;
+    designSystem?: ProjectDesignSystem;
     createdAt: string;
     updatedAt: string;
 }
@@ -617,6 +679,16 @@ export interface GenerateOptions {
     platform?: string;
     images?: string[];
     preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
+}
+
+export interface GenerateProjectDesignSystemOptions {
+    prompt: string;
+    stylePreset?: string;
+    platform?: string;
+    images?: string[];
+    preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
 }
 
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
@@ -674,11 +746,458 @@ Return concise JSON only with fields:
     }
 }
 
+type DesignSystemSeed = {
+    themeMode: ProjectDesignSystem['themeMode'];
+    tokens: ProjectDesignSystem['tokens'];
+    typography: Pick<ProjectDesignSystem['typography'], 'displayFont' | 'bodyFont' | 'tone'>;
+};
+
+const DESIGN_SYSTEM_SEEDS: Record<string, DesignSystemSeed> = {
+    modern: {
+        themeMode: 'dark',
+        tokens: {
+            bg: '#0B1020',
+            surface: '#121933',
+            surface2: '#1C2444',
+            text: '#F3F7FF',
+            muted: '#9AA7C7',
+            stroke: '#2A3764',
+            accent: '#4F8CFF',
+            accent2: '#1CC8E8',
+        },
+        typography: {
+            displayFont: 'Space Grotesk',
+            bodyFont: 'Plus Jakarta Sans',
+            tone: 'Crisp, confident, and utility-forward.',
+        },
+    },
+    minimal: {
+        themeMode: 'light',
+        tokens: {
+            bg: '#F8F9FB',
+            surface: '#FFFFFF',
+            surface2: '#EEF1F6',
+            text: '#14161D',
+            muted: '#687082',
+            stroke: '#D6DAE4',
+            accent: '#2D3A8C',
+            accent2: '#5B7BFF',
+        },
+        typography: {
+            displayFont: 'Manrope',
+            bodyFont: 'Inter',
+            tone: 'Quiet, precise, and highly legible.',
+        },
+    },
+    vibrant: {
+        themeMode: 'mixed',
+        tokens: {
+            bg: '#10091F',
+            surface: '#1B1034',
+            surface2: '#2B1850',
+            text: '#F8F4FF',
+            muted: '#C4B7E6',
+            stroke: '#4A2C80',
+            accent: '#FF4FA3',
+            accent2: '#6BE6FF',
+        },
+        typography: {
+            displayFont: 'Clash Display',
+            bodyFont: 'Plus Jakarta Sans',
+            tone: 'Energetic, expressive, and contrast-rich.',
+        },
+    },
+    luxury: {
+        themeMode: 'dark',
+        tokens: {
+            bg: '#0F0B08',
+            surface: '#1B1410',
+            surface2: '#2A2019',
+            text: '#F6EFE6',
+            muted: '#BFAF9A',
+            stroke: '#3E3026',
+            accent: '#CDA25A',
+            accent2: '#E7C88D',
+        },
+        typography: {
+            displayFont: 'Playfair Display',
+            bodyFont: 'Source Sans 3',
+            tone: 'Premium, restrained, and cinematic.',
+        },
+    },
+    playful: {
+        themeMode: 'light',
+        tokens: {
+            bg: '#FFF7E8',
+            surface: '#FFFFFF',
+            surface2: '#FFEED0',
+            text: '#241E42',
+            muted: '#6C5C8B',
+            stroke: '#E8D5AF',
+            accent: '#FF6A3D',
+            accent2: '#20B2AA',
+        },
+        typography: {
+            displayFont: 'Baloo 2',
+            bodyFont: 'Nunito',
+            tone: 'Friendly, upbeat, and rounded.',
+        },
+    },
+};
+
+function safeString(input: unknown, fallback: string, max = 240): string {
+    const value = typeof input === 'string' ? input.trim() : '';
+    if (!value) return fallback;
+    return value.slice(0, max);
+}
+
+function safeNumber(input: unknown, fallback: number, min: number, max: number): number {
+    const value = Number(input);
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function safeThemeMode(input: unknown, fallback: ProjectDesignSystem['themeMode']): ProjectDesignSystem['themeMode'] {
+    return input === 'light' || input === 'dark' || input === 'mixed' ? input : fallback;
+}
+
+function safeDensity(input: unknown, fallback: ProjectDesignSystem['spacing']['density']): ProjectDesignSystem['spacing']['density'] {
+    return input === 'compact' || input === 'balanced' || input === 'airy' ? input : fallback;
+}
+
+function safeStringList(input: unknown, fallback: string[], maxItems = 8): string[] {
+    if (!Array.isArray(input)) return fallback;
+    const next = input
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+        .slice(0, maxItems);
+    return next.length > 0 ? next : fallback;
+}
+
+function buildFallbackProjectDesignSystem(
+    prompt: string,
+    stylePreset: string,
+    platform: string
+): ProjectDesignSystem {
+    const preset = DESIGN_SYSTEM_SEEDS[stylePreset] || DESIGN_SYSTEM_SEEDS.modern;
+    const appIntent = safeString(prompt, 'App', 80);
+    return {
+        version: 1,
+        systemName: `${appIntent} Design System`,
+        intentSummary: `A cohesive ${stylePreset} interface system for ${appIntent}.`,
+        stylePreset,
+        platform,
+        themeMode: preset.themeMode,
+        tokens: { ...preset.tokens },
+        typography: {
+            displayFont: preset.typography.displayFont,
+            bodyFont: preset.typography.bodyFont,
+            scale: {
+                display: 'text-4xl font-bold tracking-tight',
+                h1: 'text-2xl font-semibold',
+                h2: 'text-xl font-semibold',
+                body: 'text-base font-normal',
+                caption: 'text-sm font-medium',
+            },
+            tone: preset.typography.tone,
+        },
+        spacing: {
+            baseUnit: 4,
+            density: stylePreset === 'minimal' ? 'compact' : 'balanced',
+            rhythm: 'Use 8/12/16/24/32 spacing with consistent vertical cadence.',
+        },
+        radius: {
+            card: '24px',
+            control: '14px',
+            pill: '999px',
+        },
+        shadows: {
+            soft: '0 12px 34px rgba(0,0,0,.16)',
+            glow: '0 20px 60px rgba(0,0,0,.22)',
+        },
+        componentLanguage: {
+            button: 'High-contrast primary CTA, soft rounded control, clear pressed/disabled states.',
+            card: 'Layered card with subtle gradient and clear heading/body separation.',
+            input: 'Comfortable input with strong focus ring and muted placeholder.',
+            nav: 'Context-aware nav with a strong active state and restrained iconography.',
+            chips: 'Rounded chips with compact spacing and icon + label pairing.',
+        },
+        motion: {
+            style: 'Short ease-out transitions with low-bounce emphasis.',
+            durationFastMs: 140,
+            durationBaseMs: 220,
+        },
+        rules: {
+            do: [
+                'Reuse the same tokens and typography pair on every screen.',
+                'Keep spacing rhythm consistent across sections and cards.',
+                'Reserve accent colors for CTA, active states, and key highlights.',
+            ],
+            dont: [
+                'Do not introduce a new theme direction mid-project.',
+                'Do not switch font pairing between screens.',
+                'Do not overuse accent color on neutral surfaces.',
+            ],
+        },
+    };
+}
+
+function normalizeProjectDesignSystem(
+    input: unknown,
+    prompt: string,
+    stylePreset: string,
+    platform: string
+): ProjectDesignSystem {
+    const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
+    if (!input || typeof input !== 'object') return fallback;
+    const raw = input as Record<string, any>;
+    const rawTokens = (raw.tokens && typeof raw.tokens === 'object') ? raw.tokens : {};
+    const rawTypography = (raw.typography && typeof raw.typography === 'object') ? raw.typography : {};
+    const rawScale = (rawTypography.scale && typeof rawTypography.scale === 'object') ? rawTypography.scale : {};
+    const rawSpacing = (raw.spacing && typeof raw.spacing === 'object') ? raw.spacing : {};
+    const rawRadius = (raw.radius && typeof raw.radius === 'object') ? raw.radius : {};
+    const rawShadows = (raw.shadows && typeof raw.shadows === 'object') ? raw.shadows : {};
+    const rawComponents = (raw.componentLanguage && typeof raw.componentLanguage === 'object') ? raw.componentLanguage : {};
+    const rawMotion = (raw.motion && typeof raw.motion === 'object') ? raw.motion : {};
+    const rawRules = (raw.rules && typeof raw.rules === 'object') ? raw.rules : {};
+
+    return {
+        version: 1,
+        systemName: safeString(raw.systemName, fallback.systemName, 120),
+        intentSummary: safeString(raw.intentSummary, fallback.intentSummary, 220),
+        stylePreset: safeString(raw.stylePreset, stylePreset, 32),
+        platform: safeString(raw.platform, platform, 32),
+        themeMode: safeThemeMode(raw.themeMode, fallback.themeMode),
+        tokens: {
+            bg: safeString(rawTokens.bg, fallback.tokens.bg, 40),
+            surface: safeString(rawTokens.surface, fallback.tokens.surface, 40),
+            surface2: safeString(rawTokens.surface2, fallback.tokens.surface2, 40),
+            text: safeString(rawTokens.text, fallback.tokens.text, 40),
+            muted: safeString(rawTokens.muted, fallback.tokens.muted, 40),
+            stroke: safeString(rawTokens.stroke, fallback.tokens.stroke, 40),
+            accent: safeString(rawTokens.accent, fallback.tokens.accent, 40),
+            accent2: safeString(rawTokens.accent2, fallback.tokens.accent2, 40),
+        },
+        typography: {
+            displayFont: safeString(rawTypography.displayFont, fallback.typography.displayFont, 80),
+            bodyFont: safeString(rawTypography.bodyFont, fallback.typography.bodyFont, 80),
+            scale: {
+                display: safeString(rawScale.display, fallback.typography.scale.display, 80),
+                h1: safeString(rawScale.h1, fallback.typography.scale.h1, 80),
+                h2: safeString(rawScale.h2, fallback.typography.scale.h2, 80),
+                body: safeString(rawScale.body, fallback.typography.scale.body, 80),
+                caption: safeString(rawScale.caption, fallback.typography.scale.caption, 80),
+            },
+            tone: safeString(rawTypography.tone, fallback.typography.tone, 180),
+        },
+        spacing: {
+            baseUnit: safeNumber(rawSpacing.baseUnit, fallback.spacing.baseUnit, 2, 16),
+            density: safeDensity(rawSpacing.density, fallback.spacing.density),
+            rhythm: safeString(rawSpacing.rhythm, fallback.spacing.rhythm, 200),
+        },
+        radius: {
+            card: safeString(rawRadius.card, fallback.radius.card, 40),
+            control: safeString(rawRadius.control, fallback.radius.control, 40),
+            pill: safeString(rawRadius.pill, fallback.radius.pill, 40),
+        },
+        shadows: {
+            soft: safeString(rawShadows.soft, fallback.shadows.soft, 80),
+            glow: safeString(rawShadows.glow, fallback.shadows.glow, 80),
+        },
+        componentLanguage: {
+            button: safeString(rawComponents.button, fallback.componentLanguage.button, 220),
+            card: safeString(rawComponents.card, fallback.componentLanguage.card, 220),
+            input: safeString(rawComponents.input, fallback.componentLanguage.input, 220),
+            nav: safeString(rawComponents.nav, fallback.componentLanguage.nav, 220),
+            chips: safeString(rawComponents.chips, fallback.componentLanguage.chips, 220),
+        },
+        motion: {
+            style: safeString(rawMotion.style, fallback.motion.style, 160),
+            durationFastMs: safeNumber(rawMotion.durationFastMs, fallback.motion.durationFastMs, 80, 400),
+            durationBaseMs: safeNumber(rawMotion.durationBaseMs, fallback.motion.durationBaseMs, 120, 600),
+        },
+        rules: {
+            do: safeStringList(rawRules.do, fallback.rules.do),
+            dont: safeStringList(rawRules.dont, fallback.rules.dont),
+        },
+    };
+}
+
+function buildDesignSystemGuidance(system: ProjectDesignSystem): string {
+    const doRules = system.rules.do.map((item) => `- ${item}`).join('\n');
+    const dontRules = system.rules.dont.map((item) => `- ${item}`).join('\n');
+    return `
+PROJECT DESIGN SYSTEM (STRICT, REUSE THIS ON ALL SCREENS):
+System: ${system.systemName}
+Intent: ${system.intentSummary}
+Preset/Platform: ${system.stylePreset} / ${system.platform}
+Theme mode: ${system.themeMode}
+
+Semantic tokens (map directly in tailwind.config):
+- bg: ${system.tokens.bg}
+- surface: ${system.tokens.surface}
+- surface2: ${system.tokens.surface2}
+- text: ${system.tokens.text}
+- muted: ${system.tokens.muted}
+- stroke: ${system.tokens.stroke}
+- accent: ${system.tokens.accent}
+- accent2: ${system.tokens.accent2}
+
+Typography:
+- display font: ${system.typography.displayFont}
+- body font: ${system.typography.bodyFont}
+- display/h1/h2/body/caption guidance: ${system.typography.scale.display} | ${system.typography.scale.h1} | ${system.typography.scale.h2} | ${system.typography.scale.body} | ${system.typography.scale.caption}
+- tone: ${system.typography.tone}
+
+Spacing:
+- base unit: ${system.spacing.baseUnit}px
+- density: ${system.spacing.density}
+- rhythm: ${system.spacing.rhythm}
+
+Radii/Shadows:
+- card radius: ${system.radius.card}
+- control radius: ${system.radius.control}
+- pill radius: ${system.radius.pill}
+- soft shadow: ${system.shadows.soft}
+- glow shadow: ${system.shadows.glow}
+
+Component language:
+- button: ${system.componentLanguage.button}
+- card: ${system.componentLanguage.card}
+- input: ${system.componentLanguage.input}
+- nav: ${system.componentLanguage.nav}
+- chips: ${system.componentLanguage.chips}
+
+Motion:
+- style: ${system.motion.style}
+- fast/base durations: ${system.motion.durationFastMs}ms / ${system.motion.durationBaseMs}ms
+
+Always do:
+${doRules}
+
+Never do:
+${dontRules}
+`;
+}
+
+export async function generateProjectDesignSystem(options: GenerateProjectDesignSystemOptions): Promise<ProjectDesignSystem> {
+    const prompt = safeString(options.prompt, 'Untitled app request', 800);
+    const stylePreset = safeString(options.stylePreset, 'modern', 32).toLowerCase();
+    const platform = safeString(options.platform, 'mobile', 32).toLowerCase();
+    const images = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+
+    if (options.projectDesignSystem) {
+        return normalizeProjectDesignSystem(options.projectDesignSystem, prompt, stylePreset, platform);
+    }
+
+    const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
+    const imageAnalysis = await analyzeReferenceImages(images);
+
+    const systemPrompt = `You are a senior product designer creating a reusable project design system.
+Return strict JSON only.
+
+Output schema:
+{
+  "version": 1,
+  "systemName": "string",
+  "intentSummary": "string",
+  "stylePreset": "modern|minimal|vibrant|luxury|playful",
+  "platform": "mobile|tablet|desktop",
+  "themeMode": "light|dark|mixed",
+  "tokens": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." },
+  "typography": {
+    "displayFont": "string",
+    "bodyFont": "string",
+    "scale": { "display": "tailwind-like guidance", "h1": "string", "h2": "string", "body": "string", "caption": "string" },
+    "tone": "string"
+  },
+  "spacing": { "baseUnit": 4, "density": "compact|balanced|airy", "rhythm": "string" },
+  "radius": { "card": "24px", "control": "14px", "pill": "999px" },
+  "shadows": { "soft": "css shadow", "glow": "css shadow" },
+  "componentLanguage": { "button": "string", "card": "string", "input": "string", "nav": "string", "chips": "string" },
+  "motion": { "style": "string", "durationFastMs": 140, "durationBaseMs": 220 },
+  "rules": { "do": ["rule"], "dont": ["rule"] }
+}
+
+Rules:
+- Make this system cohesive enough to drive ALL next screens in one project.
+- Output practical tokens/rules that are easy to apply in Tailwind HTML generation.
+- Keep rules concrete and short.
+- Prefer semantic colors over arbitrary color names.`;
+
+    const userPrompt = `App request: "${prompt}"
+Style preset: ${stylePreset}
+Platform: ${platform}
+${imageAnalysis || ''}
+Generate the design system that should be reused for this whole project.`;
+
+    try {
+        const preferredModel = options.preferredModel;
+        let raw: unknown = null;
+
+        if (isNvidiaModel(preferredModel)) {
+            const completion = await nvidiaChatCompletion({
+                model: preferredModel,
+                systemPrompt,
+                prompt: userPrompt,
+                maxCompletionTokens: 1900,
+                temperature: 0.35,
+                topP: 0.85,
+                responseFormat: 'json_object',
+                thinking: false,
+            });
+            raw = parseJsonSafe(cleanJsonResponse(completion.text));
+        } else if (isGroqModel(preferredModel)) {
+            const completion = await groqChatCompletion({
+                model: preferredModel,
+                systemPrompt,
+                prompt: userPrompt,
+                maxCompletionTokens: 1900,
+                temperature: 0.35,
+                topP: 0.85,
+                responseFormat: 'json_object',
+                reasoningEffort: 'low',
+            });
+            raw = parseJsonSafe(cleanJsonResponse(completion.text));
+        } else {
+            const preferredGeminiModel = resolvePreferredModel(preferredModel);
+            const designSystemModel = preferredGeminiModel ? getGenerativeModel(preferredGeminiModel).model : model;
+            const imageParts = extractInlineImageParts(images).slice(0, 3);
+            const result = await designSystemModel.generateContent({
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }, ...imageParts],
+                }],
+                generationConfig: {
+                    temperature: 0.35,
+                    topP: 0.85,
+                    maxOutputTokens: 2600,
+                },
+            });
+            raw = parseJsonSafe(cleanJsonResponse(result.response.text()));
+        }
+
+        return normalizeProjectDesignSystem(raw, prompt, stylePreset, platform);
+    } catch (error) {
+        console.warn('[Gemini] generateProjectDesignSystem failed; using fallback design system', error);
+        return fallback;
+    }
+}
+
 export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
     const generationConfig = getGenerationConfig(images.length > 0);
     const imageAnalysis = await analyzeReferenceImages(images);
+    const projectDesignSystem = await generateProjectDesignSystem({
+        prompt,
+        stylePreset,
+        platform,
+        images,
+        preferredModel,
+        projectDesignSystem: options.projectDesignSystem,
+    });
+    const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
     const imageGuidance = images.length > 0
         ? `Use the attached image(s) as PRIMARY reference. Match palette, typography mood, spacing density, component shapes, and layout hierarchy. Do not ignore reference cues.
@@ -692,6 +1211,7 @@ Style: ${stylePreset}
 Generate a maximum of 4 complete screens.
 ${imageGuidance}
 ${imageAnalysis}
+${designSystemGuidance}
 `;
 
     const fastBaseUserPrompt = `
@@ -701,6 +1221,7 @@ Style: ${stylePreset}
 Generate exactly 1 complete main screen.
 ${imageGuidance}
 ${imageAnalysis}
+${designSystemGuidance}
 `;
 
     const buildParts = (userPrompt: string) => {
@@ -794,20 +1315,31 @@ ${imageAnalysis}
         name: prompt,
         screens,
         description: normalizeUiDescriptionTags(initialResponse.description),
+        designSystem: projectDesignSystem,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
 }
 
 export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
-    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [] } = options;
+    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
     const generationConfig = getGenerationConfig(images.length > 0);
     const imageAnalysis = await analyzeReferenceImages(images);
+    const projectDesignSystem = await generateProjectDesignSystem({
+        prompt,
+        stylePreset,
+        platform,
+        images,
+        preferredModel,
+        projectDesignSystem: options.projectDesignSystem,
+    });
+    const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
     const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
 ${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
-${imageAnalysis}`;
+${imageAnalysis}
+${designSystemGuidance}`;
     const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
 
     parts.push(...extractInlineImageParts(images));
@@ -857,6 +1389,7 @@ export interface CompleteScreenOptions {
     prompt?: string;
     platform?: string;
     stylePreset?: string;
+    projectDesignSystem?: ProjectDesignSystem;
 }
 
 function extractImageSrcFromResponse(response: any): string | null {
@@ -1028,11 +1561,21 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
 
 export async function completePartialScreen(options: CompleteScreenOptions): Promise<string> {
     const { screenName, partialHtml, prompt, platform, stylePreset } = options;
+    const projectDesignSystem = options.projectDesignSystem
+        ? normalizeProjectDesignSystem(
+            options.projectDesignSystem,
+            prompt || screenName,
+            stylePreset || 'modern',
+            platform || 'mobile'
+        )
+        : buildFallbackProjectDesignSystem(prompt || screenName, stylePreset || 'modern', platform || 'mobile');
+    const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
     const userPrompt = `${COMPLETE_PARTIAL_SCREEN_PROMPT}
 Screen name: ${screenName}
 Original request: ${prompt || 'N/A'}
 Platform: ${platform || 'unknown'}
 Style: ${stylePreset || 'unknown'}
+${designSystemGuidance}
 
 Partial HTML:
 ${partialHtml}

@@ -6,7 +6,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { v4 as uuidv4 } from 'uuid';
-import { generateDesign, editDesign, completePartialScreen, generateImageAsset, type HtmlDesignSpec } from './services/gemini.js';
+import { generateDesign, editDesign, completePartialScreen, generateImageAsset, generateProjectDesignSystem, type HtmlDesignSpec, type ProjectDesignSystem } from './services/gemini.js';
 import { synthesizeImagesForScreens } from './services/imagePipeline.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
@@ -204,17 +204,18 @@ fastify.post<{
         platform?: string;
         images?: string[];
         preferredModel?: string;
+        projectDesignSystem?: ProjectDesignSystem;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, preferredModel } = request.body;
+    const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
     }
 
     try {
-        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel }, 'generate: start');
-        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel });
+        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel, hasProjectDesignSystem: Boolean(projectDesignSystem) }, 'generate: start');
+        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
         const versionId = uuidv4();
         fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
 
@@ -223,6 +224,41 @@ fastify.post<{
         fastify.log.error(error);
         return reply.status(500).send({
             error: 'Failed to generate design',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        prompt: string;
+        stylePreset?: string;
+        platform?: string;
+        images?: string[];
+        preferredModel?: string;
+        projectDesignSystem?: ProjectDesignSystem;
+    };
+}>('/api/design-system', async (request, reply) => {
+    const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
+
+    if (!prompt?.trim()) {
+        return reply.status(400).send({ error: 'Prompt is required' });
+    }
+
+    try {
+        const designSystem = await generateProjectDesignSystem({
+            prompt,
+            stylePreset,
+            platform,
+            images,
+            preferredModel,
+            projectDesignSystem,
+        });
+        return { designSystem };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to generate project design system',
             message: (error as Error).message,
         });
     }
@@ -566,9 +602,11 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        preferredModel?: string;
+        projectDesignSystem?: ProjectDesignSystem;
     };
 }>('/api/generate-stream', async (request, reply) => {
-    const { prompt, stylePreset, platform, images } = request.body;
+    const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -579,8 +617,8 @@ fastify.post<{
 
     try {
         const { generateDesignStream } = await import('./services/gemini.js');
-        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0 }, 'generate-stream: start');
-        const stream = generateDesignStream({ prompt, stylePreset, platform, images });
+        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel, hasProjectDesignSystem: Boolean(projectDesignSystem) }, 'generate-stream: start');
+        const stream = generateDesignStream({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
 
         for await (const chunk of stream) {
             reply.raw.write(chunk);
@@ -602,9 +640,10 @@ fastify.post<{
         prompt?: string;
         platform?: string;
         stylePreset?: string;
+        projectDesignSystem?: ProjectDesignSystem;
     };
 }>('/api/complete-screen', async (request, reply) => {
-    const { screenName, partialHtml, prompt, platform, stylePreset } = request.body;
+    const { screenName, partialHtml, prompt, platform, stylePreset, projectDesignSystem } = request.body;
 
     if (!screenName?.trim()) {
         return reply.status(400).send({ error: 'screenName is required' });
@@ -621,6 +660,7 @@ fastify.post<{
             prompt,
             platform,
             stylePreset,
+            projectDesignSystem,
         });
         return { html };
     } catch (error) {

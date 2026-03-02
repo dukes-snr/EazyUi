@@ -17,11 +17,73 @@ export interface HtmlScreen {
     status?: 'streaming' | 'complete';
 }
 
+export interface ProjectDesignSystem {
+    version: number;
+    systemName: string;
+    intentSummary: string;
+    stylePreset: string;
+    platform: string;
+    themeMode: 'light' | 'dark' | 'mixed';
+    tokens: {
+        bg: string;
+        surface: string;
+        surface2: string;
+        text: string;
+        muted: string;
+        stroke: string;
+        accent: string;
+        accent2: string;
+    };
+    typography: {
+        displayFont: string;
+        bodyFont: string;
+        scale: {
+            display: string;
+            h1: string;
+            h2: string;
+            body: string;
+            caption: string;
+        };
+        tone: string;
+    };
+    spacing: {
+        baseUnit: number;
+        density: 'compact' | 'balanced' | 'airy';
+        rhythm: string;
+    };
+    radius: {
+        card: string;
+        control: string;
+        pill: string;
+    };
+    shadows: {
+        soft: string;
+        glow: string;
+    };
+    componentLanguage: {
+        button: string;
+        card: string;
+        input: string;
+        nav: string;
+        chips: string;
+    };
+    motion: {
+        style: string;
+        durationFastMs: number;
+        durationBaseMs: number;
+    };
+    rules: {
+        do: string[];
+        dont: string[];
+    };
+}
+
 export interface HtmlDesignSpec {
     id: string;
     name: string;
     screens: HtmlScreen[];
     description?: string;
+    designSystem?: ProjectDesignSystem;
     createdAt: string;
     updatedAt: string;
 }
@@ -32,6 +94,7 @@ export interface GenerateRequest {
     platform?: string;
     images?: string[]; // Base64 encoded images
     preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
 }
 
 export interface GenerateResponse {
@@ -104,6 +167,20 @@ export interface CompleteScreenRequest {
     prompt?: string;
     platform?: string;
     stylePreset?: string;
+    projectDesignSystem?: ProjectDesignSystem;
+}
+
+export interface GenerateDesignSystemRequest {
+    prompt: string;
+    stylePreset?: string;
+    platform?: string;
+    images?: string[];
+    preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
+}
+
+export interface GenerateDesignSystemResponse {
+    designSystem: ProjectDesignSystem;
 }
 
 export interface TranscribeAudioRequest {
@@ -263,6 +340,17 @@ class ApiClient {
 
     async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
         return this.request<GenerateResponse>('/generate', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async generateDesignSystem(
+        request: GenerateDesignSystemRequest,
+        signal?: AbortSignal
+    ): Promise<GenerateDesignSystemResponse> {
+        return this.request<GenerateDesignSystemResponse>('/design-system', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,

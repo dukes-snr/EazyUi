@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore } from '../../stores';
-import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type HtmlScreen } from '../../api/client';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type HtmlScreen, type ProjectDesignSystem } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
@@ -213,6 +213,17 @@ type PlannerSuggestionContext = {
     modelProfile: DesignModelProfile;
     existingScreenNames: string[];
     styleReference?: string;
+};
+
+type DesignSystemProposalContext = {
+    prompt: string;
+    appPromptForPlanning: string;
+    images?: string[];
+    platform: 'mobile' | 'tablet' | 'desktop';
+    stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+    modelProfile: DesignModelProfile;
+    referenceScreens: ComposerScreenReference[];
+    parentUserId: string;
 };
 
 type ComposerScreenReference = {
@@ -846,8 +857,67 @@ function extractLikelyHtml(content: string): string {
     return content.trim();
 }
 
+function stripDanglingBlocks(input: string, tagName: 'script' | 'style'): string {
+    const openRegex = new RegExp(`<${tagName}\\b[^>]*>`, 'ig');
+    const closeRegex = new RegExp(`</${tagName}>`, 'ig');
+    const openMatches = [...input.matchAll(openRegex)];
+    const closeMatches = [...input.matchAll(closeRegex)];
+    if (openMatches.length === 0) return input;
+
+    const closeIndexes = closeMatches.map((m) => m.index as number).sort((a, b) => a - b);
+    const stack: number[] = [];
+    let closeCursor = 0;
+
+    for (const match of openMatches) {
+        const openIndex = match.index as number;
+        while (closeCursor < closeIndexes.length && closeIndexes[closeCursor] < openIndex) {
+            if (stack.length > 0) stack.pop();
+            closeCursor += 1;
+        }
+        stack.push(openIndex);
+        while (closeCursor < closeIndexes.length) {
+            if (stack.length === 0) break;
+            const closeIndex = closeIndexes[closeCursor];
+            const topOpen = stack[stack.length - 1];
+            if (closeIndex > topOpen) {
+                stack.pop();
+                closeCursor += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (stack.length === 0) return input;
+    const cutAt = stack[0];
+    return input.slice(0, cutAt);
+}
+
+function sanitizeStreamingHtml(input: string): string {
+    let html = input;
+    // If a trailing tag is incomplete, cut it to avoid iframe parser glitches.
+    const lastLt = html.lastIndexOf('<');
+    const lastGt = html.lastIndexOf('>');
+    if (lastLt > lastGt) {
+        html = html.slice(0, lastLt);
+    }
+
+    // Drop unmatched block comments.
+    const lastCommentOpen = html.lastIndexOf('<!--');
+    const lastCommentClose = html.lastIndexOf('-->');
+    if (lastCommentOpen > lastCommentClose) {
+        html = html.slice(0, lastCommentOpen);
+    }
+
+    // Unclosed script/style blocks can swallow all remaining markup and cause flashing.
+    html = stripDanglingBlocks(html, 'script');
+    html = stripDanglingBlocks(html, 'style');
+
+    return html;
+}
+
 function bestEffortCompleteHtml(content: string): string {
-    let html = extractLikelyHtml(content);
+    let html = sanitizeStreamingHtml(extractLikelyHtml(content));
     if (!html) return '';
 
     if (!/<html[\s>]/i.test(html)) {
@@ -1045,6 +1115,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [titleDraft, setTitleDraft] = useState('');
     const [isTitleSaving, setIsTitleSaving] = useState(false);
     const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+    const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system'>('chat');
+    const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
+    const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -1155,6 +1228,61 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     };
 
+    const applyProjectDesignSystem = (designSystem: ProjectDesignSystem | undefined) => {
+        if (!designSystem) return;
+        const currentSpec = useDesignStore.getState().spec;
+        if (!currentSpec) {
+            const now = new Date().toISOString();
+            useDesignStore.getState().setSpec({
+                id: uuidv4(),
+                name: 'Untitled project',
+                screens: [],
+                designSystem,
+                createdAt: now,
+                updatedAt: now,
+            });
+            return;
+        }
+        useDesignStore.getState().setSpec({
+            ...currentSpec,
+            designSystem,
+            updatedAt: new Date().toISOString(),
+        });
+    };
+
+    const cloneDesignSystem = (source: ProjectDesignSystem): ProjectDesignSystem => {
+        return JSON.parse(JSON.stringify(source)) as ProjectDesignSystem;
+    };
+
+    const openDesignSystemEditor = (source?: ProjectDesignSystem) => {
+        const effective = source || useDesignStore.getState().spec?.designSystem;
+        if (!effective) return;
+        applyProjectDesignSystem(effective);
+        setDesignSystemDraft(cloneDesignSystem(effective));
+        setIsDesignSystemEditing(true);
+        setChatPanelView('design-system');
+    };
+
+    const cancelDesignSystemEdit = () => {
+        setIsDesignSystemEditing(false);
+        setDesignSystemDraft(null);
+    };
+
+    const saveDesignSystemEdit = () => {
+        if (!designSystemDraft) return;
+        applyProjectDesignSystem(designSystemDraft);
+        setIsDesignSystemEditing(false);
+        setDesignSystemDraft(null);
+        notifySuccess('Design system updated', 'Future screens will follow the updated design system.');
+    };
+
+    const updateDesignSystemDraft = (updater: (current: ProjectDesignSystem) => ProjectDesignSystem) => {
+        setDesignSystemDraft((current) => {
+            if (!current) return current;
+            return updater(current);
+        });
+    };
+
     const screenPreviewById = useMemo(() => {
         const map = new Map<string, HtmlScreen>();
         (spec?.screens || []).forEach((screen) => map.set(screen.screenId, screen));
@@ -1220,6 +1348,20 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (isTitleEditing) return;
         setTitleDraft(spec?.name?.trim() || '');
     }, [spec?.name, isTitleEditing]);
+
+    useEffect(() => {
+        if (chatPanelView === 'design-system' && !spec?.designSystem && !designSystemDraft) {
+            setChatPanelView('chat');
+        }
+    }, [chatPanelView, spec?.designSystem, designSystemDraft]);
+
+    useEffect(() => {
+        if (!isDesignSystemEditing) return;
+        if (!spec?.designSystem && !designSystemDraft) {
+            setIsDesignSystemEditing(false);
+            setDesignSystemDraft(null);
+        }
+    }, [isDesignSystemEditing, spec?.designSystem, designSystemDraft]);
 
     const commitProjectTitle = async () => {
         if (!spec) return;
@@ -1752,6 +1894,43 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         );
     };
 
+    const handleProceedWithDesignSystem = async (assistantMessageId: string) => {
+        if (isGenerating) return;
+        const source = useChatStore.getState().messages.find((item) => item.id === assistantMessageId && item.role === 'assistant');
+        if (!source) return;
+        const designSystem = (source.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
+        const context = (source.meta?.designSystemProposalContext || null) as DesignSystemProposalContext | null;
+        if (!designSystem || !context) return;
+        const parentMessage = context.parentUserId
+            ? useChatStore.getState().messages.find((item) => item.id === context.parentUserId && item.role === 'user')
+            : null;
+        const imagesToUse = Array.isArray(context.images) ? context.images : (parentMessage?.images || []);
+
+        applyProjectDesignSystem(designSystem);
+        updateMessage(assistantMessageId, {
+            meta: {
+                ...(source.meta || {}),
+                designSystemProceedAt: Date.now(),
+            }
+        });
+
+        await handleGenerate(
+            context.prompt,
+            imagesToUse,
+            context.platform,
+            context.stylePreset,
+            context.modelProfile,
+            undefined,
+            context.appPromptForPlanning || context.prompt,
+            undefined,
+            undefined,
+            context.parentUserId,
+            getScreenReferencesFromComposer(context.referenceScreens),
+            false,
+            true
+        );
+    };
+
     const handlePlanOnly = async (
         existingUserMessageId?: string,
         overridePrompt?: string,
@@ -1936,7 +2115,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         incomingStyleReference?: string,
         existingUserMessageId?: string,
         incomingReferenceScreens?: HtmlScreen[],
-        allowPlannerFlow?: boolean
+        allowPlannerFlow?: boolean,
+        skipDesignSystemStep?: boolean
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
@@ -1944,6 +2124,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const hasPriorScreens = (spec?.screens?.length || 0) > 0;
         const hasPriorUserMessages = messages.some((message) => message.role === 'user');
         const shouldNameProjectOnFirstRequest = !hasPriorScreens && !hasPriorUserMessages && isGenericProjectName(spec?.name);
+        const shouldPauseForDesignSystemApproval = !skipDesignSystemStep
+            && !existingUserMessageId
+            && !hasPriorScreens
+            && !hasPriorUserMessages
+            && (!incomingTargetScreens || incomingTargetScreens.length === 0);
         const referenceScreens = incomingReferenceScreens || [];
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
@@ -2016,6 +2201,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         let plannerSuggestedProjectName = '';
         let generationPromptFromPlanner = requestPromptWithReferences;
         let plannerReferenceImages: string[] = [];
+        let activeProjectDesignSystem: ProjectDesignSystem | undefined = useDesignStore.getState().spec?.designSystem;
 
         try {
             console.info('[UI] generate: start (stream)', {
@@ -2025,6 +2211,65 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 images: imagesToSend,
                 modelProfile: modelProfileToUse,
             });
+            if (!activeProjectDesignSystem) {
+                try {
+                    const designSystemResponse = await apiClient.generateDesignSystem({
+                        prompt: appPromptForPlanning,
+                        stylePreset: styleToUse,
+                        platform: platformToUse,
+                        images: imagesToSend,
+                        preferredModel,
+                    });
+                    activeProjectDesignSystem = designSystemResponse.designSystem;
+                    applyProjectDesignSystem(activeProjectDesignSystem);
+                } catch (designSystemError) {
+                    console.warn('[UI] design-system pre-gen failed; continuing with backend fallback', designSystemError);
+                }
+            }
+
+            if (shouldPauseForDesignSystemApproval && activeProjectDesignSystem) {
+                updateMessage(assistantMsgId, {
+                    content: `[h2]Design System Ready[/h2]
+[p]Review this project design system, adjust anything you want, then proceed to generate screens.[/p]`,
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        typedComplete: true,
+                        designSystemProposal: activeProjectDesignSystem,
+                        designSystemProposalContext: {
+                            prompt: requestPrompt,
+                            appPromptForPlanning,
+                            images: imagesToSend,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                            modelProfile: modelProfileToUse,
+                            referenceScreens: referenceScreens.map((screen) => ({
+                                screenId: screen.screenId,
+                                name: screen.name,
+                            })),
+                            parentUserId: userMsgId,
+                        } as DesignSystemProposalContext,
+                    }
+                });
+                try {
+                    setSaving(true);
+                    const saved = await apiClient.save({
+                        projectId: projectId || undefined,
+                        designSpec: useDesignStore.getState().spec as any,
+                        canvasDoc: useCanvasStore.getState().doc,
+                        chatState: { messages: useChatStore.getState().messages },
+                        mode: 'manual',
+                    });
+                    markSaved(saved.projectId, saved.savedAt);
+                } catch (persistError) {
+                    setSaving(false);
+                    console.warn('[UI] could not persist design-system proposal message immediately', persistError);
+                }
+                notifyInfo('Design system drafted', 'Review or edit it, then click Proceed to generate screens.');
+                return;
+            }
+
             if (usePlanner || shouldNameProjectOnFirstRequest) {
                 plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
                 try {
@@ -2140,7 +2385,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     platform: platformToUse,
                     images: imagesToSend,
                     preferredModel,
+                    projectDesignSystem: activeProjectDesignSystem,
                 }, controller.signal);
+                activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
                 regen.designSpec.screens.forEach((screen, index) => {
                     const screenId = uuidv4();
@@ -2168,6 +2415,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     const currentBoards = useCanvasStore.getState().doc.boards;
                     setBoards([...currentBoards, board]);
                 });
+                applyProjectDesignSystem(activeProjectDesignSystem);
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
@@ -2236,6 +2484,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 platform: platformToUse,
                 images: imagesToSend,
                 preferredModel,
+                projectDesignSystem: activeProjectDesignSystem,
             }, (chunk) => {
                 const events = parseStreamChunk(parserState, chunk);
                 for (const event of events) {
@@ -2277,6 +2526,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             prompt: generationPromptFromPlanner,
                             platform: platformToUse,
                             stylePreset: styleToUse,
+                            projectDesignSystem: activeProjectDesignSystem,
                         }, controller.signal);
                             finalHtml = repaired.html;
                         } catch (repairError) {
@@ -2295,7 +2545,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     platform: platformToUse,
                     images: imagesToSend,
                     preferredModel,
+                    projectDesignSystem: activeProjectDesignSystem,
                 }, controller.signal);
+                activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
                 regen.designSpec.screens.forEach((screen, index) => {
                     const seq = createdSeqs[index];
@@ -2331,6 +2583,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     const currentBoards = useCanvasStore.getState().doc.boards;
                     setBoards([...currentBoards, board]);
                 });
+                applyProjectDesignSystem(activeProjectDesignSystem);
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
@@ -2404,6 +2657,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     updateScreen(screenId, current.html, 'complete', current.width, current.height, current.name);
                 }
             }
+            applyProjectDesignSystem(activeProjectDesignSystem);
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
@@ -2874,8 +3128,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
                 : stylePreset === 'playful'
                     ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-                    : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+                : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
     const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
+    const designSystem = spec?.designSystem;
+    const hasDesignSystem = Boolean(designSystem);
+    const isDesignSystemView = chatPanelView === 'design-system';
+    const designSystemForPanel = isDesignSystemEditing && designSystemDraft ? designSystemDraft : designSystem;
 
     return (
         <>
@@ -2944,18 +3202,34 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </p>
                         </div>
-                        {!isEditMode && (
+                        <div className="flex items-center gap-2">
                             <button
-                                onClick={() => setIsCollapsed(true)}
-                                className="p-2 rounded-lg hover:bg-[var(--ui-surface-3)] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] transition-colors"
-                                title="Collapse Sidebar"
+                                type="button"
+                                onClick={() => setChatPanelView((current) => current === 'chat' ? 'design-system' : 'chat')}
+                                disabled={!hasDesignSystem}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${isDesignSystemView
+                                    ? 'bg-indigo-500/20 text-indigo-200 ring-indigo-300/40 hover:bg-indigo-500/25'
+                                    : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                                    } ${!hasDesignSystem ? 'opacity-60 cursor-not-allowed hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text-muted)]' : ''}`}
+                                title={hasDesignSystem ? (isDesignSystemView ? 'Switch to chat view' : 'Show generated design system') : 'Generate a screen first to create a design system'}
                             >
-                                <ChevronLeft size={16} />
+                                <Palette size={12} />
+                                <span>{isDesignSystemView ? 'Chat' : 'System'}</span>
                             </button>
-                        )}
+                            {!isEditMode && (
+                                <button
+                                    onClick={() => setIsCollapsed(true)}
+                                    className="p-2 rounded-lg hover:bg-[var(--ui-surface-3)] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] transition-colors"
+                                    title="Collapse Sidebar"
+                                >
+                                    <ChevronLeft size={16} />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
-                    {/* Messages */}
+                    {/* Messages / Design System */}
+                    {chatPanelView === 'chat' ? (
                     <div
                         ref={messagesContainerRef}
                         className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide"
@@ -3081,6 +3355,54 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                                     </div>
                                 ) : (
                                     <div className="w-full max-w-[95%] space-y-2">
+                                        {(() => {
+                                            const proposal = (message.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
+                                            if (!proposal || message.status !== 'complete') return null;
+                                            const proceeded = Boolean((message.meta as any)?.designSystemProceedAt);
+                                            return (
+                                                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3.5 space-y-3">
+                                                    <div>
+                                                        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Project Design System</p>
+                                                        <h4 className="text-[13px] font-semibold text-[var(--ui-text)] mt-1">{proposal.systemName}</h4>
+                                                        <p className="text-[11px] text-[var(--ui-text-muted)] mt-1 leading-relaxed">{proposal.intentSummary}</p>
+                                                    </div>
+                                                    <div className="grid grid-cols-4 gap-1.5">
+                                                        {Object.entries(proposal.tokens).slice(0, 8).map(([tokenName, tokenValue]) => (
+                                                            <div key={`${message.id}-${tokenName}`} className="space-y-1">
+                                                                <div className="h-7 rounded-md ring-1 ring-black/15" style={{ background: tokenValue }} />
+                                                                <p className="text-[9px] font-semibold text-[var(--ui-text-muted)] truncate">{tokenName}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 text-[10px] text-[var(--ui-text-muted)]">
+                                                        <p><span className="text-[var(--ui-text)] font-semibold">Type:</span> {proposal.typography.displayFont} / {proposal.typography.bodyFont}</p>
+                                                        <p><span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {proposal.spacing.baseUnit}px · {proposal.spacing.density}</p>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openDesignSystemEditor(proposal)}
+                                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                        >
+                                                            <Pencil size={12} />
+                                                            <span>Edit in Design Tab</span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void handleProceedWithDesignSystem(message.id)}
+                                                            disabled={isGenerating || proceeded}
+                                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-sm transition-colors ${(isGenerating || proceeded)
+                                                                ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] cursor-not-allowed'
+                                                                : 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                                                }`}
+                                                        >
+                                                            <Sparkles size={12} />
+                                                            <span>{proceeded ? 'Generating...' : 'Proceed to Generate Screens'}</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                         {(message.status === 'pending' || message.status === 'streaming') && (() => {
                                             const steps = getProcessSteps(message);
                                             const progress = getProcessProgress(message, steps);
@@ -3272,8 +3594,158 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         })}
                         <div ref={messagesEndRef} />
                     </div>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-4 scrollbar-hide">
+                            {!designSystemForPanel ? (
+                                <div className="h-full flex items-center justify-center text-center px-5">
+                                    <div className="max-w-[300px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
+                                        <h3 className="text-sm font-semibold text-[var(--ui-text)]">No design system yet</h3>
+                                        <p className="mt-2 text-xs text-[var(--ui-text-muted)] leading-relaxed">
+                                            Generate your first screen and EazyUI will create a reusable project design system here.
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Generated Design System</p>
+                                        <h3 className="mt-1 text-[15px] font-semibold text-[var(--ui-text)]">{designSystemForPanel.systemName}</h3>
+                                        <p className="mt-2 text-xs text-[var(--ui-text-muted)] leading-relaxed">{designSystemForPanel.intentSummary}</p>
+                                        <div className="mt-3 flex items-center justify-between gap-2">
+                                            <div className="flex flex-wrap gap-1.5">
+                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                    {designSystemForPanel.stylePreset}
+                                                </span>
+                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                    {designSystemForPanel.platform}
+                                                </span>
+                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                    {designSystemForPanel.themeMode}
+                                                </span>
+                                            </div>
+                                            {!isDesignSystemEditing ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openDesignSystemEditor(designSystemForPanel)}
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                >
+                                                    <Pencil size={12} />
+                                                    <span>Edit</span>
+                                                </button>
+                                            ) : (
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelDesignSystemEdit}
+                                                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={saveDesignSystemEdit}
+                                                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-indigo-600 text-indigo-100 ring-1 ring-indigo-300/60 hover:bg-indigo-500"
+                                                    >
+                                                        Save
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
 
-                    {showScrollToLatest && (
+                                    {isDesignSystemEditing && (
+                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
+                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Quick Edit</p>
+                                            <div className="grid grid-cols-2 gap-2.5">
+                                                {Object.entries(designSystemForPanel.tokens).map(([tokenName, tokenValue]) => (
+                                                    <label key={`edit-${tokenName}`} className="space-y-1">
+                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{tokenName}</span>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(tokenValue) ? tokenValue : '#000000'}
+                                                                onChange={(event) => updateDesignSystemDraft((current) => ({
+                                                                    ...current,
+                                                                    tokens: {
+                                                                        ...current.tokens,
+                                                                        [tokenName]: event.target.value,
+                                                                    },
+                                                                }))}
+                                                                className="h-8 w-9 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                value={tokenValue}
+                                                                onChange={(event) => updateDesignSystemDraft((current) => ({
+                                                                    ...current,
+                                                                    tokens: {
+                                                                        ...current.tokens,
+                                                                        [tokenName]: event.target.value,
+                                                                    },
+                                                                }))}
+                                                                className="flex-1 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                            />
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Color Tokens</p>
+                                        <div className="mt-3 grid grid-cols-2 gap-2">
+                                            {Object.entries(designSystemForPanel.tokens).map(([tokenName, tokenValue]) => (
+                                                <div key={tokenName} className="rounded-xl bg-[var(--ui-surface-3)] ring-1 ring-[var(--ui-border)] p-2">
+                                                    <div className="h-7 rounded-md ring-1 ring-black/10" style={{ background: tokenValue }} />
+                                                    <p className="mt-1 text-[10px] font-semibold text-[var(--ui-text)]">{tokenName}</p>
+                                                    <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{tokenValue}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Type, Spacing, Motion</p>
+                                        <p className="text-xs text-[var(--ui-text-muted)]">
+                                            <span className="text-[var(--ui-text)] font-semibold">Typography:</span> {designSystemForPanel.typography.displayFont} / {designSystemForPanel.typography.bodyFont}
+                                        </p>
+                                        <p className="text-xs text-[var(--ui-text-muted)]">
+                                            <span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {designSystemForPanel.spacing.baseUnit}px base, {designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}
+                                        </p>
+                                        <p className="text-xs text-[var(--ui-text-muted)]">
+                                            <span className="text-[var(--ui-text)] font-semibold">Radius:</span> card {designSystemForPanel.radius.card}, control {designSystemForPanel.radius.control}, pill {designSystemForPanel.radius.pill}
+                                        </p>
+                                        <p className="text-xs text-[var(--ui-text-muted)]">
+                                            <span className="text-[var(--ui-text)] font-semibold">Motion:</span> {designSystemForPanel.motion.style} ({designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms)
+                                        </p>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Rules</p>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-emerald-300 mb-1">Do</p>
+                                            <ul className="space-y-1">
+                                                {designSystemForPanel.rules.do.map((rule, index) => (
+                                                    <li key={`do-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-rose-300 mb-1">Don't</p>
+                                            <ul className="space-y-1">
+                                                {designSystemForPanel.rules.dont.map((rule, index) => (
+                                                    <li key={`dont-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {chatPanelView === 'chat' && showScrollToLatest && (
                         <button
                             type="button"
                             onClick={() => {
@@ -3287,6 +3759,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         </button>
                     )}
 
+                    {chatPanelView === 'chat' ? (
+                    <>
                     {/* Chat Input Container */}
                     <div className="mx-4 mb-6 relative bg-[var(--ui-surface-1)] rounded-[20px] border border-[var(--ui-border)] p-3 shadow-2xl transition-all flex flex-col gap-2">
                         <button
@@ -3519,6 +3993,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         accept="image/*"
                         multiple
                     />
+                    </>
+                    ) : (
+                        <div className="mx-4 mb-6 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3.5">
+                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Design System View</p>
+                            <p className="mt-1 text-xs text-[var(--ui-text-muted)] leading-relaxed">
+                                This view reflects the project-wide style foundation used for all newly generated screens.
+                            </p>
+                        </div>
+                    )}
                 </div>
             </div>
             {viewerImage && (

@@ -9,6 +9,13 @@ import { ensureEditableUids } from '../../utils/htmlPatcher';
 import { getPreferredTextModel } from '../../constants/designModels';
 import '../../styles/DeviceFrames.css';
 
+// Streaming preview tuning:
+// - Overlay is disabled by default so users can watch progressive element construction.
+// - Throttle streaming iframe srcDoc updates to reduce flashing/reload jitter.
+const SHOW_STREAMING_OVERLAY = false;
+const SMOOTH_STREAMING_PREVIEW = true;
+const STREAMING_PREVIEW_THROTTLE_MS = 320;
+
 function injectHeightScript(html: string, screenId: string) {
     const script = `
 <script>
@@ -881,18 +888,52 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtmlWithNonce);
     const wasEditingRef = useRef(false);
     const lastReloadTickRef = useRef(reloadTick);
+    const streamFlushTimerRef = useRef<number | null>(null);
+    const pendingStreamDocRef = useRef<string>(injectedHtmlWithNonce);
+
     useEffect(() => {
+        return () => {
+            if (streamFlushTimerRef.current !== null) {
+                window.clearTimeout(streamFlushTimerRef.current);
+                streamFlushTimerRef.current = null;
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        const flushStreamDoc = () => {
+            setStableSrcDoc(pendingStreamDocRef.current);
+            if (streamFlushTimerRef.current !== null) {
+                window.clearTimeout(streamFlushTimerRef.current);
+                streamFlushTimerRef.current = null;
+            }
+        };
+
         if (isEditingScreen) {
             const reloadRequested = lastReloadTickRef.current !== reloadTick;
             if (!wasEditingRef.current || reloadRequested) {
                 setStableSrcDoc(injectedHtmlWithNonce);
             }
+            if (streamFlushTimerRef.current !== null) {
+                window.clearTimeout(streamFlushTimerRef.current);
+                streamFlushTimerRef.current = null;
+            }
         } else {
-            setStableSrcDoc(injectedHtmlWithNonce);
+            if (isStreaming && SMOOTH_STREAMING_PREVIEW) {
+                pendingStreamDocRef.current = injectedHtmlWithNonce;
+                if (streamFlushTimerRef.current === null) {
+                    streamFlushTimerRef.current = window.setTimeout(() => {
+                        flushStreamDoc();
+                    }, STREAMING_PREVIEW_THROTTLE_MS);
+                }
+            } else {
+                pendingStreamDocRef.current = injectedHtmlWithNonce;
+                flushStreamDoc();
+            }
         }
         wasEditingRef.current = isEditingScreen;
         lastReloadTickRef.current = reloadTick;
-    }, [injectedHtmlWithNonce, isEditingScreen, reloadTick]);
+    }, [injectedHtmlWithNonce, isEditingScreen, reloadTick, isStreaming]);
 
     // Frame Configuration
     let borderWidth = 8;
@@ -1054,37 +1095,37 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 borderRadius: contentClipRadius,
                                 clipPath: `inset(0 round ${contentClipRadius})`,
                                 pointerEvents: isEditingScreen ? 'auto' : 'none',
-                                opacity: isStreaming ? 0 : 1,
-                                transition: 'opacity 0.5s ease-in-out',
+                                opacity: 1,
                             }}
                             sandbox="allow-scripts allow-same-origin"
                         />
                     </div>
 
-                    {/* Loading State Overlay */}
-                    <div
-                        style={{
-                            position: 'absolute',
-                            inset: 0,
-                            zIndex: 30,
-                            backgroundColor: 'var(--ui-surface-2)',
-                            opacity: isStreaming ? 1 : 0,
-                            pointerEvents: isStreaming ? 'auto' : 'none',
-                            transition: 'opacity 0.7s ease-in-out',
-                        }}
-                    >
-                        {(isStreaming || data.status === 'complete') && (
-                            <Grainient
-                                color1="#394056"
-                                color2="#2366be"
-                                color3="#f7f7f7"
-                                timeSpeed={4}
-                                grainAmount={0.2}
-                                zoom={1.5}
-                                className="w-full h-full"
-                            />
-                        )}
-                    </div>
+                    {SHOW_STREAMING_OVERLAY && (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                inset: 0,
+                                zIndex: 30,
+                                backgroundColor: 'var(--ui-surface-2)',
+                                opacity: isStreaming ? 1 : 0,
+                                pointerEvents: isStreaming ? 'auto' : 'none',
+                                transition: 'opacity 0.35s ease-out',
+                            }}
+                        >
+                            {(isStreaming || data.status === 'complete') && (
+                                <Grainient
+                                    color1="#394056"
+                                    color2="#2366be"
+                                    color3="#f7f7f7"
+                                    timeSpeed={4}
+                                    grainAmount={0.2}
+                                    zoom={1.5}
+                                    className="w-full h-full"
+                                />
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 

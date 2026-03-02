@@ -53,6 +53,7 @@ type ProjectMetaData = {
     id?: string;
     name?: string;
     description?: string;
+    designSystem?: HtmlDesignSpec["designSystem"];
     screens?: Array<{
       screenId: string;
       name: string;
@@ -81,6 +82,8 @@ const MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048;
 const MAX_INLINE_CHAT_IMAGE_DATA_URL_LENGTH = 350_000;
 const MAX_PERSISTED_IMAGE_COUNT = 8;
 const MAX_PERSISTED_SCREEN_ID_COUNT = 32;
+const MAX_PERSISTED_DESIGN_SYSTEM_RULE_COUNT = 10;
+const MAX_PERSISTED_DESIGN_SYSTEM_REFERENCE_SCREENS = 12;
 
 function isValidDesignSpec(value: unknown): value is HtmlDesignSpec {
   if (!value || typeof value !== "object") return false;
@@ -141,6 +144,145 @@ function normalizeTimestampMs(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function sanitizeMetaString(value: unknown, fallback: string, max = 256): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return fallback;
+  return text.length <= max ? text : text.slice(0, max);
+}
+
+function sanitizeMetaNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function sanitizeMetaStringArray(value: unknown, maxItems: number, maxLength = 220): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, maxItems)
+    .map((item) => (item.length <= maxLength ? item : item.slice(0, maxLength)));
+}
+
+function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDesignSpec["designSystem"]> | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const rawTokens = (raw.tokens && typeof raw.tokens === "object") ? raw.tokens as Record<string, unknown> : {};
+  const rawTypography = (raw.typography && typeof raw.typography === "object") ? raw.typography as Record<string, unknown> : {};
+  const rawScale = (rawTypography.scale && typeof rawTypography.scale === "object") ? rawTypography.scale as Record<string, unknown> : {};
+  const rawSpacing = (raw.spacing && typeof raw.spacing === "object") ? raw.spacing as Record<string, unknown> : {};
+  const rawRadius = (raw.radius && typeof raw.radius === "object") ? raw.radius as Record<string, unknown> : {};
+  const rawShadows = (raw.shadows && typeof raw.shadows === "object") ? raw.shadows as Record<string, unknown> : {};
+  const rawComponentLanguage = (raw.componentLanguage && typeof raw.componentLanguage === "object") ? raw.componentLanguage as Record<string, unknown> : {};
+  const rawMotion = (raw.motion && typeof raw.motion === "object") ? raw.motion as Record<string, unknown> : {};
+  const rawRules = (raw.rules && typeof raw.rules === "object") ? raw.rules as Record<string, unknown> : {};
+
+  const themeMode = raw.themeMode === "light" || raw.themeMode === "dark" || raw.themeMode === "mixed"
+    ? raw.themeMode
+    : "mixed";
+  const spacingDensity = rawSpacing.density === "compact" || rawSpacing.density === "balanced" || rawSpacing.density === "airy"
+    ? rawSpacing.density
+    : "balanced";
+
+  return {
+    version: 1,
+    systemName: sanitizeMetaString(raw.systemName, "Design System", 120),
+    intentSummary: sanitizeMetaString(raw.intentSummary, "", 260),
+    stylePreset: sanitizeMetaString(raw.stylePreset, "modern", 32),
+    platform: sanitizeMetaString(raw.platform, "mobile", 32),
+    themeMode,
+    tokens: {
+      bg: sanitizeMetaString(rawTokens.bg, "#000000", 40),
+      surface: sanitizeMetaString(rawTokens.surface, "#111111", 40),
+      surface2: sanitizeMetaString(rawTokens.surface2, "#222222", 40),
+      text: sanitizeMetaString(rawTokens.text, "#ffffff", 40),
+      muted: sanitizeMetaString(rawTokens.muted, "#9ca3af", 40),
+      stroke: sanitizeMetaString(rawTokens.stroke, "#374151", 40),
+      accent: sanitizeMetaString(rawTokens.accent, "#4f46e5", 40),
+      accent2: sanitizeMetaString(rawTokens.accent2, "#22d3ee", 40),
+    },
+    typography: {
+      displayFont: sanitizeMetaString(rawTypography.displayFont, "Plus Jakarta Sans", 80),
+      bodyFont: sanitizeMetaString(rawTypography.bodyFont, "Plus Jakarta Sans", 80),
+      scale: {
+        display: sanitizeMetaString(rawScale.display, "text-4xl font-bold", 90),
+        h1: sanitizeMetaString(rawScale.h1, "text-2xl font-semibold", 90),
+        h2: sanitizeMetaString(rawScale.h2, "text-xl font-semibold", 90),
+        body: sanitizeMetaString(rawScale.body, "text-base", 90),
+        caption: sanitizeMetaString(rawScale.caption, "text-sm", 90),
+      },
+      tone: sanitizeMetaString(rawTypography.tone, "", 180),
+    },
+    spacing: {
+      baseUnit: sanitizeMetaNumber(rawSpacing.baseUnit, 4, 2, 16),
+      density: spacingDensity,
+      rhythm: sanitizeMetaString(rawSpacing.rhythm, "", 200),
+    },
+    radius: {
+      card: sanitizeMetaString(rawRadius.card, "24px", 40),
+      control: sanitizeMetaString(rawRadius.control, "14px", 40),
+      pill: sanitizeMetaString(rawRadius.pill, "999px", 40),
+    },
+    shadows: {
+      soft: sanitizeMetaString(rawShadows.soft, "", 120),
+      glow: sanitizeMetaString(rawShadows.glow, "", 120),
+    },
+    componentLanguage: {
+      button: sanitizeMetaString(rawComponentLanguage.button, "", 220),
+      card: sanitizeMetaString(rawComponentLanguage.card, "", 220),
+      input: sanitizeMetaString(rawComponentLanguage.input, "", 220),
+      nav: sanitizeMetaString(rawComponentLanguage.nav, "", 220),
+      chips: sanitizeMetaString(rawComponentLanguage.chips, "", 220),
+    },
+    motion: {
+      style: sanitizeMetaString(rawMotion.style, "", 180),
+      durationFastMs: sanitizeMetaNumber(rawMotion.durationFastMs, 140, 60, 1000),
+      durationBaseMs: sanitizeMetaNumber(rawMotion.durationBaseMs, 220, 80, 1400),
+    },
+    rules: {
+      do: sanitizeMetaStringArray(rawRules.do, MAX_PERSISTED_DESIGN_SYSTEM_RULE_COUNT, 220),
+      dont: sanitizeMetaStringArray(rawRules.dont, MAX_PERSISTED_DESIGN_SYSTEM_RULE_COUNT, 220),
+    },
+  };
+}
+
+function sanitizeDesignSystemProposalContextForMeta(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {
+    prompt: sanitizeMetaString(raw.prompt, "", 1800),
+    appPromptForPlanning: sanitizeMetaString(raw.appPromptForPlanning, "", 2200),
+    platform: sanitizeMetaString(raw.platform, "mobile", 32),
+    stylePreset: sanitizeMetaString(raw.stylePreset, "modern", 32),
+    modelProfile: sanitizeMetaString(raw.modelProfile, "quality", 32),
+    parentUserId: sanitizeMetaString(raw.parentUserId, "", 128),
+  };
+
+  const referenceScreens = Array.isArray(raw.referenceScreens)
+    ? (raw.referenceScreens as Array<Record<string, unknown>>)
+      .map((item) => ({
+        screenId: sanitizeMetaString(item?.screenId, "", 128),
+        name: sanitizeMetaString(item?.name, "", 120),
+      }))
+      .filter((item) => item.screenId)
+      .slice(0, MAX_PERSISTED_DESIGN_SYSTEM_REFERENCE_SCREENS)
+    : [];
+
+  if (referenceScreens.length > 0) {
+    out.referenceScreens = referenceScreens;
+  }
+
+  const images = sanitizeChatImagesForPersistence(raw.images)
+    .filter((img) => !img.startsWith("data:"))
+    .slice(0, 3);
+  if (images.length > 0) {
+    out.images = images;
+  }
+
+  return out;
+}
+
 function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -167,6 +309,16 @@ function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
   copyBoolean("livePreview");
   copyNumber("thinkingMs");
   copyNumber("feedbackStart");
+  copyNumber("designSystemProceedAt");
+
+  const designSystemProposal = sanitizeDesignSystemProposalForMeta(raw.designSystemProposal);
+  if (designSystemProposal) {
+    next.designSystemProposal = designSystemProposal;
+  }
+  const designSystemProposalContext = sanitizeDesignSystemProposalContextForMeta(raw.designSystemProposalContext);
+  if (designSystemProposalContext) {
+    next.designSystemProposalContext = designSystemProposalContext;
+  }
 
   if (Array.isArray(raw.screenIds)) {
     next.screenIds = raw.screenIds
@@ -541,6 +693,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
         id: safeDesignSpec.id,
         name: safeDesignSpec.name,
         description: safeDesignSpec.description || "",
+        designSystem: safeDesignSpec.designSystem,
         screens: (safeDesignSpec.screens || []).map((s) => ({
           screenId: s.screenId,
           name: s.name,
@@ -831,6 +984,7 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
       id: data.designSpecMeta?.id || projectId,
       name: data.designSpecMeta?.name || "Untitled project",
       description: data.designSpecMeta?.description || "",
+      designSystem: data.designSpecMeta?.designSystem,
       screens,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
