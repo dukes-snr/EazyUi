@@ -324,6 +324,7 @@ export interface PlannerRequest {
     screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
     recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     projectMemorySummary?: string;
+    routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
     preferredModel?: string;
 }

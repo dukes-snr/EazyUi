@@ -8,13 +8,14 @@ import {
     Undo2,
     Redo2,
 } from 'lucide-react';
-import { useReactFlow } from '@xyflow/react';
+import { useReactFlow, useViewport } from '@xyflow/react';
 
 export function CanvasToolbar() {
-    const { activeTool, setActiveTool, doc, setDoc } = useCanvasStore();
+    const { activeTool, setActiveTool, setDoc } = useCanvasStore();
     const { setSpec } = useDesignStore();
     const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { zoomIn, zoomOut, fitView } = useReactFlow();
+    const viewport = useViewport();
 
     const handleUndo = () => {
         const snapshot = undoSnapshot();
@@ -86,7 +87,7 @@ export function CanvasToolbar() {
                     <ZoomOut size={20} />
                 </button>
                 <span className="text-xs font-medium text-[var(--ui-text-subtle)] min-w-[32px] text-center select-none">
-                    {Math.round(doc.viewport.zoom * 100)}%
+                    {Math.round(viewport.zoom * 100)}%
                 </span>
                 <button
                     onClick={() => zoomIn()}

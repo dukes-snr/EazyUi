@@ -29,7 +29,7 @@ function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
 }
 
 export function CanvasProfileMenu() {
-    const { theme, setTheme, pushToast, removeToast, showInspector } = useUiStore();
+    const { theme, setTheme, pushToast, removeToast, showInspector, requestConfirmation } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
     const { doc, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
@@ -107,8 +107,14 @@ export function CanvasProfileMenu() {
         }
     };
 
-    const handleNewProject = () => {
-        const proceed = !dirty || window.confirm('Discard unsaved changes and start a new project?');
+    const handleNewProject = async () => {
+        const proceed = !dirty || await requestConfirmation({
+            title: 'Start a new project?',
+            message: 'You have unsaved changes. Starting a new project will discard current unsaved work.',
+            confirmLabel: 'Start New Project',
+            cancelLabel: 'Keep Editing',
+            tone: 'danger',
+        });
         if (!proceed) return;
         resetDesign(); resetCanvas(); exitEdit(); clearMessages(); clearHistory(); resetProjectState();
         setOpenSettingsModal(false);
@@ -321,7 +327,7 @@ export function CanvasProfileMenu() {
                                 {settingsTab === 'workspace' && (
                                     <div className="max-w-[840px] flex flex-wrap gap-3">
                                         <button type="button" onClick={() => { window.history.pushState({}, '', '/app/projects'); window.dispatchEvent(new PopStateEvent('popstate')); setOpenSettingsModal(false); }} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Open Project Workspace</button>
-                                        <button type="button" onClick={handleNewProject} className="h-10 rounded-xl bg-indigo-600 px-4 text-sm text-white hover:bg-indigo-500">New Project</button>
+                                        <button type="button" onClick={() => void handleNewProject()} className="h-10 rounded-xl bg-indigo-600 px-4 text-sm text-white hover:bg-indigo-500">New Project</button>
                                         <button type="button" onClick={() => void handleSaveNow()} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Save now</button>
                                     </div>
                                 )}

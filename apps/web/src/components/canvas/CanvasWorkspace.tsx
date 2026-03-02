@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { useMemo, useCallback, useEffect, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import {
     ReactFlow,
     Background,
@@ -19,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { ChevronRight } from 'lucide-react';
 
-import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore, useProjectStore } from '../../stores';
+import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
@@ -30,16 +31,68 @@ const nodeTypes = {
     device: DeviceNode,
 };
 
+type CopiedScreenPayload = {
+    name: string;
+    html: string;
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+};
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    if (target.closest('[contenteditable="true"]')) return true;
+    if (target.closest('input, textarea, select, [role="textbox"]')) return true;
+    return false;
+}
+
+function createCopiedScreenName(sourceName: string, usedNames: Set<string>): string {
+    const base = `${sourceName} Copy`;
+    if (!usedNames.has(base)) {
+        usedNames.add(base);
+        return base;
+    }
+
+    let counter = 2;
+    while (usedNames.has(`${base} ${counter}`)) {
+        counter += 1;
+    }
+    const candidate = `${base} ${counter}`;
+    usedNames.add(candidate);
+    return candidate;
+}
+
 // Inner component to use React Flow hooks if needed
 function CanvasWorkspaceContent() {
-    const { spec } = useDesignStore();
+    const { spec, addScreens, removeScreen } = useDesignStore();
     const { projectId, isHydrating } = useProjectStore();
-    const { doc, selectNodes, updateBoardPosition, focusNodeId, setFocusNodeId, focusNodeIds, setFocusNodeIds, lastExternalUpdate } = useCanvasStore();
-    const { isEditMode } = useEditStore();
+    const {
+        doc,
+        selectNodes,
+        clearSelection,
+        setBoards,
+        updateBoardPosition,
+        focusNodeId,
+        setFocusNodeId,
+        focusNodeIds,
+        setFocusNodeIds,
+        lastExternalUpdate,
+        triggerExternalUpdate,
+        activeTool,
+        setActiveTool,
+    } = useCanvasStore();
+    const { isEditMode, screenId: editScreenId, exitEdit } = useEditStore();
     const { isGenerating } = useChatStore();
-    const { recordSnapshot } = useHistoryStore();
-    const { setCenter, fitView, setViewport } = useReactFlow();
+    const { pushToast, requestConfirmation } = useUiStore();
+    const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
+    const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
     const autoFocusedProjectIdRef = useRef<string | null>(null);
+    const copiedScreensRef = useRef<CopiedScreenPayload[]>([]);
+    const pasteCountRef = useRef(0);
 
     const getNodeSize = useCallback((node: Node) => {
         const width = node.measured?.width ?? (node.data?.width as number) ?? 375;
@@ -94,7 +147,7 @@ function CanvasWorkspaceContent() {
         const x = viewport.width / 2 - ((minX + boundsWidth / 2) * zoom);
         const y = topPadding - minY * zoom;
 
-        setViewport({ x, y, zoom }, { duration });
+        setViewport({ x, y, zoom }, { duration, ease: easeInOutCubic, interpolate: 'smooth' });
     }, [getCanvasViewportSize, getNodeSize, setViewport]);
 
     // Initialize nodes from doc.boards and spec.screens
@@ -145,7 +198,9 @@ function CanvasWorkspaceContent() {
 
                     setCenter(centerX, centerY, {
                         zoom: 1,
-                        duration: 800
+                        duration: 800,
+                        ease: easeInOutCubic,
+                        interpolate: 'smooth',
                     });
                 }
 
@@ -169,24 +224,10 @@ function CanvasWorkspaceContent() {
         const targetNodes = existing
             .map((id) => nodes.find((node) => node.id === id))
             .filter(Boolean) as Node[];
-        const hasDesktop = targetNodes.some((node) => {
-            const { width } = getNodeSize(node);
-            return width >= 1024;
-        });
-
-        if (hasDesktop) {
-            focusNodesTopAligned(targetNodes, 900, true);
-        } else {
-            fitView({
-                nodes: existing.map((id) => ({ id })),
-                padding: 0.2,
-                duration: 900,
-                maxZoom: 1.1,
-            });
-        }
+        focusNodesTopAligned(targetNodes, 900, true);
         selectNodes(existing);
         setFocusNodeIds(null);
-    }, [focusNodeIds, fitView, focusNodesTopAligned, getNodeSize, nodes, selectNodes, setFocusNodeIds]);
+    }, [focusNodeIds, focusNodesTopAligned, nodes, selectNodes, setFocusNodeIds]);
 
     // After a project finishes loading, focus all screens with room for device toolbar chrome.
     useEffect(() => {
@@ -197,11 +238,35 @@ function CanvasWorkspaceContent() {
 
     useEffect(() => {
         if (isHydrating) return;
-        if (!projectId || nodes.length === 0) return;
+        if (!projectId || !spec || nodes.length === 0) return;
         if (autoFocusedProjectIdRef.current === projectId) return;
-        focusNodesTopAligned(nodes, 900, true);
-        autoFocusedProjectIdRef.current = projectId;
-    }, [isHydrating, projectId, nodes, focusNodesTopAligned]);
+
+        const projectScreenIds = new Set((spec.screens || []).map((screen) => screen.screenId));
+        const targetNodes = nodes.filter((node) => projectScreenIds.has(node.id));
+        if (targetNodes.length === 0) return;
+
+        let cancelled = false;
+        let delayedPass: number | undefined;
+        const frame = window.requestAnimationFrame(() => {
+            if (cancelled) return;
+            // First fit pass immediately after nodes are mounted.
+            focusNodesTopAligned(targetNodes, 900, true);
+            // Second pass settles final dimensions for a stable centered view.
+            delayedPass = window.setTimeout(() => {
+                if (cancelled) return;
+                focusNodesTopAligned(targetNodes, 520, true);
+                autoFocusedProjectIdRef.current = projectId;
+            }, 220);
+        });
+
+        return () => {
+            cancelled = true;
+            window.cancelAnimationFrame(frame);
+            if (delayedPass) {
+                window.clearTimeout(delayedPass);
+            }
+        };
+    }, [isHydrating, projectId, spec, nodes, focusNodesTopAligned]);
 
     // Update nodes when structure or selection changes
     // But avoid resetting positions while users are interacting via React Flow
@@ -285,13 +350,332 @@ function CanvasWorkspaceContent() {
         selectNodes([]);
     }, [selectNodes]);
 
+    const onMoveEnd = useCallback((_: MouseEvent | TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => {
+        const currentDoc = useCanvasStore.getState().doc;
+        const zoomDelta = Math.abs((currentDoc.viewport.zoom || 1) - viewport.zoom);
+        const panXDelta = Math.abs((currentDoc.viewport.panX || 0) - viewport.x);
+        const panYDelta = Math.abs((currentDoc.viewport.panY || 0) - viewport.y);
+        if (zoomDelta < 0.0001 && panXDelta < 0.1 && panYDelta < 0.1) return;
+
+        useCanvasStore.getState().setDoc({
+            ...currentDoc,
+            viewport: {
+                zoom: viewport.zoom,
+                panX: viewport.x,
+                panY: viewport.y,
+            },
+        });
+    }, []);
+
+    const collectSelectedScreens = useCallback((): CopiedScreenPayload[] => {
+        const canvasState = useCanvasStore.getState();
+        const currentSpec = useDesignStore.getState().spec;
+        const selectedIds = Array.from(new Set(canvasState.doc.selection.selectedNodeIds || []));
+        if (!currentSpec || selectedIds.length === 0) return [];
+
+        const screenMap = new Map(currentSpec.screens.map((screen) => [screen.screenId, screen]));
+        const boardMap = new Map(canvasState.doc.boards.map((board) => [board.screenId, board]));
+
+        return selectedIds
+            .map((screenId) => {
+                const screen = screenMap.get(screenId);
+                const board = boardMap.get(screenId);
+                if (!screen || !board) return null;
+                return {
+                    name: screen.name,
+                    html: screen.html,
+                    width: screen.width,
+                    height: screen.height,
+                    x: board.x,
+                    y: board.y,
+                };
+            })
+            .filter(Boolean) as CopiedScreenPayload[];
+    }, []);
+
+    const copySelectionToClipboard = useCallback((): boolean => {
+        const copied = collectSelectedScreens();
+        if (copied.length === 0) return false;
+        copiedScreensRef.current = copied;
+        pasteCountRef.current = 0;
+        pushToast({
+            kind: 'info',
+            title: 'Copied screens',
+            message: `${copied.length} screen${copied.length === 1 ? '' : 's'} copied.`,
+            durationMs: 2200,
+        });
+        return true;
+    }, [collectSelectedScreens, pushToast]);
+
+    const pasteScreens = useCallback((sourceScreens: CopiedScreenPayload[]): boolean => {
+        if (sourceScreens.length === 0) return false;
+
+        const currentSpec = useDesignStore.getState().spec;
+        if (!currentSpec) return false;
+
+        pasteCountRef.current += 1;
+        const stepOffset = 40 * pasteCountRef.current;
+        const minX = Math.min(...sourceScreens.map((item) => item.x));
+        const minY = Math.min(...sourceScreens.map((item) => item.y));
+        const usedNames = new Set(currentSpec.screens.map((screen) => screen.name));
+
+        const nextScreens = sourceScreens.map((source) => {
+            const screenId = uuidv4();
+            return {
+                screenId,
+                name: createCopiedScreenName(source.name, usedNames),
+                html: source.html,
+                width: source.width,
+                height: source.height,
+                status: 'complete' as const,
+                board: {
+                    boardId: screenId,
+                    screenId,
+                    x: source.x - minX + minX + stepOffset,
+                    y: source.y - minY + minY + stepOffset,
+                    width: source.width,
+                    height: source.height,
+                    deviceFrame: 'none' as const,
+                    locked: false,
+                    visible: true,
+                },
+            };
+        });
+
+        addScreens(nextScreens.map(({ board: _board, ...screen }) => screen));
+        const currentBoards = useCanvasStore.getState().doc.boards;
+        setBoards([...currentBoards, ...nextScreens.map((item) => item.board)]);
+        const newIds = nextScreens.map((item) => item.screenId);
+        selectNodes(newIds);
+        setFocusNodeIds(newIds);
+        pushToast({
+            kind: 'success',
+            title: 'Pasted screens',
+            message: `${nextScreens.length} screen${nextScreens.length === 1 ? '' : 's'} added to canvas.`,
+            durationMs: 2400,
+        });
+        return true;
+    }, [addScreens, pushToast, selectNodes, setBoards, setFocusNodeIds]);
+
+    const deleteSelectedScreens = useCallback(async (): Promise<boolean> => {
+        const canvasState = useCanvasStore.getState();
+        const selectedIds = Array.from(new Set(canvasState.doc.selection.selectedNodeIds || []));
+        if (selectedIds.length === 0) return false;
+
+        const label = selectedIds.length === 1 ? 'this screen' : `${selectedIds.length} screens`;
+        const confirmed = await requestConfirmation({
+            title: selectedIds.length === 1 ? 'Delete screen?' : 'Delete selected screens?',
+            message: `This will permanently remove ${label} from the current project.`,
+            confirmLabel: selectedIds.length === 1 ? 'Delete Screen' : 'Delete Screens',
+            cancelLabel: 'Cancel',
+            tone: 'danger',
+        });
+        if (!confirmed) return false;
+
+        const selectedSet = new Set(selectedIds);
+        selectedIds.forEach((screenId) => removeScreen(screenId));
+        const updatedBoards = useCanvasStore.getState().doc.boards.filter(
+            (board) => !selectedSet.has(board.screenId) && !selectedSet.has(board.boardId)
+        );
+        setBoards(updatedBoards);
+        clearSelection();
+
+        if (isEditMode && editScreenId && selectedSet.has(editScreenId)) {
+            exitEdit();
+        }
+
+        pushToast({
+            kind: 'success',
+            title: 'Screens deleted',
+            message: `Removed ${selectedIds.length} screen${selectedIds.length === 1 ? '' : 's'}.`,
+            durationMs: 2200,
+        });
+        return true;
+    }, [clearSelection, editScreenId, exitEdit, isEditMode, pushToast, removeScreen, requestConfirmation, setBoards]);
+
+    const nudgeSelection = useCallback((deltaX: number, deltaY: number): boolean => {
+        const canvasState = useCanvasStore.getState();
+        const selectedIds = Array.from(new Set(canvasState.doc.selection.selectedNodeIds || []));
+        if (selectedIds.length === 0) return false;
+        const selectedSet = new Set(selectedIds);
+
+        const nextBoards = canvasState.doc.boards.map((board) => (
+            selectedSet.has(board.screenId)
+                ? { ...board, x: board.x + deltaX, y: board.y + deltaY }
+                : board
+        ));
+        setBoards(nextBoards);
+        triggerExternalUpdate();
+        return true;
+    }, [setBoards, triggerExternalUpdate]);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (isEditableTarget(event.target)) return;
+
+            const key = event.key.toLowerCase();
+            const primary = event.ctrlKey || event.metaKey;
+
+            if (!primary && event.key === 'Escape') {
+                if (doc.selection.selectedNodeIds.length > 0) {
+                    clearSelection();
+                    event.preventDefault();
+                    return;
+                }
+                if (isEditMode) {
+                    exitEdit();
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'c') {
+                if (copySelectionToClipboard()) {
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'v') {
+                if (pasteScreens(copiedScreensRef.current)) {
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'd') {
+                const selected = collectSelectedScreens();
+                if (selected.length && pasteScreens(selected)) {
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'f') {
+                const selectedIds = Array.from(new Set(useCanvasStore.getState().doc.selection.selectedNodeIds || []));
+                if (selectedIds.length > 0) {
+                    if (selectedIds.length === 1) {
+                        setFocusNodeId(selectedIds[0]);
+                    } else {
+                        setFocusNodeIds(selectedIds);
+                    }
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'a') {
+                const allIds = (useDesignStore.getState().spec?.screens || []).map((screen) => screen.screenId);
+                if (allIds.length > 0) {
+                    selectNodes(allIds);
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            if (primary && key === 'z' && !event.shiftKey) {
+                if (!canUndo()) return;
+                const snapshot = undoSnapshot();
+                if (!snapshot) return;
+                useDesignStore.getState().setSpec(snapshot.spec as any);
+                useCanvasStore.getState().setDoc(snapshot.doc);
+                event.preventDefault();
+                return;
+            }
+
+            if (primary && (key === 'y' || (key === 'z' && event.shiftKey))) {
+                if (!canRedo()) return;
+                const snapshot = redoSnapshot();
+                if (!snapshot) return;
+                useDesignStore.getState().setSpec(snapshot.spec as any);
+                useCanvasStore.getState().setDoc(snapshot.doc);
+                event.preventDefault();
+                return;
+            }
+
+            if (primary && (event.key === '=' || event.key === '+')) {
+                zoomIn({ duration: 120 });
+                event.preventDefault();
+                return;
+            }
+
+            if (primary && (event.key === '-' || event.key === '_')) {
+                zoomOut({ duration: 120 });
+                event.preventDefault();
+                return;
+            }
+
+            if (primary && key === '0') {
+                fitView({ padding: 0.15, duration: 260, maxZoom: 1.1 });
+                event.preventDefault();
+                return;
+            }
+
+            if (!primary && key === '1') {
+                setActiveTool('select');
+                event.preventDefault();
+                return;
+            }
+
+            if (!primary && key === '2') {
+                setActiveTool('hand');
+                event.preventDefault();
+                return;
+            }
+
+            if (!primary && (event.key === 'Delete' || event.key === 'Backspace')) {
+                if (doc.selection.selectedNodeIds.length > 0) {
+                    event.preventDefault();
+                    void deleteSelectedScreens();
+                }
+                return;
+            }
+
+            const nudgeStep = event.shiftKey ? 10 : 1;
+            if (!primary && key === 'arrowup') {
+                if (nudgeSelection(0, -nudgeStep)) event.preventDefault();
+                return;
+            }
+            if (!primary && key === 'arrowdown') {
+                if (nudgeSelection(0, nudgeStep)) event.preventDefault();
+                return;
+            }
+            if (!primary && key === 'arrowleft') {
+                if (nudgeSelection(-nudgeStep, 0)) event.preventDefault();
+                return;
+            }
+            if (!primary && key === 'arrowright') {
+                if (nudgeSelection(nudgeStep, 0)) event.preventDefault();
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [
+        canRedo,
+        canUndo,
+        clearSelection,
+        collectSelectedScreens,
+        copySelectionToClipboard,
+        deleteSelectedScreens,
+        doc.selection.selectedNodeIds.length,
+        exitEdit,
+        fitView,
+        isEditMode,
+        nudgeSelection,
+        pasteScreens,
+        redoSnapshot,
+        selectNodes,
+        setActiveTool,
+        undoSnapshot,
+        zoomIn,
+        zoomOut,
+    ]);
+
     const navigateTo = useCallback((path: string) => {
         window.history.pushState({}, '', path);
         window.dispatchEvent(new PopStateEvent('popstate'));
     }, []);
-
-    // Derived props based on active tool
-    const { activeTool } = useCanvasStore();
 
     // Select Tool: Selection Box on drag (pan with Space via panActivationKeyCode)
     // Hand Tool: Pan on drag
@@ -341,6 +725,7 @@ function CanvasWorkspaceContent() {
                 onNodeDragStop={onNodeDragStop}
                 onPaneClick={onPaneClick}
                 onSelectionChange={onSelectionChange}
+                onMoveEnd={onMoveEnd}
                 nodeTypes={nodeTypes}
                 fitView
                 fitViewOptions={{ padding: 0.15, maxZoom: 1 }}

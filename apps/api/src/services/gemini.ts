@@ -353,17 +353,12 @@ THINK BEFORE YOU DESIGN:
 - What emotions should the user feel? Design around that feeling, not around a generic template.
 - Each screen should have a clear visual focal point — a hero image, a bold stat, a featured card — NOT just a list of items.
 
-NAVIGATION — CONTEXT-AWARE & PLATFORM-SPECIFIC:
-- MOBILE:
-  - Professional/Finance: Clean, structured fixed bottom nav or top tab bar.
-  - Creative/Social: Floating pill-shaped bottom bar with backdrop-blur or fixed bottom bar with backdrop-blur.
-- DESKTOP / TABLET:
-  - Use a left sidebar navigation (fixed or collapsible) OR a robust top navigation header.
-  - PROHIBITED: Do NOT use bottom navigation bars on Desktop/Tablet.
-- General:
-  - Detail screens: Minimal top bar with back arrow.
-  - Splash/Welcome: NO navigation.
-- NEVER stamp the same navigation style onto every screen.
+NAVIGATION - CONTEXT-AWARE & PLATFORM-SPECIFIC:
+- Let the navigation pattern be decided by the product context and each screen's purpose.
+- You may use bottom tabs, top tabs, sidebar, top header, contextual back navigation, or no global navigation.
+- Keep navigation usable and accessible, and avoid forcing one identical nav pattern on every screen.
+- Detail screens usually need contextual back navigation; splash/welcome screens may omit navigation.
+- For Desktop/Tablet, avoid mobile-styled floating nav bars unless the user explicitly requests them.
 
 LAYOUT COMPOSITION — NOT TEMPLATES:
 - Design each screen like an editorial page, NOT a form or a list.
@@ -373,10 +368,11 @@ LAYOUT COMPOSITION — NOT TEMPLATES:
 - Stack content in interesting ways: overlap an avatar over a header, float a price badge over an image, use negative margins creatively.
 - Vary card sizes within the same screen — one tall card next to two short ones, horizontal scrollable chips, etc.
 
-GLASSMORPHISM & DEPTH:
-- Use backdrop-blur-lg with semi-transparent backgrounds (bg-white/5, bg-white/10, bg-black/20) for cards, navs, and overlays.
-- Layer elements with colored shadows that match the theme (e.g. shadow-xl shadow-amber-500/10 for a warm app), NOT plain gray shadows.
-- Create visual depth: background layer → content layer → floating UI layer.
+MODERN DEPTH & GLASSMORPHISM:
+- Use backdrop-blur-xl with semi-transparent backgrounds (bg-white/10 dark:bg-black/40) for sticky navs, sidebars, and overlays.
+- Add subtle borders to glass elements to make them pop (border border-white/20 or border-white/10).
+- Layer elements with colored, soft shadows that match the theme (e.g., shadow-[0_8px_30px_rgb(0,0,0,0.12)] or colored shadows like shadow-accent/20). Avoid default, harsh black shadows unless requested.
+- Create visual depth: Background Layer -> Glass/Surface Layer -> Content Layer -> Floating UI Layer.
 
 TYPOGRAPHY & SPACING:
 - Use a TWO-FONT pairing: a display font (font-display) for hero headings + Plus Jakarta Sans (font-sans) for body/meta.
@@ -452,10 +448,12 @@ THINK FIRST:
 - What is the app's personality? Finance = trustworthy. Music = vibrant. Food = warm. Design around that feeling.
 - Each screen needs a clear visual focal point — a hero image, a bold stat, a featured card — NOT just a list.
 
-NAVIGATION — CONTEXT-AWARE & PLATFORM-SPECIFIC:
-- MOBILE: Finance=Fixed Bottom, Creative=Floating Pill. 
-- DESKTOP: Sidebar or Top Header. NO bottom nav.
-- Detail screens: Back button only. Splash: No nav.
+NAVIGATION - CONTEXT-AWARE & PLATFORM-SPECIFIC:
+- Let navigation be chosen from product context and each screen's role.
+- Allowed patterns include bottom tabs, top tabs, sidebars, top headers, contextual back nav, or no global nav.
+- Avoid repeating one identical nav style on every screen.
+- Detail screens usually need back navigation; splash/welcome screens may omit nav.
+- For Desktop/Tablet, avoid mobile-styled floating nav bars unless explicitly requested.
 
 LAYOUT COMPOSITION:
 - Design like an editorial page, NOT a form or list.
@@ -464,10 +462,11 @@ LAYOUT COMPOSITION:
 - Full-bleed images with gradient overlays as hero sections.
 - Overlap elements creatively: avatar over header, price badge over image.
 
-GLASSMORPHISM & DEPTH:
-- backdrop-blur-lg + semi-transparent backgrounds (bg-white/5, bg-white/10, bg-black/20).
-- Colored shadows matching the theme (shadow-xl shadow-amber-500/10), NOT plain gray.
-- Depth layers: background → content → floating UI.
+MODERN DEPTH & GLASSMORPHISM:
+- Use backdrop-blur-xl with semi-transparent backgrounds (bg-white/10 dark:bg-black/40) for sticky navs, sidebars, and overlays.
+- Add subtle borders to glass elements to make them pop (border border-white/20 or border-white/10).
+- Layer elements with colored, soft shadows that match the theme (e.g., shadow-[0_8px_30px_rgb(0,0,0,0.12)] or colored shadows like shadow-accent/20). Avoid default, harsh black shadows unless requested.
+- Create visual depth: Background Layer -> Glass/Surface Layer -> Content Layer -> Floating UI Layer.
 
 TYPOGRAPHY: Use font-display for hero headings and font-sans for body. Bold headings (text-3xl+, tracking-tight), clear hierarchy, generous spacing (p-6+, space-y-5+).
 
@@ -1472,10 +1471,6 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
     const designSystemGuidance = normalizedDesignSystem
         ? buildDesignSystemGuidance(normalizedDesignSystem)
         : '';
-    const canonicalNavbar = (options.consistencyProfile?.canonicalNavbarLabels || [])
-        .map((item) => String(item || '').trim())
-        .filter(Boolean)
-        .slice(0, 8);
     const consistencyRules = (options.consistencyProfile?.rules || [])
         .map((item) => String(item || '').trim())
         .filter(Boolean)
@@ -1490,9 +1485,8 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
     const consistencyGuidance = `
 Consistency requirements:
 - Keep component language consistent with the existing app.
-- Preserve navbar/navigation pattern from existing screens.
-- Do not invent a new nav paradigm if one already exists.
-${canonicalNavbar.length > 0 ? `- Canonical navbar labels to align with: ${canonicalNavbar.join(', ')}` : ''}
+- Keep navigation decisions context-aware for each screen instead of forcing one navbar style.
+- If navigation changes, keep it coherent with the screen goal and overall product UX.
 ${consistencyRules.length > 0 ? `- Consistency rules:\n${consistencyRules.map((rule) => `  - ${rule}`).join('\n')}` : ''}
 ${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((screen) => `  - ${screen.name}\n${screen.htmlSnippet}`).join('\n')}` : ''}
 ${designSystemGuidance}`.trim();

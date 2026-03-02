@@ -5,6 +5,8 @@ import type { DesignModelProfile } from '../../constants/designModels';
 import logo from '../../assets/Ui-logo.png';
 import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
+import { useUiStore } from '../../stores';
+import { ConfirmationDialog } from '../ui/ConfirmationDialog';
 
 type ProjectWorkspacePageProps = {
   authReady: boolean;
@@ -34,6 +36,7 @@ function formatDate(value: string) {
 }
 
 export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, onOpenProject }: ProjectWorkspacePageProps) {
+  const requestConfirmation = useUiStore((state) => state.requestConfirmation);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,7 +94,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   }, [openAvatarMenu]);
 
   const handleDelete = async (id: string) => {
-    const ok = window.confirm('Delete this project permanently?');
+    const ok = await requestConfirmation({
+      title: 'Delete project?',
+      message: 'This project, its screens, and saved chat history will be permanently removed.',
+      confirmLabel: 'Delete Project',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
     if (!ok) return;
     try {
       setBusyId(id);
@@ -466,6 +475,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         </section>
       </main>
       </div>
+      <ConfirmationDialog />
     </div>
   );
 }

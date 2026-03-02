@@ -14,6 +14,7 @@ import { LearnPage } from './components/marketing/LearnPage';
 import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
+import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { ToastViewport } from './components/ui/ToastViewport';
 import DemoOne from './components/ui/demo';
 import type { DesignModelProfile } from './constants/designModels';
@@ -590,6 +591,7 @@ function App() {
                 <EditPanel />
                 {showInspector && <InspectorPanel />}
             </div>
+            <ConfirmationDialog />
             <ToastViewport />
         </div>
     );

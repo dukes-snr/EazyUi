@@ -467,6 +467,88 @@ function summarizeHtmlForRouting(html: string): string {
     return text.slice(0, 280);
 }
 
+const ROUTE_MATCH_STOP_WORDS = new Set([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'your', 'you',
+    'screen', 'screens', 'page', 'pages', 'make', 'build', 'create', 'generate', 'add',
+    'new', 'please', 'need', 'want', 'have', 'show', 'give', 'can', 'could', 'would',
+    'should', 'just', 'then', 'also', 'like',
+]);
+
+function tokenizeRouteMatchText(input: string): string[] {
+    return String(input || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !ROUTE_MATCH_STOP_WORDS.has(token));
+}
+
+function scoreRouteReferenceCandidate(prompt: string, screen: HtmlScreen): number {
+    const promptLower = String(prompt || '').toLowerCase();
+    const promptTokens = tokenizeRouteMatchText(promptLower);
+    if (promptTokens.length === 0) return 0;
+
+    const name = String(screen.name || '').toLowerCase();
+    const summary = summarizeHtmlForRouting(screen.html).toLowerCase();
+    const navLabels = extractNavbarLabelsFromHtml(screen.html).join(' ').toLowerCase();
+    const quickCorpus = `${name} ${summary} ${navLabels}`;
+    const htmlLower = String(screen.html || '').toLowerCase();
+
+    let score = 0;
+    promptTokens.forEach((token) => {
+        if (name.includes(token)) score += 6;
+        if (quickCorpus.includes(token)) score += 2.5;
+        if (token.length >= 5 && htmlLower.includes(token)) score += 0.7;
+    });
+
+    if (/(create|add|build|generate|new)/i.test(promptLower) && /<nav\b/i.test(screen.html || '')) {
+        score += 1.4;
+    }
+    if (/(profile|account|settings|user|me)/i.test(promptLower) && /(profile|account|settings|avatar|user)/i.test(quickCorpus)) {
+        score += 3;
+    }
+    if (/\b(dashboard|home)\b/i.test(name)) {
+        score += 0.6;
+    }
+    if (!/\bdetail\b/i.test(promptLower) && /\bdetail\b/i.test(name)) {
+        score -= 0.5;
+    }
+    return score;
+}
+
+function mergeReferenceScreens(primary: HtmlScreen[], secondary: HtmlScreen[], limit = 2): HtmlScreen[] {
+    const merged: HtmlScreen[] = [];
+    const seen = new Set<string>();
+    [...primary, ...secondary].forEach((screen) => {
+        if (!screen || seen.has(screen.screenId)) return;
+        seen.add(screen.screenId);
+        merged.push(screen);
+    });
+    return merged.slice(0, limit);
+}
+
+function pickRouteReferenceScreens(prompt: string, allScreens: HtmlScreen[], explicitReferences: HtmlScreen[] = []): HtmlScreen[] {
+    const validScreens = (allScreens || []).filter(Boolean);
+    if (validScreens.length === 0) return [];
+
+    const byId = new Map(validScreens.map((screen) => [screen.screenId, screen] as const));
+    const explicit = explicitReferences
+        .map((screen) => byId.get(screen.screenId))
+        .filter(Boolean) as HtmlScreen[];
+    if (explicit.length > 0) return explicit.slice(0, 1);
+
+    const scored = validScreens
+        .map((screen) => ({ screen, score: scoreRouteReferenceCandidate(prompt, screen) }))
+        .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 0) return [];
+    if (scored[0].score > 0.1) return [scored[0].screen];
+
+    const dashboardLike = validScreens.find((screen) => /\b(dashboard|home)\b/i.test(screen.name));
+    if (dashboardLike) return [dashboardLike];
+    return [validScreens[0]];
+}
+
 function buildRoutingScreenDetails(screens: HtmlScreen[]): RoutingScreenDetail[] {
     return screens.slice(0, 24).map((screen) => ({
         screenId: screen.screenId,
@@ -1324,6 +1406,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const initialRequestSubmittedRef = useRef<string | null>(null);
     const previousMessageLengthRef = useRef(0);
     const previousScrollMessageLengthRef = useRef(0);
+    const shouldStickToLatestRef = useRef(true);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1374,6 +1457,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const scrollToLatest = (behavior: ScrollBehavior = 'smooth') => {
         messagesEndRef.current?.scrollIntoView({ behavior });
+    };
+
+    const pinToLatest = (behavior: ScrollBehavior = 'auto') => {
+        shouldStickToLatestRef.current = true;
+        setShowScrollToLatest(false);
+        window.requestAnimationFrame(() => {
+            scrollToLatest(behavior);
+        });
     };
 
     const ensureNotificationPermission = async () => {
@@ -1729,26 +1820,56 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         return messages.slice(-renderedMessageCount);
     }, [messages, renderedMessageCount]);
 
+    const lastMessageActivitySignature = useMemo(() => {
+        const last = visibleMessages[visibleMessages.length - 1];
+        return [
+            visibleMessages.length,
+            last?.id || '',
+            last?.status || '',
+            (last?.content || '').length,
+            last?.images?.length || 0,
+            String((last?.meta as any)?.typedComplete ? 1 : 0),
+        ].join(':');
+    }, [visibleMessages]);
+
     // Auto-scroll to latest message on load/new message updates.
     useEffect(() => {
+        if (chatPanelView !== 'chat') return;
         if (!messagesEndRef.current || !messagesContainerRef.current) return;
         const previousLength = previousScrollMessageLengthRef.current;
         const largeJump = messages.length - previousLength > 12;
+        const appended = messages.length > previousLength;
         previousScrollMessageLengthRef.current = messages.length;
+        if (!shouldStickToLatestRef.current && !appended) return;
         scrollToLatest(largeJump ? 'auto' : 'smooth');
         setShowScrollToLatest(false);
-    }, [messages.length]);
+    }, [messages.length, chatPanelView]);
+
+    useEffect(() => {
+        if (chatPanelView !== 'chat') return;
+        if (!messagesContainerRef.current) return;
+        if (!shouldStickToLatestRef.current) return;
+        const frame = window.requestAnimationFrame(() => {
+            const el = messagesContainerRef.current;
+            if (!el) return;
+            el.scrollTop = el.scrollHeight;
+            setShowScrollToLatest(false);
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [lastMessageActivitySignature, isGenerating, renderedMessageCount, chatPanelView]);
 
     useEffect(() => {
         const el = messagesContainerRef.current;
         if (!el) return;
         const onScroll = () => {
-            setShowScrollToLatest(!isNearBottom());
+            const nearBottom = isNearBottom();
+            shouldStickToLatestRef.current = nearBottom;
+            setShowScrollToLatest(!nearBottom);
         };
         onScroll();
         el.addEventListener('scroll', onScroll, { passive: true });
         return () => el.removeEventListener('scroll', onScroll);
-    }, [messages.length, renderedMessageCount, isCollapsed]);
+    }, [messages.length, renderedMessageCount, isCollapsed, chatPanelView]);
 
     useEffect(() => {
         if (!isGenerating) return;
@@ -2058,6 +2179,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const handlePlannerCta = (messageId: string, screenNames: string[], label?: string) => {
         if (!Array.isArray(screenNames) || screenNames.length === 0 || isGenerating) return;
+        pinToLatest('smooth');
         const source = useChatStore.getState().messages.find((item) => item.id === messageId);
         const suggestionContext = (source?.meta?.plannerContext || null) as PlannerSuggestionContext | null;
         const basePrompt = String(suggestionContext?.appPrompt || source?.meta?.plannerPrompt || '').trim();
@@ -2106,6 +2228,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const handleProceedWithDesignSystem = async (assistantMessageId: string) => {
         if (isGenerating) return;
+        pinToLatest('smooth');
         const source = useChatStore.getState().messages.find((item) => item.id === assistantMessageId && item.role === 'assistant');
         if (!source) return;
         const designSystem = (source.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
@@ -2199,7 +2322,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
     };
 
-    const withProjectPlannerContext = (payload: PlannerRequest): PlannerRequest => {
+    const withProjectPlannerContext = (payload: PlannerRequest, routeReferenceScreens: HtmlScreen[] = []): PlannerRequest => {
         const currentScreens = useDesignStore.getState().spec?.screens || [];
         const currentMessages = useChatStore.getState().messages;
         const memorySnapshot = useProjectMemoryStore.getState().memory
@@ -2209,6 +2332,13 @@ Return a polished, consistent screen without introducing a new navigation patter
             screenDetails: buildRoutingScreenDetails(currentScreens),
             recentMessages: buildRecentConversation(currentMessages),
             projectMemorySummary: buildProjectMemorySummary(memorySnapshot, currentScreens, currentMessages),
+            routeReferenceScreens: payload.phase === 'route'
+                ? routeReferenceScreens.slice(0, 1).map((screen) => ({
+                    screenId: screen.screenId,
+                    name: screen.name,
+                    html: screen.html,
+                }))
+                : payload.routeReferenceScreens,
         };
     };
 
@@ -2227,6 +2357,11 @@ Return a polished, consistent screen without introducing a new navigation patter
 
         const imagesToSend = overrideImages ? [...overrideImages] : [...images];
         const referenceScreens = incomingReferenceScreens || [];
+        const routeReferenceScreens = pickRouteReferenceScreens(
+            requestPrompt,
+            useDesignStore.getState().spec?.screens || [],
+            referenceScreens
+        );
         const requestPromptWithReferences = referenceScreens.length > 0
             ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
             : requestPrompt;
@@ -2277,7 +2412,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            }));
+            }, routeReferenceScreens));
 
             if (route.phase === 'route' && route.intent === 'chat_assist') {
                 const routeSuggestions = buildRouteChatSuggestionPayload(route);
@@ -2483,6 +2618,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         let generationPromptFromPlanner = requestPromptWithReferences;
         let plannerReferenceImages: string[] = [];
         let activeProjectDesignSystem: ProjectDesignSystem | undefined = useDesignStore.getState().spec?.designSystem;
+        let firstRequestProjectNameLocked = false;
 
         try {
             console.info('[UI] generate: start (stream)', {
@@ -2503,6 +2639,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                     });
                     activeProjectDesignSystem = designSystemResponse.designSystem;
                     applyProjectDesignSystem(activeProjectDesignSystem);
+                    if (shouldNameProjectOnFirstRequest && isGenericProjectName(useDesignStore.getState().spec?.name)) {
+                        const firstDesignSystemName = normalizeSuggestedProjectName(designSystemResponse.designSystem?.systemName);
+                        if (firstDesignSystemName) {
+                            applyProjectName(firstDesignSystemName);
+                            firstRequestProjectNameLocked = true;
+                        }
+                    }
                 } catch (designSystemError) {
                     console.warn('[UI] design-system pre-gen failed; continuing with backend fallback', designSystemError);
                 }
@@ -2510,33 +2653,13 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             if (shouldPauseForDesignSystemApproval && activeProjectDesignSystem) {
                 if (shouldNameProjectOnFirstRequest && isGenericProjectName(useDesignStore.getState().spec?.name)) {
-                    let nextProjectName = '';
-                    try {
-                        if (plannerReferenceImages.length === 0) {
-                            plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
-                        }
-                        const namingPlan = await apiClient.plan(withProjectPlannerContext({
-                            phase: 'plan',
-                            appPrompt: appPromptForPlanning,
-                            platform: platformToUse,
-                            stylePreset: styleToUse,
-                            screenCountDesired: 2,
-                            screensGenerated: existingScreenNames.map((name) => ({ name })),
-                            referenceImages: plannerReferenceImages,
-                            preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-                        }));
-                        if (namingPlan.phase === 'plan' || namingPlan.phase === 'discovery') {
-                            nextProjectName = normalizeSuggestedProjectName(namingPlan.appName);
-                        }
-                    } catch (namePlanError) {
-                        console.warn('[UI] naming planner failed; falling back to prompt-derived name', namePlanError);
-                    }
-
+                    let nextProjectName = normalizeSuggestedProjectName(activeProjectDesignSystem.systemName);
                     if (!nextProjectName) {
                         nextProjectName = deriveProjectNameFromPrompt(requestPrompt);
                     }
                     if (nextProjectName) {
                         applyProjectName(nextProjectName);
+                        firstRequestProjectNameLocked = true;
                     }
                 }
 
@@ -2597,7 +2720,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                     }));
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
-                        plannerSuggestedProjectName = normalizeSuggestedProjectName(discoveryPlan.appName);
+                        if (!firstRequestProjectNameLocked) {
+                            plannerSuggestedProjectName = normalizeSuggestedProjectName(discoveryPlan.appName);
+                        }
                         if (incomingTargetScreens && incomingTargetScreens.length > 0) {
                             generationPromptFromPlanner = makePlannerTargetedGenerationPromptWithStyle(
                                 appPromptForPlanning,
@@ -2788,7 +2913,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } : {}),
                     }
                 });
-                if (plannerSuggestedProjectName) {
+                if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                     applyProjectName(plannerSuggestedProjectName);
                 }
                 if (generatedIds.length > 0) {
@@ -2980,7 +3105,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } : {}),
                     }
                 });
-                if (plannerSuggestedProjectName) {
+                if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                     applyProjectName(plannerSuggestedProjectName);
                 }
                 const fallbackIds = regen.designSpec.screens
@@ -3080,7 +3205,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     } : {}),
                 }
             });
-            if (plannerSuggestedProjectName) {
+            if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                 applyProjectName(plannerSuggestedProjectName);
             }
             const generatedIds = createdSeqs
@@ -3140,6 +3265,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         if (nextPlatform) setPlatform(nextPlatform);
         if (nextStylePreset) setStylePreset(nextStylePreset);
         if (nextModelProfile) setModelProfile(nextModelProfile);
+        pinToLatest('auto');
         void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
     }, [initialRequest, messages.length, isGenerating]);
 
@@ -3307,8 +3433,15 @@ Return a polished, consistent screen without introducing a new navigation patter
     const handleRoutedGenerateOrEdit = async () => {
         const requestPrompt = prompt.trim();
         if (!requestPrompt || isGenerating) return;
+        pinToLatest('smooth');
         const attachedImages = [...images];
         const referenceScreens = getScreenReferencesFromComposer();
+        const routeReferenceScreens = pickRouteReferenceScreens(
+            requestPrompt,
+            useDesignStore.getState().spec?.screens || [],
+            referenceScreens
+        );
+        const generationReferenceScreens = mergeReferenceScreens(referenceScreens, routeReferenceScreens, 2);
         const routingPrompt = referenceScreens.length > 0
             ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
             : requestPrompt;
@@ -3331,9 +3464,9 @@ Return a polished, consistent screen without introducing a new navigation patter
 
         const executeFallbackRoute = async () => {
             const editLike = /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish)/i.test(requestPrompt);
-            const fallbackTarget = referenceScreens[0] || null;
+            const fallbackTarget = generationReferenceScreens[0] || null;
             if (editLike && fallbackTarget) {
-                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, referenceScreens);
+                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, generationReferenceScreens);
                 return;
             }
             await handleGenerate(
@@ -3347,7 +3480,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 undefined,
                 undefined,
                 userMsgId,
-                referenceScreens,
+                generationReferenceScreens,
                 false
             );
         };
@@ -3362,7 +3495,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            }));
+            }, routeReferenceScreens));
             if (routeResponse.phase !== 'route') {
                 throw new Error('Planner route phase mismatch');
             }
@@ -3396,7 +3529,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             }
 
             if (route.intent === 'edit_existing_screen' || route.action === 'edit') {
-                const target = resolveRoutedScreen(route, useDesignStore.getState().spec?.screens || [], referenceScreens);
+                const target = resolveRoutedScreen(route, useDesignStore.getState().spec?.screens || [], generationReferenceScreens);
                 if (!target) {
                     const assistantMsgId = addMessage(
                         'assistant',
@@ -3418,7 +3551,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     route.editInstruction || requestPrompt,
                     attachedImages,
                     userMsgId,
-                    referenceScreens
+                    generationReferenceScreens
                 );
                 return;
             }
@@ -3437,7 +3570,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 undefined,
                 undefined,
                 userMsgId,
-                referenceScreens,
+                generationReferenceScreens,
                 false
             );
         } catch (routeError) {
@@ -3447,6 +3580,7 @@ Return a polished, consistent screen without introducing a new navigation patter
     };
 
     const handleSubmit = () => {
+        pinToLatest('smooth');
         const referenceScreens = getScreenReferencesFromComposer();
         if (planMode) {
             void handlePlanOnly(undefined, undefined, undefined, referenceScreens);
@@ -3457,6 +3591,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
     const handleRetryUserMessage = async (userMessageId: string) => {
         if (isGenerating) return;
+        pinToLatest('smooth');
         const source = messages.find((message) => message.id === userMessageId && message.role === 'user');
         if (!source) return;
 
@@ -4248,10 +4383,11 @@ Return a polished, consistent screen without introducing a new navigation patter
                         <button
                             type="button"
                             onClick={() => {
+                                shouldStickToLatestRef.current = true;
                                 scrollToLatest('smooth');
                                 setShowScrollToLatest(false);
                             }}
-                            className="absolute right-6 bottom-[118px] z-20 h-9 w-9 rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] shadow-lg hover:bg-[var(--ui-surface-4)] transition-colors inline-flex items-center justify-center"
+                            className="absolute left-1/2 -translate-x-1/2 bottom-[190px] z-20 h-9 min-w-9 px-2 rounded-full bg-[var(--ui-primary)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] shadow-lg hover:bg-[var(--ui-primary-hover)] transition-colors inline-flex items-center justify-center"
                             title="Scroll to latest"
                         >
                             <ArrowDown size={16} />

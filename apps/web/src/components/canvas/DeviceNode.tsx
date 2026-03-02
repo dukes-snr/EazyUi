@@ -557,7 +557,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
     const { projectId, markSaved, setSaving } = useProjectStore();
-    const { modelProfile, pushToast, removeToast } = useUiStore();
+    const { modelProfile, pushToast, removeToast, requestConfirmation } = useUiStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
     const width = (data.width as number) || 375;
     const initialHeight = (data.height as number) || 812;
@@ -664,7 +664,13 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         });
                     }
                     if ((error as Error).name !== 'AbortError') {
-                        alert('Failed to edit screen. Please try again.');
+                        await requestConfirmation({
+                            title: 'Edit failed',
+                            message: 'Failed to edit screen. Please try again.',
+                            confirmLabel: 'OK',
+                            tone: 'danger',
+                            hideCancel: true,
+                        });
                     }
                 } finally {
                     setAbortController(null);
@@ -672,10 +678,15 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
             case 'delete':
-                if (confirm('Are you sure you want to delete this screen?')) {
-                    removeScreen(data.screenId as string);
-                    removeBoard(data.screenId as string);
-                }
+                if (!await requestConfirmation({
+                    title: 'Delete screen?',
+                    message: 'This screen will be permanently removed from the current project.',
+                    confirmLabel: 'Delete Screen',
+                    cancelLabel: 'Cancel',
+                    tone: 'danger',
+                })) break;
+                removeScreen(data.screenId as string);
+                removeBoard(data.screenId as string);
                 break;
             case 'regenerate':
                 const regenImages = Array.isArray(payload?.images) ? payload.images as string[] : [];
@@ -747,7 +758,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast, removeToast]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast, removeToast, requestConfirmation]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
     const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(String(data.html || ''));

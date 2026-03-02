@@ -99,6 +99,7 @@ export type PlannerInput = {
     screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
     recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     projectMemorySummary?: string;
+    routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
     preferredModel?: string;
 };
@@ -206,6 +207,8 @@ Rules:
 - confidence must be between 0 and 1.
 - If user asks for critique, feedback, app ideas, UX advice, strategy, or general conversation without explicit generation/edit action -> chat_assist.
 - If user asks to describe/explain/analyze what a referenced screen looks like, ALWAYS use chat_assist.
+- If routeReferenceScreens are provided, use them as the strongest source of truth for existing component language and repeated UI patterns (navbar/profile avatar/buttons/cards).
+- Use routeReferenceScreens to infer whether the user is likely asking for an edit to an existing pattern vs a new screen in the same app.
 - For chat_assist, provide assistantResponse as concise natural chat assistant text (not robotic JSON style), with practical suggestions.
 - For chat_assist, write as a senior UI/UX designer and use rich tags in assistantResponse:
   [h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i].
@@ -304,6 +307,10 @@ function buildUserPrompt(input: PlannerInput): string {
         .map((message, idx) => `${idx + 1}. ${message.role}: ${(message.content || '').replace(/\s+/g, ' ').trim().slice(0, 260)}`)
         .join('\n');
     const projectMemorySummary = (input.projectMemorySummary || '').trim().slice(0, 2200);
+    const routeReferenceScreens = (input.routeReferenceScreens || [])
+        .slice(0, 1)
+        .map((screen, idx) => `${idx + 1}. id=${screen.screenId || 'n/a'} name=${screen.name}\nfullHtml:\n${screen.html}`)
+        .join('\n\n---\n\n');
 
     return `${constraints}
 
@@ -319,8 +326,14 @@ ${recentMessages || 'none'}
 projectMemory:
 ${projectMemorySummary || 'none'}
 
+routeReferenceScreens:
+${routeReferenceScreens || 'none'}
+
 If phase is "postgen", use alreadyGeneratedScreens to find gaps and propose next screens.
 If phase is "plan" or "discovery", define the best initial flow and which screens to generate now.
+If phase is "route" and routeReferenceScreens are provided:
+- Treat routeReferenceScreens as authoritative examples of current component language.
+- Reuse those patterns when inferring edits/new screens and when writing appContextPrompt.
 
 Domain lock:
 - Treat appPrompt + alreadyGeneratedScreens as the source of truth for product domain.
@@ -532,6 +545,7 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
         stylePreset: input.stylePreset || 'modern',
         screensGenerated: input.screensGenerated?.length || 0,
         screenDetails: input.screenDetails?.length || 0,
+        routeReferenceScreens: input.routeReferenceScreens?.length || 0,
         recentMessages: input.recentMessages?.length || 0,
         hasProjectMemorySummary: Boolean(input.projectMemorySummary?.trim()),
         referenceImages: hasReferenceImages ? (input.referenceImages || []).length : 0,

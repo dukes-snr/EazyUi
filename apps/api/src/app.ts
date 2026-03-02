@@ -562,6 +562,7 @@ fastify.post<{
         screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
         recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
         projectMemorySummary?: string;
+        routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
         referenceImages?: string[];
         preferredModel?: string;
     };
@@ -576,6 +577,7 @@ fastify.post<{
         screenDetails,
         recentMessages,
         projectMemorySummary,
+        routeReferenceScreens,
         referenceImages,
         preferredModel,
     } = request.body;
@@ -598,6 +600,8 @@ fastify.post<{
             screenDetailsCount: screenDetails?.length || 0,
             recentMessagesCount: recentMessages?.length || 0,
             hasProjectMemorySummary: Boolean(projectMemorySummary?.trim()),
+            routeReferenceScreensCount: routeReferenceScreens?.length || 0,
+            routeReferenceScreenNames: (routeReferenceScreens || []).map((screen) => screen.name).slice(0, 3),
             referenceImagesCount: referenceImages?.length || 0,
             preferredModel,
             appPromptPreview: previewText(appPrompt),
@@ -612,6 +616,7 @@ fastify.post<{
             screenDetails,
             recentMessages,
             projectMemorySummary,
+            routeReferenceScreens,
             referenceImages,
             preferredModel,
         });

@@ -62,6 +62,7 @@ const DOC_SECTIONS: DocSection[] = [
             { name: 'Zoom percent readout', howToUse: 'Shows current zoom level at a glance.' },
             { name: 'Fit to screen', howToUse: 'Recenter and fit all active content into view.' },
             { name: 'Space-to-pan shortcut', howToUse: 'Hold Space while in Select mode for temporary pan behavior.' },
+            { name: 'Keyboard shortcuts', howToUse: 'Use Delete/Backspace, Ctrl/Cmd+C, Ctrl/Cmd+V, Ctrl/Cmd+D, Esc, Ctrl/Cmd+Z/Y, Ctrl/Cmd +/-/0, Ctrl/Cmd+A, Arrow keys (Shift for bigger step), and 1/2 to switch tools.' },
         ],
     },
     {

@@ -786,7 +786,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
   );
 
-  if (!isAutosave && shouldRefreshCover) {
+  if (shouldRefreshCover) {
     const coverDataUrls = await buildProjectCoverDataUrls(safeDesignSpec.screens || []);
     if (coverDataUrls.length > 0) {
       regeneratedCover = true;

@@ -3,6 +3,7 @@ import type { DesignModelProfile } from '../constants/designModels';
 
 export type ThemeMode = 'dark' | 'light';
 export type ToastKind = 'info' | 'success' | 'error' | 'guide' | 'loading';
+export type ConfirmDialogTone = 'default' | 'danger';
 
 export type ToastItem = {
     id: string;
@@ -20,11 +21,31 @@ type PushToastInput = {
     durationMs?: number;
 };
 
+export type ConfirmDialogRequest = {
+    title: string;
+    message?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    tone?: ConfirmDialogTone;
+    hideCancel?: boolean;
+};
+
+export type ConfirmDialogState = {
+    id: string;
+    title: string;
+    message?: string;
+    confirmLabel: string;
+    cancelLabel: string;
+    tone: ConfirmDialogTone;
+    hideCancel: boolean;
+};
+
 type UiState = {
     theme: ThemeMode;
     modelProfile: DesignModelProfile;
     showInspector: boolean;
     toasts: ToastItem[];
+    confirmDialog: ConfirmDialogState | null;
     setTheme: (theme: ThemeMode) => void;
     toggleTheme: () => void;
     setModelProfile: (profile: DesignModelProfile) => void;
@@ -34,6 +55,8 @@ type UiState = {
     updateToast: (id: string, updates: Partial<Omit<ToastItem, 'id' | 'createdAt'>>) => void;
     removeToast: (id: string) => void;
     clearToasts: () => void;
+    requestConfirmation: (request: ConfirmDialogRequest) => Promise<boolean>;
+    resolveConfirmation: (accepted: boolean) => void;
 };
 
 const THEME_STORAGE_KEY = 'eazyui:theme';
@@ -68,11 +91,14 @@ function defaultToastDuration(kind: ToastKind): number {
     return 3800;
 }
 
+let pendingConfirmationResolver: ((accepted: boolean) => void) | null = null;
+
 export const useUiStore = create<UiState>((set, get) => ({
     theme: getInitialTheme(),
     modelProfile: getInitialModelProfile(),
     showInspector: getInitialShowInspector(),
     toasts: [],
+    confirmDialog: null,
     setTheme: (theme) => {
         if (typeof window !== 'undefined') {
             window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -127,4 +153,30 @@ export const useUiStore = create<UiState>((set, get) => ({
         set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));
     },
     clearToasts: () => set({ toasts: [] }),
+    requestConfirmation: (request) => {
+        if (pendingConfirmationResolver) {
+            pendingConfirmationResolver(false);
+            pendingConfirmationResolver = null;
+        }
+        const dialog: ConfirmDialogState = {
+            id: `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            title: request.title,
+            message: request.message,
+            confirmLabel: request.confirmLabel || 'Confirm',
+            cancelLabel: request.cancelLabel || 'Cancel',
+            tone: request.tone || 'default',
+            hideCancel: Boolean(request.hideCancel),
+        };
+        set({ confirmDialog: dialog });
+        return new Promise<boolean>((resolve) => {
+            pendingConfirmationResolver = resolve;
+        });
+    },
+    resolveConfirmation: (accepted) => {
+        set({ confirmDialog: null });
+        if (pendingConfirmationResolver) {
+            pendingConfirmationResolver(accepted);
+            pendingConfirmationResolver = null;
+        }
+    },
 }));
