@@ -1085,9 +1085,22 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
     const stylePreset = safeString(options.stylePreset, 'modern', 32).toLowerCase();
     const platform = safeString(options.platform, 'mobile', 32).toLowerCase();
     const images = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+    console.info('[Gemini] design-system:start', {
+        stylePreset,
+        platform,
+        imagesCount: images.length,
+        preferredModel: options.preferredModel || null,
+        hasProjectDesignSystem: Boolean(options.projectDesignSystem),
+        promptPreview: prompt.slice(0, 180),
+    });
 
     if (options.projectDesignSystem) {
-        return normalizeProjectDesignSystem(options.projectDesignSystem, prompt, stylePreset, platform);
+        const normalized = normalizeProjectDesignSystem(options.projectDesignSystem, prompt, stylePreset, platform);
+        console.info('[Gemini] design-system:reuse-project-system', {
+            systemName: normalized.systemName,
+            themeMode: normalized.themeMode,
+        });
+        return normalized;
     }
 
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
@@ -1177,7 +1190,14 @@ Generate the design system that should be reused for this whole project.`;
             raw = parseJsonSafe(cleanJsonResponse(result.response.text()));
         }
 
-        return normalizeProjectDesignSystem(raw, prompt, stylePreset, platform);
+        const normalized = normalizeProjectDesignSystem(raw, prompt, stylePreset, platform);
+        console.info('[Gemini] design-system:complete', {
+            systemName: normalized.systemName,
+            themeMode: normalized.themeMode,
+            stylePreset: normalized.stylePreset,
+            platform: normalized.platform,
+        });
+        return normalized;
     } catch (error) {
         console.warn('[Gemini] generateProjectDesignSystem failed; using fallback design system', error);
         return fallback;
@@ -1186,6 +1206,14 @@ Generate the design system that should be reused for this whole project.`;
 
 export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+    console.info('[Gemini] generateDesign:start', {
+        stylePreset,
+        platform,
+        imagesCount: images.length,
+        preferredModel: preferredModel || null,
+        hasProjectDesignSystem: Boolean(options.projectDesignSystem),
+        promptPreview: String(prompt || '').slice(0, 180),
+    });
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
     const generationConfig = getGenerationConfig(images.length > 0);
     const imageAnalysis = await analyzeReferenceImages(images);
@@ -1310,7 +1338,7 @@ ${designSystemGuidance}
         height: dimensions.height,
     }));
 
-    return {
+    const output: HtmlDesignSpec = {
         id: designId,
         name: prompt,
         screens,
@@ -1319,10 +1347,24 @@ ${designSystemGuidance}
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
+    console.info('[Gemini] generateDesign:complete', {
+        screens: output.screens.length,
+        screenNames: output.screens.map((screen) => screen.name).slice(0, 8),
+        descriptionPreview: String(output.description || '').slice(0, 180),
+    });
+    return output;
 }
 
 export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+    console.info('[Gemini] generateDesignStream:start', {
+        stylePreset,
+        platform,
+        imagesCount: images.length,
+        preferredModel: preferredModel || null,
+        hasProjectDesignSystem: Boolean(options.projectDesignSystem),
+        promptPreview: String(prompt || '').slice(0, 180),
+    });
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
     const generationConfig = getGenerationConfig(images.length > 0);
     const imageAnalysis = await analyzeReferenceImages(images);
@@ -1375,6 +1417,17 @@ export interface EditOptions {
     screenId: string;
     images?: string[];
     preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
+    consistencyProfile?: {
+        canonicalNavbarLabels?: string[];
+        canonicalNavbarSignature?: string;
+        rules?: string[];
+    };
+    referenceScreens?: Array<{
+        screenId: string;
+        name: string;
+        html: string;
+    }>;
 }
 
 export interface GenerateImageOptions {
@@ -1463,8 +1516,53 @@ export async function generateImageAsset(options: GenerateImageOptions): Promise
 
 export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
     const { instruction, html, images = [], preferredModel } = options;
-    const userPrompt = `${EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
-    const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${html}\n\nUser instruction: "${instruction}"`;
+    console.info('[Gemini] editDesign:start', {
+        screenId: options.screenId,
+        htmlChars: String(html || '').length,
+        instructionPreview: String(instruction || '').slice(0, 180),
+        imagesCount: images.length,
+        preferredModel: preferredModel || null,
+        hasProjectDesignSystem: Boolean(options.projectDesignSystem),
+        hasConsistencyProfile: Boolean(options.consistencyProfile),
+        referenceScreens: (options.referenceScreens || []).map((screen) => screen.name).slice(0, 4),
+    });
+    const normalizedDesignSystem = options.projectDesignSystem
+        ? normalizeProjectDesignSystem(
+            options.projectDesignSystem,
+            instruction || 'Screen edit',
+            options.projectDesignSystem.stylePreset || 'modern',
+            options.projectDesignSystem.platform || 'mobile'
+        )
+        : undefined;
+    const designSystemGuidance = normalizedDesignSystem
+        ? buildDesignSystemGuidance(normalizedDesignSystem)
+        : '';
+    const canonicalNavbar = (options.consistencyProfile?.canonicalNavbarLabels || [])
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 8);
+    const consistencyRules = (options.consistencyProfile?.rules || [])
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 10);
+    const referenceScreens = (options.referenceScreens || [])
+        .filter((screen) => screen && screen.screenId !== options.screenId)
+        .slice(0, 2)
+        .map((screen) => ({
+            name: String(screen.name || 'Screen').slice(0, 80),
+            htmlSnippet: String(screen.html || '').slice(0, 1400),
+        }));
+    const consistencyGuidance = `
+Consistency requirements:
+- Keep component language consistent with the existing app.
+- Preserve navbar/navigation pattern from existing screens.
+- Do not invent a new nav paradigm if one already exists.
+${canonicalNavbar.length > 0 ? `- Canonical navbar labels to align with: ${canonicalNavbar.join(', ')}` : ''}
+${consistencyRules.length > 0 ? `- Consistency rules:\n${consistencyRules.map((rule) => `  - ${rule}`).join('\n')}` : ''}
+${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((screen) => `  - ${screen.name}\n${screen.htmlSnippet}`).join('\n')}` : ''}
+${designSystemGuidance}`.trim();
+    const userPrompt = `${EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
+    const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
 
     const parts: any[] = [{ text: userPrompt }];
     if (images.length > 0) {
@@ -1510,6 +1608,12 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
             const { text, modelUsed } = completion;
             const parsed = parseEditResponse(text);
             const note = `(Model: ${modelUsed})`;
+            console.info('[Gemini] editDesign:complete-fast-provider', {
+                screenId: options.screenId,
+                modelUsed,
+                htmlChars: parsed.html.length,
+                descriptionPreview: String(parsed.description || note).slice(0, 180),
+            });
             return {
                 html: parsed.html,
                 description: parsed.description ? `${parsed.description} ${note}` : note,
@@ -1531,7 +1635,14 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
             contents: [{ role: 'user', parts }],
             generationConfig: GENERATION_CONFIG,
         });
-        return parseEditResponse(result.response.text());
+        const parsed = parseEditResponse(result.response.text());
+        console.info('[Gemini] editDesign:complete-gemini', {
+            screenId: options.screenId,
+            modelUsed: selectedModel.name,
+            htmlChars: parsed.html.length,
+            descriptionPreview: String(parsed.description || '').slice(0, 180),
+        });
+        return parsed;
     } catch (error) {
         const shouldFallback =
             Boolean(resolvedPreferredModel) &&
@@ -1552,6 +1663,12 @@ export async function editDesign(options: EditOptions): Promise<{ html: string; 
         });
         const parsed = parseEditResponse(fallbackResult.response.text());
         const fallbackNote = `(Image model quota exceeded; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`;
+        console.info('[Gemini] editDesign:complete-fallback', {
+            screenId: options.screenId,
+            modelUsed: IMAGE_FALLBACK_MODEL,
+            htmlChars: parsed.html.length,
+            descriptionPreview: String(parsed.description || fallbackNote).slice(0, 180),
+        });
         return {
             html: parsed.html,
             description: parsed.description ? `${parsed.description} ${fallbackNote}` : fallbackNote,

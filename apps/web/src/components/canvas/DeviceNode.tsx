@@ -636,6 +636,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         screenId: data.screenId as string,
                         images,
                         preferredModel: getPreferredTextModel(modelProfile),
+                        projectDesignSystem: spec?.designSystem,
                     }, controller.signal);
 
                     // Update with new content

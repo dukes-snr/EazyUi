@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "firebase/storage";
-import type { HtmlDesignSpec } from "@/api/client";
+import type { HtmlDesignSpec, ProjectMemory } from "@/api/client";
 import { db, storage } from "./firebase";
 
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0";
@@ -44,6 +44,7 @@ type WorkspaceSnapshot = {
   designSpec: HtmlDesignSpec;
   canvasDoc: unknown | null;
   chatState: unknown | null;
+  projectMemory?: ProjectMemory | null;
 };
 
 type ProjectMetaData = {
@@ -64,6 +65,7 @@ type ProjectMetaData = {
   };
   canvasDoc?: unknown;
   chatState?: unknown;
+  projectMemory?: ProjectMemory;
   snapshotPath?: string;
   coverImagePath?: string;
   coverImageUrl?: string;
@@ -84,6 +86,11 @@ const MAX_PERSISTED_IMAGE_COUNT = 8;
 const MAX_PERSISTED_SCREEN_ID_COUNT = 32;
 const MAX_PERSISTED_DESIGN_SYSTEM_RULE_COUNT = 10;
 const MAX_PERSISTED_DESIGN_SYSTEM_REFERENCE_SCREENS = 12;
+const MAX_PROJECT_MEMORY_SCREEN_COUNT = 24;
+const MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH = 88;
+const MAX_PROJECT_MEMORY_USER_REQUESTS = 16;
+const MAX_PROJECT_MEMORY_USER_REQUEST_LENGTH = 220;
+const MAX_PROJECT_MEMORY_NAV_LABELS = 8;
 
 function isValidDesignSpec(value: unknown): value is HtmlDesignSpec {
   if (!value || typeof value !== "object") return false;
@@ -329,6 +336,158 @@ function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
   return Object.keys(next).length > 0 ? next : null;
 }
 
+function normalizeMemoryText(value: unknown, maxLength: number): string {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text) return "";
+  return text.length <= maxLength ? text : text.slice(0, maxLength);
+}
+
+function pickIsoTime(value: unknown): string {
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function extractTextLabelsFromHtmlBlock(block: string): string[] {
+  if (!block) return [];
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const regex = />([^<>]{1,48})</g;
+  let match: RegExpExecArray | null = regex.exec(block);
+  while (match) {
+    const raw = normalizeMemoryText(match[1], 48);
+    const collapsed = raw.replace(/[^\p{L}\p{N}\s/&+-]/gu, "").trim();
+    const normalized = collapsed.toLowerCase();
+    const useful = normalized.length >= 2 && !/^(home page|click|tap|button)$/i.test(normalized);
+    if (useful && !seen.has(normalized)) {
+      labels.push(collapsed);
+      seen.add(normalized);
+    }
+    if (labels.length >= MAX_PROJECT_MEMORY_NAV_LABELS) break;
+    match = regex.exec(block);
+  }
+  return labels;
+}
+
+function extractNavbarContractFromHtml(html: string): { labels: string[]; signature: string } | null {
+  if (!html) return null;
+  const navMatch = html.match(/<nav\b[\s\S]*?<\/nav>/i);
+  const navBlock = navMatch?.[0] || "";
+  const labels = extractTextLabelsFromHtmlBlock(navBlock);
+  if (labels.length < 2) return null;
+  const signature = labels
+    .map((label) => label.toLowerCase().replace(/\s+/g, " ").trim())
+    .slice(0, MAX_PROJECT_MEMORY_NAV_LABELS)
+    .join("|");
+  if (!signature) return null;
+  return { labels, signature };
+}
+
+function buildProjectMemorySnapshot(designSpec: HtmlDesignSpec, chatState: unknown): ProjectMemory {
+  const screenNames = (designSpec.screens || [])
+    .map((screen) => normalizeMemoryText(screen.name, MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH))
+    .filter(Boolean)
+    .slice(0, MAX_PROJECT_MEMORY_SCREEN_COUNT);
+  const userRequests = Array.isArray((chatState as { messages?: Array<Record<string, unknown>> } | null | undefined)?.messages)
+    ? ((chatState as { messages?: Array<Record<string, unknown>> }).messages || [])
+      .filter((message) => message?.role === "user")
+      .map((message) => normalizeMemoryText(message?.content, MAX_PROJECT_MEMORY_USER_REQUEST_LENGTH))
+      .filter(Boolean)
+      .slice(-MAX_PROJECT_MEMORY_USER_REQUESTS)
+    : [];
+
+  const navbarCandidates = (designSpec.screens || [])
+    .map((screen) => {
+      const contract = extractNavbarContractFromHtml(screen.html || "");
+      if (!contract) return null;
+      return {
+        ...contract,
+        screenId: screen.screenId,
+        screenName: normalizeMemoryText(screen.name, MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH) || "Screen",
+      };
+    })
+    .filter((item): item is { labels: string[]; signature: string; screenId: string; screenName: string } => Boolean(item));
+
+  const canonicalNavbar = navbarCandidates.length > 0 ? navbarCandidates[0] : null;
+  const tokenKeys = designSpec.designSystem?.tokens
+    ? Object.keys(designSpec.designSystem.tokens).slice(0, 12)
+    : [];
+
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    summary: {
+      screenCount: (designSpec.screens || []).length,
+      screenNames,
+      lastUserRequests: userRequests,
+    },
+    components: canonicalNavbar ? {
+      navbar: {
+        sourceScreenId: canonicalNavbar.screenId,
+        sourceScreenName: canonicalNavbar.screenName,
+        labels: canonicalNavbar.labels.slice(0, MAX_PROJECT_MEMORY_NAV_LABELS),
+        signature: canonicalNavbar.signature,
+      },
+    } : undefined,
+    style: {
+      themeMode: designSpec.designSystem?.themeMode,
+      displayFont: normalizeMemoryText(designSpec.designSystem?.typography?.displayFont, 90) || undefined,
+      bodyFont: normalizeMemoryText(designSpec.designSystem?.typography?.bodyFont, 90) || undefined,
+      tokenKeys,
+    },
+  };
+}
+
+function sanitizeProjectMemoryForPersistence(value: unknown): ProjectMemory | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const rawSummary = (raw.summary && typeof raw.summary === "object") ? raw.summary as Record<string, unknown> : {};
+  const rawComponents = (raw.components && typeof raw.components === "object") ? raw.components as Record<string, unknown> : {};
+  const rawNavbar = (rawComponents.navbar && typeof rawComponents.navbar === "object") ? rawComponents.navbar as Record<string, unknown> : null;
+  const rawStyle = (raw.style && typeof raw.style === "object") ? raw.style as Record<string, unknown> : {};
+
+  const summary = {
+    screenCount: sanitizeMetaNumber(rawSummary.screenCount, 0, 0, 999),
+    screenNames: sanitizeMetaStringArray(rawSummary.screenNames, MAX_PROJECT_MEMORY_SCREEN_COUNT, MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH),
+    lastUserRequests: sanitizeMetaStringArray(rawSummary.lastUserRequests, MAX_PROJECT_MEMORY_USER_REQUESTS, MAX_PROJECT_MEMORY_USER_REQUEST_LENGTH),
+  };
+
+  const styleThemeMode = rawStyle.themeMode === "light" || rawStyle.themeMode === "dark" || rawStyle.themeMode === "mixed"
+    ? rawStyle.themeMode
+    : undefined;
+
+  const memory: ProjectMemory = {
+    version: 1,
+    updatedAt: pickIsoTime(raw.updatedAt),
+    summary,
+    style: {
+      themeMode: styleThemeMode,
+      displayFont: normalizeMemoryText(rawStyle.displayFont, 90) || undefined,
+      bodyFont: normalizeMemoryText(rawStyle.bodyFont, 90) || undefined,
+      tokenKeys: sanitizeMetaStringArray(rawStyle.tokenKeys, 12, 40),
+    },
+  };
+
+  if (rawNavbar) {
+    const labels = sanitizeMetaStringArray(rawNavbar.labels, MAX_PROJECT_MEMORY_NAV_LABELS, 48);
+    const signature = normalizeMemoryText(rawNavbar.signature, 280);
+    if (labels.length > 0 || signature) {
+      memory.components = {
+        navbar: {
+          sourceScreenId: normalizeMemoryText(rawNavbar.sourceScreenId, 128),
+          sourceScreenName: normalizeMemoryText(rawNavbar.sourceScreenName, MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH) || "Screen",
+          labels,
+          signature,
+        },
+      };
+    }
+  }
+
+  return memory;
+}
+
 function makeId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -564,11 +723,15 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   const safeDesignSpec = stripUndefinedDeep(designSpec);
   const safeCanvasDoc = canvasDoc == null ? null : stripUndefinedDeep(canvasDoc);
   const safeChatState = chatState == null ? null : stripUndefinedDeep(chatState);
+  const projectMemory = sanitizeProjectMemoryForPersistence(
+    buildProjectMemorySnapshot(safeDesignSpec as HtmlDesignSpec, safeChatState)
+  );
   const snapshotChatState = sanitizeChatStateForSnapshot(safeChatState);
   const snapshot: WorkspaceSnapshot = {
     designSpec: safeDesignSpec,
     canvasDoc: safeCanvasDoc,
     chatState: snapshotChatState,
+    projectMemory,
   };
   const snapshotPath = `snapshots/latest.json`;
   let resolvedSnapshotPath: string | null = null;
@@ -702,6 +865,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
           status: s.status || "complete",
         })),
       },
+      projectMemory,
       createdAt,
       updatedAt: now,
     },
@@ -978,19 +1142,26 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
     messages = [];
   }
 
+  const resolvedDesignSpec: HtmlDesignSpec = {
+    id: data.designSpecMeta?.id || projectId,
+    name: data.designSpecMeta?.name || "Untitled project",
+    description: data.designSpecMeta?.description || "",
+    designSystem: data.designSpecMeta?.designSystem,
+    screens,
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+  };
+  const persistedProjectMemory = sanitizeProjectMemoryForPersistence(data.projectMemory);
+  const derivedProjectMemory = sanitizeProjectMemoryForPersistence(
+    buildProjectMemorySnapshot(resolvedDesignSpec, { messages })
+  );
+
   return {
     projectId: data.id || projectId,
-    designSpec: {
-      id: data.designSpecMeta?.id || projectId,
-      name: data.designSpecMeta?.name || "Untitled project",
-      description: data.designSpecMeta?.description || "",
-      designSystem: data.designSpecMeta?.designSystem,
-      screens,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-    },
+    designSpec: resolvedDesignSpec,
     canvasDoc,
     chatState: messages.length > 0 ? { messages } : (data.chatState ?? null),
+    projectMemory: persistedProjectMemory || derivedProjectMemory || undefined,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -1019,11 +1190,17 @@ export async function getProjectFirestore(uid: string, projectId: string) {
       } catch {
         persistedMessages = [];
       }
+      const persistedProjectMemory = sanitizeProjectMemoryForPersistence(data.projectMemory);
+      const snapshotProjectMemory = sanitizeProjectMemoryForPersistence(parsed.projectMemory);
+      const derivedProjectMemory = sanitizeProjectMemoryForPersistence(
+        buildProjectMemorySnapshot(parsed.designSpec, { messages: persistedMessages })
+      );
       return {
         projectId: data.id || projectId,
         designSpec: parsed.designSpec,
         canvasDoc: parsed.canvasDoc ?? null,
         chatState: persistedMessages.length > 0 ? { messages: persistedMessages } : (parsed.chatState ?? null),
+        projectMemory: persistedProjectMemory || snapshotProjectMemory || derivedProjectMemory || undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -1032,11 +1209,16 @@ export async function getProjectFirestore(uid: string, projectId: string) {
     }
   }
   if (isValidDesignSpec(data.designSpec)) {
+    const persistedProjectMemory = sanitizeProjectMemoryForPersistence(data.projectMemory);
+    const derivedProjectMemory = sanitizeProjectMemoryForPersistence(
+      buildProjectMemorySnapshot(data.designSpec as HtmlDesignSpec, data.chatState)
+    );
     return {
       projectId: data.id || projectId,
       designSpec: data.designSpec as HtmlDesignSpec,
       canvasDoc: data.canvasDoc ?? null,
       chatState: data.chatState ?? null,
+      projectMemory: persistedProjectMemory || derivedProjectMemory || undefined,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     };

@@ -66,6 +66,8 @@ const PlannerPostgenResponseSchema = z.object({
 const PlannerRouteResponseSchema = z.object({
     phase: z.literal('route'),
     intent: z.enum(['new_app', 'add_screen', 'edit_existing_screen', 'chat_assist']),
+    action: z.enum(['edit', 'generate', 'assist']).optional(),
+    confidence: z.coerce.number().min(0).max(1).optional().default(0.6),
     reason: z.string().default(''),
     appContextPrompt: z.string().nullable().optional().transform((v) => v ?? undefined),
     targetScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
@@ -94,6 +96,9 @@ export type PlannerInput = {
     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     screenCountDesired?: number;
     screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+    screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
+    recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    projectMemorySummary?: string;
     referenceImages?: string[];
     preferredModel?: string;
 };
@@ -173,6 +178,8 @@ Output schema:
 {
   "phase": "route",
   "intent": "new_app | add_screen | edit_existing_screen | chat_assist",
+  "action": "edit | generate | assist",
+  "confidence": 0.0,
   "reason": "short reason",
   "appContextPrompt": "full app context prompt to keep style consistency",
   "targetScreenName": "Home",
@@ -191,6 +198,10 @@ Rules:
 - If user asks to match/design like another existing screen, set referenceExistingScreenName.
 - If user asks for a new screen inside existing app -> add_screen.
 - If user asks for a new app concept unrelated to existing screens -> new_app.
+- If intent=edit_existing_screen then action MUST be "edit".
+- If intent=add_screen or intent=new_app then action MUST be "generate".
+- If intent=chat_assist then action MUST be "assist".
+- confidence must be between 0 and 1.
 - If user asks for critique, feedback, app ideas, UX advice, strategy, or general conversation without explicit generation/edit action -> chat_assist.
 - If user asks to describe/explain/analyze what a referenced screen looks like, ALWAYS use chat_assist.
 - For chat_assist, provide assistantResponse as concise natural chat assistant text (not robotic JSON style), with practical suggestions.
@@ -282,11 +293,29 @@ function buildUserPrompt(input: PlannerInput): string {
     const screens = (input.screensGenerated || [])
         .map((screen, idx) => `${idx + 1}. ${screen.name}${screen.description ? ` - ${screen.description}` : ''}`)
         .join('\n');
+    const screenDetails = (input.screenDetails || [])
+        .slice(0, 24)
+        .map((screen, idx) => `${idx + 1}. id=${screen.screenId || 'n/a'} name=${screen.name}\nsummary=${(screen.htmlSummary || '').slice(0, 320) || 'n/a'}`)
+        .join('\n\n');
+    const recentMessages = (input.recentMessages || [])
+        .slice(-8)
+        .map((message, idx) => `${idx + 1}. ${message.role}: ${(message.content || '').replace(/\s+/g, ' ').trim().slice(0, 260)}`)
+        .join('\n');
+    const projectMemorySummary = (input.projectMemorySummary || '').trim().slice(0, 2200);
 
     return `${constraints}
 
 alreadyGeneratedScreens:
 ${screens || 'none'}
+
+screenDetails:
+${screenDetails || 'none'}
+
+recentConversation:
+${recentMessages || 'none'}
+
+projectMemory:
+${projectMemorySummary || 'none'}
 
 If phase is "postgen", use alreadyGeneratedScreens to find gaps and propose next screens.
 If phase is "plan" or "discovery", define the best initial flow and which screens to generate now.
@@ -318,6 +347,92 @@ function isAssistLikeRequest(prompt: string): boolean {
 function isNextScreenRequest(prompt: string): boolean {
     const text = (prompt || '').toLowerCase();
     return /(what next|next screen|next screens|recommend.*screen|suggest.*screen|what should i build next|flow next)/i.test(text);
+}
+
+function previewForLog(value: unknown, max = 180): string {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length <= max ? text : `${text.slice(0, max)}...`;
+}
+
+function clampConfidence(value: unknown, fallback = 0.6): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.max(0, Math.min(1, numeric));
+}
+
+function defaultActionForIntent(intent: PlannerRouteResponse['intent']): 'edit' | 'generate' | 'assist' {
+    if (intent === 'edit_existing_screen') return 'edit';
+    if (intent === 'chat_assist') return 'assist';
+    return 'generate';
+}
+
+function isLikelyEditPrompt(prompt: string): boolean {
+    const text = (prompt || '').toLowerCase();
+    return /(edit|update|rework|revise|tweak|improve|refine|fix|adjust|change|make .* better|clean up|polish|regenerate)/i.test(text);
+}
+
+function resolveMentionedScreenName(prompt: string, screenNames: string[]): string | undefined {
+    const text = (prompt || '').toLowerCase();
+    const normalized = screenNames
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+    for (const name of normalized) {
+        const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
+        if (pattern.test(text)) return name;
+    }
+    return undefined;
+}
+
+function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse): PlannerRouteResponse {
+    const screenNames = Array.from(new Set([
+        ...(input.screenDetails || []).map((screen) => (screen.name || '').trim()).filter(Boolean),
+        ...(input.screensGenerated || []).map((screen) => (screen.name || '').trim()).filter(Boolean),
+    ]));
+    const mentionedScreen = resolveMentionedScreenName(input.appPrompt, screenNames);
+    const editLikePrompt = isLikelyEditPrompt(input.appPrompt);
+    let next: PlannerRouteResponse = {
+        ...route,
+        confidence: clampConfidence(route.confidence, 0.62),
+        action: route.action || defaultActionForIntent(route.intent),
+    };
+
+    if (editLikePrompt && mentionedScreen) {
+        next = {
+            ...next,
+            intent: 'edit_existing_screen',
+            action: 'edit',
+            confidence: Math.max(next.confidence || 0.62, 0.88),
+            matchedExistingScreenName: next.matchedExistingScreenName || mentionedScreen,
+            targetScreenName: next.targetScreenName || mentionedScreen,
+            editInstruction: next.editInstruction || input.appPrompt,
+            generateTheseNow: [],
+        };
+    }
+
+    if (next.intent === 'edit_existing_screen') {
+        next.action = 'edit';
+        next.generateTheseNow = [];
+        if (!next.editInstruction?.trim()) {
+            next.editInstruction = input.appPrompt;
+        }
+        if (!next.matchedExistingScreenName && mentionedScreen) {
+            next.matchedExistingScreenName = mentionedScreen;
+        }
+    } else if (next.intent === 'chat_assist') {
+        next.action = 'assist';
+        next.generateTheseNow = [];
+    } else {
+        next.action = 'generate';
+    }
+
+    if (next.intent !== 'add_screen') {
+        next.recommendNextScreens = Boolean(next.recommendNextScreens && isNextScreenRequest(input.appPrompt));
+    }
+
+    return next;
 }
 
 async function generateAssistFallbackResponse(input: PlannerInput, model: GroqModelId): Promise<string> {
@@ -376,6 +491,7 @@ ${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n')
 }
 
 export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResponse> {
+    const traceId = `pln-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const hasReferenceImages = (input.referenceImages || []).filter(Boolean).length > 0;
     const forcedRouteVisionModel: GroqModelId | null =
         input.phase === 'route' && hasReferenceImages
@@ -386,12 +502,33 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
         ? 'llama-3.1-8b-instant'
         : 'llama-3.3-70b-versatile';
     const modelsToTry: GroqModelId[] = [primaryModel, fallbackModel];
+    console.info('[Planner] start', {
+        traceId,
+        phase: input.phase,
+        platform: input.platform || 'mobile',
+        stylePreset: input.stylePreset || 'modern',
+        screensGenerated: input.screensGenerated?.length || 0,
+        screenDetails: input.screenDetails?.length || 0,
+        recentMessages: input.recentMessages?.length || 0,
+        hasProjectMemorySummary: Boolean(input.projectMemorySummary?.trim()),
+        referenceImages: hasReferenceImages ? (input.referenceImages || []).length : 0,
+        preferredModel: input.preferredModel || null,
+        appPromptPreview: previewForLog(input.appPrompt),
+        modelsToTry,
+    });
     let completion: Awaited<ReturnType<typeof groqChatCompletion>> | null = null;
     let lastError: unknown = null;
 
     for (const model of modelsToTry) {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
+                console.info('[Planner] model-attempt', {
+                    traceId,
+                    phase: input.phase,
+                    model,
+                    attempt: attempt + 1,
+                    supportsVisionRoute: input.phase === 'route' && model === 'meta-llama/llama-4-maverick-17b-128e-instruct',
+                });
                 const referenceImages = (input.referenceImages || []).filter(Boolean).slice(0, 3);
                 const canUseVisionRoute =
                     input.phase === 'route'
@@ -439,9 +576,26 @@ Return JSON only.`,
                         responseFormat: 'json_object',
                     });
                 }
+                console.info('[Planner] model-response', {
+                    traceId,
+                    phase: input.phase,
+                    model,
+                    attempt: attempt + 1,
+                    textChars: completion.text.length,
+                    finishReason: completion.finishReason || null,
+                    preview: previewForLog(completion.text),
+                });
                 break;
             } catch (error) {
                 lastError = error;
+                console.warn('[Planner] model-error', {
+                    traceId,
+                    phase: input.phase,
+                    model,
+                    attempt: attempt + 1,
+                    message: (error as Error)?.message || String(error),
+                    transient: isTransientNetworkError(error),
+                });
                 if (attempt === 0 && isTransientNetworkError(error)) {
                     await sleep(400 + Math.round(Math.random() * 450));
                     continue;
@@ -453,54 +607,83 @@ Return JSON only.`,
     }
 
     if (!completion) {
+        console.error('[Planner] failed', {
+            traceId,
+            phase: input.phase,
+            message: (lastError as Error)?.message || String(lastError),
+        });
         throw (lastError instanceof Error ? lastError : new Error('Planner request failed'));
     }
 
     const raw = parseJsonSafe<any>(completion.text || '{}');
+    console.info('[Planner] parsed-json', {
+        traceId,
+        phase: input.phase,
+        keys: raw && typeof raw === 'object' ? Object.keys(raw) : [],
+    });
     if (input.phase === 'route') {
         const parsedRoute = PlannerRouteResponseSchema.parse({
             phase: 'route',
             ...raw,
         });
-        if (parsedRoute.intent === 'chat_assist') {
-            if (!parsedRoute.assistantResponse?.trim()) {
+        const routed = enforceRouteDecision(input, parsedRoute);
+        console.info('[Planner] route-decision', {
+            traceId,
+            intent: routed.intent,
+            action: routed.action,
+            confidence: routed.confidence,
+            reason: previewForLog(routed.reason),
+            matchedExistingScreenName: routed.matchedExistingScreenName || null,
+            targetScreenName: routed.targetScreenName || null,
+            generateTheseNow: routed.generateTheseNow || [],
+            editInstructionPreview: previewForLog(routed.editInstruction),
+        });
+        if (routed.intent === 'chat_assist') {
+            if (!routed.assistantResponse?.trim()) {
                 try {
                     const assistText = await generateAssistFallbackResponse(input, primaryModel);
+                    console.info('[Planner] route-assist-fallback', { traceId, used: true, hasText: Boolean(assistText?.trim()) });
                     return {
-                        ...parsedRoute,
+                        ...routed,
                         assistantResponse: assistText || 'Here is a direct response based on your request.',
                     };
                 } catch {
+                    console.warn('[Planner] route-assist-fallback', { traceId, used: true, hasText: false });
                     return {
-                        ...parsedRoute,
+                        ...routed,
                         assistantResponse: 'Here is a direct response based on your request.',
                     };
                 }
             }
             if (!isNextScreenRequest(input.appPrompt)) {
+                console.info('[Planner] route-next-screens-disabled', { traceId, reason: 'no explicit next-screen request' });
                 return {
-                    ...parsedRoute,
+                    ...routed,
                     recommendNextScreens: false,
                     nextScreenSuggestions: [],
                 };
             }
-            return parsedRoute;
+            return routed;
         }
         if (isAssistLikeRequest(input.appPrompt)) {
             try {
                 const assistText = await generateAssistFallbackResponse(input, primaryModel);
+                console.info('[Planner] assist-like-override', { traceId, usedFallbackAssist: true });
                 return {
-                    ...parsedRoute,
+                    ...routed,
                     intent: 'chat_assist',
+                    action: 'assist',
                     reason: parsedRoute.reason || 'assist-like request',
                     assistantResponse: assistText || parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
                     recommendNextScreens: isNextScreenRequest(input.appPrompt),
                     nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
                 };
             } catch {
+                console.warn('[Planner] assist-like-override', { traceId, usedFallbackAssist: false });
                 return {
-                    ...parsedRoute,
+                    ...routed,
                     intent: 'chat_assist',
+                    action: 'assist',
                     reason: parsedRoute.reason || 'assist-like request',
                     assistantResponse: parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
                     recommendNextScreens: isNextScreenRequest(input.appPrompt),
@@ -508,19 +691,35 @@ Return JSON only.`,
                 };
             }
         }
-        return parsedRoute;
+        console.info('[Planner] complete', { traceId, phase: 'route', summary: `${routed.intent}:${routed.action || 'n/a'}` });
+        return routed;
     }
     if (input.phase === 'postgen') {
-        return PlannerPostgenResponseSchema.parse({
+        const parsed = PlannerPostgenResponseSchema.parse({
             phase: 'postgen',
             ...raw,
         });
+        console.info('[Planner] complete', {
+            traceId,
+            phase: 'postgen',
+            gapsDetected: parsed.gapsDetected.length,
+            nextSuggestions: parsed.nextScreenSuggestions.length,
+        });
+        return parsed;
     }
 
-    return PlannerPlanResponseSchema.parse({
+    const parsed = PlannerPlanResponseSchema.parse({
         phase: 'plan',
         ...raw,
     });
+    console.info('[Planner] complete', {
+        traceId,
+        phase: parsed.phase,
+        appName: parsed.appName || null,
+        recommendedScreens: parsed.recommendedScreens.length,
+        questions: parsed.questions.length,
+    });
+    return parsed;
 }
 
 export function getPlannerModels() {

@@ -23,7 +23,7 @@ import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import type { ChatMessage } from './stores/chat-store';
 
-import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore } from './stores';
+import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
 import logo from './assets/Ui-logo.png';
 
 import './styles/App.css';
@@ -153,13 +153,16 @@ function App() {
     const activeProjectIdFromRoute = route.kind === 'app-project-canvas'
         ? route.projectId
         : null;
+    const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
+    const resetProjectMemory = useProjectMemoryStore((state) => state.resetMemory);
 
 
     useEffect(() => {
         if (!projectId) {
             hydratedProjectIdRef.current = null;
+            resetProjectMemory();
         }
-    }, [projectId]);
+    }, [projectId, resetProjectMemory]);
 
     useEffect(() => {
         let cancelled = false;
@@ -187,6 +190,7 @@ function App() {
                     useCanvasStore.getState().setDoc(resolvedDoc);
                     useChatStore.getState().hydrateSession(project.chatState as any);
                 });
+                setProjectMemory(project.projectMemory || null);
                 const loadedMessages = Array.isArray((project.chatState as any)?.messages) ? (project.chatState as any).messages : [];
                 lastSavedFingerprintRef.current = getProjectFingerprint(project.designSpec as any, resolvedDoc, loadedMessages);
                 hydratedProjectIdRef.current = project.projectId;
@@ -202,6 +206,7 @@ function App() {
                         useChatStore.getState().hydrateSession({ messages: [] });
                         useHistoryStore.getState().clearHistory();
                     });
+                    resetProjectMemory();
                     lastSavedFingerprintRef.current = '';
                     hydratedProjectIdRef.current = targetProjectId;
                     markSaved(targetProjectId, new Date().toISOString());
@@ -224,7 +229,7 @@ function App() {
         return () => {
             cancelled = true;
         };
-    }, [isCanvasRoute, projectId, setHydrating, markSaved, setProjectId, pushToast, authReady, authUser]);
+    }, [isCanvasRoute, projectId, setHydrating, markSaved, setProjectId, pushToast, authReady, authUser, setProjectMemory, resetProjectMemory]);
 
     useEffect(() => {
         if (!isCanvasRoute || isHydrating || !spec) return;

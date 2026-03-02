@@ -22,6 +22,7 @@ let renderBrowserPromise: Promise<any> | null = null;
 
 type PlatformKind = 'mobile' | 'tablet' | 'desktop';
 type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+const LOG_PREVIEW_MAX = 220;
 
 function normalizePlatform(input?: string): PlatformKind | undefined {
     if (input === 'mobile' || input === 'tablet' || input === 'desktop') return input;
@@ -31,6 +32,12 @@ function normalizePlatform(input?: string): PlatformKind | undefined {
 function normalizeStyle(input?: string): StyleKind | undefined {
     if (input === 'modern' || input === 'minimal' || input === 'vibrant' || input === 'luxury' || input === 'playful') return input;
     return undefined;
+}
+
+function previewText(value: unknown, max = LOG_PREVIEW_MAX): string {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length <= max ? text : `${text.slice(0, max)}...`;
 }
 
 async function getRenderBrowser() {
@@ -208,20 +215,40 @@ fastify.post<{
     };
 }>('/api/generate', async (request, reply) => {
     const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
     }
 
     try {
-        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel, hasProjectDesignSystem: Boolean(projectDesignSystem) }, 'generate: start');
+        fastify.log.info({
+            traceId,
+            route: '/api/generate',
+            stage: 'start',
+            platform,
+            stylePreset,
+            imagesCount: images?.length || 0,
+            preferredModel,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            promptPreview: previewText(prompt),
+        }, 'generate: start');
         const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
         const versionId = uuidv4();
-        fastify.log.info({ screens: designSpec.screens.length }, 'generate: complete');
+        fastify.log.info({
+            traceId,
+            route: '/api/generate',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            screens: designSpec.screens.length,
+            screenNames: designSpec.screens.map((screen) => screen.name).slice(0, 8),
+            descriptionPreview: previewText(designSpec.description),
+        }, 'generate: complete');
 
         return { designSpec, versionId };
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/generate', durationMs: Date.now() - startedAt, err: error }, 'generate: failed');
         return reply.status(500).send({
             error: 'Failed to generate design',
             message: (error as Error).message,
@@ -240,12 +267,25 @@ fastify.post<{
     };
 }>('/api/design-system', async (request, reply) => {
     const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
     }
 
     try {
+        fastify.log.info({
+            traceId,
+            route: '/api/design-system',
+            stage: 'start',
+            platform,
+            stylePreset,
+            imagesCount: images?.length || 0,
+            preferredModel,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            promptPreview: previewText(prompt),
+        }, 'design-system: start');
         const designSystem = await generateProjectDesignSystem({
             prompt,
             stylePreset,
@@ -254,9 +294,19 @@ fastify.post<{
             preferredModel,
             projectDesignSystem,
         });
+        fastify.log.info({
+            traceId,
+            route: '/api/design-system',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            systemName: designSystem.systemName,
+            stylePreset: designSystem.stylePreset,
+            platform: designSystem.platform,
+            themeMode: designSystem.themeMode,
+        }, 'design-system: complete');
         return { designSystem };
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/design-system', durationMs: Date.now() - startedAt, err: error }, 'design-system: failed');
         return reply.status(500).send({
             error: 'Failed to generate project design system',
             message: (error as Error).message,
@@ -272,9 +322,22 @@ fastify.post<{
         screenId: string;
         images?: string[];
         preferredModel?: string;
+        projectDesignSystem?: ProjectDesignSystem;
+        consistencyProfile?: {
+            canonicalNavbarLabels?: string[];
+            canonicalNavbarSignature?: string;
+            rules?: string[];
+        };
+        referenceScreens?: Array<{
+            screenId: string;
+            name: string;
+            html: string;
+        }>;
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId, images, preferredModel } = request.body;
+    const { instruction, html, screenId, images, preferredModel, projectDesignSystem, consistencyProfile, referenceScreens } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!instruction?.trim()) {
         return reply.status(400).send({ error: 'Instruction is required' });
@@ -285,12 +348,44 @@ fastify.post<{
     }
 
     try {
-        const edited = await editDesign({ instruction, html, screenId, images, preferredModel });
+        fastify.log.info({
+            traceId,
+            route: '/api/edit',
+            stage: 'start',
+            screenId,
+            htmlChars: html.length,
+            imagesCount: images?.length || 0,
+            preferredModel,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            consistencyRuleCount: consistencyProfile?.rules?.length || 0,
+            canonicalNavbarLabels: consistencyProfile?.canonicalNavbarLabels?.slice(0, 8) || [],
+            referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
+            instructionPreview: previewText(instruction),
+        }, 'edit: start');
+        const edited = await editDesign({
+            instruction,
+            html,
+            screenId,
+            images,
+            preferredModel,
+            projectDesignSystem,
+            consistencyProfile,
+            referenceScreens,
+        });
         const versionId = uuidv4();
+        fastify.log.info({
+            traceId,
+            route: '/api/edit',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            screenId,
+            htmlChars: edited.html.length,
+            descriptionPreview: previewText(edited.description),
+        }, 'edit: complete');
 
         return { html: edited.html, description: edited.description, versionId };
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/edit', durationMs: Date.now() - startedAt, screenId, err: error }, 'edit: failed');
         return reply.status(500).send({
             error: 'Failed to edit design',
             message: (error as Error).message,
@@ -315,6 +410,8 @@ fastify.post<{
     };
 }>('/api/synthesize-screen-images', async (request, reply) => {
     const { appPrompt, stylePreset, platform, preferredModel, maxImages, screens } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
@@ -324,6 +421,17 @@ fastify.post<{
     }
 
     try {
+        fastify.log.info({
+            traceId,
+            route: '/api/synthesize-screen-images',
+            stage: 'start',
+            screens: screens.length,
+            stylePreset,
+            platform,
+            preferredModel,
+            maxImages,
+            appPromptPreview: previewText(appPrompt),
+        }, 'synthesize-screen-images: start');
         const normalizedPlatform = normalizePlatform(platform);
         const normalizedStyle = normalizeStyle(stylePreset);
         const result = await synthesizeImagesForScreens(screens, {
@@ -333,9 +441,16 @@ fastify.post<{
             preferredModel: preferredModel || 'image',
             maxImages,
         });
+        fastify.log.info({
+            traceId,
+            route: '/api/synthesize-screen-images',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            stats: result.stats,
+        }, 'synthesize-screen-images: complete');
         return result;
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/synthesize-screen-images', durationMs: Date.now() - startedAt, err: error }, 'synthesize-screen-images: failed');
         return reply.status(500).send({
             error: 'Failed to synthesize screen images',
             message: (error as Error).message,
@@ -351,16 +466,34 @@ fastify.post<{
     };
 }>('/api/generate-image', async (request, reply) => {
     const { prompt, instruction, preferredModel } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
     }
 
     try {
+        fastify.log.info({
+            traceId,
+            route: '/api/generate-image',
+            stage: 'start',
+            preferredModel,
+            promptPreview: previewText(prompt),
+            instructionPreview: previewText(instruction),
+        }, 'generate-image: start');
         const result = await generateImageAsset({ prompt, instruction, preferredModel });
+        fastify.log.info({
+            traceId,
+            route: '/api/generate-image',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            modelUsed: result.modelUsed,
+            srcPreview: previewText(result.src, 120),
+        }, 'generate-image: complete');
         return result;
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/generate-image', durationMs: Date.now() - startedAt, err: error }, 'generate-image: failed');
         return reply.status(500).send({
             error: 'Failed to generate image',
             message: (error as Error).message,
@@ -426,6 +559,9 @@ fastify.post<{
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         screenCountDesired?: number;
         screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+        screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
+        recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        projectMemorySummary?: string;
         referenceImages?: string[];
         preferredModel?: string;
     };
@@ -437,15 +573,35 @@ fastify.post<{
         stylePreset,
         screenCountDesired,
         screensGenerated,
+        screenDetails,
+        recentMessages,
+        projectMemorySummary,
         referenceImages,
         preferredModel,
     } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
     }
 
     try {
+        fastify.log.info({
+            traceId,
+            route: '/api/plan',
+            stage: 'start',
+            phase,
+            platform,
+            stylePreset,
+            screensGeneratedCount: screensGenerated?.length || 0,
+            screenDetailsCount: screenDetails?.length || 0,
+            recentMessagesCount: recentMessages?.length || 0,
+            hasProjectMemorySummary: Boolean(projectMemorySummary?.trim()),
+            referenceImagesCount: referenceImages?.length || 0,
+            preferredModel,
+            appPromptPreview: previewText(appPrompt),
+        }, 'plan: start');
         const plan = await runDesignPlanner({
             phase,
             appPrompt: appPrompt.trim(),
@@ -453,12 +609,43 @@ fastify.post<{
             stylePreset,
             screenCountDesired,
             screensGenerated,
+            screenDetails,
+            recentMessages,
+            projectMemorySummary,
             referenceImages,
             preferredModel,
         });
+        if (plan.phase === 'route') {
+            fastify.log.info({
+                traceId,
+                route: '/api/plan',
+                stage: 'decision',
+                phase: plan.phase,
+                intent: plan.intent,
+                action: plan.action,
+                confidence: plan.confidence,
+                reason: previewText(plan.reason),
+                matchedExistingScreenName: plan.matchedExistingScreenName,
+                targetScreenName: plan.targetScreenName,
+                generateTheseNow: plan.generateTheseNow,
+                hasAssistantResponse: Boolean(plan.assistantResponse?.trim()),
+            }, 'plan: route decision');
+        }
+        fastify.log.info({
+            traceId,
+            route: '/api/plan',
+            stage: 'response',
+            phase: plan.phase,
+            durationMs: Date.now() - startedAt,
+            summary: plan.phase === 'route'
+                ? `${plan.intent}:${plan.action || 'n/a'}`
+                : plan.phase === 'postgen'
+                    ? `nextSuggestions=${plan.nextScreenSuggestions.length}`
+                    : `recommendedScreens=${plan.recommendedScreens.length}`,
+        }, 'plan: complete');
         return plan;
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/plan', durationMs: Date.now() - startedAt, err: error }, 'plan: failed');
         return reply.status(500).send({
             error: 'Failed to create planner output',
             message: (error as Error).message,
@@ -607,6 +794,8 @@ fastify.post<{
     };
 }>('/api/generate-stream', async (request, reply) => {
     const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -617,15 +806,44 @@ fastify.post<{
 
     try {
         const { generateDesignStream } = await import('./services/gemini.js');
-        fastify.log.info({ platform, stylePreset, imagesCount: images?.length || 0, preferredModel, hasProjectDesignSystem: Boolean(projectDesignSystem) }, 'generate-stream: start');
+        fastify.log.info({
+            traceId,
+            route: '/api/generate-stream',
+            stage: 'start',
+            platform,
+            stylePreset,
+            imagesCount: images?.length || 0,
+            preferredModel,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            promptPreview: previewText(prompt),
+        }, 'generate-stream: start');
         const stream = generateDesignStream({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
+        let chunkCount = 0;
+        let charCount = 0;
 
         for await (const chunk of stream) {
+            chunkCount += 1;
+            charCount += chunk.length;
+            if (chunkCount === 1) {
+                fastify.log.info({
+                    traceId,
+                    route: '/api/generate-stream',
+                    stage: 'progress',
+                    firstChunkPreview: previewText(chunk, 120),
+                }, 'generate-stream: first chunk');
+            }
             reply.raw.write(chunk);
         }
-        fastify.log.info('generate-stream: complete');
+        fastify.log.info({
+            traceId,
+            route: '/api/generate-stream',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            chunkCount,
+            charCount,
+        }, 'generate-stream: complete');
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/generate-stream', durationMs: Date.now() - startedAt, err: error }, 'generate-stream: failed');
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
     } finally {
         reply.raw.end();
@@ -644,6 +862,8 @@ fastify.post<{
     };
 }>('/api/complete-screen', async (request, reply) => {
     const { screenName, partialHtml, prompt, platform, stylePreset, projectDesignSystem } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
 
     if (!screenName?.trim()) {
         return reply.status(400).send({ error: 'screenName is required' });
@@ -654,6 +874,17 @@ fastify.post<{
     }
 
     try {
+        fastify.log.info({
+            traceId,
+            route: '/api/complete-screen',
+            stage: 'start',
+            screenName,
+            partialHtmlChars: partialHtml.length,
+            platform,
+            stylePreset,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            promptPreview: previewText(prompt),
+        }, 'complete-screen: start');
         const html = await completePartialScreen({
             screenName,
             partialHtml,
@@ -662,9 +893,17 @@ fastify.post<{
             stylePreset,
             projectDesignSystem,
         });
+        fastify.log.info({
+            traceId,
+            route: '/api/complete-screen',
+            stage: 'response',
+            durationMs: Date.now() - startedAt,
+            screenName,
+            htmlChars: html.length,
+        }, 'complete-screen: complete');
         return { html };
     } catch (error) {
-        fastify.log.error(error);
+        fastify.log.error({ traceId, route: '/api/complete-screen', durationMs: Date.now() - startedAt, screenName, err: error }, 'complete-screen: failed');
         return reply.status(500).send({
             error: 'Failed to complete partial screen',
             message: (error as Error).message,

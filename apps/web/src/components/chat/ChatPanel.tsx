@@ -3,8 +3,8 @@
 // ============================================================================
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore } from '../../stores';
-import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type HtmlScreen, type ProjectDesignSystem } from '../../api/client';
+import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
@@ -388,6 +388,32 @@ function normalizeSuggestedProjectName(value: string | undefined): string {
     return raw.replace(/^["'`]+|["'`]+$/g, '').slice(0, 72).trim();
 }
 
+function deriveProjectNameFromPrompt(prompt: string): string {
+    const compact = String(prompt || '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!compact) return '';
+
+    const withoutLead = compact
+        .replace(/^(create|build|design|generate|make|craft)\s+/i, '')
+        .replace(/^(an?|the)\s+/i, '');
+
+    const cleaned = withoutLead
+        .replace(/[^\w\s&-]/g, ' ')
+        .replace(/\b(app|screen|screens|ui|design|website|mobile)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const candidate = cleaned
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 6)
+        .join(' ');
+
+    return normalizeSuggestedProjectName(candidate || compact.slice(0, 42));
+}
+
 function isGenericProjectName(value: string | undefined): boolean {
     const name = String(value || '').trim().toLowerCase();
     if (!name) return true;
@@ -443,6 +469,202 @@ ${screens || '[li]No screens suggested.[/li]'}
 ${assumptions || '[li]No explicit assumptions.[/li]'}
 [h3]Questions to refine[/h3]
 ${questions || '[li]No blocking questions.[/li]'}`;
+}
+
+type RoutingScreenDetail = { screenId: string; name: string; htmlSummary: string };
+
+type ConsistencyIssue = {
+    code: 'navbar-mismatch' | 'navbar-missing' | 'design-token-missing';
+    message: string;
+    severity: 'warn' | 'error';
+};
+
+function summarizeHtmlForRouting(html: string): string {
+    const text = String(html || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.slice(0, 280);
+}
+
+function buildRoutingScreenDetails(screens: HtmlScreen[]): RoutingScreenDetail[] {
+    return screens.slice(0, 24).map((screen) => ({
+        screenId: screen.screenId,
+        name: screen.name,
+        htmlSummary: summarizeHtmlForRouting(screen.html),
+    }));
+}
+
+function buildRecentConversation(messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>) {
+    return messages
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .slice(-8)
+        .map((message) => ({
+            role: message.role as 'user' | 'assistant',
+            content: String(message.content || '').replace(/\s+/g, ' ').trim().slice(0, 260),
+        }))
+        .filter((message) => message.content.length > 0);
+}
+
+function buildProjectMemorySummary(memory: ProjectMemory | null | undefined, screens: HtmlScreen[], messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>): string {
+    const source = memory || null;
+    const screenNames = source?.summary?.screenNames?.length
+        ? source.summary.screenNames
+        : screens.map((screen) => screen.name).slice(0, 12);
+    const lastRequests = source?.summary?.lastUserRequests?.length
+        ? source.summary.lastUserRequests
+        : messages.filter((message) => message.role === 'user').map((message) => message.content).slice(-8);
+    const navbarLabels = source?.components?.navbar?.labels || [];
+    const tokenKeys = source?.style?.tokenKeys || [];
+    const lines = [
+        `screenCount=${source?.summary?.screenCount ?? screens.length}`,
+        `screenNames=${screenNames.join(', ') || 'none'}`,
+        `recentUserRequests=${lastRequests.map((item) => item.replace(/\s+/g, ' ').trim().slice(0, 140)).join(' || ') || 'none'}`,
+        `canonicalNavbarLabels=${navbarLabels.join(', ') || 'none'}`,
+        `tokenKeys=${tokenKeys.join(', ') || 'none'}`,
+    ];
+    return lines.join('\n').slice(0, 2400);
+}
+
+function deriveProjectMemoryFromState(screens: HtmlScreen[], messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, designSystem?: ProjectDesignSystem): ProjectMemory {
+    const navbarSource = screens
+        .map((screen) => ({
+            screenId: screen.screenId,
+            screenName: screen.name,
+            labels: extractNavbarLabelsFromHtml(screen.html),
+        }))
+        .find((entry) => entry.labels.length >= 2);
+    return {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        summary: {
+            screenCount: screens.length,
+            screenNames: screens.map((screen) => screen.name).slice(0, 24),
+            lastUserRequests: messages
+                .filter((message) => message.role === 'user')
+                .map((message) => String(message.content || '').replace(/\s+/g, ' ').trim().slice(0, 220))
+                .filter(Boolean)
+                .slice(-16),
+        },
+        components: navbarSource
+            ? {
+                navbar: {
+                    sourceScreenId: navbarSource.screenId,
+                    sourceScreenName: navbarSource.screenName,
+                    labels: navbarSource.labels.slice(0, 8),
+                    signature: navbarSource.labels.map((label) => label.toLowerCase()).join('|'),
+                },
+            }
+            : undefined,
+        style: {
+            themeMode: designSystem?.themeMode,
+            displayFont: designSystem?.typography?.displayFont,
+            bodyFont: designSystem?.typography?.bodyFont,
+            tokenKeys: designSystem?.tokens ? Object.keys(designSystem.tokens).slice(0, 12) : [],
+        },
+    };
+}
+
+function resolveRoutedScreen(route: PlannerRouteResponse, screens: HtmlScreen[], referencedScreens: HtmlScreen[] = []): HtmlScreen | null {
+    const matchCandidates = [
+        route.matchedExistingScreenName,
+        route.targetScreenName,
+        route.referenceExistingScreenName,
+    ]
+        .map((name) => String(name || '').trim().toLowerCase())
+        .filter(Boolean);
+    const byId = new Map(screens.map((screen) => [screen.screenId, screen] as const));
+
+    for (const referenced of referencedScreens) {
+        const existing = byId.get(referenced.screenId);
+        if (existing) return existing;
+    }
+
+    const all = screens.slice();
+    for (const candidate of matchCandidates) {
+        const exact = all.find((screen) => screen.name.trim().toLowerCase() === candidate);
+        if (exact) return exact;
+    }
+    for (const candidate of matchCandidates) {
+        const partial = all.find((screen) => screen.name.trim().toLowerCase().includes(candidate) || candidate.includes(screen.name.trim().toLowerCase()));
+        if (partial) return partial;
+    }
+    return null;
+}
+
+function extractNavbarLabelsFromHtml(html: string): string[] {
+    const navMatch = String(html || '').match(/<nav\b[\s\S]*?<\/nav>/i);
+    if (!navMatch) return [];
+    const labels: string[] = [];
+    const seen = new Set<string>();
+    const regex = />([^<>]{1,48})</g;
+    let match: RegExpExecArray | null = regex.exec(navMatch[0]);
+    while (match) {
+        const label = String(match[1] || '').replace(/\s+/g, ' ').trim();
+        const normalized = label.toLowerCase();
+        if (label.length >= 2 && !seen.has(normalized) && /[a-z]/i.test(normalized)) {
+            labels.push(label);
+            seen.add(normalized);
+        }
+        if (labels.length >= 8) break;
+        match = regex.exec(navMatch[0]);
+    }
+    return labels;
+}
+
+function getLabelSimilarityScore(current: string[], canonical: string[]): number {
+    if (current.length === 0 || canonical.length === 0) return 0;
+    const a = new Set(current.map((item) => item.toLowerCase()));
+    const b = new Set(canonical.map((item) => item.toLowerCase()));
+    const union = new Set([...a, ...b]);
+    if (union.size === 0) return 0;
+    let overlap = 0;
+    a.forEach((item) => {
+        if (b.has(item)) overlap += 1;
+    });
+    return overlap / union.size;
+}
+
+function validateScreenConsistency(params: {
+    html: string;
+    memory: ProjectMemory | null | undefined;
+    designSystem?: ProjectDesignSystem;
+}): ConsistencyIssue[] {
+    const { html, memory, designSystem } = params;
+    const issues: ConsistencyIssue[] = [];
+    const canonicalNavbar = memory?.components?.navbar;
+    const currentNavbarLabels = extractNavbarLabelsFromHtml(html);
+
+    if (canonicalNavbar?.labels?.length) {
+        if (currentNavbarLabels.length === 0) {
+            issues.push({
+                code: 'navbar-missing',
+                message: 'Screen is missing a navbar while project has a canonical navbar pattern.',
+                severity: 'warn',
+            });
+        } else {
+            const similarity = getLabelSimilarityScore(currentNavbarLabels, canonicalNavbar.labels);
+            if (similarity < 0.34) {
+                issues.push({
+                    code: 'navbar-mismatch',
+                    message: `Navbar labels diverge from project pattern (${currentNavbarLabels.join(', ')} vs ${canonicalNavbar.labels.join(', ')}).`,
+                    severity: 'error',
+                });
+            }
+        }
+    }
+
+    if (designSystem && !/tailwind\.config/i.test(html)) {
+        issues.push({
+            code: 'design-token-missing',
+            message: 'Screen is missing tailwind token config, which can break design-system consistency.',
+            severity: 'warn',
+        });
+    }
+
+    return issues;
 }
 
 function getThinkingSeconds(message: any): number | null {
@@ -1141,6 +1363,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
     const { modelProfile, setModelProfile, pushToast, removeToast } = useUiStore();
     const { projectId, markSaved, setSaving } = useProjectStore();
+    const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
     const assistantMsgIdRef = useRef<string>('');
     const notificationGuideShownRef = useRef(false);
     const generationLoadingToastRef = useRef<string | null>(null);
@@ -1348,6 +1571,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (isTitleEditing) return;
         setTitleDraft(spec?.name?.trim() || '');
     }, [spec?.name, isTitleEditing]);
+
+    useEffect(() => {
+        const screens = spec?.screens || [];
+        if (!spec && messages.length === 0) {
+            setProjectMemory(null);
+            return;
+        }
+        setProjectMemory(deriveProjectMemoryFromState(screens, messages, spec?.designSystem));
+    }, [spec, messages, setProjectMemory]);
 
     useEffect(() => {
         if (chatPanelView === 'design-system' && !spec?.designSystem && !designSystemDraft) {
@@ -1931,6 +2163,77 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         );
     };
 
+    const runConsistencyRepairIfNeeded = async (
+        screen: HtmlScreen,
+        nextHtml: string,
+        reasonContext: string,
+        referenceScreens: HtmlScreen[],
+        attachedImages?: string[]
+    ): Promise<string> => {
+        const localMemory = useProjectMemoryStore.getState().memory
+            || deriveProjectMemoryFromState(useDesignStore.getState().spec?.screens || [], useChatStore.getState().messages, useDesignStore.getState().spec?.designSystem);
+        const designSystem = useDesignStore.getState().spec?.designSystem;
+        const issues = validateScreenConsistency({
+            html: nextHtml,
+            memory: localMemory,
+            designSystem,
+        });
+        const severeIssues = issues.filter((issue) => issue.severity === 'error');
+        if (severeIssues.length === 0) return nextHtml;
+
+        const fallbackReferences = (useDesignStore.getState().spec?.screens || [])
+            .filter((candidate) => candidate.screenId !== screen.screenId)
+            .slice(0, 2);
+        const finalReferences = (referenceScreens.length > 0 ? referenceScreens : fallbackReferences)
+            .filter((candidate) => candidate.screenId !== screen.screenId)
+            .slice(0, 2)
+            .map((candidate) => ({
+                screenId: candidate.screenId,
+                name: candidate.name,
+                html: candidate.html,
+            }));
+
+        try {
+            const repair = await apiClient.edit({
+                instruction: `Consistency repair pass for "${screen.name}".
+Keep the screen's purpose and content intact.
+Align component language with the project design system and existing screens.
+Context: ${reasonContext}
+Issues:
+${issues.map((issue) => `- ${issue.message}`).join('\n')}
+Return a polished, consistent screen without introducing a new navigation pattern.`,
+                html: nextHtml,
+                screenId: screen.screenId,
+                images: attachedImages,
+                preferredModel: getPreferredTextModel(modelProfile),
+                projectDesignSystem: designSystem,
+                consistencyProfile: {
+                    canonicalNavbarLabels: localMemory?.components?.navbar?.labels || [],
+                    canonicalNavbarSignature: localMemory?.components?.navbar?.signature || '',
+                    rules: issues.map((issue) => issue.message),
+                },
+                referenceScreens: finalReferences,
+            });
+            return repair.html || nextHtml;
+        } catch (error) {
+            console.warn('[UI] consistency repair skipped due to edit failure', error);
+            return nextHtml;
+        }
+    };
+
+    const withProjectPlannerContext = (payload: PlannerRequest): PlannerRequest => {
+        const currentScreens = useDesignStore.getState().spec?.screens || [];
+        const currentMessages = useChatStore.getState().messages;
+        const memorySnapshot = useProjectMemoryStore.getState().memory
+            || deriveProjectMemoryFromState(currentScreens, currentMessages, useDesignStore.getState().spec?.designSystem);
+        return {
+            ...payload,
+            screenDetails: buildRoutingScreenDetails(currentScreens),
+            recentMessages: buildRecentConversation(currentMessages),
+            projectMemorySummary: buildProjectMemorySummary(memorySnapshot, currentScreens, currentMessages),
+        };
+    };
+
     const handlePlanOnly = async (
         existingUserMessageId?: string,
         overridePrompt?: string,
@@ -1988,7 +2291,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
         try {
             const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
-            const route = await apiClient.plan({
+            const route = await apiClient.plan(withProjectPlannerContext({
                 phase: 'route',
                 appPrompt: requestPromptWithReferences,
                 platform: selectedPlatform,
@@ -1996,7 +2299,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            });
+            }));
 
             if (route.phase === 'route' && route.intent === 'chat_assist') {
                 const routeSuggestions = buildRouteChatSuggestionPayload(route);
@@ -2015,7 +2318,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 return;
             }
 
-            const response = await apiClient.plan({
+            const response = await apiClient.plan(withProjectPlannerContext({
                 phase: hasScreens ? 'postgen' : 'plan',
                 appPrompt: requestPromptWithReferences,
                 platform: selectedPlatform,
@@ -2024,7 +2327,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            });
+            }));
 
             if (response.phase === 'postgen') {
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
@@ -2228,6 +2531,37 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             }
 
             if (shouldPauseForDesignSystemApproval && activeProjectDesignSystem) {
+                if (shouldNameProjectOnFirstRequest && isGenericProjectName(useDesignStore.getState().spec?.name)) {
+                    let nextProjectName = '';
+                    try {
+                        if (plannerReferenceImages.length === 0) {
+                            plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
+                        }
+                        const namingPlan = await apiClient.plan(withProjectPlannerContext({
+                            phase: 'plan',
+                            appPrompt: appPromptForPlanning,
+                            platform: platformToUse,
+                            stylePreset: styleToUse,
+                            screenCountDesired: 2,
+                            screensGenerated: existingScreenNames.map((name) => ({ name })),
+                            referenceImages: plannerReferenceImages,
+                            preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+                        }));
+                        if (namingPlan.phase === 'plan' || namingPlan.phase === 'discovery') {
+                            nextProjectName = normalizeSuggestedProjectName(namingPlan.appName);
+                        }
+                    } catch (namePlanError) {
+                        console.warn('[UI] naming planner failed; falling back to prompt-derived name', namePlanError);
+                    }
+
+                    if (!nextProjectName) {
+                        nextProjectName = deriveProjectNameFromPrompt(requestPrompt);
+                    }
+                    if (nextProjectName) {
+                        applyProjectName(nextProjectName);
+                    }
+                }
+
                 updateMessage(assistantMsgId, {
                     content: `[h2]Design System Ready[/h2]
 [p]Review this project design system, adjust anything you want, then proceed to generate screens.[/p]`,
@@ -2273,7 +2607,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             if (usePlanner || shouldNameProjectOnFirstRequest) {
                 plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
                 try {
-                    const discoveryPlan = await apiClient.plan({
+                    const discoveryPlan = await apiClient.plan(withProjectPlannerContext({
                         phase: 'plan',
                         appPrompt: appPromptForPlanning,
                         platform: platformToUse,
@@ -2282,7 +2616,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         screensGenerated: existingScreenNames.map((name) => ({ name })),
                         referenceImages: plannerReferenceImages,
                         preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-                    });
+                    }));
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
                         plannerSuggestedProjectName = normalizeSuggestedProjectName(discoveryPlan.appName);
@@ -2389,12 +2723,24 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 }, controller.signal);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
-                regen.designSpec.screens.forEach((screen, index) => {
+                for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
+                    const screen = regen.designSpec.screens[index];
                     const screenId = uuidv4();
+                    const repairedHtml = await runConsistencyRepairIfNeeded(
+                        {
+                            ...screen,
+                            screenId,
+                            html: normalizePlaceholderCatalogInHtml(screen.html),
+                        },
+                        normalizePlaceholderCatalogInHtml(screen.html),
+                        appPromptForPlanning,
+                        referenceScreens,
+                        imagesToSend
+                    );
                     addScreens([{
                         screenId,
                         name: screen.name,
-                        html: screen.html,
+                        html: repairedHtml,
                         width: screen.width,
                         height: screen.height,
                         status: 'complete'
@@ -2414,14 +2760,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     };
                     const currentBoards = useCanvasStore.getState().doc.boards;
                     setBoards([...currentBoards, board]);
-                });
+                }
                 applyProjectDesignSystem(activeProjectDesignSystem);
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
                 if (usePlanner) {
                     try {
-                        const postgen = await apiClient.plan({
+                        const postgen = await apiClient.plan(withProjectPlannerContext({
                             phase: 'postgen',
                             appPrompt: appPromptForPlanning,
                             platform: platformToUse,
@@ -2429,7 +2775,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
                             referenceImages: plannerReferenceImages,
                             preferredModel: 'llama-3.3-70b-versatile',
-                        });
+                        }));
                         if (postgen.phase === 'postgen') {
                             postgenData = postgen;
                             postgenSummary = formatPostgenSuggestionText(postgen);
@@ -2549,21 +2895,45 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 }, controller.signal);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
-                regen.designSpec.screens.forEach((screen, index) => {
+                for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
+                    const screen = regen.designSpec.screens[index];
                     const seq = createdSeqs[index];
+                    const normalizedHtml = normalizePlaceholderCatalogInHtml(screen.html);
                     if (seq !== undefined) {
                         const targetId = screenIdBySeq.get(seq);
                         if (targetId) {
-                            updateScreen(targetId, screen.html, 'complete', screen.width, screen.height, screen.name);
-                            return;
+                            const repairedHtml = await runConsistencyRepairIfNeeded(
+                                {
+                                    ...screen,
+                                    screenId: targetId,
+                                    html: normalizedHtml,
+                                },
+                                normalizedHtml,
+                                appPromptForPlanning,
+                                referenceScreens,
+                                imagesToSend
+                            );
+                            updateScreen(targetId, repairedHtml, 'complete', screen.width, screen.height, screen.name);
+                            continue;
                         }
                     }
 
                     const screenId = uuidv4();
+                    const repairedHtml = await runConsistencyRepairIfNeeded(
+                        {
+                            ...screen,
+                            screenId,
+                            html: normalizedHtml,
+                        },
+                        normalizedHtml,
+                        appPromptForPlanning,
+                        referenceScreens,
+                        imagesToSend
+                    );
                     addScreens([{
                         screenId,
                         name: screen.name,
-                        html: screen.html,
+                        html: repairedHtml,
                         width: screen.width,
                         height: screen.height,
                         status: 'complete'
@@ -2582,14 +2952,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     };
                     const currentBoards = useCanvasStore.getState().doc.boards;
                     setBoards([...currentBoards, board]);
-                });
+                }
                 applyProjectDesignSystem(activeProjectDesignSystem);
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
                 if (usePlanner) {
                     try {
-                        const postgen = await apiClient.plan({
+                        const postgen = await apiClient.plan(withProjectPlannerContext({
                             phase: 'postgen',
                             appPrompt: appPromptForPlanning,
                             platform: platformToUse,
@@ -2597,7 +2967,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
                             referenceImages: plannerReferenceImages,
                             preferredModel: 'llama-3.3-70b-versatile',
-                        });
+                        }));
                         if (postgen.phase === 'postgen') {
                             postgenData = postgen;
                             postgenSummary = formatPostgenSuggestionText(postgen);
@@ -2657,13 +3027,29 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                     updateScreen(screenId, current.html, 'complete', current.width, current.height, current.name);
                 }
             }
+            for (const seq of createdSeqs) {
+                const screenId = screenIdBySeq.get(seq);
+                if (!screenId) continue;
+                const current = useDesignStore.getState().spec?.screens.find((screen) => screen.screenId === screenId);
+                if (!current) continue;
+                const repairedHtml = await runConsistencyRepairIfNeeded(
+                    current,
+                    current.html,
+                    appPromptForPlanning,
+                    referenceScreens,
+                    imagesToSend
+                );
+                if (repairedHtml !== current.html) {
+                    updateScreen(screenId, repairedHtml, 'complete', current.width, current.height, current.name);
+                }
+            }
             applyProjectDesignSystem(activeProjectDesignSystem);
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
             if (usePlanner) {
                 try {
-                    const postgen = await apiClient.plan({
+                    const postgen = await apiClient.plan(withProjectPlannerContext({
                         phase: 'postgen',
                         appPrompt: appPromptForPlanning,
                         platform: platformToUse,
@@ -2677,7 +3063,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                             })
                             .filter(Boolean) as Array<{ name: string }>,
                         preferredModel: 'llama-3.3-70b-versatile',
-                    });
+                    }));
                     if (postgen.phase === 'postgen') {
                         postgenData = postgen;
                         postgenSummary = formatPostgenSuggestionText(postgen);
@@ -2837,17 +3223,37 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             updateScreen(targetScreen.screenId, targetScreen.html, 'streaming', targetScreen.width, targetScreen.height, targetScreen.name);
             const controller = new AbortController();
             setAbortController(controller);
+            const localMemory = useProjectMemoryStore.getState().memory
+                || deriveProjectMemoryFromState(useDesignStore.getState().spec?.screens || [], useChatStore.getState().messages, useDesignStore.getState().spec?.designSystem);
             const response = await apiClient.edit({
                 instruction: currentPrompt,
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
                 images: editImages,
                 preferredModel: getPreferredTextModel(modelProfile),
+                projectDesignSystem: useDesignStore.getState().spec?.designSystem,
+                consistencyProfile: {
+                    canonicalNavbarLabels: localMemory?.components?.navbar?.labels || [],
+                    canonicalNavbarSignature: localMemory?.components?.navbar?.signature || '',
+                    rules: ['Keep navbar and shared components consistent with existing project screens.'],
+                },
+                referenceScreens: referenceScreens.slice(0, 2).map((screen) => ({
+                    screenId: screen.screenId,
+                    name: screen.name,
+                    html: screen.html,
+                })),
             }, controller.signal);
+            const repairedHtml = await runConsistencyRepairIfNeeded(
+                targetScreen,
+                response.html,
+                currentPrompt,
+                referenceScreens,
+                editImages
+            );
 
-            updateScreen(targetScreen.screenId, response.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
+            updateScreen(targetScreen.screenId, repairedHtml, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
             if (isEditMode && editScreenId === targetScreen.screenId) {
-                setActiveScreen(targetScreen.screenId, response.html);
+                setActiveScreen(targetScreen.screenId, repairedHtml);
             }
             setFocusNodeIds([targetScreen.screenId]);
 
@@ -2856,7 +3262,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             if (planMode) {
                 try {
                     const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, editImages);
-                    const postgen = await apiClient.plan({
+                    const postgen = await apiClient.plan(withProjectPlannerContext({
                         phase: 'postgen',
                         appPrompt: currentPrompt,
                         platform: selectedPlatform,
@@ -2864,7 +3270,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
                         referenceImages: plannerReferenceImages,
                         preferredModel: 'llama-3.3-70b-versatile',
-                    });
+                    }));
                     if (postgen.phase === 'postgen') {
                         postgenData = postgen;
                         postgenSummary = formatPostgenSuggestionText(postgen);
@@ -2925,26 +3331,141 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!requestPrompt || isGenerating) return;
         const attachedImages = [...images];
         const referenceScreens = getScreenReferencesFromComposer();
+        const routingPrompt = referenceScreens.length > 0
+            ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
+            : requestPrompt;
+        const referenceMeta = buildScreenReferenceMeta(referenceScreens);
+        const userMsgId = addMessage('user', requestPrompt, attachedImages.length ? attachedImages : undefined);
+        updateMessage(userMsgId, {
+            meta: {
+                ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                requestKind: 'route',
+                ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
+            },
+        });
         setComposerScreenReferences([]);
         closeMentionMenu();
+        setPrompt('');
         if (attachedImages.length > 0) {
             setImages([]);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
-        await handleGenerate(
-            requestPrompt,
-            attachedImages,
-            selectedPlatform,
-            stylePreset,
-            modelProfile,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            referenceScreens,
-            false
-        );
+
+        const executeFallbackRoute = async () => {
+            const editLike = /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish)/i.test(requestPrompt);
+            const fallbackTarget = referenceScreens[0] || null;
+            if (editLike && fallbackTarget) {
+                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, referenceScreens);
+                return;
+            }
+            await handleGenerate(
+                requestPrompt,
+                attachedImages,
+                selectedPlatform,
+                stylePreset,
+                modelProfile,
+                undefined,
+                requestPrompt,
+                undefined,
+                undefined,
+                userMsgId,
+                referenceScreens,
+                false
+            );
+        };
+
+        try {
+            const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, attachedImages);
+            const routeResponse = await apiClient.plan(withProjectPlannerContext({
+                phase: 'route',
+                appPrompt: routingPrompt,
+                platform: selectedPlatform,
+                stylePreset,
+                screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
+                referenceImages: plannerReferenceImages,
+                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+            }));
+            if (routeResponse.phase !== 'route') {
+                throw new Error('Planner route phase mismatch');
+            }
+            const route = routeResponse;
+
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                    requestKind: route.intent === 'chat_assist'
+                        ? 'assist'
+                        : route.intent === 'edit_existing_screen'
+                            ? 'edit'
+                            : 'generate',
+                    plannerRoute: route,
+                    ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
+                },
+            });
+
+            if (route.intent === 'chat_assist' || route.action === 'assist') {
+                const assistantMsgId = addMessage('assistant', route.assistantResponse || 'Here is a direct response based on your request.');
+                updateMessage(assistantMsgId, {
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                        parentUserId: userMsgId,
+                        plannerRoute: route,
+                    },
+                });
+                setActiveBranchForUser(userMsgId, assistantMsgId);
+                return;
+            }
+
+            if (route.intent === 'edit_existing_screen' || route.action === 'edit') {
+                const target = resolveRoutedScreen(route, useDesignStore.getState().spec?.screens || [], referenceScreens);
+                if (!target) {
+                    const assistantMsgId = addMessage(
+                        'assistant',
+                        `[h2]Need target screen[/h2]\n[p]I interpreted this as an edit request, but I could not map it to an existing screen. Mention the exact screen name (for example: [b]Profile[/b]) or use @screen reference.</p>`
+                    );
+                    updateMessage(assistantMsgId, {
+                        status: 'complete',
+                        meta: {
+                            ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                            parentUserId: userMsgId,
+                            plannerRoute: route,
+                        },
+                    });
+                    setActiveBranchForUser(userMsgId, assistantMsgId);
+                    return;
+                }
+                await handleEditForScreen(
+                    target,
+                    route.editInstruction || requestPrompt,
+                    attachedImages,
+                    userMsgId,
+                    referenceScreens
+                );
+                return;
+            }
+
+            const targetedScreens = route.intent === 'add_screen'
+                ? route.generateTheseNow.filter(Boolean).slice(0, 3)
+                : undefined;
+            await handleGenerate(
+                requestPrompt,
+                attachedImages,
+                selectedPlatform,
+                stylePreset,
+                modelProfile,
+                targetedScreens && targetedScreens.length > 0 ? targetedScreens : undefined,
+                route.appContextPrompt || requestPrompt,
+                undefined,
+                undefined,
+                userMsgId,
+                referenceScreens,
+                false
+            );
+        } catch (routeError) {
+            console.warn('[UI] route planner failed; using deterministic fallback', routeError);
+            await executeFallbackRoute();
+        }
     };
 
     const handleSubmit = () => {

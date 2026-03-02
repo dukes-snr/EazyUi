@@ -78,6 +78,30 @@ export interface ProjectDesignSystem {
     };
 }
 
+export interface ProjectMemory {
+    version: number;
+    updatedAt: string;
+    summary: {
+        screenCount: number;
+        screenNames: string[];
+        lastUserRequests: string[];
+    };
+    components?: {
+        navbar?: {
+            sourceScreenId: string;
+            sourceScreenName: string;
+            labels: string[];
+            signature: string;
+        };
+    };
+    style?: {
+        themeMode?: 'light' | 'dark' | 'mixed';
+        displayFont?: string;
+        bodyFont?: string;
+        tokenKeys?: string[];
+    };
+}
+
 export interface HtmlDesignSpec {
     id: string;
     name: string;
@@ -108,6 +132,17 @@ export interface EditRequest {
     screenId: string;
     images?: string[];
     preferredModel?: string;
+    projectDesignSystem?: ProjectDesignSystem;
+    consistencyProfile?: {
+        canonicalNavbarLabels?: string[];
+        canonicalNavbarSignature?: string;
+        rules?: string[];
+    };
+    referenceScreens?: Array<{
+        screenId: string;
+        name: string;
+        html: string;
+    }>;
 }
 
 export interface EditResponse {
@@ -263,6 +298,8 @@ export interface PlannerPostgenResponse {
 export interface PlannerRouteResponse {
     phase: 'route';
     intent: 'new_app' | 'add_screen' | 'edit_existing_screen' | 'chat_assist';
+    action?: 'edit' | 'generate' | 'assist';
+    confidence?: number;
     reason: string;
     appContextPrompt?: string;
     targetScreenName?: string;
@@ -284,6 +321,9 @@ export interface PlannerRequest {
     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     screenCountDesired?: number;
     screensGenerated?: Array<{ name: string; description?: string; htmlSummary?: string }>;
+    screenDetails?: Array<{ screenId?: string; name: string; htmlSummary?: string }>;
+    recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    projectMemorySummary?: string;
     referenceImages?: string[];
     preferredModel?: string;
 }
@@ -307,6 +347,7 @@ export interface ProjectResponse {
     designSpec: HtmlDesignSpec;
     canvasDoc: unknown;
     chatState: unknown;
+    projectMemory?: ProjectMemory;
     createdAt: string;
     updatedAt: string;
 }
