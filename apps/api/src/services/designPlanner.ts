@@ -198,6 +198,8 @@ Rules:
 - If user asks to match/design like another existing screen, set referenceExistingScreenName.
 - If user asks for a new screen inside existing app -> add_screen.
 - If user asks for a new app concept unrelated to existing screens -> new_app.
+- If user asks advisory questions like "what next screen should I have" or "what should I build next", route to chat_assist with recommendNextScreens=true.
+- Do NOT route advisory "what next" questions to add_screen unless user explicitly asks to generate/build/create now.
 - If intent=edit_existing_screen then action MUST be "edit".
 - If intent=add_screen or intent=new_app then action MUST be "generate".
 - If intent=chat_assist then action MUST be "assist".
@@ -349,6 +351,12 @@ function isNextScreenRequest(prompt: string): boolean {
     return /(what next|next screen|next screens|recommend.*screen|suggest.*screen|what should i build next|flow next)/i.test(text);
 }
 
+function isExplicitGenerationRequest(prompt: string): boolean {
+    const text = (prompt || '').toLowerCase();
+    return /(generate|create|build|make|add|design|produce)\b[\s\S]{0,80}\b(screen|screens|page|pages|flow|ui)/i.test(text)
+        || /^(generate|create|build|add)\b/i.test(text);
+}
+
 function previewForLog(value: unknown, max = 180): string {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
@@ -393,11 +401,26 @@ function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse):
     ]));
     const mentionedScreen = resolveMentionedScreenName(input.appPrompt, screenNames);
     const editLikePrompt = isLikelyEditPrompt(input.appPrompt);
+    const nextScreenAsk = isNextScreenRequest(input.appPrompt);
+    const explicitGenerate = isExplicitGenerationRequest(input.appPrompt);
     let next: PlannerRouteResponse = {
         ...route,
         confidence: clampConfidence(route.confidence, 0.62),
         action: route.action || defaultActionForIntent(route.intent),
     };
+
+    if (nextScreenAsk && !explicitGenerate) {
+        next = {
+            ...next,
+            intent: 'chat_assist',
+            action: 'assist',
+            confidence: Math.max(next.confidence || 0.62, 0.85),
+            reason: next.reason || 'next screen advisory request',
+            recommendNextScreens: true,
+            generateTheseNow: [],
+            editInstruction: undefined,
+        };
+    }
 
     if (editLikePrompt && mentionedScreen) {
         next = {
