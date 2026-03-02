@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
-import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory } from '../../api/client';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type BillingSummary } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
@@ -1400,6 +1400,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system'>('chat');
     const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
+    const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -1448,6 +1449,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         targetRef.current = null;
     };
 
+    const refreshBillingSummary = async () => {
+        try {
+            const response = await apiClient.getBillingSummary();
+            setBillingSummary(response.summary);
+        } catch {
+            // ignore when auth/session is not available
+        }
+    };
+
     const isNearBottom = () => {
         const el = messagesContainerRef.current;
         if (!el) return true;
@@ -1479,6 +1489,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             });
         }
     };
+
+    useEffect(() => {
+        void refreshBillingSummary();
+        const timer = window.setInterval(() => {
+            void refreshBillingSummary();
+        }, 45000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     const notifySuccess = (title: string, message: string) => {
         pushToast({ kind: 'success', title, message });
@@ -2308,6 +2326,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 images: attachedImages,
                 preferredModel: getPreferredTextModel(modelProfile),
                 projectDesignSystem: designSystem,
+                projectId: projectId || undefined,
                 consistencyProfile: {
                     canonicalNavbarLabels: localMemory?.components?.navbar?.labels || [],
                     canonicalNavbarSignature: localMemory?.components?.navbar?.signature || '',
@@ -2516,6 +2535,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         } finally {
             setGenerating(false);
             clearLoadingToast(generationLoadingToastRef);
+            void refreshBillingSummary();
         }
     };
 
@@ -2540,6 +2560,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         const hasPriorScreens = (spec?.screens?.length || 0) > 0;
         const hasPriorUserMessages = messages.some((message) => message.role === 'user');
         const shouldNameProjectOnFirstRequest = !hasPriorScreens && !hasPriorUserMessages && isGenericProjectName(spec?.name);
+        const shouldBundleDesignSystemWithFirstGeneration = !hasPriorScreens;
         const shouldPauseForDesignSystemApproval = !skipDesignSystemStep
             && !existingUserMessageId
             && !hasPriorScreens
@@ -2636,6 +2657,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                         platform: platformToUse,
                         images: imagesToSend,
                         preferredModel,
+                        bundleWithFirstGeneration: shouldBundleDesignSystemWithFirstGeneration,
+                        projectId: projectId || undefined,
                     });
                     activeProjectDesignSystem = designSystemResponse.designSystem;
                     applyProjectDesignSystem(activeProjectDesignSystem);
@@ -2823,6 +2846,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                     images: imagesToSend,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
+                    bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
+                    projectId: projectId || undefined,
                 }, controller.signal);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
@@ -2934,6 +2959,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 images: imagesToSend,
                 preferredModel,
                 projectDesignSystem: activeProjectDesignSystem,
+                bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
+                projectId: projectId || undefined,
             }, (chunk) => {
                 const events = parseStreamChunk(parserState, chunk);
                 for (const event of events) {
@@ -2976,6 +3003,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                             platform: platformToUse,
                             stylePreset: styleToUse,
                             projectDesignSystem: activeProjectDesignSystem,
+                            preferredModel,
+                            projectId: projectId || undefined,
                         }, controller.signal);
                             finalHtml = repaired.html;
                         } catch (repairError) {
@@ -2995,6 +3024,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                     images: imagesToSend,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
+                    bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
+                    projectId: projectId || undefined,
                 }, controller.signal);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
@@ -3247,6 +3278,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             setAbortController(null);
             setGenerating(false);
             clearLoadingToast(generationLoadingToastRef);
+            void refreshBillingSummary();
         }
     };
 
@@ -3336,6 +3368,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 images: editImages,
                 preferredModel: getPreferredTextModel(modelProfile),
                 projectDesignSystem: useDesignStore.getState().spec?.designSystem,
+                projectId: projectId || undefined,
                 consistencyProfile: {
                     canonicalNavbarLabels: localMemory?.components?.navbar?.labels || [],
                     canonicalNavbarSignature: localMemory?.components?.navbar?.signature || '',
@@ -3427,6 +3460,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             setAbortController(null);
             setGenerating(false);
             clearLoadingToast(editLoadingToastRef);
+            void refreshBillingSummary();
         }
     };
 
@@ -3837,6 +3871,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
+                            {billingSummary && (
+                                <div
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 ${billingSummary.lowCredits
+                                        ? 'bg-amber-500/15 text-amber-200 ring-amber-400/35'
+                                        : 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)]'
+                                        }`}
+                                    title={`${billingSummary.planLabel} plan`}
+                                >
+                                    <span>{billingSummary.balanceCredits}</span>
+                                    <span className="text-[10px] uppercase tracking-[0.08em] opacity-80">credits</span>
+                                </div>
+                            )}
                             <button
                                 type="button"
                                 onClick={() => setChatPanelView((current) => current === 'chat' ? 'design-system' : 'chat')}

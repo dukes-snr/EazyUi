@@ -119,11 +119,18 @@ export interface GenerateRequest {
     images?: string[]; // Base64 encoded images
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
+    bundleIncludesDesignSystem?: boolean;
+    projectId?: string;
 }
 
 export interface GenerateResponse {
     designSpec: HtmlDesignSpec;
     versionId: string;
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
 }
 
 export interface EditRequest {
@@ -133,6 +140,7 @@ export interface EditRequest {
     images?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
+    projectId?: string;
     consistencyProfile?: {
         canonicalNavbarLabels?: string[];
         canonicalNavbarSignature?: string;
@@ -149,18 +157,29 @@ export interface EditResponse {
     html: string;
     description?: string;
     versionId: string;
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
 }
 
 export interface GenerateImageRequest {
     prompt: string;
     instruction?: string;
     preferredModel?: string;
+    projectId?: string;
 }
 
 export interface GenerateImageResponse {
     src: string;
     modelUsed: string;
     description?: string;
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
 }
 
 export interface SynthesizeScreenImagesRequest {
@@ -169,6 +188,7 @@ export interface SynthesizeScreenImagesRequest {
     platform?: string;
     preferredModel?: string;
     maxImages?: number;
+    projectId?: string;
     screens: Array<{
         screenId?: string;
         name: string;
@@ -194,6 +214,11 @@ export interface SynthesizeScreenImagesResponse {
         reusedWithinRun: number;
         skipped: number;
     };
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
 }
 
 export interface CompleteScreenRequest {
@@ -203,6 +228,8 @@ export interface CompleteScreenRequest {
     platform?: string;
     stylePreset?: string;
     projectDesignSystem?: ProjectDesignSystem;
+    preferredModel?: string;
+    projectId?: string;
 }
 
 export interface GenerateDesignSystemRequest {
@@ -212,10 +239,17 @@ export interface GenerateDesignSystemRequest {
     images?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
+    bundleWithFirstGeneration?: boolean;
+    projectId?: string;
 }
 
 export interface GenerateDesignSystemResponse {
     designSystem: ProjectDesignSystem;
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
 }
 
 export interface TranscribeAudioRequest {
@@ -228,6 +262,82 @@ export interface TranscribeAudioRequest {
 export interface TranscribeAudioResponse {
     text: string;
     modelUsed: string;
+    billing?: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+    };
+}
+
+export interface BillingSummary {
+    uid: string;
+    planId: 'free' | 'pro' | 'team';
+    planLabel: string;
+    status: 'active' | 'past_due' | 'cancelled';
+    periodStartAt: string;
+    periodEndAt: string;
+    monthlyCreditsRemaining: number;
+    rolloverCredits: number;
+    topupCreditsRemaining: number;
+    balanceCredits: number;
+    lowCredits: boolean;
+    suggestedTopupCredits: number;
+}
+
+export interface BillingLedgerItem {
+    id: string;
+    type: 'grant' | 'reserve' | 'settle' | 'refund' | 'expire' | 'adjustment';
+    operation?: string;
+    creditsDelta: number;
+    balanceAfter: number;
+    requestId?: string;
+    reservationId?: string;
+    projectId?: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+}
+
+export interface BillingSummaryResponse {
+    summary: BillingSummary;
+    stripe?: {
+        configured: boolean;
+        publishableKeyPresent: boolean;
+    };
+}
+
+export interface BillingEstimateRequest {
+    operation: 'design_system' | 'generate' | 'generate_stream' | 'edit' | 'complete_screen' | 'generate_image' | 'synthesize_screen_images' | 'transcribe_audio' | 'plan_route' | 'plan_assist';
+    preferredModel?: string;
+    expectedScreenCount?: number;
+    expectedImageCount?: number;
+    expectedMinutes?: number;
+    bundleIncludesDesignSystem?: boolean;
+}
+
+export interface BillingEstimateResponse {
+    estimate: {
+        operation: string;
+        estimatedCredits: number;
+        modelProfile: 'fast' | 'quality' | 'premium';
+        breakdown: {
+            base: number;
+            variable: number;
+            multiplier: number;
+            bundleDesignSystem: number;
+        };
+    };
+    summary: BillingSummary;
+}
+
+export interface BillingCheckoutSessionRequest {
+    productKey: 'pro' | 'team' | 'topup_1000';
+    successUrl: string;
+    cancelUrl: string;
+}
+
+export interface BillingCheckoutSessionResponse {
+    id: string;
+    url: string | null;
 }
 
 export interface SaveRequest {
@@ -360,16 +470,28 @@ class ApiClient {
         return uid;
     }
 
+    private async getAuthHeaderValue(): Promise<string> {
+        const user = auth.currentUser;
+        if (!user) throw new Error('You must be logged in to continue.');
+        const token = await user.getIdToken();
+        return `Bearer ${token}`;
+    }
+
     private async request<T>(
         endpoint: string,
-        options: RequestInit = {}
+        options: RequestInit = {},
+        requireAuth = true
     ): Promise<T> {
+        const headers = new Headers(options.headers || {});
+        if (!headers.has('Content-Type')) {
+            headers.set('Content-Type', 'application/json');
+        }
+        if (requireAuth) {
+            headers.set('Authorization', await this.getAuthHeaderValue());
+        }
         const response = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
+            headers,
         });
 
         if (!response.ok) {
@@ -404,14 +526,21 @@ class ApiClient {
         onChunk: (chunk: string) => void,
         signal?: AbortSignal
     ): Promise<void> {
+        const authHeader = await this.getAuthHeaderValue();
         const response = await fetch(`${API_BASE}/generate-stream`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authHeader,
+            },
             body: JSON.stringify(request),
             signal,
         });
 
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+            throw new Error(error.message || `HTTP ${response.status}`);
+        }
         if (!response.body) throw new Error('No response body');
 
         const reader = response.body.getReader();
@@ -493,6 +622,48 @@ class ApiClient {
         return this.request<RenderScreenImageResponse>('/render-screen-image', {
             method: 'POST',
             body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async getBillingSummary(signal?: AbortSignal): Promise<BillingSummaryResponse> {
+        return this.request<BillingSummaryResponse>('/billing/summary', {
+            method: 'GET',
+            signal,
+        });
+    }
+
+    async getBillingLedger(limit = 50, signal?: AbortSignal): Promise<{ items: BillingLedgerItem[] }> {
+        const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+        return this.request<{ items: BillingLedgerItem[] }>(`/billing/ledger?limit=${safeLimit}`, {
+            method: 'GET',
+            signal,
+        });
+    }
+
+    async estimateBilling(request: BillingEstimateRequest, signal?: AbortSignal): Promise<BillingEstimateResponse> {
+        return this.request<BillingEstimateResponse>('/billing/estimate', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async createBillingCheckoutSession(
+        request: BillingCheckoutSessionRequest,
+        signal?: AbortSignal
+    ): Promise<BillingCheckoutSessionResponse> {
+        return this.request<BillingCheckoutSessionResponse>('/billing/checkout-session', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async createBillingPortalSession(returnUrl: string, signal?: AbortSignal): Promise<{ url: string }> {
+        return this.request<{ url: string }>('/billing/portal-session', {
+            method: 'POST',
+            body: JSON.stringify({ returnUrl }),
             signal,
         });
     }

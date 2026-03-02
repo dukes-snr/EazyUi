@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppWindow, Braces, Check, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
-import { apiClient } from '../../api/client';
+import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
@@ -46,6 +46,10 @@ export function CanvasProfileMenu() {
     const [transparentSidebar, setTransparentSidebar] = useState(true);
     const [sidebarFeature, setSidebarFeature] = useState<'recent' | 'favorites' | 'activity'>('recent');
     const [tableView, setTableView] = useState<'default' | 'compact'>('default');
+    const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+    const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
+    const [billingLoading, setBillingLoading] = useState(false);
+    const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
@@ -74,6 +78,65 @@ export function CanvasProfileMenu() {
         const unsub = observeAuthState((user) => setAuthUser(user));
         return () => unsub();
     }, []);
+
+    const refreshBillingData = async () => {
+        try {
+            setBillingLoading(true);
+            const [summaryRes, ledgerRes] = await Promise.all([
+                apiClient.getBillingSummary(),
+                apiClient.getBillingLedger(40),
+            ]);
+            setBillingSummary(summaryRes.summary);
+            setBillingLedger(ledgerRes.items || []);
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
+        } finally {
+            setBillingLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!openSettingsModal || settingsTab !== 'billing') return;
+        void refreshBillingData();
+    }, [openSettingsModal, settingsTab]);
+
+    const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
+        try {
+            setBillingActionBusy(productKey);
+            const successUrl = `${window.location.origin}/app/projects`;
+            const cancelUrl = window.location.href;
+            const session = await apiClient.createBillingCheckoutSession({
+                productKey,
+                successUrl,
+                cancelUrl,
+            });
+            if (session.url) {
+                window.location.href = session.url;
+                return;
+            }
+            pushToast({ kind: 'error', title: 'Checkout failed', message: 'Stripe checkout URL was not returned.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Checkout failed', message: (error as Error).message || 'Unable to open checkout.' });
+        } finally {
+            setBillingActionBusy(null);
+        }
+    };
+
+    const handleOpenBillingPortal = async () => {
+        try {
+            setBillingActionBusy('portal');
+            const response = await apiClient.createBillingPortalSession(window.location.href);
+            if (response.url) {
+                window.location.href = response.url;
+                return;
+            }
+            pushToast({ kind: 'error', title: 'Billing portal unavailable', message: 'Billing portal URL was not returned.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Billing portal failed', message: (error as Error).message || 'Unable to open billing portal.' });
+        } finally {
+            setBillingActionBusy(null);
+        }
+    };
 
     const withScreens = async (loadingTitle: string, action: () => Promise<void>) => {
         if (!spec || exportScreens.length === 0) {
@@ -331,7 +394,105 @@ export function CanvasProfileMenu() {
                                         <button type="button" onClick={() => void handleSaveNow()} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Save now</button>
                                     </div>
                                 )}
-                                {['team', 'billing', 'applications', 'api', 'security'].includes(settingsTab) && (
+                                {settingsTab === 'billing' && (
+                                    <div className="max-w-[920px] space-y-4">
+                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-xs uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Plan</p>
+                                                    <h3 className="mt-1 text-xl font-semibold text-[var(--ui-text)]">
+                                                        {billingSummary?.planLabel || 'Free'}
+                                                    </h3>
+                                                    <p className="mt-1 text-sm text-[var(--ui-text-subtle)]">
+                                                        {billingSummary ? `Cycle ends ${new Date(billingSummary.periodEndAt).toLocaleDateString()}` : 'Monthly credits with rollover on paid plans.'}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Credits</p>
+                                                    <p className={`mt-1 text-3xl font-semibold ${billingSummary?.lowCredits ? 'text-amber-300' : 'text-[var(--ui-text)]'}`}>
+                                                        {billingSummary?.balanceCredits ?? '--'}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-[var(--ui-text-subtle)]">
+                                                        Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'} / Rollover {billingSummary?.rolloverCredits ?? '--'} / Top-up {billingSummary?.topupCreditsRemaining ?? '--'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-4 flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleBillingCheckout('pro')}
+                                                    disabled={billingActionBusy !== null}
+                                                    className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
+                                                >
+                                                    {billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade to Pro'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleBillingCheckout('team')}
+                                                    disabled={billingActionBusy !== null}
+                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60"
+                                                >
+                                                    {billingActionBusy === 'team' ? 'Opening...' : 'Upgrade to Team'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleBillingCheckout('topup_1000')}
+                                                    disabled={billingActionBusy !== null}
+                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60"
+                                                >
+                                                    {billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy 1,000 Credits'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleOpenBillingPortal()}
+                                                    disabled={billingActionBusy !== null}
+                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                                >
+                                                    {billingActionBusy === 'portal' ? 'Opening...' : 'Manage Billing'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void refreshBillingData()}
+                                                    disabled={billingLoading}
+                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                                >
+                                                    {billingLoading ? 'Refreshing...' : 'Refresh'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
+                                            <h4 className="text-sm font-semibold text-[var(--ui-text)]">Credit activity</h4>
+                                            {billingLoading && billingLedger.length === 0 ? (
+                                                <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">Loading activity...</p>
+                                            ) : billingLedger.length === 0 ? (
+                                                <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">No billing activity yet.</p>
+                                            ) : (
+                                                <div className="mt-3 space-y-2">
+                                                    {billingLedger.slice(0, 20).map((item) => (
+                                                        <div key={item.id} className="flex items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] px-3 py-2">
+                                                            <div className="min-w-0">
+                                                                <p className="text-sm text-[var(--ui-text)]">
+                                                                    {(item.operation || item.type).replace(/_/g, ' ')}
+                                                                </p>
+                                                                <p className="text-[11px] text-[var(--ui-text-subtle)]">
+                                                                    {new Date(item.createdAt).toLocaleString()}
+                                                                </p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className={`text-sm font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                                                                    {item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}
+                                                                </p>
+                                                                <p className="text-[11px] text-[var(--ui-text-subtle)]">Balance {item.balanceAfter}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {['team', 'applications', 'api', 'security'].includes(settingsTab) && (
                                     <div className="max-w-[840px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-6 text-sm text-[var(--ui-text-subtle)]">This section is ready for expanded settings.</div>
                                 )}
                             </div>

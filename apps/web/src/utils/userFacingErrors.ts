@@ -93,6 +93,18 @@ function mapGeminiLikeError(message: string): UserFacingError {
         };
     }
 
+    if (contains(lower, /insufficient credits|need \d+ credits|credit/)) {
+        return {
+            title: 'Not enough credits',
+            summary: 'Your credit balance is too low for this action.',
+            actions: [
+                'Open Billing and buy a top-up or upgrade your plan.',
+                'Retry with a smaller request (fewer screens/images).',
+                'Try a faster model profile when possible.',
+            ],
+        };
+    }
+
     if (contains(lower, /\b500\b|internal/)) {
         return {
             title: 'Temporary model error',
@@ -164,4 +176,3 @@ export function toTaggedErrorMessage(error: unknown): string {
 [h3]What you can do[/h3]
 ${mapped.actions.map((item) => `[li]${item}[/li]`).join('\n')}`;
 }
-
