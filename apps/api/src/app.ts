@@ -1321,7 +1321,9 @@ fastify.post<{
                 confidence: plan.confidence,
                 reason: previewText(plan.reason),
                 matchedExistingScreenName: plan.matchedExistingScreenName,
+                matchedExistingScreenNames: plan.matchedExistingScreenNames,
                 targetScreenName: plan.targetScreenName,
+                targetScreenNames: plan.targetScreenNames,
                 generateTheseNow: plan.generateTheseNow,
                 hasAssistantResponse: Boolean(plan.assistantResponse?.trim()),
             }, 'plan: route decision');

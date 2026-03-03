@@ -627,31 +627,44 @@ function deriveProjectMemoryFromState(screens: HtmlScreen[], messages: Array<{ r
     };
 }
 
-function resolveRoutedScreen(route: PlannerRouteResponse, screens: HtmlScreen[], referencedScreens: HtmlScreen[] = []): HtmlScreen | null {
-    const matchCandidates = [
-        route.matchedExistingScreenName,
-        route.targetScreenName,
-        route.referenceExistingScreenName,
+function resolveRoutedScreens(route: PlannerRouteResponse, screens: HtmlScreen[], referencedScreens: HtmlScreen[] = []): HtmlScreen[] {
+    const byId = new Map(screens.map((screen) => [screen.screenId, screen] as const));
+    const ordered: HtmlScreen[] = [];
+    const seen = new Set<string>();
+    const push = (screen: HtmlScreen | null | undefined) => {
+        if (!screen || seen.has(screen.screenId)) return;
+        seen.add(screen.screenId);
+        ordered.push(screen);
+    };
+
+    const candidateNames = Array.from(new Set([
+        ...(route.matchedExistingScreenNames || []),
+        ...(route.targetScreenNames || []),
+        route.matchedExistingScreenName || '',
+        route.targetScreenName || '',
+        route.referenceExistingScreenName || '',
     ]
         .map((name) => String(name || '').trim().toLowerCase())
-        .filter(Boolean);
-    const byId = new Map(screens.map((screen) => [screen.screenId, screen] as const));
-
-    for (const referenced of referencedScreens) {
-        const existing = byId.get(referenced.screenId);
-        if (existing) return existing;
-    }
+        .filter(Boolean)));
 
     const all = screens.slice();
-    for (const candidate of matchCandidates) {
+    for (const candidate of candidateNames) {
         const exact = all.find((screen) => screen.name.trim().toLowerCase() === candidate);
-        if (exact) return exact;
+        if (exact) push(exact);
     }
-    for (const candidate of matchCandidates) {
+    for (const candidate of candidateNames) {
         const partial = all.find((screen) => screen.name.trim().toLowerCase().includes(candidate) || candidate.includes(screen.name.trim().toLowerCase()));
-        if (partial) return partial;
+        if (partial) push(partial);
     }
-    return null;
+
+    // Only use referenced screens as fallback when planner did not provide usable target names.
+    if (ordered.length === 0) {
+        for (const referenced of referencedScreens) {
+            push(byId.get(referenced.screenId));
+        }
+    }
+
+    return ordered;
 }
 
 function extractNavbarLabelsFromHtml(html: string): string[] {
@@ -3570,8 +3583,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             }
 
             if (route.intent === 'edit_existing_screen' || route.action === 'edit') {
-                const target = resolveRoutedScreen(route, useDesignStore.getState().spec?.screens || [], generationReferenceScreens);
-                if (!target) {
+                const allScreens = useDesignStore.getState().spec?.screens || [];
+                const targets = resolveRoutedScreens(route, allScreens, generationReferenceScreens);
+                if (targets.length === 0) {
                     const assistantMsgId = addMessage(
                         'assistant',
                         `[h2]Need target screen[/h2]\n[p]I interpreted this as an edit request, but I could not map it to an existing screen. Mention the exact screen name (for example: [b]Profile[/b]) or use @screen reference.</p>`
@@ -3587,13 +3601,36 @@ Return a polished, consistent screen without introducing a new navigation patter
                     setActiveBranchForUser(userMsgId, assistantMsgId);
                     return;
                 }
-                await handleEditForScreen(
-                    target,
-                    route.editInstruction || requestPrompt,
-                    attachedImages,
-                    userMsgId,
-                    generationReferenceScreens
-                );
+                if (targets.length > 1) {
+                    const names = targets.map((screen) => screen.name).join(', ');
+                    const prepMsgId = addMessage(
+                        'assistant',
+                        `[h2]Applying multi-screen edit[/h2]\n[p]Updating [b]${targets.length}[/b] screens: ${names}.</p>`
+                    );
+                    updateMessage(prepMsgId, {
+                        status: 'complete',
+                        meta: {
+                            ...(useChatStore.getState().messages.find((message) => message.id === prepMsgId)?.meta || {}),
+                            parentUserId: userMsgId,
+                            plannerRoute: route,
+                        },
+                    });
+                    setActiveBranchForUser(userMsgId, prepMsgId);
+                }
+                for (const target of targets) {
+                    const perTargetReferences = mergeReferenceScreens(
+                        generationReferenceScreens.filter((screen) => screen.screenId !== target.screenId),
+                        targets.filter((screen) => screen.screenId !== target.screenId),
+                        2
+                    );
+                    await handleEditForScreen(
+                        target,
+                        route.editInstruction || requestPrompt,
+                        attachedImages,
+                        userMsgId,
+                        perTargetReferences
+                    );
+                }
                 return;
             }
 

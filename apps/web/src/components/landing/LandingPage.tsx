@@ -4,6 +4,7 @@ import heroBg2 from '../../assets/img1.jpg';
 import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
+import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import TextType from '../ui/TextType';
 
@@ -48,59 +49,41 @@ type PatternCard = {
     image?: string;
 };
 
-const MOBBIN_SCREEN_IMAGES = [
-    'https://i.postimg.cc/WzNH44Vx/01-profile.png',
-    'https://i.postimg.cc/kGHvdMgc/03-cooking-mode-step-by-step.png',
-    'https://i.postimg.cc/nrFPLLZ8/03-pin-detail.png',
-    'https://i.postimg.cc/3NfnJCnZ/03-challenges.png',
-    'https://i.postimg.cc/L59bssSc/02-home-feed.png',
-    'https://i.postimg.cc/tJv2Ct25/01-dashboard.png',
-    'https://i.postimg.cc/bNF03pqn/Ui_(5).jpg',
-
-] as const;
-
-const PATTERN_SCREENS: PatternCard[] = [
+const PATTERN_SCREEN_TEMPLATES: Omit<PatternCard, 'image'>[] = [
     {
         title: 'Profile',
         prompt: 'Design a profile screen with avatar header, editable personal details, and clear settings/actions.',
         accent: 'from-sky-500/45 to-indigo-500/25',
-        image: MOBBIN_SCREEN_IMAGES[0],
     },
     {
         title: 'Cooking',
         prompt: 'Create a cooking mode step-by-step screen with recipe progress, ingredient guidance, and timer-friendly controls.',
         accent: 'from-fuchsia-500/40 to-slate-500/20',
-        image: MOBBIN_SCREEN_IMAGES[1],
     },
     {
         title: 'Image detail',
         prompt: 'Generate an image pin detail screen with large media preview, save/share actions, and related inspiration cards.',
         accent: 'from-amber-500/45 to-orange-500/25',
-        image: MOBBIN_SCREEN_IMAGES[2],
     },
     {
         title: 'Leaderboard',
         prompt: 'Build a challenges leaderboard screen with ranked participants, progress indicators, and reward highlights.',
         accent: 'from-violet-500/45 to-cyan-500/20',
-        image: MOBBIN_SCREEN_IMAGES[3],
     },
     {
         title: 'Feed',
         prompt: 'Design a home feed screen with content cards, discovery sections, and quick interactions for engagement.',
         accent: 'from-slate-600/50 to-zinc-500/20',
-        image: MOBBIN_SCREEN_IMAGES[4]
     },
     {
         title: 'Dashboard',
         prompt: 'Create a dashboard screen with KPI summary cards, recent activity, and concise performance trends.',
         accent: 'from-zinc-400/35 to-slate-500/20',
-        image: MOBBIN_SCREEN_IMAGES[5]
     },
     {
         title: 'Achievement',
         prompt: 'Generate an achievements screen with milestone badges, progress tracking, and unlocked reward states.',
         accent: 'from-emerald-500/35 to-cyan-500/20',
-        image: MOBBIN_SCREEN_IMAGES[6]
     },
 ];
 
@@ -339,7 +322,18 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         };
     }, [showStyleMenu]);
 
-    const patternCards = useMemo(() => PATTERN_SCREENS, []);
+    const patternCards = useMemo<PatternCard[]>(() => {
+        if (SHOWCASE_SCREEN_IMAGES.length === 0) {
+            return PATTERN_SCREEN_TEMPLATES.map((template) => ({ ...template }));
+        }
+        return SHOWCASE_SCREEN_IMAGES.map((image, index) => {
+            const template = PATTERN_SCREEN_TEMPLATES[index % PATTERN_SCREEN_TEMPLATES.length];
+            return {
+                ...template,
+                image,
+            };
+        });
+    }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
@@ -712,7 +706,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     className="w-[250px] md:w-[280px] shrink-0 rounded-2xl border border-white/10 bg-transparent p-2.5 text-left hover:border-white/20 transition-colors"
                                     title="Use this pattern in the prompt"
                                 >
-                                    <div className="mb-5 text-[13px] font-semibold text-gray-100 text-center">{item.title}</div>
                                     <div className={`relative w-full aspect-[9/19.5] rounded-xl border border-white/10 overflow-hidden ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[#0f131e]'}`}>
                                         {item.image && (
                                             <img src={item.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />

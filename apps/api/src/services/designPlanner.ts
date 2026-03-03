@@ -71,7 +71,9 @@ const PlannerRouteResponseSchema = z.object({
     reason: z.string().default(''),
     appContextPrompt: z.string().nullable().optional().transform((v) => v ?? undefined),
     targetScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
+    targetScreenNames: z.array(z.string()).nullable().optional().transform((v) => v ?? []),
     matchedExistingScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
+    matchedExistingScreenNames: z.array(z.string()).nullable().optional().transform((v) => v ?? []),
     referenceExistingScreenName: z.string().nullable().optional().transform((v) => v ?? undefined),
     generateTheseNow: z.array(z.string()).default([]),
     editInstruction: z.string().nullable().optional().transform((v) => v ?? undefined),
@@ -184,7 +186,9 @@ Output schema:
   "reason": "short reason",
   "appContextPrompt": "full app context prompt to keep style consistency",
   "targetScreenName": "Home",
+  "targetScreenNames": ["Home"],
   "matchedExistingScreenName": "Dashboard",
+  "matchedExistingScreenNames": ["Dashboard"],
   "referenceExistingScreenName": "Account",
   "generateTheseNow": ["Account"],
   "editInstruction": "regenerate with cleaner hierarchy",
@@ -196,12 +200,14 @@ Output schema:
 Rules:
 - Default to chat_assist unless user clearly asks to generate/add/edit screens.
 - If user asks to regenerate/update/rework an existing screen by name -> edit_existing_screen.
+- If user asks to edit multiple existing screens in one request, set matchedExistingScreenNames and targetScreenNames with ALL matched screens.
 - If user asks to match/design like another existing screen, set referenceExistingScreenName.
 - If user asks for a new screen inside existing app -> add_screen.
 - If user asks for a new app concept unrelated to existing screens -> new_app.
 - If user asks advisory questions like "what next screen should I have" or "what should I build next", route to chat_assist with recommendNextScreens=true.
 - Do NOT route advisory "what next" questions to add_screen unless user explicitly asks to generate/build/create now.
 - If intent=edit_existing_screen then action MUST be "edit".
+- For multi-screen edits, keep targetScreenName/matchedExistingScreenName as the first item and include the full list in targetScreenNames/matchedExistingScreenNames.
 - If intent=add_screen or intent=new_app then action MUST be "generate".
 - If intent=chat_assist then action MUST be "assist".
 - confidence must be between 0 and 1.
@@ -390,21 +396,34 @@ function defaultActionForIntent(intent: PlannerRouteResponse['intent']): 'edit' 
 
 function isLikelyEditPrompt(prompt: string): boolean {
     const text = (prompt || '').toLowerCase();
-    return /(edit|update|rework|revise|tweak|improve|refine|fix|adjust|change|make .* better|clean up|polish|regenerate)/i.test(text);
+    return /(edit|update|rework|revise|tweak|improve|refine|fix|adjust|change|make .* better|clean up|polish|regenerate|apply .* to|have .* new)/i.test(text);
 }
 
 function resolveMentionedScreenName(prompt: string, screenNames: string[]): string | undefined {
+    return resolveMentionedScreenNames(prompt, screenNames)[0];
+}
+
+function resolveMentionedScreenNames(prompt: string, screenNames: string[]): string[] {
     const text = (prompt || '').toLowerCase();
     const normalized = screenNames
         .map((name) => name.trim())
         .filter(Boolean)
         .sort((a, b) => b.length - a.length);
+    const matches: string[] = [];
+    const seen = new Set<string>();
     for (const name of normalized) {
         const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
-        if (pattern.test(text)) return name;
+        const strictPattern = new RegExp(`\\b${escaped}\\b`, 'i');
+        const relaxedPattern = new RegExp(`\\b${escaped}(?:\\s+screen)?\\b`, 'i');
+        if (strictPattern.test(text) || relaxedPattern.test(text)) {
+            const key = name.toLowerCase();
+            if (!seen.has(key)) {
+                seen.add(key);
+                matches.push(name);
+            }
+        }
     }
-    return undefined;
+    return matches;
 }
 
 function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse): PlannerRouteResponse {
@@ -412,15 +431,27 @@ function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse):
         ...(input.screenDetails || []).map((screen) => (screen.name || '').trim()).filter(Boolean),
         ...(input.screensGenerated || []).map((screen) => (screen.name || '').trim()).filter(Boolean),
     ]));
-    const mentionedScreen = resolveMentionedScreenName(input.appPrompt, screenNames);
+    const mentionedScreens = resolveMentionedScreenNames(input.appPrompt, screenNames);
+    const mentionedScreen = mentionedScreens[0];
     const editLikePrompt = isLikelyEditPrompt(input.appPrompt);
     const nextScreenAsk = isNextScreenRequest(input.appPrompt);
     const explicitGenerate = isExplicitGenerationRequest(input.appPrompt);
+    const sharedComponentEditAsk = /(navbar|nav bar|header|footer|button|buttons|component|components|theme|typography|spacing|color|layout|consistent|match|same style|same nav)/i.test(input.appPrompt);
     let next: PlannerRouteResponse = {
         ...route,
         confidence: clampConfidence(route.confidence, 0.62),
         action: route.action || defaultActionForIntent(route.intent),
     };
+    const normalizedTargetScreenNames = Array.from(new Set([
+        ...(next.targetScreenNames || []).map((name) => String(name || '').trim()).filter(Boolean),
+        ...(next.targetScreenName ? [String(next.targetScreenName).trim()] : []),
+    ]));
+    const normalizedMatchedScreenNames = Array.from(new Set([
+        ...(next.matchedExistingScreenNames || []).map((name) => String(name || '').trim()).filter(Boolean),
+        ...(next.matchedExistingScreenName ? [String(next.matchedExistingScreenName).trim()] : []),
+    ]));
+    next.targetScreenNames = normalizedTargetScreenNames;
+    next.matchedExistingScreenNames = normalizedMatchedScreenNames;
 
     if (nextScreenAsk && !explicitGenerate) {
         next = {
@@ -442,7 +473,33 @@ function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse):
             action: 'edit',
             confidence: Math.max(next.confidence || 0.62, 0.88),
             matchedExistingScreenName: next.matchedExistingScreenName || mentionedScreen,
+            matchedExistingScreenNames: next.matchedExistingScreenNames?.length
+                ? next.matchedExistingScreenNames
+                : mentionedScreens,
             targetScreenName: next.targetScreenName || mentionedScreen,
+            targetScreenNames: next.targetScreenNames?.length
+                ? next.targetScreenNames
+                : mentionedScreens,
+            editInstruction: next.editInstruction || input.appPrompt,
+            generateTheseNow: [],
+        };
+    }
+
+    if (mentionedScreens.length > 0 && sharedComponentEditAsk) {
+        next = {
+            ...next,
+            intent: 'edit_existing_screen',
+            action: 'edit',
+            confidence: Math.max(next.confidence || 0.62, 0.9),
+            reason: next.reason || 'multi-screen shared-component edit request',
+            matchedExistingScreenName: next.matchedExistingScreenName || mentionedScreens[0],
+            matchedExistingScreenNames: next.matchedExistingScreenNames?.length
+                ? next.matchedExistingScreenNames
+                : mentionedScreens,
+            targetScreenName: next.targetScreenName || mentionedScreens[0],
+            targetScreenNames: next.targetScreenNames?.length
+                ? next.targetScreenNames
+                : mentionedScreens,
             editInstruction: next.editInstruction || input.appPrompt,
             generateTheseNow: [],
         };
@@ -456,6 +513,31 @@ function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse):
         }
         if (!next.matchedExistingScreenName && mentionedScreen) {
             next.matchedExistingScreenName = mentionedScreen;
+        }
+        if (!next.matchedExistingScreenNames?.length && mentionedScreens.length > 0) {
+            next.matchedExistingScreenNames = mentionedScreens;
+        }
+        if (!next.targetScreenName && mentionedScreen) {
+            next.targetScreenName = mentionedScreen;
+        }
+        if (!next.targetScreenNames?.length) {
+            next.targetScreenNames = next.matchedExistingScreenNames?.length
+                ? [...next.matchedExistingScreenNames]
+                : mentionedScreens;
+        }
+        const combinedNames = Array.from(new Set([
+            ...(next.targetScreenNames || []),
+            ...(next.matchedExistingScreenNames || []),
+        ])).filter(Boolean);
+        next.targetScreenNames = combinedNames;
+        next.matchedExistingScreenNames = combinedNames.length > 0
+            ? combinedNames
+            : (next.matchedExistingScreenNames || []);
+        if (!next.targetScreenName && combinedNames.length > 0) {
+            next.targetScreenName = combinedNames[0];
+        }
+        if (!next.matchedExistingScreenName && combinedNames.length > 0) {
+            next.matchedExistingScreenName = combinedNames[0];
         }
     } else if (next.intent === 'chat_assist') {
         next.action = 'assist';
@@ -671,7 +753,9 @@ Return JSON only.`,
             confidence: routed.confidence,
             reason: previewForLog(routed.reason),
             matchedExistingScreenName: routed.matchedExistingScreenName || null,
+            matchedExistingScreenNames: routed.matchedExistingScreenNames || [],
             targetScreenName: routed.targetScreenName || null,
+            targetScreenNames: routed.targetScreenNames || [],
             generateTheseNow: routed.generateTheseNow || [],
             editInstructionPreview: previewForLog(routed.editInstruction),
         });

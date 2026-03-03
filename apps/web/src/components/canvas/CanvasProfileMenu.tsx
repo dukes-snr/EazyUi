@@ -29,6 +29,7 @@ import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZi
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
+type ExportAction = 'zip' | 'images' | 'code' | 'figma';
 
 const ACCOUNT_NAV: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
     { key: 'profile', label: 'Profile', icon: UserIcon },
@@ -77,6 +78,7 @@ export function CanvasProfileMenu() {
     const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
     const [billingLoading, setBillingLoading] = useState(false);
     const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
+    const [exportActionBusy, setExportActionBusy] = useState<ExportAction | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
@@ -170,6 +172,16 @@ export function CanvasProfileMenu() {
             pushToast({ kind: 'error', title: 'Export failed', message: (error as Error).message || 'An unexpected error occurred.' });
         } finally {
             removeToast(loadingToastId);
+        }
+    };
+
+    const runExportAction = async (actionKey: ExportAction, loadingTitle: string, action: () => Promise<void>) => {
+        if (exportActionBusy) return;
+        setExportActionBusy(actionKey);
+        try {
+            await withScreens(loadingTitle, action);
+        } finally {
+            setExportActionBusy(null);
         }
     };
 
@@ -285,6 +297,7 @@ export function CanvasProfileMenu() {
             return acc;
         }, {});
     const mostFrequentModel = Object.entries(modelHistogram).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const anyExportBusy = exportActionBusy !== null;
 
     return (
         <>
@@ -297,17 +310,71 @@ export function CanvasProfileMenu() {
                 </div>
 
                 <div className="relative">
-                    <button type="button" onClick={() => { setOpenExport((v) => !v); setOpenProfile(false); }} className="canvas-profile-trigger" title="Export options">
-                        <div className="canvas-profile-avatar"><Download size={16} /></div>
-                        <div className="canvas-profile-meta"><span className="canvas-profile-name">Export</span><span className="canvas-profile-role">{selectionLabel}</span></div>
+                    <button
+                        type="button"
+                        onClick={() => { setOpenExport((v) => !v); setOpenProfile(false); }}
+                        className="canvas-profile-trigger"
+                        title={anyExportBusy ? 'Export in progress...' : 'Export options'}
+                    >
+                        <div className="canvas-profile-avatar">
+                            {anyExportBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                        </div>
+                        <div className="canvas-profile-meta">
+                            <span className="canvas-profile-name">{anyExportBusy ? 'Exporting...' : 'Export'}</span>
+                            <span className="canvas-profile-role">{selectionLabel}</span>
+                        </div>
                         <ChevronDown size={14} className={`transition-transform ${openExport ? 'rotate-180' : ''}`} />
                     </button>
                     {openExport && (
                         <div className="canvas-profile-menu">
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => withScreens('Exporting ZIP', async () => { const { filename } = exportScreensAsZip(exportScreens, spec?.name || 'eazyui-design'); pushToast({ kind: 'success', title: 'ZIP exported', message: `${filename} (${selectionLabel})` }); })}><Download size={14} /><span>Export as ZIP</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => withScreens('Rendering images', async () => { const { filename } = await exportScreensAsImagesZip(exportScreens, spec?.name || 'eazyui-design'); pushToast({ kind: 'success', title: 'Images exported', message: `${filename} (${selectionLabel})` }); })}><Image size={14} /><span>Export as Images</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => withScreens('Copying code', async () => { await copyScreensCodeToClipboard(exportScreens); pushToast({ kind: 'success', title: 'Code copied', message: `Copied ${selectionLabel} to clipboard.` }); })}><Files size={14} /><span>Copy Code to Clipboard</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => withScreens('Preparing Figma export', async () => { await exportScreensToFigmaClipboard(exportScreens); pushToast({ kind: 'guide', title: 'Ready for Figma', message: 'Open Figma and press Ctrl+V to paste.', durationMs: 6000 }); })}><Settings size={14} /><span>Export to Figma</span></button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={anyExportBusy}
+                                onClick={() => runExportAction('zip', 'Exporting ZIP', async () => {
+                                    const { filename } = exportScreensAsZip(exportScreens, spec?.name || 'eazyui-design');
+                                    pushToast({ kind: 'success', title: 'ZIP exported', message: `${filename} (${selectionLabel})` });
+                                })}
+                            >
+                                {exportActionBusy === 'zip' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                                <span>{exportActionBusy === 'zip' ? 'Exporting ZIP...' : 'Export as ZIP'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={anyExportBusy}
+                                onClick={() => runExportAction('images', 'Rendering images', async () => {
+                                    const { filename } = await exportScreensAsImagesZip(exportScreens, spec?.name || 'eazyui-design');
+                                    pushToast({ kind: 'success', title: 'Images exported', message: `${filename} (${selectionLabel})` });
+                                })}
+                            >
+                                {exportActionBusy === 'images' ? <Loader2 size={14} className="animate-spin" /> : <Image size={14} />}
+                                <span>{exportActionBusy === 'images' ? 'Rendering images...' : 'Export as Images'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={anyExportBusy}
+                                onClick={() => runExportAction('code', 'Copying code', async () => {
+                                    await copyScreensCodeToClipboard(exportScreens);
+                                    pushToast({ kind: 'success', title: 'Code copied', message: `Copied ${selectionLabel} to clipboard.` });
+                                })}
+                            >
+                                {exportActionBusy === 'code' ? <Loader2 size={14} className="animate-spin" /> : <Files size={14} />}
+                                <span>{exportActionBusy === 'code' ? 'Copying code...' : 'Copy Code to Clipboard'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={anyExportBusy}
+                                onClick={() => runExportAction('figma', 'Preparing Figma export', async () => {
+                                    await exportScreensToFigmaClipboard(exportScreens);
+                                    pushToast({ kind: 'guide', title: 'Ready for Figma', message: 'Open Figma and press Ctrl+V to paste.', durationMs: 6000 });
+                                })}
+                            >
+                                {exportActionBusy === 'figma' ? <Loader2 size={14} className="animate-spin" /> : <Settings size={14} />}
+                                <span>{exportActionBusy === 'figma' ? 'Preparing Figma export...' : 'Export to Figma'}</span>
+                            </button>
                         </div>
                     )}
                 </div>

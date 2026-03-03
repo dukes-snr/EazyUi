@@ -4,33 +4,14 @@ import { useMemo, useState } from "react";
 import { Chrome, Eye, EyeOff, Loader2, Mail } from "lucide-react";
 import appLogo from "@/assets/Ui-logo.png";
 import heroBg from "@/assets/img1.jpg";
-import screenDash from "@/assets/screens-img/01-dashboard.png";
-import screenLogFood from "@/assets/screens-img/02-log-food.png";
-import screenRecipe from "@/assets/screens-img/03-recipe-detail.png";
-import screenStats from "@/assets/screens-img/04-statistics.png";
-import screenProfile from "@/assets/screens-img/05-profile-screen.png";
 import { sendPasswordReset, signInWithEmail, signInWithGooglePopup, signUpWithEmail } from "@/lib/auth";
+import { SHOWCASE_SCREEN_IMAGES } from "@/utils/showcaseImages";
 
 type LoginCardSectionProps = {
   onNavigate: (path: string) => void;
 };
 
 type AuthMode = "login" | "signup";
-
-const REEL_IMAGE_POOL = [
-  screenDash,
-  screenLogFood,
-  screenRecipe,
-  screenStats,
-  screenProfile,
-  "https://i.postimg.cc/tJv2Ct25/01-dashboard.png",
-  "https://i.postimg.cc/WzNH44Vx/01-profile.png",
-  "https://i.postimg.cc/L59bssSc/02-home-feed.png",
-  "https://i.postimg.cc/nrFPLLZ8/03-pin-detail.png",
-  "https://i.postimg.cc/kGHvdMgc/03-cooking-mode-step-by-step.png",
-  "https://i.postimg.cc/3NfnJCnZ/03-challenges.png",
-  "https://i.postimg.cc/bNF03pqn/Ui_(5).jpg",
-] as const;
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -42,6 +23,9 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 function createReelLanes(pool: readonly string[], laneCount = 6, laneLength = 5): string[][] {
+  if (pool.length === 0) {
+    return Array.from({ length: laneCount }, () => []);
+  }
   const lanes: string[][] = [];
   for (let laneIndex = 0; laneIndex < laneCount; laneIndex += 1) {
     const randomized = shuffle([...pool]);
@@ -75,7 +59,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const reelLanes = useMemo(() => createReelLanes(REEL_IMAGE_POOL, 6, 6), []);
+  const reelLanes = useMemo(() => createReelLanes(SHOWCASE_SCREEN_IMAGES, 6, 6), []);
 
   const canSubmit = useMemo(() => {
     if (!email.trim() || !password) return false;

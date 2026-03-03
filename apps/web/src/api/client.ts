@@ -413,7 +413,9 @@ export interface PlannerRouteResponse {
     reason: string;
     appContextPrompt?: string;
     targetScreenName?: string;
+    targetScreenNames?: string[];
     matchedExistingScreenName?: string;
+    matchedExistingScreenNames?: string[];
     referenceExistingScreenName?: string;
     generateTheseNow: string[];
     editInstruction?: string;
