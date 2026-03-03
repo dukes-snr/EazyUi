@@ -3314,17 +3314,54 @@ Return a polished, consistent screen without introducing a new navigation patter
         void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
     }, [initialRequest, messages.length, isGenerating]);
 
+    type EditExecutionOptions = {
+        assistantMessageId?: string;
+        suppressBranchActivation?: boolean;
+        suppressLoadingToast?: boolean;
+        suppressToasts?: boolean;
+        skipFinalMessageUpdate?: boolean;
+        skipUserMetaUpdate?: boolean;
+    };
+
+    type EditExecutionResult = {
+        screenId: string;
+        screenName: string;
+        ok: boolean;
+        description: string;
+        errorMessage?: string;
+        thinkingMs: number;
+    };
+
     const handleEditForScreen = async (
         targetScreen: HtmlScreen,
         instruction: string,
         attachedImages?: string[],
         existingUserMessageId?: string,
-        incomingReferenceScreens?: HtmlScreen[]
-    ) => {
-        if (!instruction.trim() || isGenerating) return;
+        incomingReferenceScreens?: HtmlScreen[],
+        options?: EditExecutionOptions
+    ): Promise<EditExecutionResult> => {
+        if (!instruction.trim() || isGenerating) {
+            return {
+                screenId: targetScreen.screenId,
+                screenName: targetScreen.name,
+                ok: false,
+                description: '',
+                errorMessage: 'Edit skipped.',
+                thinkingMs: 0,
+            };
+        }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            notifyError('No internet connection', 'Reconnect and try editing again.');
-            return;
+            if (!options?.suppressToasts) {
+                notifyError('No internet connection', 'Reconnect and try editing again.');
+            }
+            return {
+                screenId: targetScreen.screenId,
+                screenName: targetScreen.name,
+                ok: false,
+                description: '',
+                errorMessage: 'No internet connection.',
+                thinkingMs: 0,
+            };
         }
         void ensureNotificationPermission();
 
@@ -3336,23 +3373,27 @@ Return a polished, consistent screen without introducing a new navigation patter
 
         const editImages = Array.isArray(attachedImages) ? attachedImages : [];
         const userMsgId = existingUserMessageId || addMessage('user', instruction, editImages.length ? editImages : undefined, screenRef);
-        const assistantMsgId = addMessage('assistant', `Updating...`, undefined, screenRef);
+        const assistantMsgId = options?.assistantMessageId || addMessage('assistant', 'Updating...', undefined, screenRef);
         const referenceScreens = incomingReferenceScreens || [];
         const referenceMeta = buildScreenReferenceMeta([targetScreen, ...referenceScreens]);
-        updateMessage(userMsgId, {
-            meta: {
-                ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
-                requestKind: 'edit',
-                livePreview: false,
-                ...referenceMeta,
-            }
-        });
+        if (!options?.skipUserMetaUpdate) {
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
+                    requestKind: 'edit',
+                    livePreview: false,
+                    ...referenceMeta,
+                }
+            });
+        }
         const currentPrompt = instruction;
-        startLoadingToast(
-            editLoadingToastRef,
-            'Applying edit',
-            'Updating the selected screen...'
-        );
+        if (!options?.suppressLoadingToast) {
+            startLoadingToast(
+                editLoadingToastRef,
+                'Applying edit',
+                'Updating the selected screen...'
+            );
+        }
         setPrompt((prev) => (prev.trim() === instruction.trim() ? '' : prev));
         setGenerating(true);
         const startTime = Date.now();
@@ -3365,7 +3406,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 typedComplete: false,
             }
         });
-        setActiveBranchForUser(userMsgId, assistantMsgId);
+        if (!options?.suppressBranchActivation) {
+            setActiveBranchForUser(userMsgId, assistantMsgId);
+        }
 
         try {
             setFocusNodeId(targetScreen.screenId);
@@ -3409,7 +3452,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
-            if (planMode) {
+            if (planMode && !options?.skipFinalMessageUpdate) {
                 try {
                     const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, editImages);
                     const postgen = await apiClient.plan(withProjectPlannerContext({
@@ -3432,47 +3475,73 @@ Return a polished, consistent screen without introducing a new navigation patter
             const snapshotScreens = useDesignStore.getState().spec?.screens || [];
             const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
             const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
-            const content = `${response.description?.trim()
-                ? response.description
-                : `Updated ${targetScreen.name} based on your feedback.`}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
+            const baseDescription = response.description?.trim()
+                ? response.description.trim()
+                : `Updated ${targetScreen.name} based on your feedback.`;
+            const content = `${baseDescription}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
 
-            updateMessage(assistantMsgId, {
-                content,
-                status: 'complete',
-                meta: {
-                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
-                    thinkingMs: Date.now() - startTime,
-                    ...(planMode ? {
-                        plannerPrompt: currentPrompt,
-                        plannerPostgen: postgenData || undefined,
-                        plannerContext: {
-                            appPrompt: currentPrompt,
-                            platform: selectedPlatform,
-                            stylePreset,
-                            modelProfile,
-                            existingScreenNames: snapshotScreenNames,
-                            styleReference: snapshotStyleReference,
-                        } as PlannerSuggestionContext,
-                    } : {}),
-                }
-            });
-            notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`);
+            if (!options?.skipFinalMessageUpdate) {
+                updateMessage(assistantMsgId, {
+                    content,
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        ...(planMode ? {
+                            plannerPrompt: currentPrompt,
+                            plannerPostgen: postgenData || undefined,
+                            plannerContext: {
+                                appPrompt: currentPrompt,
+                                platform: selectedPlatform,
+                                stylePreset,
+                                modelProfile,
+                                existingScreenNames: snapshotScreenNames,
+                                styleReference: snapshotStyleReference,
+                            } as PlannerSuggestionContext,
+                        } : {}),
+                    }
+                });
+            }
+            if (!options?.suppressToasts) {
+                notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`);
+            }
+            return {
+                screenId: targetScreen.screenId,
+                screenName: targetScreen.name,
+                ok: true,
+                description: baseDescription,
+                thinkingMs: Date.now() - startTime,
+            };
         } catch (error) {
             const friendly = getUserFacingError(error);
             updateScreen(targetScreen.screenId, targetScreen.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
-            updateMessage(assistantMsgId, {
-                content: toTaggedErrorMessage(error),
-                status: 'error',
-                meta: {
-                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
-                    thinkingMs: Date.now() - startTime,
-                }
-            });
-            notifyError(friendly.title, friendly.summary);
+            if (!options?.skipFinalMessageUpdate) {
+                updateMessage(assistantMsgId, {
+                    content: toTaggedErrorMessage(error),
+                    status: 'error',
+                    meta: {
+                        ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                    }
+                });
+            }
+            if (!options?.suppressToasts) {
+                notifyError(friendly.title, friendly.summary);
+            }
+            return {
+                screenId: targetScreen.screenId,
+                screenName: targetScreen.name,
+                ok: false,
+                description: '',
+                errorMessage: friendly.summary || (error as Error)?.message || 'Unable to update this screen.',
+                thinkingMs: Date.now() - startTime,
+            };
         } finally {
             setAbortController(null);
             setGenerating(false);
-            clearLoadingToast(editLoadingToastRef);
+            if (!options?.suppressLoadingToast) {
+                clearLoadingToast(editLoadingToastRef);
+            }
             void refreshBillingSummary();
         }
     };
@@ -3603,19 +3672,117 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }
                 if (targets.length > 1) {
                     const names = targets.map((screen) => screen.name).join(', ');
-                    const prepMsgId = addMessage(
+                    const combinedReferenceMeta = buildScreenReferenceMeta([
+                        ...targets,
+                        ...generationReferenceScreens,
+                    ]);
+                    updateMessage(userMsgId, {
+                        meta: {
+                            ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                            requestKind: 'edit',
+                            ...combinedReferenceMeta,
+                        },
+                    });
+                    const assistantMsgId = addMessage(
                         'assistant',
                         `[h2]Applying multi-screen edit[/h2]\n[p]Updating [b]${targets.length}[/b] screens: ${names}.</p>`
                     );
-                    updateMessage(prepMsgId, {
-                        status: 'complete',
+                    const batchStart = Date.now();
+                    updateMessage(assistantMsgId, {
+                        status: 'streaming',
                         meta: {
-                            ...(useChatStore.getState().messages.find((message) => message.id === prepMsgId)?.meta || {}),
+                            ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
                             parentUserId: userMsgId,
                             plannerRoute: route,
+                            ...combinedReferenceMeta,
+                            feedbackStart: batchStart,
+                            typedComplete: false,
+                            livePreview: true,
                         },
                     });
-                    setActiveBranchForUser(userMsgId, prepMsgId);
+                    setActiveBranchForUser(userMsgId, assistantMsgId);
+
+                    const results: EditExecutionResult[] = [];
+                    startLoadingToast(
+                        editLoadingToastRef,
+                        'Applying multi-screen edit',
+                        `Updating ${targets.length} screens...`
+                    );
+                    try {
+                        for (const [index, target] of targets.entries()) {
+                            updateMessage(assistantMsgId, {
+                                content: `[h2]Applying multi-screen edit[/h2]\n[p]Updating [b]${index + 1}/${targets.length}[/b]: ${target.name}</p>`,
+                                status: 'streaming',
+                                meta: {
+                                    ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                                    progressLabel: `Updating ${target.name}`,
+                                },
+                            });
+                            const perTargetReferences = mergeReferenceScreens(
+                                generationReferenceScreens.filter((screen) => screen.screenId !== target.screenId),
+                                targets.filter((screen) => screen.screenId !== target.screenId),
+                                2
+                            );
+                            const result = await handleEditForScreen(
+                                target,
+                                route.editInstruction || requestPrompt,
+                                attachedImages,
+                                userMsgId,
+                                perTargetReferences,
+                                {
+                                    assistantMessageId: assistantMsgId,
+                                    suppressBranchActivation: true,
+                                    suppressLoadingToast: true,
+                                    suppressToasts: true,
+                                    skipFinalMessageUpdate: true,
+                                    skipUserMetaUpdate: true,
+                                }
+                            );
+                            results.push(result);
+                        }
+                    } finally {
+                        clearLoadingToast(editLoadingToastRef);
+                    }
+
+                    const succeeded = results.filter((item) => item.ok);
+                    const failed = results.filter((item) => !item.ok);
+                    const successLines = succeeded
+                        .map((item) => `[li][b]${item.screenName}[/b]: ${item.description || 'Updated successfully.'}[/li]`)
+                        .join('\n');
+                    const failureLines = failed
+                        .map((item) => `[li][b]${item.screenName}[/b]: ${item.errorMessage || 'Failed to update.'}[/li]`)
+                        .join('\n');
+                    const finalContent = [
+                        '[h2]Multi-screen edit complete[/h2]',
+                        `[p]Updated [b]${succeeded.length}[/b] of [b]${targets.length}[/b] screens in one pass.[/p]`,
+                        `[h3]Changes[/h3]\n${successLines || '[li]No screens were updated.[/li]'}`,
+                        failed.length > 0 ? `[h3]Needs attention[/h3]\n${failureLines}` : '',
+                    ].filter(Boolean).join('\n\n');
+
+                    updateMessage(assistantMsgId, {
+                        content: finalContent,
+                        status: failed.length === targets.length ? 'error' : 'complete',
+                        meta: {
+                            ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                            ...combinedReferenceMeta,
+                            thinkingMs: Date.now() - batchStart,
+                            typedComplete: true,
+                            livePreview: false,
+                        },
+                    });
+                    if (succeeded.length > 0) {
+                        notifySuccess(
+                            'Multi-screen edit complete',
+                            `Updated ${succeeded.length} screen${succeeded.length === 1 ? '' : 's'}.`
+                        );
+                    }
+                    if (failed.length > 0) {
+                        notifyError(
+                            'Some edits failed',
+                            `Could not update ${failed.length} screen${failed.length === 1 ? '' : 's'}.`
+                        );
+                    }
+                    return;
                 }
                 for (const target of targets) {
                     const perTargetReferences = mergeReferenceScreens(
