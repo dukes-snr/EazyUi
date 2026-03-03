@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Apple, ChevronLeft, ChevronRight, Chrome, Eye, EyeOff, Github, Loader2, Mail } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Chrome, Eye, EyeOff, Loader2, Mail } from "lucide-react";
 import appLogo from "@/assets/Ui-logo.png";
 import heroBg from "@/assets/img1.jpg";
+import screenDash from "@/assets/screens-img/01-dashboard.png";
+import screenLogFood from "@/assets/screens-img/02-log-food.png";
+import screenRecipe from "@/assets/screens-img/03-recipe-detail.png";
+import screenStats from "@/assets/screens-img/04-statistics.png";
+import screenProfile from "@/assets/screens-img/05-profile-screen.png";
 import { sendPasswordReset, signInWithEmail, signInWithGooglePopup, signUpWithEmail } from "@/lib/auth";
 
 type LoginCardSectionProps = {
@@ -12,29 +17,42 @@ type LoginCardSectionProps = {
 
 type AuthMode = "login" | "signup";
 
-type Slide = {
-  imageUrl: string;
-  title: string;
-  subtitle: string;
-};
+const REEL_IMAGE_POOL = [
+  screenDash,
+  screenLogFood,
+  screenRecipe,
+  screenStats,
+  screenProfile,
+  "https://i.postimg.cc/tJv2Ct25/01-dashboard.png",
+  "https://i.postimg.cc/WzNH44Vx/01-profile.png",
+  "https://i.postimg.cc/L59bssSc/02-home-feed.png",
+  "https://i.postimg.cc/nrFPLLZ8/03-pin-detail.png",
+  "https://i.postimg.cc/kGHvdMgc/03-cooking-mode-step-by-step.png",
+  "https://i.postimg.cc/3NfnJCnZ/03-challenges.png",
+  "https://i.postimg.cc/bNF03pqn/Ui_(5).jpg",
+] as const;
 
-const SLIDES: Slide[] = [
-  {
-    imageUrl: "https://i.postimg.cc/tJv2Ct25/01-dashboard.png",
-    title: "Built for teams",
-    subtitle: "Build, test, and ship polished interfaces together with less back-and-forth.",
-  },
-  {
-    imageUrl: "https://i.postimg.cc/WzNH44Vx/01-profile.png",
-    title: "Design with context",
-    subtitle: "Keep component language consistent across every screen in your project.",
-  },
-  {
-    imageUrl: "https://i.postimg.cc/L59bssSc/02-home-feed.png",
-    title: "From prompt to product",
-    subtitle: "Turn ideas into production-ready screens with structure, hierarchy, and speed.",
-  },
-];
+function shuffle<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function createReelLanes(pool: readonly string[], laneCount = 6, laneLength = 5): string[][] {
+  const lanes: string[][] = [];
+  for (let laneIndex = 0; laneIndex < laneCount; laneIndex += 1) {
+    const randomized = shuffle([...pool]);
+    const lane: string[] = [];
+    for (let itemIndex = 0; itemIndex < laneLength; itemIndex += 1) {
+      lane.push(randomized[(itemIndex + laneIndex) % randomized.length]);
+    }
+    lanes.push(lane);
+  }
+  return lanes;
+}
 
 function userMessage(error: unknown) {
   const code = (error as { code?: string })?.code || "";
@@ -57,30 +75,13 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [activeSlide, setActiveSlide] = useState(0);
-  const [pauseSlide, setPauseSlide] = useState(false);
+  const reelLanes = useMemo(() => createReelLanes(REEL_IMAGE_POOL, 6, 6), []);
 
   const canSubmit = useMemo(() => {
     if (!email.trim() || !password) return false;
     if (authMode === "signup" && !confirmPassword) return false;
     return true;
   }, [authMode, confirmPassword, email, password]);
-
-  useEffect(() => {
-    if (pauseSlide) return;
-    const timer = window.setInterval(() => {
-      setActiveSlide((prev) => (prev + 1) % SLIDES.length);
-    }, 4500);
-    return () => window.clearInterval(timer);
-  }, [pauseSlide]);
-
-  const goPrev = () => {
-    setActiveSlide((prev) => (prev - 1 + SLIDES.length) % SLIDES.length);
-  };
-
-  const goNext = () => {
-    setActiveSlide((prev) => (prev + 1) % SLIDES.length);
-  };
 
   const submit = async () => {
     setError(null);
@@ -144,6 +145,16 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
 
   return (
     <section className="fixed inset-0 overflow-hidden bg-[#07090d] text-white">
+      <style>{`
+        @keyframes auth-reel-up {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(-50%); }
+        }
+        @keyframes auth-reel-down {
+          0% { transform: translateY(-50%); }
+          100% { transform: translateY(0); }
+        }
+      `}</style>
       <div
         className="absolute inset-0"
         style={{
@@ -167,9 +178,9 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
               <img src={appLogo} alt="EazyUI symbol" className="mx-auto h-12 w-12 object-contain opacity-95" />
 
               <h1 className="mt-7 text-[42px] font-semibold leading-[1.04] tracking-[-0.03em] text-white">
-                Build Full-Stack
+                Design &amp; Refine
                 <br />
-                <span className="text-[#9de8af]">Web &amp; Mobile Apps in minutes</span>
+                <span className="text-[#9de8af]">AI-powered UI screens in minutes</span>
               </h1>
 
               <button
@@ -182,7 +193,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
                 Continue with Google
               </button>
 
-              <div className="mt-3 grid grid-cols-3 gap-2">
+              {/* <div className="mt-3 grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   disabled
@@ -207,7 +218,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
                 >
                   f
                 </button>
-              </div>
+              </div> */}
 
               <button
                 type="button"
@@ -310,11 +321,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
 
           <div className="relative hidden lg:block">
             <div className="grid h-full place-items-center">
-              <div
-                className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/15"
-                onMouseEnter={() => setPauseSlide(true)}
-                onMouseLeave={() => setPauseSlide(false)}
-              >
+              <div className="relative h-full w-full overflow-hidden rounded-[18px]">
                 <div
                   className="absolute inset-0"
                   style={{
@@ -326,66 +333,48 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
                 />
                 <div className="absolute inset-0 bg-[radial-gradient(75%_75%_at_16%_82%,rgba(255,255,255,0.45),rgba(53,204,226,0.5)_38%,rgba(39,97,196,0.88)_78%)]" />
 
-                <div className="absolute right-4 top-4 rounded-md bg-[#f2a25f] px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
+                <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-md bg-[#f2a25f] px-2.5 py-1 text-[11px] font-semibold text-white">
                   EazyUI Beta
                 </div>
 
-                <div className="relative z-10 flex h-full flex-col items-center justify-start px-8 pt-20 pb-8">
-                  <h2 className="text-[50px] font-semibold leading-none tracking-[-0.02em] text-white">
-                    Built for teams
-                  </h2>
-                  <p className="mt-4 max-w-[540px] text-center text-lg font-medium text-white/85">
-                    {SLIDES[activeSlide].subtitle}
-                  </p>
-
-                  <div className="mt-10 w-full max-w-[760px] overflow-hidden rounded-2xl border border-black/40 bg-[#05070d]/80 shadow-[0_22px_45px_rgba(0,0,0,0.45)]">
-                    <div className="flex items-center gap-2 border-b border-white/15 bg-black/70 px-3 py-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-400/90" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-amber-300/90" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-300/90" />
-                      <span className="ml-3 text-[11px] uppercase tracking-[0.08em] text-white/65">{SLIDES[activeSlide].title}</span>
+                <div className="relative z-10 grid h-full place-items-center">
+                  <div className="relative h-full w-full overflow-hidden">
+                    <div className="absolute inset-0 scale-[1.22] -rotate-[12deg]">
+                      <div className="flex h-full items-start justify-center gap-2">
+                        {reelLanes.map((lane, laneIndex) => {
+                          const isEvenLane = laneIndex % 2 === 0;
+                          const durationSec = 32 + laneIndex * 4.5;
+                          const repeated = [...lane, ...lane];
+                          return (
+                            <div key={`lane-${laneIndex}`} className="h-[138%] w-[186px] flex-none overflow-hidden">
+                              <div
+                                className="flex flex-col gap-2"
+                                style={{
+                                  animationName: isEvenLane ? "auth-reel-up" : "auth-reel-down",
+                                  animationDuration: `${durationSec}s`,
+                                  animationTimingFunction: "linear",
+                                  animationIterationCount: "infinite",
+                                }}
+                              >
+                                {repeated.map((imageUrl, idx) => (
+                                  <div
+                                    key={`${laneIndex}-${idx}-${imageUrl}`}
+                                    className="relative w-full overflow-hidden rounded-[18px] bg-[#0a1322]"
+                                  >
+                                    <img
+                                      src={imageUrl}
+                                      alt={`EazyUI mobile showcase ${idx + 1}`}
+                                      className="h-full w-full object-cover"
+                                      loading="lazy"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="relative h-[460px] overflow-hidden bg-black/40">
-                      {SLIDES.map((slide, index) => (
-                        <img
-                          key={slide.imageUrl}
-                          src={slide.imageUrl}
-                          alt={slide.title}
-                          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${index === activeSlide ? "opacity-100" : "opacity-0"}`}
-                          loading={index === 0 ? "eager" : "lazy"}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={goPrev}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/35 text-[#11396f] hover:bg-white/55"
-                      aria-label="Previous slide"
-                    >
-                      <ChevronLeft size={17} />
-                    </button>
-                    <div className="flex items-center gap-1.5">
-                      {SLIDES.map((_, idx) => (
-                        <button
-                          key={`indicator-${idx}`}
-                          type="button"
-                          onClick={() => setActiveSlide(idx)}
-                          className={`h-1.5 rounded-full transition-all ${idx === activeSlide ? "w-10 bg-white" : "w-2.5 bg-white/45 hover:bg-white/70"}`}
-                          aria-label={`Go to slide ${idx + 1}`}
-                        />
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={goNext}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/35 text-[#11396f] hover:bg-white/55"
-                      aria-label="Next slide"
-                    >
-                      <ChevronRight size={17} />
-                    </button>
                   </div>
                 </div>
               </div>
