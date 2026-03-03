@@ -14,6 +14,19 @@
         var(--color-bg);
 }
 
+.app-layout.project-settings-active {
+    position: relative;
+}
+
+.project-settings-overlay {
+    position: absolute;
+    inset: 16px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--ui-surface-1);
+    z-index: 60;
+}
+
 .app-canvas-shell {
     flex: 1;
     min-width: 0;

@@ -13,3 +13,4 @@ Thumbs.db
 data/
 .vscode/
 .idea/
+*firebase-adminsdk*.json

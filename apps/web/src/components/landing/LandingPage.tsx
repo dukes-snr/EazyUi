@@ -171,12 +171,14 @@ const MARKETING_NAV_LINKS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
     { label: 'Learn', path: '/learn' },
+    { label: 'Changelog', path: '/changelog' },
 ] as const;
 const FOOTER_PRIMARY_LINKS = [
     { label: 'Home', path: '/' },
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
     { label: 'Learn', path: '/learn' },
+    { label: 'Changelog', path: '/changelog' },
     { label: 'Open App', path: '/app' },
 ] as const;
 const FOOTER_POLICIES = [

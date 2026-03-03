@@ -14,7 +14,7 @@ STRIPE_PRICE_PRO_MONTHLY=price_xxx
 STRIPE_PRICE_TEAM_MONTHLY=price_xxx
 STRIPE_PRICE_TOPUP_1000=price_xxx
 
-# choose one Firebase Admin credential method:
+# choose one Firebase Admin env method (no repo file path required):
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 # or
 FIREBASE_SERVICE_ACCOUNT_BASE64=eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwiLi4u
@@ -24,15 +24,25 @@ FIREBASE_SERVICE_ACCOUNT_BASE64=eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwiLi4u
 
 Your API verifies Firebase ID tokens using `firebase-admin`.
 
-## Option A: Service account JSON (recommended)
+## Option A: Inline service account JSON (env only)
 
 1. Open Firebase Console.
 2. Go to `Project settings` -> `Service accounts`.
 3. Click `Generate new private key`.
 4. Download the JSON file.
-5. Set either:
-   - `FIREBASE_SERVICE_ACCOUNT_JSON` = full JSON object as a single-line string
-   - or base64 encode file and set `FIREBASE_SERVICE_ACCOUNT_BASE64`.
+5. Open the JSON file and copy all content into `FIREBASE_SERVICE_ACCOUNT_JSON` (single line in `.env`).
+
+```env
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+## Option B: Base64 service account (env only)
+
+1. Open Firebase Console.
+2. Go to `Project settings` -> `Service accounts`.
+3. Click `Generate new private key`.
+4. Download the JSON file.
+5. Base64 encode the file and set `FIREBASE_SERVICE_ACCOUNT_BASE64`.
 
 PowerShell base64 helper:
 
@@ -40,9 +50,13 @@ PowerShell base64 helper:
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\service-account.json"))
 ```
 
-Use output as `FIREBASE_SERVICE_ACCOUNT_BASE64`.
+Use output as:
 
-## Option B: Application default credentials
+```env
+FIREBASE_SERVICE_ACCOUNT_BASE64=eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwiLi4u
+```
+
+## Option C: Application default credentials
 
 If running on a cloud runtime with ADC configured, you can omit both env vars and rely on `applicationDefault()`.
 

@@ -17,7 +17,7 @@
         "@google/generative-ai": "^0.21.0",
         "firebase-admin": "^12.7.0",
         "fastify": "^4.25.2",
-        "fastify-raw-body": "^5.0.0",
+        "fastify-raw-body": "^4.3.0",
         "@fastify/cors": "^8.5.0",
         "better-sqlite3": "^9.4.3",
         "stripe": "^16.9.0",

@@ -9,6 +9,7 @@ const NAV_ITEMS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
     { label: 'Learn', path: '/learn' },
+    { label: 'Changelog', path: '/changelog' },
 ] as const;
 
 export function MarketingHeader({ onNavigate, onOpenApp }: MarketingHeaderProps) {

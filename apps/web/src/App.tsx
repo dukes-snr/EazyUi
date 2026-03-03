@@ -14,6 +14,8 @@ import { LearnPage } from './components/marketing/LearnPage';
 import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
+import { ChangelogPage } from './components/marketing/ChangelogPage';
+import { ProjectSettingsPage } from './components/settings/ProjectSettingsPage';
 import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { ToastViewport } from './components/ui/ToastViewport';
 import DemoOne from './components/ui/demo';
@@ -36,9 +38,11 @@ type RouteInfo =
     | { kind: 'templates' }
     | { kind: 'learn' }
     | { kind: 'pricing' }
+    | { kind: 'changelog' }
     | { kind: 'app-home' }
     | { kind: 'app-projects' }
     | { kind: 'app-project-new' }
+    | { kind: 'app-project-settings'; projectId: string; tab?: string }
     | { kind: 'app-project-canvas'; projectId: string; screenId?: string };
 
 function resolveUserPhotoUrl(user: User | null): string | null {
@@ -91,6 +95,7 @@ function getRouteFromPath(): RouteInfo {
     if (path === '/templates') return { kind: 'templates' };
     if (path === '/learn') return { kind: 'learn' };
     if (path === '/pricing') return { kind: 'pricing' };
+    if (path === '/changelog') return { kind: 'changelog' };
 
     if (path === '/workspace') return { kind: 'app-home' }; // legacy route support
     if (path === '/app') return { kind: 'app-home' };
@@ -99,6 +104,10 @@ function getRouteFromPath(): RouteInfo {
 
     if (segments[0] === 'app' && segments[1] === 'projects' && segments[2]) {
         const projectId = decodeURIComponent(segments[2]);
+        if (segments[3] === 'settings') {
+            const tab = new URLSearchParams(window.location.search).get('tab') || undefined;
+            return { kind: 'app-project-settings', projectId, tab };
+        }
         if (segments[3] === 'canvas') {
             const screenId = segments[4] ? decodeURIComponent(segments[4]) : undefined;
             return { kind: 'app-project-canvas', projectId, screenId };
@@ -150,8 +159,8 @@ function App() {
         modelProfile?: DesignModelProfile;
     } | null>(null);
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
-    const isCanvasRoute = route.kind === 'app-project-canvas';
-    const activeProjectIdFromRoute = route.kind === 'app-project-canvas'
+    const isCanvasRoute = route.kind === 'app-project-canvas' || route.kind === 'app-project-settings';
+    const activeProjectIdFromRoute = route.kind === 'app-project-canvas' || route.kind === 'app-project-settings'
         ? route.projectId
         : null;
     const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
@@ -579,11 +588,14 @@ function App() {
         if (route.kind === 'pricing') {
             return <PricingPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
+        if (route.kind === 'changelog') {
+            return <ChangelogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        }
         return <LearnPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
     }
 
     return (
-        <div className={`app-layout ${isEditMode ? 'edit-mode' : ''}`}>
+        <div className={`app-layout ${isEditMode ? 'edit-mode' : ''} ${route.kind === 'app-project-settings' ? 'project-settings-active' : ''}`}>
             <ChatPanel initialRequest={initialRequest} />
             <div className="app-canvas-shell">
                 <LayersPanel />
@@ -591,6 +603,15 @@ function App() {
                 <EditPanel />
                 {showInspector && <InspectorPanel />}
             </div>
+            {route.kind === 'app-project-settings' && (
+                <div className="project-settings-overlay">
+                    <ProjectSettingsPage
+                        projectId={route.projectId}
+                        initialTab={route.tab}
+                        onNavigate={(path) => navigate(path)}
+                    />
+                </div>
+            )}
             <ConfirmationDialog />
             <ToastViewport />
         </div>

@@ -418,6 +418,27 @@ fastify.post<{
             });
         }
 
+        const price = await stripe.prices.retrieve(planPriceId);
+        if (!price || !price.active) {
+            return reply.status(400).send({
+                error: 'Invalid Stripe price',
+                message: `Price ${planPriceId} is missing or inactive.`,
+            });
+        }
+        const inferredMode: 'payment' | 'subscription' = price.type === 'recurring' ? 'subscription' : 'payment';
+        if (productKey === 'topup_1000' && inferredMode !== 'payment') {
+            return reply.status(400).send({
+                error: 'Top-up price misconfigured',
+                message: `Top-up price ${planPriceId} must be one-time (Stripe price.type=one_time).`,
+            });
+        }
+        if ((productKey === 'pro' || productKey === 'team') && inferredMode !== 'subscription') {
+            return reply.status(400).send({
+                error: 'Plan price misconfigured',
+                message: `Plan price ${planPriceId} must be recurring (Stripe price.type=recurring).`,
+            });
+        }
+
         let customerId = getStripeCustomerId(user.uid);
         if (!customerId) {
             const customer = await stripe.customers.create({
@@ -428,7 +449,7 @@ fastify.post<{
             attachStripeCustomer(user.uid, customerId);
         }
 
-        const mode = productKey === 'topup_1000' ? 'payment' : 'subscription';
+        const mode = inferredMode;
         const session = await createStripeCheckoutSession({
             customerId,
             mode,

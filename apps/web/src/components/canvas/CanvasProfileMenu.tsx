@@ -1,22 +1,43 @@
-import { useEffect, useRef, useState } from 'react';
-import { AppWindow, Braces, Check, ChevronDown, CreditCard, Download, Files, FolderOpen, Image, Loader2, LogOut, Mail, Moon, Palette, Save, Search, Settings, Shield, Sun, User as UserIcon, UserCircle2, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+    AlertTriangle,
+    BarChart3,
+    ChevronDown,
+    CreditCard,
+    Download,
+    Files,
+    FolderOpen,
+    Image,
+    Link2,
+    Loader2,
+    LogOut,
+    Mail,
+    Moon,
+    Save,
+    Settings,
+    Sun,
+    User as UserIcon,
+    UserCircle2,
+    X,
+    Zap,
+    type LucideIcon,
+} from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
-type SettingsTab = 'profile' | 'appearance' | 'workspace' | 'team' | 'billing' | 'applications' | 'api' | 'security';
+type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
 
-const NAV_ITEMS: Array<{ key: SettingsTab; label: string; icon: any }> = [
+const ACCOUNT_NAV: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
     { key: 'profile', label: 'Profile', icon: UserIcon },
-    { key: 'appearance', label: 'Appearance', icon: Palette },
-    { key: 'workspace', label: 'Workspace', icon: FolderOpen },
-    { key: 'team', label: 'Team', icon: Users },
-    { key: 'billing', label: 'Billing', icon: CreditCard },
-    { key: 'applications', label: 'Applications', icon: AppWindow },
-    { key: 'api', label: 'API', icon: Braces },
-    { key: 'security', label: 'Security', icon: Shield },
+    { key: 'settings', label: 'Settings', icon: Settings },
+];
+
+const SUBSCRIPTION_NAV: Array<{ key: SettingsTab; label: string; icon: LucideIcon }> = [
+    { key: 'billing', label: 'Plan & Billing', icon: CreditCard },
+    { key: 'usage', label: 'Usage', icon: BarChart3 },
 ];
 
 function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
@@ -28,8 +49,16 @@ function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
 }
 
+function heatClass(level: number): string {
+    if (level <= 0) return 'bg-[#2a2d36]';
+    if (level === 1) return 'bg-emerald-700/70';
+    if (level === 2) return 'bg-emerald-500/75';
+    if (level === 3) return 'bg-emerald-400/90';
+    return 'bg-emerald-300';
+}
+
 export function CanvasProfileMenu() {
-    const { theme, setTheme, pushToast, removeToast, showInspector, requestConfirmation } = useUiStore();
+    const { theme, setTheme, pushToast, removeToast, requestConfirmation } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
     const { doc, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
@@ -43,9 +72,7 @@ export function CanvasProfileMenu() {
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('profile');
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
-    const [transparentSidebar, setTransparentSidebar] = useState(true);
-    const [sidebarFeature, setSidebarFeature] = useState<'recent' | 'favorites' | 'activity'>('recent');
-    const [tableView, setTableView] = useState<'default' | 'compact'>('default');
+    const [onDemandUsage, setOnDemandUsage] = useState(false);
     const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
     const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
     const [billingLoading, setBillingLoading] = useState(false);
@@ -82,10 +109,7 @@ export function CanvasProfileMenu() {
     const refreshBillingData = async () => {
         try {
             setBillingLoading(true);
-            const [summaryRes, ledgerRes] = await Promise.all([
-                apiClient.getBillingSummary(),
-                apiClient.getBillingLedger(40),
-            ]);
+            const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(40)]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
         } catch (error) {
@@ -96,20 +120,15 @@ export function CanvasProfileMenu() {
     };
 
     useEffect(() => {
-        if (!openSettingsModal || settingsTab !== 'billing') return;
+        if (!openSettingsModal) return;
         void refreshBillingData();
-    }, [openSettingsModal, settingsTab]);
+    }, [openSettingsModal]);
 
     const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
         try {
             setBillingActionBusy(productKey);
-            const successUrl = `${window.location.origin}/app/projects`;
-            const cancelUrl = window.location.href;
-            const session = await apiClient.createBillingCheckoutSession({
-                productKey,
-                successUrl,
-                cancelUrl,
-            });
+            const returnUrl = window.location.href;
+            const session = await apiClient.createBillingCheckoutSession({ productKey, successUrl: returnUrl, cancelUrl: returnUrl });
             if (session.url) {
                 window.location.href = session.url;
                 return;
@@ -144,19 +163,19 @@ export function CanvasProfileMenu() {
             return;
         }
         const loadingToastId = pushToast({ kind: 'loading', title: loadingTitle, message: `Processing ${selectionLabel}...`, durationMs: 0 });
-        try { await action(); setOpenExport(false); } catch (error) {
+        try {
+            await action();
+            setOpenExport(false);
+        } catch (error) {
             pushToast({ kind: 'error', title: 'Export failed', message: (error as Error).message || 'An unexpected error occurred.' });
-        } finally { removeToast(loadingToastId); }
+        } finally {
+            removeToast(loadingToastId);
+        }
     };
 
     const handleSaveNow = async () => {
         if (!spec || isSaving) return;
-        const savingToastId = pushToast({
-            kind: 'loading',
-            title: 'Saving canvas',
-            message: 'Persisting screens, chat, and canvas state...',
-            durationMs: 0,
-        });
+        const savingToastId = pushToast({ kind: 'loading', title: 'Saving canvas', message: 'Persisting screens, chat, and canvas state...', durationMs: 0 });
         try {
             setSaving(true);
             const saved = await apiClient.save({ projectId: projectId || undefined, designSpec: spec as any, canvasDoc: doc, chatState: { messages } });
@@ -179,7 +198,12 @@ export function CanvasProfileMenu() {
             tone: 'danger',
         });
         if (!proceed) return;
-        resetDesign(); resetCanvas(); exitEdit(); clearMessages(); clearHistory(); resetProjectState();
+        resetDesign();
+        resetCanvas();
+        exitEdit();
+        clearMessages();
+        clearHistory();
+        resetProjectState();
         setOpenSettingsModal(false);
         window.history.pushState({}, '', '/app/projects/new');
         window.dispatchEvent(new PopStateEvent('popstate'));
@@ -213,20 +237,60 @@ export function CanvasProfileMenu() {
         setOpenProfile(false);
         setOpenExport(false);
         setSettingsTab(tab);
-        setOpenSettingsModal(true);
+        const routedProjectId = projectId || window.location.pathname.split('/')[3] || 'new';
+        const query = tab === 'profile' ? '' : `?tab=${encodeURIComponent(tab)}`;
+        window.history.pushState({}, '', `/app/projects/${encodeURIComponent(routedProjectId)}/settings${query}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
     };
+
+    const tabMeta: Record<SettingsTab, { title: string; subtitle: string }> = {
+        profile: { title: `Hello! ${authDisplayName}`, subtitle: 'This is your profile and activity overview.' },
+        settings: { title: 'Settings', subtitle: 'Manage account preferences and integrations.' },
+        billing: { title: 'Plan & Billing', subtitle: 'View your subscription, credits, and payment options.' },
+        usage: { title: 'Usage', subtitle: 'Track credit consumption and recent billing events.' },
+    };
+
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
+    const currentMonthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
+    const consumedThisCycle = Math.max(0, planCreditCap - currentMonthlyCredits);
+    const cycleUsagePct = Math.max(0, Math.min(100, Math.round((consumedThisCycle / Math.max(planCreditCap, 1)) * 100)));
+    const billingPeriodEnd = billingSummary ? new Date(billingSummary.periodEndAt) : null;
+    const daysUntilReset = billingPeriodEnd ? Math.max(0, Math.ceil((billingPeriodEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null;
+
+    const ledgerByDay = billingLedger.reduce<Map<string, number>>((acc, item) => {
+        const key = new Date(item.createdAt).toISOString().slice(0, 10);
+        acc.set(key, (acc.get(key) || 0) + 1);
+        return acc;
+    }, new Map<string, number>());
+    const activityCells = Array.from({ length: 140 }, (_, index) => {
+        const date = new Date(Date.now() - (139 - index) * 24 * 60 * 60 * 1000);
+        const key = date.toISOString().slice(0, 10);
+        const count = ledgerByDay.get(key) || 0;
+        const level = count >= 4 ? 4 : count >= 3 ? 3 : count >= 2 ? 2 : count >= 1 ? 1 : 0;
+        return { key, level };
+    });
+    const monthHeaders = useMemo(() => Array.from({ length: 12 }, (_, idx) => {
+        const date = new Date();
+        date.setMonth(date.getMonth() - (11 - idx));
+        return date.toLocaleDateString(undefined, { month: 'short' });
+    }), []);
+    const usageEvents = billingLedger.slice(0, 20);
+    const aiCodeAccepted = billingLedger.filter((item) => (item.operation || '').includes('generate') || (item.operation || '').includes('edit')).length;
+    const chatCount = billingLedger.filter((item) => (item.operation || '').includes('plan') || (item.operation || '').includes('generate')).length;
+    const modelHistogram = usageEvents
+        .map((item) => typeof item.metadata?.model === 'string' ? item.metadata.model : null)
+        .filter((value): value is string => Boolean(value))
+        .reduce<Record<string, number>>((acc, model) => {
+            acc[model] = (acc[model] || 0) + 1;
+            return acc;
+        }, {});
+    const mostFrequentModel = Object.entries(modelHistogram).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
     return (
         <>
             <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
                 <div className="canvas-profile-trigger-2 px-2.5 gap-2">
-                    <button
-                        type="button"
-                        onClick={() => void handleSaveNow()}
-                        disabled={isSaving}
-                        className="canvas-profile-avatar"
-                        title={isSaving ? 'Saving project...' : 'Save project'}
-                    >
+                    <button type="button" onClick={() => void handleSaveNow()} disabled={isSaving} className="canvas-profile-avatar" title={isSaving ? 'Saving project...' : 'Save project'}>
                         {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     </button>
                     <span className={`text-[11px] font-medium ${!dirty && !isSaving && !!lastSavedAt ? 'text-emerald-300' : 'text-[var(--ui-text-subtle)]'}`}>{projectStatus}</span>
@@ -256,244 +320,153 @@ export function CanvasProfileMenu() {
                         <div className="canvas-profile-menu">
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><UserIcon size={14} /><span>Profile</span></button>
                             {!authUser?.emailVerified && <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><Mail size={14} /><span>Verify Email</span></button>}
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('workspace')}><FolderOpen size={14} /><span>Project Workspace</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('workspace')}><Settings size={14} /><span>New Project</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('appearance')}>{theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}<span>Switch to {theme === 'dark' ? 'Light' : 'Dark'} Theme</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('appearance')}><Settings size={14} /><span>{showInspector ? 'Hide' : 'Show'} Inspector</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('appearance')}><Save size={14} /><span>{autosaveEnabled ? 'Disable' : 'Enable'} Autosave</span></button>
-                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><LogOut size={14} /><span>Log Out</span></button>
+                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('settings')}><Settings size={14} /><span>Settings</span></button>
+                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('billing')}><CreditCard size={14} /><span>Plan & Billing</span></button>
+                            <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('usage')}><BarChart3 size={14} /><span>Usage</span></button>
+                            <button type="button" className="canvas-profile-menu-item" onClick={() => void handleSignOut()}><LogOut size={14} /><span>Log Out</span></button>
                         </div>
                     )}
                 </div>
             </div>
 
             {openSettingsModal && authUser && (
-                <div className="fixed inset-0 z-[1300] bg-black/70 backdrop-blur-[2px] p-4">
-                    <div className="h-full w-full rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl overflow-hidden flex">
-                        <aside className="w-[280px] border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-5 flex flex-col">
-                            <div className="flex items-center gap-3 px-2">
-                                <div className="h-9 w-9 rounded-full overflow-hidden border border-[var(--ui-border)] bg-[var(--ui-surface-3)]">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" /> : <div className="h-full w-full inline-flex items-center justify-center text-[var(--ui-text)]"><UserCircle2 size={16} /></div>}</div>
-                                <div className="min-w-0"><div className="text-sm font-semibold text-[var(--ui-text)] truncate">{authDisplayName}</div><div className="text-xs text-[var(--ui-text-subtle)] truncate">{authUser.email || 'No email'}</div></div>
+                <div className="fixed inset-0 z-[1300] bg-black/75 p-3 backdrop-blur-[2px]">
+                    <div className="mx-auto flex h-full w-full max-w-[1280px] overflow-hidden rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+                        <aside className="flex w-[250px] flex-col border-r border-[var(--ui-border)] bg-[#0c0d12] px-4 py-5">
+                            <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                                <div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-[#171922]">
+                                    {authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" /> : <div className="inline-flex h-full w-full items-center justify-center text-[var(--ui-text)]"><UserCircle2 size={16} /></div>}
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-white">{authDisplayName}</p>
+                                    <p className="truncate text-xs text-[var(--ui-text-subtle)]">{authUser.email || 'No email'}</p>
+                                </div>
                             </div>
-                            <div className="mt-4 px-2"><div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ui-text-subtle)]" /><input value="" readOnly placeholder="Search" className="h-9 w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] pl-9 pr-3 text-sm text-[var(--ui-text-subtle)]" /></div></div>
-                            <div className="mt-4 space-y-1">
-                                {NAV_ITEMS.map((item) => {
-                                    const Icon = item.icon;
-                                    const active = settingsTab === item.key;
-                                    return <button key={item.key} type="button" onClick={() => setSettingsTab(item.key)} className={`w-full h-10 rounded-xl px-3 text-sm inline-flex items-center gap-2.5 transition-colors ${active ? 'bg-indigo-500/20 text-[var(--ui-text)] border border-indigo-400/40' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'}`}><Icon size={15} /><span>{item.label}</span></button>;
-                                })}
+
+                            <div className="mt-6">
+                                <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Account</p>
+                                <div className="mt-2 space-y-1">{ACCOUNT_NAV.map((item) => { const Icon = item.icon; const active = settingsTab === item.key; return <button key={item.key} type="button" onClick={() => setSettingsTab(item.key)} className={`flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors ${active ? 'bg-white/8 text-white' : 'text-slate-300 hover:bg-white/5'}`}><Icon size={15} /><span>{item.label}</span></button>; })}</div>
+                            </div>
+                            <div className="mt-6">
+                                <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Subscription</p>
+                                <div className="mt-2 space-y-1">{SUBSCRIPTION_NAV.map((item) => { const Icon = item.icon; const active = settingsTab === item.key; return <button key={item.key} type="button" onClick={() => setSettingsTab(item.key)} className={`flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors ${active ? 'bg-white/8 text-white' : 'text-slate-300 hover:bg-white/5'}`}><Icon size={15} /><span>{item.label}</span></button>; })}</div>
+                            </div>
+
+                            <div className="mt-auto space-y-2 pt-8">
+                                <button type="button" onClick={() => { window.history.pushState({}, '', '/app/projects'); window.dispatchEvent(new PopStateEvent('popstate')); setOpenSettingsModal(false); }} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"><FolderOpen size={14} /><span>Open Workspace</span></button>
+                                <button type="button" onClick={() => void refreshBillingData()} disabled={billingLoading} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60">{billingLoading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}<span>{billingLoading ? 'Refreshing...' : 'Refresh Data'}</span></button>
                             </div>
                         </aside>
 
-                        <section className="flex-1 min-w-0 flex flex-col bg-[var(--ui-surface-1)]">
-                            <header className="h-16 px-6 border-b border-[var(--ui-border)] flex items-center justify-between">
-                                <div className="text-[32px] leading-none font-semibold text-[var(--ui-text)]">{settingsTab[0].toUpperCase()}{settingsTab.slice(1)} settings</div>
-                                <button type="button" onClick={() => setOpenSettingsModal(false)} className="h-10 w-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]" title="Close settings"><X size={16} className="mx-auto" /></button>
+                        <section className="flex min-w-0 flex-1 flex-col bg-[#090b12]">
+                            <header className="flex h-20 items-center justify-between border-b border-[var(--ui-border)] px-7">
+                                <div>
+                                    <h2 className="text-[42px] font-semibold leading-[1] text-white">{tabMeta[settingsTab].title}</h2>
+                                    <p className="mt-2 text-base text-[var(--ui-text-subtle)]">{tabMeta[settingsTab].subtitle}</p>
+                                </div>
+                                <button type="button" onClick={() => setOpenSettingsModal(false)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]" title="Close settings"><X size={16} /></button>
                             </header>
 
-                            <div className="flex-1 overflow-y-auto px-6 py-6">
+                            <div className="flex-1 overflow-y-auto px-7 py-6">
                                 {settingsTab === 'profile' && (
-                                    <div className="max-w-[840px] space-y-4">
-                                        <Field label="Display name" value={authDisplayName} />
-                                        <Field label="Email" value={authUser.email || 'No email'} />
-                                        <Field label="UID" value={authUser.uid} />
-                                        {!authUser.emailVerified && (
-                                            <button
-                                                type="button"
-                                                onClick={() => void handleSendVerification()}
-                                                disabled={verificationBusy}
-                                                className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
-                                            >
-                                                {verificationBusy ? 'Sending verification...' : 'Send verification email'}
-                                            </button>
-                                        )}
-                                        <button type="button" onClick={() => void handleSignOut()} className="h-10 rounded-xl border border-red-400/30 bg-red-500/10 px-4 text-sm text-red-200 hover:bg-red-500/20">Log out</button>
-                                    </div>
-                                )}
-                                {settingsTab === 'appearance' && (
-                                    <div className="max-w-[980px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
-                                        <div className="border-b border-[var(--ui-border)] px-5 py-5">
-                                            <div className="text-xl font-semibold text-[var(--ui-text)]">Appearance</div>
-                                            <div className="mt-1 text-sm text-[var(--ui-text-subtle)]">Change how your workspace looks and behaves.</div>
-                                        </div>
+                                    <div className="mx-auto w-full max-w-[900px] space-y-4">
+                                        <p className="text-sm text-[var(--ui-text-subtle)]">This is your day {Math.max(1, Math.ceil((Date.now() - new Date(authUser.metadata.creationTime || Date.now()).getTime()) / (1000 * 60 * 60 * 24)))} of using EazyUI.</p>
+                                        <p className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold tracking-[0.08em] text-emerald-300">Power User</p>
 
-                                        <div className="border-b border-[var(--ui-border)] px-5 py-5">
-                                            <div className="text-sm font-semibold text-[var(--ui-text)]">Interface theme</div>
-                                            <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Select or customize your UI theme.</div>
-                                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                                <ThemePreviewCard title="System preference" tone={theme} active={false} onClick={() => { }} />
-                                                <ThemePreviewCard title="Light" tone="light" active={theme === 'light'} onClick={() => setTheme('light')} />
-                                                <ThemePreviewCard title="Dark" tone="dark" active={theme === 'dark'} onClick={() => setTheme('dark')} />
+                                        <div className="rounded-xl border border-[var(--ui-border)] bg-[#10131b] p-4">
+                                            <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-[var(--ui-text)]">Active Days</h3><span className="text-xs text-[var(--ui-text-subtle)]">{activityCells.filter((cell) => cell.level > 0).length} active days</span></div>
+                                            <div className="mt-3 grid grid-cols-12 gap-1 text-[10px] text-[var(--ui-text-subtle)]">{monthHeaders.map((label) => <span key={label} className="truncate">{label}</span>)}</div>
+                                            <div className="mt-2 grid grid-flow-col grid-rows-7 gap-1">{activityCells.map((cell) => <div key={cell.key} title={cell.key} className={`h-3 w-3 rounded-[3px] ${heatClass(cell.level)}`} />)}</div>
+                                            <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-[var(--ui-text-subtle)]"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <span key={level} className={`h-2.5 w-2.5 rounded-[3px] ${heatClass(level)}`} />)}<span>More</span></div>
+                                            <div className="mt-4 divide-y divide-[var(--ui-border)] rounded-lg border border-[var(--ui-border)]">
+                                                <div className="flex items-center justify-between px-3 py-2"><span className="text-sm text-[var(--ui-text-subtle)]">AI Code Accepted</span><span className="text-sm font-semibold text-[var(--ui-text)]">{aiCodeAccepted > 0 ? aiCodeAccepted : '-'}</span></div>
+                                                <div className="flex items-center justify-between px-3 py-2"><span className="text-sm text-[var(--ui-text-subtle)]">Chat Count</span><span className="text-sm font-semibold text-[var(--ui-text)]">{chatCount > 0 ? chatCount : '-'}</span></div>
                                             </div>
                                         </div>
 
-                                        <div className="border-b border-[var(--ui-border)] px-5 py-4">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <div>
-                                                    <div className="text-sm font-semibold text-[var(--ui-text)]">Transparent sidebar</div>
-                                                    <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Make the workspace sidebar slightly translucent.</div>
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[#10131b] p-4"><h4 className="text-base font-semibold text-[var(--ui-text)]">Most Frequent AI Partner</h4><div className="mt-8 text-center"><p className="text-4xl leading-none text-[var(--ui-text-subtle)]">zZ</p><p className="mt-5 text-sm text-[var(--ui-text-subtle)]">{mostFrequentModel || 'No model data yet.'}</p></div></div>
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[#10131b] p-4"><h4 className="text-base font-semibold text-[var(--ui-text)]">Recent Model Invocation Preference</h4><div className="mt-8 text-center"><p className="text-4xl leading-none text-[var(--ui-text-subtle)]">zZ</p><p className="mt-5 text-sm text-[var(--ui-text-subtle)]">{usageEvents[0] ? (usageEvents[0].operation || usageEvents[0].type).replace(/_/g, ' ') : 'No recent activity yet.'}</p></div></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {settingsTab === 'settings' && (
+                                    <div className="mx-auto w-full max-w-[920px] space-y-6">
+                                        <SectionCard title="User Info">
+                                            <SettingsRow label="Avatar" detail="JPG, PNG, or GIF (max 2 MB)"><div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-[#1a1d26]">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" /> : <div className="inline-flex h-full w-full items-center justify-center text-[var(--ui-text)]"><UserCircle2 size={16} /></div>}</div></SettingsRow>
+                                            <SettingsRow label="Name" detail="Your profile name"><span className="text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span></SettingsRow>
+                                            <SettingsRow label="Email" detail="Your login method"><span className="text-sm font-semibold text-[var(--ui-text)]">{authUser.email || 'No email'}</span></SettingsRow>
+                                        </SectionCard>
+
+                                        <SectionCard title="Preferences">
+                                            <SettingsRow label="Theme" detail="Choose how the workspace looks.">
+                                                <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]">
+                                                    <button type="button" onClick={() => setTheme('light')} className={`inline-flex h-9 items-center gap-2 px-3 text-sm ${theme === 'light' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><Sun size={14} /><span>Light</span></button>
+                                                    <button type="button" onClick={() => setTheme('dark')} className={`inline-flex h-9 items-center gap-2 border-l border-[var(--ui-border)] px-3 text-sm ${theme === 'dark' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><Moon size={14} /><span>Dark</span></button>
                                                 </div>
-                                                <ToggleSwitch checked={transparentSidebar} onChange={setTransparentSidebar} />
-                                            </div>
-                                        </div>
+                                            </SettingsRow>
+                                        </SectionCard>
 
-                                        <div className="border-b border-[var(--ui-border)] px-5 py-4">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <div>
-                                                    <div className="text-sm font-semibold text-[var(--ui-text)]">Sidebar feature</div>
-                                                    <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Choose what shows by default in sidebar shortcuts.</div>
-                                                </div>
-                                                <select
-                                                    value={sidebarFeature}
-                                                    onChange={(event) => setSidebarFeature(event.target.value as 'recent' | 'favorites' | 'activity')}
-                                                    className="h-10 min-w-[220px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm text-[var(--ui-text)]"
-                                                >
-                                                    <option value="recent">Recent projects</option>
-                                                    <option value="favorites">Favorites</option>
-                                                    <option value="activity">Recent activity</option>
-                                                </select>
-                                            </div>
-                                        </div>
+                                        <SectionCard title="Integrations">
+                                            <SettingsRow label="Vercel" detail="A frontend cloud platform for automatic web deployment."><button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]"><Link2 size={13} /><span>Connect</span></button></SettingsRow>
+                                            <SettingsRow label="Supabase" detail="For user authentication and data storage."><button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]"><Link2 size={13} /><span>Connect</span></button></SettingsRow>
+                                        </SectionCard>
 
-                                        <div className="px-5 py-5">
-                                            <div className="text-sm font-semibold text-[var(--ui-text)]">Tables view</div>
-                                            <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">Adjust information density in table-like views.</div>
-                                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                <TableViewCard title="Default" compact={false} active={tableView === 'default'} onClick={() => setTableView('default')} />
-                                                <TableViewCard title="Compact" compact active={tableView === 'compact'} onClick={() => setTableView('compact')} />
-                                            </div>
-                                        </div>
+                                        <SectionCard title="Account Access">
+                                            <SettingsRow label="Log out current account" detail="End this session on this browser."><button type="button" onClick={() => void handleSignOut()} className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]"><LogOut size={13} /><span>Log out</span></button></SettingsRow>
+                                            {!authUser.emailVerified && <SettingsRow label="Email verification" detail="Verify your account for billing and notifications."><button type="button" onClick={() => void handleSendVerification()} disabled={verificationBusy} className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60"><Mail size={13} /><span>{verificationBusy ? 'Sending...' : 'Send verification'}</span></button></SettingsRow>}
+                                        </SectionCard>
 
-                                        <div className="border-t border-[var(--ui-border)] px-5 py-4">
-                                            <div className="flex flex-wrap items-center justify-end gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setOpenSettingsModal(false)}
-                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
-                                                >
-                                                    Cancel
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        pushToast({ kind: 'success', title: 'Appearance saved', message: 'Your visual preferences were updated.' });
-                                                        setOpenSettingsModal(false);
-                                                    }}
-                                                    className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500"
-                                                >
-                                                    Save changes
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <SectionCard title="Danger Zone"><SettingsRow label="Start a new project" detail="This clears unsaved work and opens a clean canvas."><button type="button" onClick={() => void handleNewProject()} className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-4 text-sm text-rose-200 hover:bg-rose-500/20"><AlertTriangle size={13} /><span>New project</span></button></SettingsRow></SectionCard>
                                     </div>
                                 )}
-                                {settingsTab === 'workspace' && (
-                                    <div className="max-w-[840px] flex flex-wrap gap-3">
-                                        <button type="button" onClick={() => { window.history.pushState({}, '', '/app/projects'); window.dispatchEvent(new PopStateEvent('popstate')); setOpenSettingsModal(false); }} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Open Project Workspace</button>
-                                        <button type="button" onClick={() => void handleNewProject()} className="h-10 rounded-xl bg-indigo-600 px-4 text-sm text-white hover:bg-indigo-500">New Project</button>
-                                        <button type="button" onClick={() => void handleSaveNow()} className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]">Save now</button>
-                                    </div>
-                                )}
+
                                 {settingsTab === 'billing' && (
-                                    <div className="max-w-[920px] space-y-4">
-                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-                                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                                <div>
-                                                    <p className="text-xs uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Plan</p>
-                                                    <h3 className="mt-1 text-xl font-semibold text-[var(--ui-text)]">
-                                                        {billingSummary?.planLabel || 'Free'}
-                                                    </h3>
-                                                    <p className="mt-1 text-sm text-[var(--ui-text-subtle)]">
-                                                        {billingSummary ? `Cycle ends ${new Date(billingSummary.periodEndAt).toLocaleDateString()}` : 'Monthly credits with rollover on paid plans.'}
-                                                    </p>
+                                    <div className="mx-auto w-full max-w-[920px] space-y-6">
+                                        <SectionCard title="Subscription Plan">
+                                            <SettingsRow label="Current plan" detail={billingSummary ? `Status: ${billingSummary.status}` : 'Loading plan status...'}><span className="text-3xl font-semibold text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free'}</span></SettingsRow>
+                                            <SettingsRow label="Upgrade plan" detail={billingSummary ? `Cycle ends ${new Date(billingSummary.periodEndAt).toLocaleDateString()}` : 'Monthly credits with rollover on paid plans.'}>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <button type="button" onClick={() => void handleBillingCheckout('pro')} disabled={billingActionBusy !== null} className="h-9 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-black hover:bg-emerald-400 disabled:opacity-60">{billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade plan'}</button>
+                                                    <button type="button" onClick={() => void handleBillingCheckout('team')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'team' ? 'Opening...' : 'Team'}</button>
+                                                    <button type="button" onClick={() => void handleBillingCheckout('topup_1000')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy 1,000 credits'}</button>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-xs uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Credits</p>
-                                                    <p className={`mt-1 text-3xl font-semibold ${billingSummary?.lowCredits ? 'text-amber-300' : 'text-[var(--ui-text)]'}`}>
-                                                        {billingSummary?.balanceCredits ?? '--'}
-                                                    </p>
-                                                    <p className="mt-1 text-xs text-[var(--ui-text-subtle)]">
-                                                        Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'} / Rollover {billingSummary?.rolloverCredits ?? '--'} / Top-up {billingSummary?.topupCreditsRemaining ?? '--'}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="mt-4 flex flex-wrap gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => void handleBillingCheckout('pro')}
-                                                    disabled={billingActionBusy !== null}
-                                                    className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
-                                                >
-                                                    {billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade to Pro'}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => void handleBillingCheckout('team')}
-                                                    disabled={billingActionBusy !== null}
-                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60"
-                                                >
-                                                    {billingActionBusy === 'team' ? 'Opening...' : 'Upgrade to Team'}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => void handleBillingCheckout('topup_1000')}
-                                                    disabled={billingActionBusy !== null}
-                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60"
-                                                >
-                                                    {billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy 1,000 Credits'}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => void handleOpenBillingPortal()}
-                                                    disabled={billingActionBusy !== null}
-                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
-                                                >
-                                                    {billingActionBusy === 'portal' ? 'Opening...' : 'Manage Billing'}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => void refreshBillingData()}
-                                                    disabled={billingLoading}
-                                                    className="h-10 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
-                                                >
-                                                    {billingLoading ? 'Refreshing...' : 'Refresh'}
-                                                </button>
-                                            </div>
-                                        </div>
+                                            </SettingsRow>
+                                        </SectionCard>
 
-                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-                                            <h4 className="text-sm font-semibold text-[var(--ui-text)]">Credit activity</h4>
-                                            {billingLoading && billingLedger.length === 0 ? (
-                                                <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">Loading activity...</p>
-                                            ) : billingLedger.length === 0 ? (
-                                                <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">No billing activity yet.</p>
-                                            ) : (
-                                                <div className="mt-3 space-y-2">
-                                                    {billingLedger.slice(0, 20).map((item) => (
-                                                        <div key={item.id} className="flex items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] px-3 py-2">
-                                                            <div className="min-w-0">
-                                                                <p className="text-sm text-[var(--ui-text)]">
-                                                                    {(item.operation || item.type).replace(/_/g, ' ')}
-                                                                </p>
-                                                                <p className="text-[11px] text-[var(--ui-text-subtle)]">
-                                                                    {new Date(item.createdAt).toLocaleString()}
-                                                                </p>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <p className={`text-sm font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                                                                    {item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}
-                                                                </p>
-                                                                <p className="text-[11px] text-[var(--ui-text-subtle)]">Balance {item.balanceAfter}</p>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
+                                        <SectionCard title="On-Demand Usage"><SettingsRow label="On-Demand Usage" detail="On-demand usage is available with a paid subscription."><ToggleSwitch checked={onDemandUsage} onChange={setOnDemandUsage} /></SettingsRow></SectionCard>
+
+                                        <SectionCard title="Billing History" action={<button type="button" onClick={() => void handleOpenBillingPortal()} disabled={billingActionBusy !== null} className="h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-3 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'portal' ? 'Opening...' : 'Payment settings'}</button>}>
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-left">
+                                                    <thead><tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]"><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Name</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Credits</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Date</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Operation</th></tr></thead>
+                                                    <tbody>{usageEvents.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No billing rows yet.</td></tr> : usageEvents.map((item) => <tr key={item.id} className="text-sm text-[var(--ui-text)]"><td className="border-b border-[var(--ui-border)] px-4 py-3">{(item.operation || item.type).replace(/_/g, ' ')}</td><td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{new Date(item.createdAt).toLocaleString()}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{item.type}</td></tr>)}</tbody>
+                                                </table>
+                                            </div>
+                                        </SectionCard>
                                     </div>
                                 )}
-                                {['team', 'applications', 'api', 'security'].includes(settingsTab) && (
-                                    <div className="max-w-[840px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-6 text-sm text-[var(--ui-text-subtle)]">This section is ready for expanded settings.</div>
+
+                                {settingsTab === 'usage' && (
+                                    <div className="mx-auto w-full max-w-[920px] space-y-6">
+                                        <p className="text-[22px] text-[var(--ui-text)]">You are on <span className="font-semibold">{billingSummary?.planLabel || 'Free Plan'}</span>. Usage reset in {daysUntilReset ?? '--'} days on {billingPeriodEnd ? billingPeriodEnd.toLocaleString() : '--'}</p>
+                                        <SectionCard title="Dollar Usage">
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between"><p className="text-sm text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free plan'}</p><p className="text-sm font-semibold text-[var(--ui-text)]">{consumedThisCycle.toLocaleString()} / {planCreditCap.toLocaleString()} credits</p></div>
+                                                <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-surface-4)]"><div className="h-full rounded-full bg-emerald-400 transition-[width] duration-300" style={{ width: `${cycleUsagePct}%` }} /></div>
+                                                <div className="flex items-center justify-between text-xs text-[var(--ui-text-subtle)]"><span>Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'}</span><span>Rollover {billingSummary?.rolloverCredits ?? '--'}</span><span>Top-up {billingSummary?.topupCreditsRemaining ?? '--'}</span><span className="font-semibold text-emerald-300">Balance {billingSummary?.balanceCredits ?? '--'}</span></div>
+                                            </div>
+                                        </SectionCard>
+                                        <SectionCard title="Usage Events">
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-left">
+                                                    <thead><tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]"><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Time</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Model</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Cost</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Source</th></tr></thead>
+                                                    <tbody>{usageEvents.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td></tr> : usageEvents.map((item) => <tr key={`usage-${item.id}`} className="text-sm text-[var(--ui-text)]"><td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(item.createdAt).toLocaleString()}</td><td className="border-b border-[var(--ui-border)] px-4 py-3">{typeof item.metadata?.model === 'string' ? item.metadata.model : 'Default model'}</td><td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{(item.operation || item.type).replace(/_/g, ' ')}</td></tr>)}</tbody>
+                                                </table>
+                                            </div>
+                                        </SectionCard>
+                                    </div>
                                 )}
                             </div>
                         </section>
@@ -504,86 +477,28 @@ export function CanvasProfileMenu() {
     );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] px-3 py-2">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">{label}</div>
-            <div className="mt-1 text-[13px] text-[var(--ui-text)] break-all">{value}</div>
-        </div>
-    );
-}
-
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
     return (
-        <button
-            type="button"
-            onClick={() => onChange(!checked)}
-            className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'border-indigo-500/80 bg-indigo-600' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}
-        >
+        <button type="button" onClick={() => onChange(!checked)} className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'border-emerald-500/90 bg-emerald-500' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}>
             <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-[2px]'}`} />
         </button>
     );
 }
 
-function ThemePreviewCard({ title, tone, active, onClick }: { title: string; tone: 'light' | 'dark'; active: boolean; onClick: () => void }) {
-    const canvasTone = tone === 'dark'
-        ? 'bg-[#0f1116] border-[#232836]'
-        : 'bg-[#f7f8fc] border-[#dfe4ef]';
-    const topBarTone = tone === 'dark' ? 'bg-[#161a24]' : 'bg-[#eef2f8]';
-    const leftPaneTone = tone === 'dark' ? 'bg-[#1a1f2b]' : 'bg-[#e8edf5]';
-    const lineTone = tone === 'dark' ? 'bg-[#2e3648]' : 'bg-[#cfd8e8]';
-
+function SectionCard({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
     return (
-        <button
-            type="button"
-            onClick={onClick}
-            className={`relative rounded-xl border p-2 text-left transition-colors ${active ? 'border-indigo-500/80 bg-indigo-500/10' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'}`}
-        >
-            {active && (
-                <span className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white">
-                    <Check size={12} />
-                </span>
-            )}
-            <div className={`h-[92px] overflow-hidden rounded-lg border ${canvasTone}`}>
-                <div className={`h-4 w-full ${topBarTone}`} />
-                <div className="flex h-[calc(100%-16px)]">
-                    <div className={`w-[30%] border-r ${leftPaneTone}`} />
-                    <div className="flex-1 p-2">
-                        <div className={`mb-1 h-2.5 w-[70%] rounded ${lineTone}`} />
-                        <div className={`mb-1 h-2.5 w-[85%] rounded ${lineTone}`} />
-                        <div className={`h-2.5 w-[58%] rounded ${lineTone}`} />
-                    </div>
-                </div>
-            </div>
-            <div className="mt-2 text-sm font-medium text-[var(--ui-text)]">{title}</div>
-        </button>
+        <section className="rounded-xl border border-[var(--ui-border)] bg-[#10131b]">
+            <div className="flex items-center justify-between border-b border-[var(--ui-border)] px-4 py-3"><h3 className="text-[26px] font-semibold text-[var(--ui-text)]">{title}</h3>{action}</div>
+            <div className="divide-y divide-[var(--ui-border)]">{children}</div>
+        </section>
     );
 }
 
-function TableViewCard({ title, compact, active, onClick }: { title: string; compact: boolean; active: boolean; onClick: () => void }) {
+function SettingsRow({ label, detail, children }: { label: string; detail: string; children: ReactNode }) {
     return (
-        <button
-            type="button"
-            onClick={onClick}
-            className={`relative rounded-xl border p-2 text-left transition-colors ${active ? 'border-indigo-500/80 bg-indigo-500/10' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'}`}
-        >
-            {active && (
-                <span className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white">
-                    <Check size={12} />
-                </span>
-            )}
-            <div className="h-[92px] overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2">
-                <div className="space-y-1">
-                    {Array.from({ length: compact ? 6 : 4 }).map((_, idx) => (
-                        <div key={idx} className={`flex items-center gap-2 rounded ${compact ? 'h-2.5' : 'h-4'}`}>
-                            <span className={`rounded-full bg-[var(--ui-surface-4)] ${compact ? 'h-2 w-2' : 'h-2.5 w-2.5'}`} />
-                            <span className="h-2 flex-1 rounded bg-[var(--ui-surface-4)]" />
-                            <span className={`rounded bg-indigo-500/35 ${compact ? 'h-2 w-8' : 'h-2.5 w-10'}`} />
-                        </div>
-                    ))}
-                </div>
-            </div>
-            <div className="mt-2 text-sm font-medium text-[var(--ui-text)]">{title}</div>
-        </button>
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="min-w-0"><p className="text-base font-medium text-[var(--ui-text)]">{label}</p><p className="mt-0.5 text-sm text-[var(--ui-text-subtle)]">{detail}</p></div>
+            <div className="shrink-0">{children}</div>
+        </div>
     );
 }

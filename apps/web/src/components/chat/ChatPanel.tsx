@@ -3464,12 +3464,17 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
     };
 
-    const handleRoutedGenerateOrEdit = async () => {
-        const requestPrompt = prompt.trim();
+    const handleRoutedGenerateOrEdit = async (
+        existingUserMessageId?: string,
+        overridePrompt?: string,
+        overrideImages?: string[],
+        incomingReferenceScreens?: HtmlScreen[]
+    ) => {
+        const requestPrompt = (overridePrompt ?? prompt).trim();
         if (!requestPrompt || isGenerating) return;
         pinToLatest('smooth');
-        const attachedImages = [...images];
-        const referenceScreens = getScreenReferencesFromComposer();
+        const attachedImages = overrideImages ? [...overrideImages] : [...images];
+        const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer();
         const routeReferenceScreens = pickRouteReferenceScreens(
             requestPrompt,
             useDesignStore.getState().spec?.screens || [],
@@ -3480,7 +3485,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
             : requestPrompt;
         const referenceMeta = buildScreenReferenceMeta(referenceScreens);
-        const userMsgId = addMessage('user', requestPrompt, attachedImages.length ? attachedImages : undefined);
+        const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, attachedImages.length ? attachedImages : undefined);
         updateMessage(userMsgId, {
             meta: {
                 ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
@@ -3488,12 +3493,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             },
         });
-        setComposerScreenReferences([]);
-        closeMentionMenu();
-        setPrompt('');
-        if (attachedImages.length > 0) {
-            setImages([]);
-            if (fileInputRef.current) fileInputRef.current.value = '';
+        if (!existingUserMessageId) {
+            setComposerScreenReferences([]);
+            closeMentionMenu();
+            setPrompt('');
+            if (attachedImages.length > 0) {
+                setImages([]);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            }
         }
 
         const executeFallbackRoute = async () => {
@@ -3635,6 +3642,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         const retryScreenIds = Array.isArray((source.meta as any)?.screenIds)
             ? (((source.meta as any)?.screenIds as string[]).filter(Boolean))
             : [];
+        if (source.screenRef?.id && !retryScreenIds.includes(source.screenRef.id)) {
+            retryScreenIds.push(source.screenRef.id);
+        }
         const retryReferences = getScreenReferencesFromComposer(
             retryScreenIds.map((screenId) => ({ screenId, name: '' }))
         );
@@ -3644,45 +3654,11 @@ Return a polished, consistent screen without introducing a new navigation patter
             return;
         }
 
-        if (requestKind === 'edit' && source.screenRef?.id) {
-            const target = useDesignStore.getState().spec?.screens.find((screen) => screen.screenId === source.screenRef?.id);
-            if (target) {
-                await handleEditForScreen(target, retryPrompt, retryImages, userMessageId, retryReferences);
-                return;
-            }
-        }
-
-        if (requestKind === 'assist') {
-            await handleGenerate(
-                retryPrompt,
-                retryImages,
-                selectedPlatform,
-                stylePreset,
-                modelProfile,
-                undefined,
-                retryPrompt,
-                undefined,
-                undefined,
-                userMessageId,
-                retryReferences,
-                false
-            );
-            return;
-        }
-
-        await handleGenerate(
+        await handleRoutedGenerateOrEdit(
+            userMessageId,
             retryPrompt,
             retryImages,
-            selectedPlatform,
-            stylePreset,
-            modelProfile,
-            undefined,
-            retryPrompt,
-            undefined,
-            undefined,
-            userMessageId,
-            retryReferences,
-            false
+            retryReferences
         );
     };
 

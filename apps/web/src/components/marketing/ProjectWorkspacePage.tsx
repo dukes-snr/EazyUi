@@ -1,4 +1,4 @@
-import { ArrowUp, FolderOpen, House, LogOut, Monitor, Plus, RefreshCcw, Smartphone, Sparkles, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, FolderOpen, House, Loader2, LogOut, Monitor, Plus, RefreshCcw, Smartphone, Sparkles, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -35,12 +35,18 @@ function formatDate(value: string) {
   }
 }
 
+function sortProjects(items: ProjectListItem[]) {
+  return [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
 export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, onOpenProject }: ProjectWorkspacePageProps) {
   const requestConfirmation = useUiStore((state) => state.requestConfirmation);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<string[]>([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [deleteProgress, setDeleteProgress] = useState<{ total: number; completed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starterPrompt, setStarterPrompt] = useState('');
   const [creatingFromPrompt, setCreatingFromPrompt] = useState(false);
@@ -56,6 +62,10 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const authPhotoUrl = authUser?.photoURL
     || authUser?.providerData.find((provider) => Boolean(provider?.photoURL))?.photoURL
     || `https://ui-avatars.com/api/?name=${encodeURIComponent(authDisplayName)}&background=111827&color=ffffff&size=128&rounded=true`;
+  const deletingIdSet = new Set(deletingIds);
+  const selectedIdSet = new Set(selectedProjectIds);
+  const hasSelectedProjects = selectedProjectIds.length > 0;
+  const allSelected = projects.length > 0 && projects.every((project) => selectedIdSet.has(project.id));
 
   const loadProjects = async () => {
     if (!authReady || !isAuthenticated) return;
@@ -63,7 +73,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
       setLoading(true);
       setError(null);
       const res = await apiClient.listProjects();
-      setProjects(res.projects || []);
+      setProjects(sortProjects(res.projects || []));
     } catch (err) {
       setError((err as Error).message || 'Failed to load projects.');
     } finally {
@@ -93,24 +103,95 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [openAvatarMenu]);
 
-  const handleDelete = async (id: string) => {
+  useEffect(() => {
+    const available = new Set(projects.map((project) => project.id));
+    setSelectedProjectIds((prev) => prev.filter((id) => available.has(id)));
+  }, [projects]);
+
+  const performDelete = async (ids: string[]) => {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length === 0) return;
+
+    setError(null);
+    const deletingSet = new Set(uniqueIds);
+    setDeleteProgress({ total: uniqueIds.length, completed: 0 });
+    setDeletingIds((prev) => Array.from(new Set([...prev, ...uniqueIds])));
+    setSelectedProjectIds((prev) => prev.filter((id) => !deletingSet.has(id)));
+
+    let removedProjects: ProjectListItem[] = [];
+    setProjects((prev) => {
+      removedProjects = prev.filter((project) => deletingSet.has(project.id));
+      return prev.filter((project) => !deletingSet.has(project.id));
+    });
+
+    const failedIds: string[] = [];
+    let completed = 0;
+    await Promise.all(
+      uniqueIds.map(async (projectId) => {
+        try {
+          await apiClient.deleteProject(projectId);
+        } catch {
+          failedIds.push(projectId);
+        } finally {
+          completed += 1;
+          setDeleteProgress((prev) => (prev ? { ...prev, completed } : prev));
+        }
+      })
+    );
+
+    if (failedIds.length > 0) {
+      const failedSet = new Set(failedIds);
+      const restoreItems = removedProjects.filter((project) => failedSet.has(project.id));
+      setProjects((prev) => sortProjects([...prev, ...restoreItems]));
+      setError(
+        failedIds.length === 1
+          ? 'Failed to delete one project. It has been restored.'
+          : `Failed to delete ${failedIds.length} projects. They have been restored.`
+      );
+    }
+
+    setDeletingIds((prev) => prev.filter((id) => !deletingSet.has(id)));
+    setDeleteProgress(null);
+  };
+
+  const handleDelete = async (ids: string[]) => {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length === 0) return;
     const ok = await requestConfirmation({
-      title: 'Delete project?',
-      message: 'This project, its screens, and saved chat history will be permanently removed.',
-      confirmLabel: 'Delete Project',
+      title: uniqueIds.length === 1 ? 'Delete project?' : `Delete ${uniqueIds.length} projects?`,
+      message: uniqueIds.length === 1
+        ? 'This project, its screens, and saved chat history will be permanently removed.'
+        : 'These projects, their screens, and saved chat histories will be permanently removed.',
+      confirmLabel: uniqueIds.length === 1 ? 'Delete Project' : `Delete ${uniqueIds.length} Projects`,
       cancelLabel: 'Cancel',
       tone: 'danger',
     });
     if (!ok) return;
-    try {
-      setBusyId(id);
-      await apiClient.deleteProject(id);
-      setProjects((prev) => prev.filter((p) => p.id !== id));
-    } catch (err) {
-      setError((err as Error).message || 'Failed to delete project.');
-    } finally {
-      setBusyId(null);
-    }
+    await performDelete(uniqueIds);
+  };
+
+  const toggleProjectSelection = (projectId: string) => {
+    if (deletingIdSet.has(projectId)) return;
+    setSelectedProjectIds((prev) => (
+      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId]
+    ));
+  };
+
+  const toggleSelectAllProjects = () => {
+    const selectableIds = projects
+      .map((project) => project.id)
+      .filter((projectId) => !deletingIdSet.has(projectId));
+    if (selectableIds.length === 0) return;
+    const shouldSelectAll = selectableIds.some((projectId) => !selectedIdSet.has(projectId));
+    setSelectedProjectIds((prev) => {
+      const prevSet = new Set(prev);
+      if (shouldSelectAll) {
+        selectableIds.forEach((projectId) => prevSet.add(projectId));
+      } else {
+        selectableIds.forEach((projectId) => prevSet.delete(projectId));
+      }
+      return Array.from(prevSet);
+    });
   };
 
   const handleCreateFromPrompt = () => {
@@ -207,7 +288,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
             title="Refresh Projects"
           >
-            <RefreshCcw size={16} />
+            <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
         </nav>
 
@@ -306,7 +387,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   className="h-9 w-9 shrink-0 rounded-[12px] flex items-center justify-center transition-all bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40"
                   title="Create project from request"
                 >
-                  <ArrowUp size={18} />
+                  {creatingFromPrompt ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={18} />}
                 </button>
               </div>
               <div className="flex items-center justify-between pt-2">
@@ -377,6 +458,41 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             </div>
           )}
 
+          {deleteProgress && (
+            <div className="mt-5 rounded-2xl border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)] px-4 py-3 text-sm text-[var(--ui-text)]">
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
+                Deleting projects... {deleteProgress.completed}/{deleteProgress.total}
+              </span>
+            </div>
+          )}
+
+          {!loading && projects.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
+              <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAllProjects}
+                  className="h-4 w-4 cursor-pointer rounded border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-primary)]"
+                />
+                Select all
+              </label>
+              <span className="text-xs text-[var(--ui-text-subtle)]">
+                {hasSelectedProjects ? `${selectedProjectIds.length} selected` : 'No project selected'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleDelete(selectedProjectIds)}
+                disabled={!hasSelectedProjects || deleteProgress !== null}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+              >
+                {deleteProgress ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                Delete selected
+              </button>
+            </div>
+          )}
+
           {loading && (
             <div className="mt-6 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-5 py-4 text-sm text-[var(--ui-text-muted)]">
               Loading projects...
@@ -392,7 +508,17 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           {!loading && projects.length > 0 && (
             <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
-                <article key={project.id} className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                <article key={project.id} className={`relative rounded-2xl border p-4 ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}>
+                  <div className="absolute left-3 top-3 z-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedIdSet.has(project.id)}
+                      onChange={() => toggleProjectSelection(project.id)}
+                      disabled={deletingIdSet.has(project.id)}
+                      className="h-4 w-4 cursor-pointer rounded border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-primary)] disabled:cursor-not-allowed"
+                      aria-label={`Select ${project.name || 'project'}`}
+                    />
+                  </div>
                   <div className="mb-3">
                     {(() => {
                       const persistedImages = (project.coverImageUrls || []).filter(Boolean);
@@ -454,18 +580,21 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     <button
                       type="button"
                       onClick={() => onOpenProject(project.id)}
-                      disabled={busyId === project.id}
+                      disabled={deletingIdSet.has(project.id)}
                       className="h-8 rounded-full border border-[var(--ui-border-light)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)] disabled:opacity-50"
                     >
                       <span className="inline-flex items-center gap-1.5"><FolderOpen size={12} /> Open</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleDelete(project.id)}
-                      disabled={busyId === project.id}
+                      onClick={() => void handleDelete([project.id])}
+                      disabled={deletingIdSet.has(project.id) || deleteProgress !== null}
                       className="h-8 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
                     >
-                      <span className="inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        {deletingIdSet.has(project.id) ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        {deletingIdSet.has(project.id) ? 'Deleting' : 'Delete'}
+                      </span>
                     </button>
                   </div>
                 </article>

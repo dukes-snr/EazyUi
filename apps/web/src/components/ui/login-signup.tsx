@@ -1,11 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Eye, EyeOff, Github, Lock, Mail, Chrome } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Apple, ChevronLeft, ChevronRight, Chrome, Eye, EyeOff, Github, Loader2, Mail } from "lucide-react";
 import appLogo from "@/assets/Ui-logo.png";
 import heroBg from "@/assets/img1.jpg";
 import { sendPasswordReset, signInWithEmail, signInWithGooglePopup, signUpWithEmail } from "@/lib/auth";
@@ -13,6 +9,32 @@ import { sendPasswordReset, signInWithEmail, signInWithGooglePopup, signUpWithEm
 type LoginCardSectionProps = {
   onNavigate: (path: string) => void;
 };
+
+type AuthMode = "login" | "signup";
+
+type Slide = {
+  imageUrl: string;
+  title: string;
+  subtitle: string;
+};
+
+const SLIDES: Slide[] = [
+  {
+    imageUrl: "https://i.postimg.cc/tJv2Ct25/01-dashboard.png",
+    title: "Built for teams",
+    subtitle: "Build, test, and ship polished interfaces together with less back-and-forth.",
+  },
+  {
+    imageUrl: "https://i.postimg.cc/WzNH44Vx/01-profile.png",
+    title: "Design with context",
+    subtitle: "Keep component language consistent across every screen in your project.",
+  },
+  {
+    imageUrl: "https://i.postimg.cc/L59bssSc/02-home-feed.png",
+    title: "From prompt to product",
+    subtitle: "Turn ideas into production-ready screens with structure, hierarchy, and speed.",
+  },
+];
 
 function userMessage(error: unknown) {
   const code = (error as { code?: string })?.code || "";
@@ -27,13 +49,38 @@ function userMessage(error: unknown) {
 
 export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
+  const [authMode, setAuthMode] = useState<AuthMode>("signup");
+  const [showEmailForm, setShowEmailForm] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [pauseSlide, setPauseSlide] = useState(false);
+
+  const canSubmit = useMemo(() => {
+    if (!email.trim() || !password) return false;
+    if (authMode === "signup" && !confirmPassword) return false;
+    return true;
+  }, [authMode, confirmPassword, email, password]);
+
+  useEffect(() => {
+    if (pauseSlide) return;
+    const timer = window.setInterval(() => {
+      setActiveSlide((prev) => (prev + 1) % SLIDES.length);
+    }, 4500);
+    return () => window.clearInterval(timer);
+  }, [pauseSlide]);
+
+  const goPrev = () => {
+    setActiveSlide((prev) => (prev - 1 + SLIDES.length) % SLIDES.length);
+  };
+
+  const goNext = () => {
+    setActiveSlide((prev) => (prev + 1) % SLIDES.length);
+  };
 
   const submit = async () => {
     setError(null);
@@ -81,7 +128,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
     setInfo(null);
     const cleanEmail = email.trim();
     if (!cleanEmail) {
-      setError("Enter your email first, then click Forgot Password.");
+      setError("Enter your email first, then click forgot password.");
       return;
     }
     try {
@@ -96,173 +143,252 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
   };
 
   return (
-    <section className="fixed inset-0 bg-[#1a1b1f] text-white">
+    <section className="fixed inset-0 overflow-hidden bg-[#07090d] text-white">
       <div
         className="absolute inset-0"
         style={{
           backgroundImage: `url(${heroBg})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
-          opacity: 0.12,
+          opacity: 0.14,
         }}
       />
+      <div className="absolute inset-0 bg-[radial-gradient(85%_70%_at_74%_15%,rgba(52,94,179,0.22),rgba(8,10,15,0.7)_54%,rgba(7,9,13,0.96)_100%)]" />
 
-      <div className="h-full w-full p-5 md:p-10">
-        <div className="relative h-full w-full overflow-hidden">
-          <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-white/8" />
-          <div className="pointer-events-none absolute -left-2 -top-10 h-44 w-44 rounded-full bg-white/6" />
-          <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-white/8" />
-          <div className="pointer-events-none absolute right-10 -bottom-14 h-44 w-44 rounded-full bg-white/6" />
+      <div className="relative z-10 h-full w-full p-3 md:p-5">
+        <div className="grid h-full w-full grid-cols-1 overflow-hidden lg:grid-cols-[1fr_1.18fr]">
+          <div className="relative flex min-h-[420px] flex-col justify-center px-8 py-8 lg:px-11 lg:py-10">
+            <div className="absolute left-6 top-6 flex items-center gap-2 text-[19px] font-semibold tracking-tight text-white/90">
+              <img src={appLogo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+              <span>eazyui</span>
+            </div>
 
-          <div className="absolute inset-0 flex items-center justify-center px-4">
-            <div className="w-full max-w-[320px] origin-center transform-gpu scale-[1.16] md:scale-[1.28]">
-              <div className="mb-8 flex items-center justify-center gap-2 text-gray-400">
-                <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                <span className="text-[16px] font-medium">EazyUI</span>
-              </div>
+            <div className="mx-auto w-full max-w-[420px] text-center">
+              <img src={appLogo} alt="EazyUI symbol" className="mx-auto h-12 w-12 object-contain opacity-95" />
 
-              <div className="mb-3 grid grid-cols-2 rounded-md border border-white/10 bg-[#0f1015] p-1">
+              <h1 className="mt-7 text-[42px] font-semibold leading-[1.04] tracking-[-0.03em] text-white">
+                Build Full-Stack
+                <br />
+                <span className="text-[#9de8af]">Web &amp; Mobile Apps in minutes</span>
+              </h1>
+
+              <button
+                type="button"
+                onClick={continueWithGoogle}
+                disabled={loading}
+                className="mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white px-5 text-[15px] font-semibold text-[#111827] transition-colors hover:bg-[#e9edf4] disabled:cursor-not-allowed disabled:opacity-65"
+              >
+                {loading ? <Loader2 size={18} className="animate-spin" /> : <Chrome size={18} />}
+                Continue with Google
+              </button>
+
+              <div className="mt-3 grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setAuthMode("login")}
-                  className={`h-7 rounded-sm text-[11px] font-medium transition-colors ${
-                    authMode === "login" ? "bg-[#1b1d24] text-white" : "text-gray-400 hover:text-gray-200"
-                  }`}
-                >
-                  Log In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthMode("signup")}
-                  className={`h-7 rounded-sm text-[11px] font-medium transition-colors ${
-                    authMode === "signup" ? "bg-[#1b1d24] text-white" : "text-gray-400 hover:text-gray-200"
-                  }`}
-                >
-                  Sign Up
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  onClick={continueWithGoogle}
-                  disabled={loading}
-                  className="h-8 rounded-md border-white/10 bg-[#111217] text-[11px] text-gray-200 hover:bg-white/10"
-                >
-                  <Chrome className="mr-1.5 h-3.5 w-3.5" />
-                  Google
-                </Button>
-                <Button
-                  variant="outline"
                   disabled
-                  className="h-8 rounded-md border-white/10 bg-[#111217] text-[11px] text-gray-500"
-                  title="GitHub provider not enabled in this form yet"
+                  title="GitHub auth not enabled yet"
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-white/5 text-gray-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-65"
                 >
-                  <Github className="mr-1.5 h-3.5 w-3.5" />
-                  GitHub
-                </Button>
+                  <Github size={18} />
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title="Apple auth not enabled yet"
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-white/5 text-gray-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-65"
+                >
+                  <Apple size={18} />
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title="Facebook auth not enabled yet"
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-white/5 text-[18px] font-semibold text-gray-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-65"
+                >
+                  f
+                </button>
               </div>
 
-              <div className="relative my-3">
-                <Separator className="bg-white/10" />
-                <span className="absolute left-1/2 -translate-x-1/2 -top-2 bg-black px-2 text-[10px] text-gray-500">
-                  or
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowEmailForm((v) => !v)}
+                className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white/5 px-5 text-[15px] font-medium text-white/90 transition-colors hover:bg-white/10"
+              >
+                <Mail size={16} />
+                Continue with Email
+              </button>
 
-              <div className="grid gap-2.5">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="email" className="text-[10px] text-gray-400">
-                    Email
-                  </Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500" />
-                    <Input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Enter your email"
-                      className="h-9 rounded-md border-white/10 bg-[#111217] pl-9 text-[12px] text-gray-100 placeholder:text-gray-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-1.5">
-                  <Label htmlFor="password" className="text-[10px] text-gray-400">
-                    Password
-                  </Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500" />
-                    <Input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="********"
-                      className="h-9 rounded-md border-white/10 bg-[#111217] pl-9 pr-9 text-[12px] text-gray-100 placeholder:text-gray-500"
-                    />
+              {showEmailForm && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-left">
+                  <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-white/5 p-1">
                     <button
                       type="button"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-gray-200"
-                      onClick={() => setShowPassword((v) => !v)}
+                      onClick={() => setAuthMode("login")}
+                      className={`h-8 rounded-lg text-xs font-semibold uppercase tracking-[0.08em] ${authMode === "login" ? "bg-white/15 text-white" : "text-gray-300 hover:bg-white/10"}`}
                     >
-                      {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      Log In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode("signup")}
+                      className={`h-8 rounded-lg text-xs font-semibold uppercase tracking-[0.08em] ${authMode === "signup" ? "bg-white/15 text-white" : "text-gray-300 hover:bg-white/10"}`}
+                    >
+                      Sign Up
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="Email address"
+                      className="h-10 w-full rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white placeholder:text-gray-400 focus:border-white/30 focus:outline-none"
+                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder="Password"
+                        className="h-10 w-full rounded-xl border border-white/15 bg-white/5 px-3 pr-10 text-sm text-white placeholder:text-gray-400 focus:border-white/30 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-300 hover:bg-white/10"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                    {authMode === "signup" && (
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        placeholder="Confirm password"
+                        className="h-10 w-full rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white placeholder:text-gray-400 focus:border-white/30 focus:outline-none"
+                      />
+                    )}
+                  </div>
+
+                  {error && <p className="mt-2 text-xs text-rose-300">{error}</p>}
+                  {info && <p className="mt-2 text-xs text-emerald-300">{info}</p>}
+
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={submit}
+                      disabled={loading || !canSubmit}
+                      className="inline-flex h-10 flex-1 items-center justify-center rounded-xl bg-[#5b8df7] text-sm font-semibold text-white hover:bg-[#6b99f9] disabled:cursor-not-allowed disabled:opacity-65"
+                    >
+                      {loading ? <Loader2 size={15} className="animate-spin" /> : authMode === "signup" ? "Create account" : "Log in"}
+                    </button>
+                    {authMode === "login" && (
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        disabled={loading}
+                        className="h-10 rounded-xl border border-white/15 px-3 text-xs text-gray-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-65"
+                      >
+                        Forgot
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-5 text-xs text-gray-400">
+                By continuing, you agree to our{" "}
+                <button type="button" className="text-gray-200 underline underline-offset-2">Terms of Service</button>{" "}
+                and{" "}
+                <button type="button" className="text-gray-200 underline underline-offset-2">Privacy Policy</button>.
+              </p>
+            </div>
+          </div>
+
+          <div className="relative hidden lg:block">
+            <div className="grid h-full place-items-center">
+              <div
+                className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/15"
+                onMouseEnter={() => setPauseSlide(true)}
+                onMouseLeave={() => setPauseSlide(false)}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    backgroundImage: `url(${heroBg})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    opacity: 0.5,
+                  }}
+                />
+                <div className="absolute inset-0 bg-[radial-gradient(75%_75%_at_16%_82%,rgba(255,255,255,0.45),rgba(53,204,226,0.5)_38%,rgba(39,97,196,0.88)_78%)]" />
+
+                <div className="absolute right-4 top-4 rounded-md bg-[#f2a25f] px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
+                  EazyUI Beta
+                </div>
+
+                <div className="relative z-10 flex h-full flex-col items-center justify-start px-8 pt-20 pb-8">
+                  <h2 className="text-[50px] font-semibold leading-none tracking-[-0.02em] text-white">
+                    Built for teams
+                  </h2>
+                  <p className="mt-4 max-w-[540px] text-center text-lg font-medium text-white/85">
+                    {SLIDES[activeSlide].subtitle}
+                  </p>
+
+                  <div className="mt-10 w-full max-w-[760px] overflow-hidden rounded-2xl border border-black/40 bg-[#05070d]/80 shadow-[0_22px_45px_rgba(0,0,0,0.45)]">
+                    <div className="flex items-center gap-2 border-b border-white/15 bg-black/70 px-3 py-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-400/90" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-amber-300/90" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-300/90" />
+                      <span className="ml-3 text-[11px] uppercase tracking-[0.08em] text-white/65">{SLIDES[activeSlide].title}</span>
+                    </div>
+                    <div className="relative h-[460px] overflow-hidden bg-black/40">
+                      {SLIDES.map((slide, index) => (
+                        <img
+                          key={slide.imageUrl}
+                          src={slide.imageUrl}
+                          alt={slide.title}
+                          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${index === activeSlide ? "opacity-100" : "opacity-0"}`}
+                          loading={index === 0 ? "eager" : "lazy"}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={goPrev}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/35 text-[#11396f] hover:bg-white/55"
+                      aria-label="Previous slide"
+                    >
+                      <ChevronLeft size={17} />
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {SLIDES.map((_, idx) => (
+                        <button
+                          key={`indicator-${idx}`}
+                          type="button"
+                          onClick={() => setActiveSlide(idx)}
+                          className={`h-1.5 rounded-full transition-all ${idx === activeSlide ? "w-10 bg-white" : "w-2.5 bg-white/45 hover:bg-white/70"}`}
+                          aria-label={`Go to slide ${idx + 1}`}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={goNext}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/35 text-[#11396f] hover:bg-white/55"
+                      aria-label="Next slide"
+                    >
+                      <ChevronRight size={17} />
                     </button>
                   </div>
                 </div>
-
-                {authMode === "signup" && (
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="password-again" className="text-[10px] text-gray-400">
-                      Password Again
-                    </Label>
-                    <Input
-                      id="password-again"
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="********"
-                      className="h-9 rounded-md border-white/10 bg-[#111217] text-[12px] text-gray-100 placeholder:text-gray-500"
-                    />
-                  </div>
-                )}
-
-                {error && <p className="text-[10px] text-rose-300">{error}</p>}
-                {info && <p className="text-[10px] text-emerald-300">{info}</p>}
-
-                <Button
-                  onClick={submit}
-                  disabled={loading}
-                  className="mt-1 h-9 rounded-md bg-[#ff6a00] text-[12px] font-semibold text-white hover:bg-[#ff7f24] disabled:opacity-60"
-                >
-                  {loading ? "Please wait..." : authMode === "signup" ? "Sign Up ->" : "Log In ->"}
-                </Button>
               </div>
-
-              <p className="mt-6 text-center text-[10px] text-gray-500">
-                {authMode === "signup" ? (
-                  <>
-                    Already have an account?{" "}
-                    <button type="button" onClick={() => setAuthMode("login")} className="text-gray-300 hover:text-white">
-                      Log In
-                    </button>{" "}
-                    | Legal
-                  </>
-                ) : (
-                  <>
-                    <button type="button" onClick={handleForgotPassword} className="text-gray-300 hover:text-white">
-                      Forgot Password
-                    </button>{" "}
-                    |{" "}
-                    <button type="button" onClick={() => setAuthMode("signup")} className="text-gray-300 hover:text-white">
-                      Sign Up
-                    </button>{" "}
-                    | Legal
-                  </>
-                )}
-              </p>
             </div>
           </div>
         </div>

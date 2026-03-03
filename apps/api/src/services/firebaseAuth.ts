@@ -1,5 +1,6 @@
 import { getApps, initializeApp, applicationDefault, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import fs from 'fs';
 
 export type AuthUserContext = {
     uid: string;
@@ -7,6 +8,16 @@ export type AuthUserContext = {
 };
 
 function parseServiceAccountFromEnv(): Record<string, unknown> | null {
+    const jsonPath = (process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim();
+    if (jsonPath) {
+        try {
+            const fromFile = fs.readFileSync(jsonPath, 'utf8');
+            return JSON.parse(fromFile) as Record<string, unknown>;
+        } catch (error) {
+            console.warn('[Auth] Invalid FIREBASE_SERVICE_ACCOUNT_PATH value', error);
+        }
+    }
+
     const rawJson = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
     if (rawJson) {
         try {
