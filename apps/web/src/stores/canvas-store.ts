@@ -271,7 +271,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             doc: {
                 ...doc,
                 boards: doc.boards.map(b =>
-                    b.boardId === boardId ? { ...b, x, y } : b
+                    (b.boardId === boardId || b.screenId === boardId) ? { ...b, x, y } : b
                 ),
             },
         });

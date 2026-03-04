@@ -25,6 +25,7 @@ import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { CanvasProfileMenu } from './CanvasProfileMenu';
+import { dispatchClearSelection } from '../../utils/editMessaging';
 
 // Define custom node types
 const nodeTypes = {
@@ -393,8 +394,23 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const handleNodesChange = useCallback(
         (changes: NodeChange[]) => {
             onNodesChange(changes);
+            const completedPositionChanges = changes.filter(
+                (change): change is NodeChange & { type: 'position'; id: string; position: { x: number; y: number } } =>
+                    change.type === 'position'
+                    && Boolean((change as any).position)
+                    && (change as any).dragging === false
+            );
+            if (completedPositionChanges.length === 0) return;
+
+            const canvasState = useCanvasStore.getState();
+            const positionMap = new Map(completedPositionChanges.map((change) => [change.id, change.position]));
+            const nextBoards = canvasState.doc.boards.map((board) => {
+                const nextPos = positionMap.get(board.screenId) || positionMap.get(board.boardId);
+                return nextPos ? { ...board, x: nextPos.x, y: nextPos.y } : board;
+            });
+            setBoards(nextBoards);
         },
-        [onNodesChange]
+        [onNodesChange, setBoards]
     );
 
     // Sync React Flow selection to store
@@ -408,7 +424,11 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
 
     const onPaneClick = useCallback(() => {
         selectNodes([]);
-    }, [selectNodes]);
+        if (isEditMode && editScreenId) {
+            dispatchClearSelection(editScreenId);
+            useEditStore.getState().setSelected(null);
+        }
+    }, [editScreenId, isEditMode, selectNodes]);
 
     const onMoveEnd = useCallback((_: MouseEvent | TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => {
         const currentDoc = useCanvasStore.getState().doc;
@@ -639,6 +659,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 if (!snapshot) return;
                 useDesignStore.getState().setSpec(snapshot.spec as any);
                 useCanvasStore.getState().setDoc(snapshot.doc);
+                useCanvasStore.getState().triggerExternalUpdate();
                 event.preventDefault();
                 return;
             }
@@ -649,6 +670,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 if (!snapshot) return;
                 useDesignStore.getState().setSpec(snapshot.spec as any);
                 useCanvasStore.getState().setDoc(snapshot.doc);
+                useCanvasStore.getState().triggerExternalUpdate();
                 event.preventDefault();
                 return;
             }

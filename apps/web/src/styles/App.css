@@ -147,8 +147,8 @@
 }
 
 .edit-workspace-editor-pane {
-    flex: 0 0 320px;
-    max-width: 320px;
+    flex: 0 0 480px;
+    max-width: 480px;
     min-width: 0;
     height: 100%;
     min-height: 0;
@@ -175,11 +175,8 @@
 
 .edit-ai-composer {
     pointer-events: auto;
-    border-radius: 16px;
-    border: 1px solid var(--ui-border);
-    background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+    /* backdrop-filter: blur(12px);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32); */
     padding: 10px;
     display: flex;
     flex-direction: column;
@@ -188,7 +185,11 @@
 
 .edit-ai-context-row {
     min-height: 28px;
+    width: fit-content;
+    border-radius: 16px;
     display: flex;
+    border: 1px solid var(--ui-border);
+    background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent);
     align-items: center;
 }
 
@@ -214,6 +215,7 @@
 }
 
 .edit-ai-selected-empty {
+    padding: 0 12px;
     font-size: 11px;
     color: var(--ui-text-subtle);
 }
@@ -312,8 +314,8 @@
     }
 
     .edit-workspace-editor-pane {
-        flex-basis: 300px;
-        max-width: 300px;
+        flex-basis: 420px;
+        max-width: 420px;
     }
 
     .edit-workspace-editor-pane .edit-panel,

@@ -39,6 +39,8 @@ export interface SelectedElementInfo {
         justifyContent?: string;
         alignItems?: string;
         gap?: string;
+        parentDisplay?: string;
+        parentPosition?: string;
     };
     rect: { x: number; y: number; width: number; height: number };
     elementType: 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';

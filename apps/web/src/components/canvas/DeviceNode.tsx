@@ -340,6 +340,8 @@ function injectEditorScript(html: string, screenId: string) {
   function buildInfo(el) {
     const uid = ensureUid(el);
     const cs = window.getComputedStyle(el);
+    const parent = el.parentElement;
+    const parentCs = parent ? window.getComputedStyle(parent) : null;
     const textValue = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? (el.value || '') : (el.textContent || '');
     return {
       uid,
@@ -384,6 +386,8 @@ function injectEditorScript(html: string, screenId: string) {
         justifyContent: cs.justifyContent,
         alignItems: cs.alignItems,
         gap: cs.gap,
+        parentDisplay: parentCs?.display || '',
+        parentPosition: parentCs?.position || '',
       },
       rect: {
         x: el.getBoundingClientRect().x,
@@ -441,7 +445,11 @@ function injectEditorScript(html: string, screenId: string) {
       return;
     }
     const target = getEditable(event.target);
-    if (!target) return;
+    if (!target) {
+      clearSelection();
+      window.parent.postMessage({ type: 'editor/clear_selection', screenId: SCREEN_ID }, '*');
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     selectElement(target);

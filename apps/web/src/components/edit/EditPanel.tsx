@@ -8,6 +8,8 @@ import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectPare
 import { getPreferredTextModel } from '../../constants/designModels';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
+type PositionOffsets = { top: string; right: string; bottom: string; left: string };
+type PositionUnit = 'px' | '%';
 type ElementType = 'text' | 'button' | 'image' | 'container' | 'input' | 'icon' | 'badge';
 type RGB = { r: number; g: number; b: number };
 type RGBA = { r: number; g: number; b: number; a: number };
@@ -33,7 +35,7 @@ const GAP_CLASSES = ['gap-0', 'gap-1', 'gap-2', 'gap-3', 'gap-4', 'gap-6', 'gap-
 const JUSTIFY_CLASSES = ['justify-start', 'justify-center', 'justify-end', 'justify-between', 'justify-around', 'justify-evenly'];
 const ALIGN_CLASSES = ['items-start', 'items-center', 'items-end', 'items-stretch'];
 const FLEX_DIR_CLASSES = ['flex-row', 'flex-col', 'flex-row-reverse', 'flex-col-reverse'];
-const DISPLAY_CLASSES = ['flex', 'grid'];
+const DISPLAY_CLASSES = ['flex', 'grid', 'inline-flex', 'inline-grid'];
 const MATERIAL_ICON_FALLBACK_OPTIONS = [
     'home', 'search', 'settings', 'person', 'favorite', 'star', 'menu', 'close', 'check',
     'add', 'remove', 'edit', 'delete', 'arrow_back', 'arrow_forward', 'expand_more',
@@ -55,6 +57,24 @@ function toPxValue(value?: string) {
     if (!value) return '';
     const match = value.match(/-?\d+(\.\d+)?/);
     return match ? match[0] : '';
+}
+
+function normalizeNumericInput(value?: string): string {
+    if (!value) return '';
+    const trimmed = String(value).trim();
+    if (!trimmed) return '';
+    if (trimmed.toLowerCase() === 'auto') return 'auto';
+    const match = trimmed.match(/-?\d+(\.\d+)?/);
+    return match ? match[0] : '';
+}
+
+function parsePositionValue(value?: string): { value: string; unit: PositionUnit | null } {
+    if (!value) return { value: '', unit: null };
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) return { value: '', unit: null };
+    if (trimmed === 'auto') return { value: 'auto', unit: null };
+    if (trimmed.endsWith('%')) return { value: normalizeNumericInput(trimmed), unit: '%' };
+    return { value: normalizeNumericInput(trimmed), unit: 'px' };
 }
 
 function parsePadding(value?: string): PaddingValues {
@@ -171,6 +191,7 @@ function ScrubNumberInput({
     min,
     max,
     placeholder,
+    disabled = false,
 }: {
     value: string;
     onChangeValue: (next: string) => void;
@@ -178,6 +199,7 @@ function ScrubNumberInput({
     min?: number;
     max?: number;
     placeholder?: string;
+    disabled?: boolean;
 }) {
     return (
         <input
@@ -187,6 +209,7 @@ function ScrubNumberInput({
             step={step}
             min={min}
             max={max}
+            disabled={disabled}
             className={inputBase}
             placeholder={placeholder}
         />
@@ -407,8 +430,8 @@ export function EditPanel() {
     const [heightMode, setHeightMode] = useState<'fixed' | 'auto' | 'hug'>('fixed');
     const [rotate, setRotate] = useState('0');
     const [positionType, setPositionType] = useState('static');
-    const [posX, setPosX] = useState('');
-    const [posY, setPosY] = useState('');
+    const [positionUnit, setPositionUnit] = useState<PositionUnit>('px');
+    const [positionOffsets, setPositionOffsets] = useState<PositionOffsets>({ top: '', right: '', bottom: '', left: '' });
     const [expandPadding, setExpandPadding] = useState(false);
     const [expandMargin, setExpandMargin] = useState(false);
     const [flexDir, setFlexDir] = useState('flex-row');
@@ -473,6 +496,15 @@ export function EditPanel() {
     const showColor = elementType !== 'image';
     const showTextFlexAlign = elementType === 'text' || elementType === 'badge' || elementType === 'button';
     const showIconPicker = elementType === 'icon';
+    const selectedDisplay = (selected?.computedStyle.display || '').toLowerCase();
+    const disableElementAlign = positionType === 'absolute' || positionType === 'fixed' || selectedDisplay === 'inline';
+    const parentDisplay = (selected?.computedStyle.parentDisplay || '').toLowerCase();
+    const parentSupportsSelfAlignment = parentDisplay
+        ? (parentDisplay.includes('flex') || parentDisplay.includes('grid'))
+        : (display === 'flex' || display === 'grid');
+    const disableTextFlexAlign = !parentSupportsSelfAlignment;
+    const alignSelfStartValue = parentDisplay.includes('grid') ? 'start' : 'flex-start';
+    const alignSelfEndValue = parentDisplay.includes('grid') ? 'end' : 'flex-end';
     const filteredIcons = useMemo(() => {
         const query = iconQuery.trim().toLowerCase();
         if (!query) return allIconOptions;
@@ -571,6 +603,12 @@ export function EditPanel() {
                 }
                 return;
             }
+            if (event.data.type === 'editor/clear_selection') {
+                const incomingScreenId = event.data.screenId as string | undefined;
+                if (!incomingScreenId || incomingScreenId !== screenId) return;
+                setSelected(null);
+                return;
+            }
             if (event.data.type !== 'editor/select') return;
             const incomingScreenId = event.data.screenId as string | undefined;
             if (!incomingScreenId) return;
@@ -615,11 +653,26 @@ export function EditPanel() {
         setLinkHref(selected.attributes?.href || '');
         setIconQuery((selected.textContent || '').trim());
         setShowIconResults(false);
-        setDisplay(selected.computedStyle.display === 'flex' ? 'flex' : selected.computedStyle.display === 'grid' ? 'grid' : 'block');
+        const resolvedDisplay = (selected.computedStyle.display || '').toLowerCase();
+        setDisplay(resolvedDisplay.includes('grid') ? 'grid' : resolvedDisplay.includes('flex') ? 'flex' : 'block');
         setZIndex(toPxValue(selected.inlineStyle?.['z-index'] || selected.computedStyle.zIndex || ''));
-        setPositionType((selected.inlineStyle?.position || selected.computedStyle.position || 'static').toLowerCase());
-        setPosX(toPxValue(selected.inlineStyle?.left || ''));
-        setPosY(toPxValue(selected.inlineStyle?.top || ''));
+        const resolvedPositionType = (selected.inlineStyle?.position || selected.computedStyle.position || 'static').toLowerCase();
+        setPositionType(resolvedPositionType);
+        const rawTop = selected.inlineStyle?.top || '';
+        const rawRight = selected.inlineStyle?.right || '';
+        const rawBottom = selected.inlineStyle?.bottom || '';
+        const rawLeft = selected.inlineStyle?.left || '';
+        const parsedTop = parsePositionValue(rawTop);
+        const parsedRight = parsePositionValue(rawRight);
+        const parsedBottom = parsePositionValue(rawBottom);
+        const parsedLeft = parsePositionValue(rawLeft);
+        setPositionOffsets({
+            top: parsedTop.value,
+            right: parsedRight.value,
+            bottom: parsedBottom.value,
+            left: parsedLeft.value,
+        });
+        setPositionUnit(parsedTop.unit || parsedRight.unit || parsedBottom.unit || parsedLeft.unit || 'px');
         const transformValue = selected.inlineStyle?.transform || '';
         const rotateMatch = transformValue.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/i);
         setRotate(rotateMatch?.[1] || '0');
@@ -706,15 +759,64 @@ export function EditPanel() {
         patchStyle({ transform: normalized ? `rotate(${normalized}deg)` : '' });
     };
 
-    const patchPosition = (nextPosition: string, nextX: string, nextY: string) => {
+    const resolveOffsetStyleValue = (rawValue: string, unit: PositionUnit): string => {
+        const normalized = normalizeNumericInput(rawValue);
+        if (!normalized) return '';
+        if (normalized === 'auto') return 'auto';
+        return `${normalized}${unit}`;
+    };
+
+    const supportsOffsetControls = positionType !== 'static';
+
+    const applyPositionConfig = (nextPosition: string, nextOffsets: PositionOffsets, nextUnit: PositionUnit) => {
+        let resolvedOffsets = { ...nextOffsets };
+
+        if (nextPosition === 'static') {
+            resolvedOffsets = { top: '', right: '', bottom: '', left: '' };
+        }
+
+        if (nextPosition === 'absolute' || nextPosition === 'fixed') {
+            const hasAnyOffset = Boolean(
+                normalizeNumericInput(resolvedOffsets.top)
+                || normalizeNumericInput(resolvedOffsets.right)
+                || normalizeNumericInput(resolvedOffsets.bottom)
+                || normalizeNumericInput(resolvedOffsets.left)
+            );
+            if (!hasAnyOffset) {
+                resolvedOffsets = { ...resolvedOffsets, top: '0', left: '0' };
+            }
+        }
+
+        const offsetStyles = nextPosition === 'static'
+            ? { top: '', right: '', bottom: '', left: '' }
+            : {
+                top: resolveOffsetStyleValue(resolvedOffsets.top, nextUnit),
+                right: resolveOffsetStyleValue(resolvedOffsets.right, nextUnit),
+                bottom: resolveOffsetStyleValue(resolvedOffsets.bottom, nextUnit),
+                left: resolveOffsetStyleValue(resolvedOffsets.left, nextUnit),
+            };
+
         setPositionType(nextPosition);
-        setPosX(nextX);
-        setPosY(nextY);
+        setPositionOffsets(resolvedOffsets);
+        setPositionUnit(nextUnit);
         patchStyle({
             position: nextPosition,
-            left: nextPosition === 'static' || !nextX ? '' : `${nextX}px`,
-            top: nextPosition === 'static' || !nextY ? '' : `${nextY}px`,
+            ...offsetStyles,
         });
+    };
+
+    const patchPositionType = (nextPosition: string) => {
+        applyPositionConfig(nextPosition, positionOffsets, positionUnit);
+    };
+
+    const patchPositionOffset = (side: keyof PositionOffsets, value: string) => {
+        const normalized = normalizeNumericInput(value);
+        const nextOffsets = { ...positionOffsets, [side]: normalized };
+        applyPositionConfig(positionType, nextOffsets, positionUnit);
+    };
+
+    const patchPositionUnit = (nextUnit: PositionUnit) => {
+        applyPositionConfig(positionType, positionOffsets, nextUnit);
     };
 
     const applyElementAlign = (next: 'left' | 'center' | 'right') => {
@@ -1200,33 +1302,72 @@ RULES:
                                 <div className="text-xs font-semibold text-[var(--ui-text-muted)]">Position</div>
                                 <div className="space-y-2">
                                     <div className="grid grid-cols-[72px_1fr] items-center gap-3">
-                                        <div className="text-xs text-[var(--ui-text-muted)]">X / Y</div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <ScrubNumberInput
-                                                value={posX}
-                                                onChangeValue={(next) => patchPosition(positionType, next, posY)}
-                                                placeholder="X"
-                                            />
-                                            <ScrubNumberInput
-                                                value={posY}
-                                                onChangeValue={(next) => patchPosition(positionType, posX, next)}
-                                                placeholder="Y"
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-[72px_1fr] items-center gap-3">
                                         <div className="text-xs text-[var(--ui-text-muted)]">Type</div>
                                         <select
                                             value={positionType}
-                                            onChange={(e) => patchPosition(e.target.value, posX, posY)}
+                                            onChange={(e) => patchPositionType(e.target.value)}
                                             className={selectBase}
                                         >
                                             <option className="bg-[var(--ui-popover)]" value="static">Static</option>
                                             <option className="bg-[var(--ui-popover)]" value="relative">Relative</option>
                                             <option className="bg-[var(--ui-popover)]" value="absolute">Absolute</option>
                                             <option className="bg-[var(--ui-popover)]" value="fixed">Fixed</option>
+                                            <option className="bg-[var(--ui-popover)]" value="sticky">Sticky</option>
                                         </select>
                                     </div>
+                                    <div className="grid grid-cols-[72px_1fr] items-center gap-3">
+                                        <div className="text-xs text-[var(--ui-text-muted)]">Unit</div>
+                                        <select
+                                            value={positionUnit}
+                                            onChange={(e) => patchPositionUnit(e.target.value as PositionUnit)}
+                                            className={selectBase}
+                                            disabled={!supportsOffsetControls}
+                                        >
+                                            <option className="bg-[var(--ui-popover)]" value="px">px</option>
+                                            <option className="bg-[var(--ui-popover)]" value="%">%</option>
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-[72px_1fr] items-start gap-3">
+                                        <div className="pt-2 text-xs text-[var(--ui-text-muted)]">Offsets</div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                                                <div key={side} className="grid grid-cols-[48px_1fr] items-center gap-2">
+                                                    <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">{side}</div>
+                                                    <ScrubNumberInput
+                                                        value={positionOffsets[side]}
+                                                        onChangeValue={(next) => patchPositionOffset(side, next)}
+                                                        placeholder={supportsOffsetControls ? `0${positionUnit}` : 'N/A'}
+                                                        min={-9999}
+                                                        max={9999}
+                                                        disabled={!supportsOffsetControls}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {!supportsOffsetControls && (
+                                        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-[11px] text-[var(--ui-text-subtle)]">
+                                            Static elements ignore top/right/bottom/left offsets. Switch to relative, absolute, fixed, or sticky.
+                                        </div>
+                                    )}
+                                    {positionType === 'sticky' && !(
+                                        normalizeNumericInput(positionOffsets.top)
+                                        || normalizeNumericInput(positionOffsets.bottom)
+                                    ) && (
+                                        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-[11px] text-[var(--ui-text-subtle)]">
+                                            Sticky usually needs `top` or `bottom` to activate.
+                                        </div>
+                                    )}
+                                    {(positionType === 'absolute' || positionType === 'fixed') && !(
+                                        normalizeNumericInput(positionOffsets.top)
+                                        || normalizeNumericInput(positionOffsets.right)
+                                        || normalizeNumericInput(positionOffsets.bottom)
+                                        || normalizeNumericInput(positionOffsets.left)
+                                    ) && (
+                                        <div className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                                            Absolute/fixed elements need at least one side offset. Defaulting to `top: 0` and `left: 0`.
+                                        </div>
+                                    )}
                                 </div>
                             </section>
 
@@ -1237,7 +1378,11 @@ RULES:
                                         value={spacingSummary(padding)}
                                         onChangeValue={(next) => {
                                             const clean = toPxValue(next);
-                                            if (!clean) return;
+                                            if (!clean) {
+                                                setPadding({ top: '', right: '', bottom: '', left: '' });
+                                                patchStyle({ padding: '' });
+                                                return;
+                                            }
                                             setPadding({ top: clean, right: clean, bottom: clean, left: clean });
                                             patchStyle({ padding: `${clean}px` });
                                         }}
@@ -1254,15 +1399,17 @@ RULES:
                                 {expandPadding && (
                                     <div className="ml-[75px] grid grid-cols-2 gap-2">
                                         {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                            <ScrubNumberInput
-                                                key={side}
-                                                value={toPxValue(padding[side])}
-                                                onChangeValue={(next) => {
-                                                    setPadding((prev) => ({ ...prev, [side]: next }));
-                                                    patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
-                                                }}
-                                                placeholder={side}
-                                            />
+                                            <div key={side} className="grid grid-cols-[48px_1fr] items-center gap-2">
+                                                <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">{side}</div>
+                                                <ScrubNumberInput
+                                                    value={toPxValue(padding[side])}
+                                                    onChangeValue={(next) => {
+                                                        setPadding((prev) => ({ ...prev, [side]: next }));
+                                                        patchStyle({ [`padding-${side}`]: next ? `${next}px` : '' });
+                                                    }}
+                                                    placeholder={`${side} px`}
+                                                />
+                                            </div>
                                         ))}
                                     </div>
                                 )}
@@ -1275,7 +1422,11 @@ RULES:
                                         value={spacingSummary(margin)}
                                         onChangeValue={(next) => {
                                             const clean = toPxValue(next);
-                                            if (!clean) return;
+                                            if (!clean) {
+                                                setMargin({ top: '', right: '', bottom: '', left: '' });
+                                                patchStyle({ margin: '' });
+                                                return;
+                                            }
                                             setMargin({ top: clean, right: clean, bottom: clean, left: clean });
                                             patchStyle({ margin: `${clean}px` });
                                         }}
@@ -1292,15 +1443,17 @@ RULES:
                                 {expandMargin && (
                                     <div className="ml-[75px] grid grid-cols-2 gap-2">
                                         {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                                            <ScrubNumberInput
-                                                key={side}
-                                                value={toPxValue(margin[side])}
-                                                onChangeValue={(next) => {
-                                                    setMargin((prev) => ({ ...prev, [side]: next }));
-                                                    patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
-                                                }}
-                                                placeholder={side}
-                                            />
+                                            <div key={side} className="grid grid-cols-[48px_1fr] items-center gap-2">
+                                                <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">{side}</div>
+                                                <ScrubNumberInput
+                                                    value={toPxValue(margin[side])}
+                                                    onChangeValue={(next) => {
+                                                        setMargin((prev) => ({ ...prev, [side]: next }));
+                                                        patchStyle({ [`margin-${side}`]: next ? `${next}px` : '' });
+                                                    }}
+                                                    placeholder={`${side} px`}
+                                                />
+                                            </div>
                                         ))}
                                     </div>
                                 )}
@@ -1549,23 +1702,31 @@ RULES:
                                 <div className="grid grid-cols-3 gap-2">
                                     <button
                                         onClick={() => applyElementAlign('left')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                        disabled={disableElementAlign}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Left
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('center')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                        disabled={disableElementAlign}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Center
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('right')}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                        disabled={disableElementAlign}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Right
                                     </button>
                                 </div>
+                                {disableElementAlign && (
+                                    <div className="text-[11px] text-[var(--ui-text-subtle)]">
+                                        Element align uses auto margins and is disabled for inline or absolute/fixed positioned elements.
+                                    </div>
+                                )}
                             </section>
 
                             <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 space-y-2">
@@ -1601,20 +1762,26 @@ RULES:
                                         +
                                     </button>
                                 </div>
+                                <div className="text-[11px] text-[var(--ui-text-subtle)]">
+                                    If the element is static, setting z-index auto-switches it to `position: relative`.
+                                </div>
                             </section>
 
                             <section className="pb-4 border-b border-[var(--ui-border)] last:border-b-0 grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Width</div>
-                                    <ScrubNumberInput value={width} onChangeValue={(next) => { setWidth(next); patchStyle({ width: next ? `${next}px` : '' }); }} min={0} />
+                                    <ScrubNumberInput value={width} onChangeValue={(next) => { setWidth(next); setWidthMode('fixed'); patchStyle({ width: next ? `${next}px` : '' }); }} min={0} />
                                 </div>
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Height</div>
-                                    <ScrubNumberInput value={height} onChangeValue={(next) => { setHeight(next); patchStyle({ height: next ? `${next}px` : '' }); }} min={0} />
+                                    <ScrubNumberInput value={height} onChangeValue={(next) => { setHeight(next); setHeightMode('fixed'); patchStyle({ height: next ? `${next}px` : '' }); }} min={0} />
                                 </div>
                                 <div className="space-y-2">
                                     <div className="text-xs uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Radius</div>
                                     <ScrubNumberInput value={radius} onChangeValue={(next) => { setRadius(next); patchStyle({ 'border-radius': next ? `${next}px` : '' }); }} min={0} />
+                                </div>
+                                <div className="col-span-2 text-[11px] text-[var(--ui-text-subtle)]">
+                                    Editing Width/Height here automatically switches Breakpoint mode to Fixed.
                                 </div>
                             </section>
 
@@ -1656,41 +1823,54 @@ RULES:
                                             <div className="grid grid-cols-4 gap-2">
                                                 <button
                                                     onClick={() => {
+                                                        if (disableTextFlexAlign) return;
                                                         setTextFlexAlign('start');
-                                                        patchStyle({ 'align-self': 'flex-start' });
+                                                        patchStyle({ 'align-self': alignSelfStartValue });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                                    disabled={disableTextFlexAlign}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Start
                                                 </button>
                                                 <button
                                                     onClick={() => {
+                                                        if (disableTextFlexAlign) return;
                                                         setTextFlexAlign('center');
                                                         patchStyle({ 'align-self': 'center' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                                    disabled={disableTextFlexAlign}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Center
                                                 </button>
                                                 <button
                                                     onClick={() => {
+                                                        if (disableTextFlexAlign) return;
                                                         setTextFlexAlign('end');
-                                                        patchStyle({ 'align-self': 'flex-end' });
+                                                        patchStyle({ 'align-self': alignSelfEndValue });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                                    disabled={disableTextFlexAlign}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     End
                                                 </button>
                                                 <button
                                                     onClick={() => {
+                                                        if (disableTextFlexAlign) return;
                                                         setTextFlexAlign('stretch');
                                                         patchStyle({ 'align-self': 'stretch' });
                                                     }}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                                    disabled={disableTextFlexAlign}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Stretch
                                                 </button>
                                             </div>
+                                            {disableTextFlexAlign && (
+                                                <div className="text-[11px] text-[var(--ui-text-subtle)]">
+                                                    `align-self` works when the parent uses flex/grid layout.
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </section>

@@ -37,3 +37,8 @@ export function dispatchDeleteSelected(screenId: string) {
     const iframe = getIframeByScreenId(screenId);
     iframe?.contentWindow?.postMessage({ type: 'editor/delete_selected', screenId }, '*');
 }
+
+export function dispatchClearSelection(screenId: string) {
+    const iframe = getIframeByScreenId(screenId);
+    iframe?.contentWindow?.postMessage({ type: 'editor/clear_selection', screenId }, '*');
+}

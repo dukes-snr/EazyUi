@@ -11,7 +11,7 @@ import {
 import { useReactFlow, useViewport } from '@xyflow/react';
 
 export function CanvasToolbar() {
-    const { activeTool, setActiveTool, setDoc } = useCanvasStore();
+    const { activeTool, setActiveTool, setDoc, triggerExternalUpdate } = useCanvasStore();
     const { setSpec } = useDesignStore();
     const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -22,6 +22,7 @@ export function CanvasToolbar() {
         if (!snapshot) return;
         setSpec(snapshot.spec as any);
         setDoc(snapshot.doc);
+        triggerExternalUpdate();
     };
 
     const handleRedo = () => {
@@ -29,6 +30,7 @@ export function CanvasToolbar() {
         if (!snapshot) return;
         setSpec(snapshot.spec as any);
         setDoc(snapshot.doc);
+        triggerExternalUpdate();
     };
 
     return (
