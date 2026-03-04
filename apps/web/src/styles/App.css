@@ -471,6 +471,78 @@
 }
 
 /* ============================================================================
+ * Toast System (goey-toast)
+ * ============================================================================ */
+
+.eazy-goey-wrapper {
+    border-radius: 16px;
+}
+
+.eazy-goey-content {
+    font-family: 'Geist', 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.eazy-goey-header {
+    align-items: center;
+}
+
+.eazy-goey-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.eazy-goey-icon {
+    color: inherit;
+}
+
+.eazy-goey-description {
+    font-size: 11px;
+    line-height: 1.45;
+    opacity: 0.9;
+}
+
+.eazy-goey-action-wrap {
+    margin-top: 6px;
+}
+
+.eazy-goey-action-btn {
+    border-radius: 10px;
+    border: 1px solid var(--ui-border);
+    background: color-mix(in srgb, var(--ui-surface-1) 78%, transparent);
+    color: var(--ui-text);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+.eazy-goey-action-btn:hover {
+    background: color-mix(in srgb, var(--ui-surface-1) 92%, transparent);
+}
+
+.eazy-goey-spinner {
+    animation: eazy-goey-spin 0.8s linear infinite;
+}
+
+@keyframes eazy-goey-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.eazy-help-fab {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1200;
+    pointer-events: auto;
+}
+
+/* ============================================================================
  * Chat Panel
  * ============================================================================ */
 

@@ -32,6 +32,14 @@
   --ui-canvas-profile-border: rgba(255, 255, 255, 0.12);
   --ui-canvas-profile-hover: rgba(255, 255, 255, 0.08);
 
+  /* Toast palette (goey-toast) */
+  --ui-toast-default-fill: #0f1621;
+  --ui-toast-info-fill: #10263d;
+  --ui-toast-success-fill: #0e2a1f;
+  --ui-toast-error-fill: #32131a;
+  --ui-toast-guide-fill: #1f1638;
+  --ui-toast-loading-fill: #141922;
+
   /* Backward-compatible aliases */
   --color-bg: var(--ui-bg);
   --color-surface: var(--ui-surface-1);
@@ -106,6 +114,14 @@
   --ui-canvas-profile-bg: var(--ui-surface-3);
   --ui-canvas-profile-border: rgba(15, 23, 42, 0.16);
   --ui-canvas-profile-hover: rgba(15, 23, 42, 0.07);
+
+  /* Toast palette (goey-toast) */
+  --ui-toast-default-fill: #f8fafc;
+  --ui-toast-info-fill: #eff6ff;
+  --ui-toast-success-fill: #ecfdf5;
+  --ui-toast-error-fill: #fff1f2;
+  --ui-toast-guide-fill: #f5f3ff;
+  --ui-toast-loading-fill: #f8fafc;
 
   --color-bg: var(--ui-bg);
   --color-surface: var(--ui-surface-1);

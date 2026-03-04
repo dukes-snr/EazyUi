@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { createElement } from 'react';
+import { Loader2 } from 'lucide-react';
+import { gooeyToast, type GooeyToastClassNames, type GooeyToastOptions } from 'goey-toast';
 import type { DesignModelProfile } from '../constants/designModels';
 
 export type ThemeMode = 'dark' | 'light';
@@ -91,6 +94,88 @@ function defaultToastDuration(kind: ToastKind): number {
     return 3800;
 }
 
+const LONG_LIVED_TOAST_MS = 8 * 60 * 60 * 1000;
+
+const GOEY_CLASSNAMES: GooeyToastClassNames = {
+    wrapper: 'eazy-goey-wrapper',
+    content: 'eazy-goey-content',
+    header: 'eazy-goey-header',
+    title: 'eazy-goey-title',
+    icon: 'eazy-goey-icon',
+    description: 'eazy-goey-description',
+    actionWrapper: 'eazy-goey-action-wrap',
+    actionButton: 'eazy-goey-action-btn',
+};
+
+function mapKindToGoeyType(kind: ToastKind): 'default' | 'success' | 'error' | 'warning' | 'info' {
+    if (kind === 'success') return 'success';
+    if (kind === 'error') return 'error';
+    if (kind === 'guide') return 'warning';
+    if (kind === 'loading') return 'info';
+    return 'info';
+}
+
+function readCssVar(name: string, fallback: string): string {
+    if (typeof window === 'undefined') return fallback;
+    const root = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return root || fallback;
+}
+
+function resolveToastFillColor(kind: ToastKind, theme: ThemeMode): string {
+    const fallbackByTheme: Record<ThemeMode, Record<ToastKind, string>> = {
+        dark: {
+            info: '#10263d',
+            success: '#0e2a1f',
+            error: '#32131a',
+            guide: '#1f1638',
+            loading: '#141922',
+        },
+        light: {
+            info: '#eff6ff',
+            success: '#ecfdf5',
+            error: '#fff1f2',
+            guide: '#f5f3ff',
+            loading: '#f8fafc',
+        },
+    };
+    if (kind === 'success') return readCssVar('--ui-toast-success-fill', fallbackByTheme[theme].success);
+    if (kind === 'error') return readCssVar('--ui-toast-error-fill', fallbackByTheme[theme].error);
+    if (kind === 'guide') return readCssVar('--ui-toast-guide-fill', fallbackByTheme[theme].guide);
+    if (kind === 'loading') return readCssVar('--ui-toast-loading-fill', fallbackByTheme[theme].loading);
+    if (kind === 'info') return readCssVar('--ui-toast-info-fill', fallbackByTheme[theme].info);
+    return readCssVar('--ui-toast-default-fill', theme === 'dark' ? '#0f1621' : '#f8fafc');
+}
+
+function buildGoeyOptions(input: {
+    id: string;
+    kind: ToastKind;
+    title: string;
+    message?: string;
+    durationMs: number;
+    theme: ThemeMode;
+    onDismiss: () => void;
+}): GooeyToastOptions {
+    const duration = input.durationMs <= 0 ? LONG_LIVED_TOAST_MS : input.durationMs;
+    const fillColor = resolveToastFillColor(input.kind, input.theme);
+    const options: GooeyToastOptions = {
+        id: input.id,
+        description: input.message,
+        classNames: GOEY_CLASSNAMES,
+        fillColor,
+        borderColor: 'transparent',
+        borderWidth: 0,
+        duration,
+        timing: { displayDuration: duration },
+        spring: true,
+        bounce: 0.34,
+        onDismiss: () => input.onDismiss(),
+    };
+    if (input.kind === 'loading') {
+        options.icon = createElement(Loader2, { size: 14, className: 'eazy-goey-spinner' });
+    }
+    return options;
+}
+
 let pendingConfirmationResolver: ((accepted: boolean) => void) | null = null;
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -127,32 +212,58 @@ export const useUiStore = create<UiState>((set, get) => ({
     },
     pushToast: ({ kind = 'info', title, message, durationMs }) => {
         const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const resolvedDuration = durationMs ?? defaultToastDuration(kind);
         const toast: ToastItem = {
             id,
             kind,
             title,
             message,
             createdAt: Date.now(),
-            durationMs: durationMs ?? defaultToastDuration(kind),
+            durationMs: resolvedDuration,
         };
-
         set((state) => ({ toasts: [...state.toasts, toast] }));
-        if (typeof window !== 'undefined' && toast.durationMs > 0) {
-            window.setTimeout(() => {
-                get().removeToast(id);
-            }, toast.durationMs);
-        }
+
+        const options = buildGoeyOptions({
+            id,
+            kind,
+            title,
+            message,
+            durationMs: resolvedDuration,
+            theme: get().theme,
+            onDismiss: () => set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) })),
+        });
+
+        const displayType = mapKindToGoeyType(kind);
+        if (displayType === 'success') gooeyToast.success(title, options);
+        else if (displayType === 'error') gooeyToast.error(title, options);
+        else if (displayType === 'warning') gooeyToast.warning(title, options);
+        else if (displayType === 'info') gooeyToast.info(title, options);
+        else gooeyToast(title, options);
+
         return id;
     },
     updateToast: (id, updates) => {
+        const existing = get().toasts.find((toast) => toast.id === id);
+        if (!existing) return;
+        const merged: ToastItem = { ...existing, ...updates };
         set((state) => ({
-            toasts: state.toasts.map((toast) => (toast.id === id ? { ...toast, ...updates } : toast)),
+            toasts: state.toasts.map((toast) => (toast.id === id ? merged : toast)),
         }));
+        gooeyToast.update(id, {
+            title: merged.title,
+            description: merged.message,
+            type: mapKindToGoeyType(merged.kind),
+            icon: merged.kind === 'loading' ? createElement(Loader2, { size: 14, className: 'eazy-goey-spinner' }) : null,
+        });
     },
     removeToast: (id) => {
+        gooeyToast.dismiss(id);
         set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) }));
     },
-    clearToasts: () => set({ toasts: [] }),
+    clearToasts: () => {
+        gooeyToast.dismiss();
+        set({ toasts: [] });
+    },
     requestConfirmation: (request) => {
         if (pendingConfirmationResolver) {
             pendingConfirmationResolver(false);
