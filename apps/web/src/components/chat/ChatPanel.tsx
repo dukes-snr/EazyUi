@@ -120,6 +120,206 @@ function stripUiTags(text: string): string {
     return text.replace(/\[(\/)?(h1|h2|h3|p|li|b|i)\]/gi, '');
 }
 
+type DesignTokenKey = keyof ProjectDesignSystem['tokens'];
+
+type DesignTokenColorPatch = {
+    token: DesignTokenKey;
+    from: string;
+    to: string;
+};
+
+function escapeRegExpLiteral(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeTokenColorValue(value: string | undefined): string {
+    return String(value || '').trim();
+}
+
+function areTokenColorsEquivalent(left: string, right: string): boolean {
+    return normalizeTokenColorValue(left).toLowerCase() === normalizeTokenColorValue(right).toLowerCase();
+}
+
+function buildDesignTokenColorPatches(
+    previous: ProjectDesignSystem | undefined,
+    next: ProjectDesignSystem
+): DesignTokenColorPatch[] {
+    if (!previous?.tokens || !next?.tokens) return [];
+    const keys = Object.keys(next.tokens) as DesignTokenKey[];
+    return keys.reduce<DesignTokenColorPatch[]>((acc, token) => {
+        const from = normalizeTokenColorValue(previous.tokens[token]);
+        const to = normalizeTokenColorValue(next.tokens[token]);
+        if (!from || !to || areTokenColorsEquivalent(from, to)) return acc;
+        acc.push({ token, from, to });
+        return acc;
+    }, []);
+}
+
+function applyDesignTokenColorPatchesToHtml(
+    html: string,
+    patches: DesignTokenColorPatch[]
+): { html: string; changed: boolean } {
+    if (!patches.length) return { html, changed: false };
+    let nextHtml = String(html || '');
+    let changed = false;
+    const replacementTable: Array<{ placeholder: string; value: string }> = [];
+
+    patches.forEach((patch, index) => {
+        const placeholder = `__EAZYUI_TOKEN_PATCH_${index}__`;
+        const pattern = new RegExp(escapeRegExpLiteral(patch.from), 'gi');
+        nextHtml = nextHtml.replace(pattern, () => {
+            changed = true;
+            return placeholder;
+        });
+        replacementTable.push({ placeholder, value: patch.to });
+    });
+
+    replacementTable.forEach((entry) => {
+        nextHtml = nextHtml.split(entry.placeholder).join(entry.value);
+    });
+
+    return { html: nextHtml, changed };
+}
+
+const DESIGN_FONT_STACK_PRESETS = [
+    'Plus Jakarta Sans, sans-serif',
+    'Inter, sans-serif',
+    'Manrope, sans-serif',
+    'DM Sans, sans-serif',
+    'Sora, sans-serif',
+    'Space Grotesk, sans-serif',
+    'Urbanist, sans-serif',
+    'Outfit, sans-serif',
+    'Poppins, sans-serif',
+    'Montserrat, sans-serif',
+    'Nunito Sans, sans-serif',
+    'Lato, sans-serif',
+    'Open Sans, sans-serif',
+    'Work Sans, sans-serif',
+    'Rubik, sans-serif',
+    'Archivo, sans-serif',
+    'IBM Plex Sans, sans-serif',
+    'Public Sans, sans-serif',
+    'Noto Sans, sans-serif',
+    'Source Sans 3, sans-serif',
+    'Raleway, sans-serif',
+    'Figtree, sans-serif',
+    'Onest, sans-serif',
+    'Kanit, sans-serif',
+    'Bricolage Grotesque, sans-serif',
+    'Syne, sans-serif',
+    'Merriweather, serif',
+    'Playfair Display, serif',
+    'Lora, serif',
+];
+
+const DESIGN_RADIUS_PRESETS = ['8px', '10px', '12px', '14px', '16px', '20px', '24px', '999px'];
+
+const GENERIC_FONT_FAMILIES = new Set([
+    'sans-serif',
+    'serif',
+    'monospace',
+    'cursive',
+    'fantasy',
+    'system-ui',
+    'ui-sans-serif',
+    'ui-serif',
+    'ui-monospace',
+    'emoji',
+    'math',
+    'fangsong',
+]);
+
+function normalizeFontStackValue(value: string | undefined): string {
+    return String(value || '')
+        .replace(/["'`]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function areFontStacksEquivalent(left: string | undefined, right: string | undefined): boolean {
+    return normalizeFontStackValue(left) === normalizeFontStackValue(right);
+}
+
+function extractPrimaryFontFamily(value: string | undefined): string {
+    const raw = String(value || '').split(',')[0] || '';
+    return raw.replace(/["'`]/g, '').trim();
+}
+
+function isGenericFontFamily(value: string): boolean {
+    return GENERIC_FONT_FAMILIES.has(value.trim().toLowerCase());
+}
+
+function buildGoogleFontStylesheetHref(fontStacks: string[]): string | null {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+
+    fontStacks.forEach((stack) => {
+        const primary = extractPrimaryFontFamily(stack);
+        if (!primary || isGenericFontFamily(primary)) return;
+        const normalized = primary.toLowerCase();
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+        unique.push(primary);
+    });
+
+    if (unique.length === 0) return null;
+
+    const families = unique
+        .map((family) => `family=${encodeURIComponent(family).replace(/%20/g, '+')}:wght@400;500;600;700;800`)
+        .join('&');
+    return `https://fonts.googleapis.com/css2?${families}&display=swap`;
+}
+
+function applyTypographyToScreenHtml(html: string, displayStack: string, bodyStack: string): { html: string; changed: boolean } {
+    let nextHtml = String(html || '');
+    let changed = false;
+
+    const displayPrimary = extractPrimaryFontFamily(displayStack);
+    const bodyPrimary = extractPrimaryFontFamily(bodyStack);
+
+    if (displayPrimary) {
+        const nextDisplayLine = `display: ["${displayPrimary}", "sans-serif"]`;
+        const updated = nextHtml.replace(/display\s*:\s*\[[^\]]*\]/i, () => {
+            changed = true;
+            return nextDisplayLine;
+        });
+        nextHtml = updated;
+    }
+
+    if (bodyPrimary) {
+        const nextSansLine = `sans: ["${bodyPrimary}", "sans-serif"]`;
+        const updated = nextHtml.replace(/\bsans\s*:\s*\[[^\]]*\]/i, () => {
+            changed = true;
+            return nextSansLine;
+        });
+        nextHtml = updated;
+    }
+
+    const fontsHref = buildGoogleFontStylesheetHref([displayStack, bodyStack]);
+    if (fontsHref) {
+        let linkReplaced = false;
+        nextHtml = nextHtml.replace(/<link\b[^>]*href=(["'])(https:\/\/fonts\.googleapis\.com\/css2\?[^"']+)\1[^>]*>/gi, (full, _quote: string, href: string) => {
+            const lowered = String(href).toLowerCase();
+            if (lowered.includes('material+symbols')) return full;
+            if (!lowered.includes('family=')) return full;
+            if (linkReplaced) return full;
+            linkReplaced = true;
+            if (href === fontsHref) return full;
+            changed = true;
+            return full.replace(href, fontsHref);
+        });
+
+        if (!linkReplaced && /<\/head>/i.test(nextHtml)) {
+            changed = true;
+            nextHtml = nextHtml.replace(/<\/head>/i, `    <link href="${fontsHref}" rel="stylesheet">\n</head>`);
+        }
+    }
+
+    return { html: nextHtml, changed };
+}
+
 function makePlannerTargetedGenerationPrompt(basePrompt: string, screenNames: string[], existingScreenNames: string[]): string {
     const targets = screenNames.map((name) => `- ${name}`).join('\n');
     const existing = existingScreenNames.length > 0
@@ -1413,6 +1613,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system'>('chat');
     const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
+    const [activeTokenEditor, setActiveTokenEditor] = useState<DesignTokenKey | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -1565,6 +1766,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!effective) return;
         applyProjectDesignSystem(effective);
         setDesignSystemDraft(cloneDesignSystem(effective));
+        const tokenKeys = Object.keys(effective.tokens || {}) as DesignTokenKey[];
+        setActiveTokenEditor(tokenKeys[0] || null);
         setIsDesignSystemEditing(true);
         setChatPanelView('design-system');
     };
@@ -1572,13 +1775,77 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const cancelDesignSystemEdit = () => {
         setIsDesignSystemEditing(false);
         setDesignSystemDraft(null);
+        setActiveTokenEditor(null);
     };
 
     const saveDesignSystemEdit = () => {
         if (!designSystemDraft) return;
-        applyProjectDesignSystem(designSystemDraft);
+        const currentSpec = useDesignStore.getState().spec;
+        const previousDesignSystem = currentSpec?.designSystem;
+        const tokenPatches = buildDesignTokenColorPatches(previousDesignSystem, designSystemDraft);
+        const typographyChanged = Boolean(previousDesignSystem?.typography) && (
+            !areFontStacksEquivalent(previousDesignSystem?.typography.displayFont, designSystemDraft.typography.displayFont)
+            || !areFontStacksEquivalent(previousDesignSystem?.typography.bodyFont, designSystemDraft.typography.bodyFont)
+        );
+        let patchedScreenCount = 0;
+        let patchedTypographyScreenCount = 0;
+
+        if (currentSpec) {
+            const patchedScreens = currentSpec.screens.map((screen) => {
+                let nextHtml = screen.html;
+                let screenChanged = false;
+
+                const colorResult = applyDesignTokenColorPatchesToHtml(nextHtml, tokenPatches);
+                nextHtml = colorResult.html;
+                screenChanged = screenChanged || colorResult.changed;
+
+                if (typographyChanged) {
+                    const typographyResult = applyTypographyToScreenHtml(
+                        nextHtml,
+                        designSystemDraft.typography.displayFont,
+                        designSystemDraft.typography.bodyFont
+                    );
+                    nextHtml = typographyResult.html;
+                    if (typographyResult.changed) {
+                        patchedTypographyScreenCount += 1;
+                        screenChanged = true;
+                    }
+                }
+
+                if (!screenChanged) return screen;
+                patchedScreenCount += 1;
+                return {
+                    ...screen,
+                    html: nextHtml,
+                };
+            });
+            useDesignStore.getState().setSpec({
+                ...currentSpec,
+                designSystem: designSystemDraft,
+                screens: patchedScreens,
+                updatedAt: new Date().toISOString(),
+            });
+        } else {
+            applyProjectDesignSystem(designSystemDraft);
+        }
+
         setIsDesignSystemEditing(false);
         setDesignSystemDraft(null);
+        setActiveTokenEditor(null);
+        if ((tokenPatches.length > 0 || typographyChanged) && patchedScreenCount > 0) {
+            const applied: string[] = [];
+            if (tokenPatches.length > 0) {
+                applied.push(`${tokenPatches.length} color token update${tokenPatches.length === 1 ? '' : 's'}`);
+            }
+            if (typographyChanged) {
+                applied.push(`typography updates on ${patchedTypographyScreenCount} screen${patchedTypographyScreenCount === 1 ? '' : 's'}`);
+            }
+            notifySuccess(
+                'Design system updated',
+                `Applied ${applied.join(' + ')} to ${patchedScreenCount} existing screen${patchedScreenCount === 1 ? '' : 's'} instantly.`
+            );
+            return;
+        }
         notifySuccess('Design system updated', 'Future screens will follow the updated design system.');
     };
 
@@ -1587,6 +1854,36 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             if (!current) return current;
             return updater(current);
         });
+    };
+
+    const updateDesignSystemTokenDraft = (tokenName: DesignTokenKey, value: string) => {
+        updateDesignSystemDraft((current) => ({
+            ...current,
+            tokens: {
+                ...current.tokens,
+                [tokenName]: value,
+            },
+        }));
+    };
+
+    const updateDesignSystemTypographyDraft = (field: 'displayFont' | 'bodyFont', value: string) => {
+        updateDesignSystemDraft((current) => ({
+            ...current,
+            typography: {
+                ...current.typography,
+                [field]: value,
+            },
+        }));
+    };
+
+    const updateDesignSystemRadiusDraft = (field: keyof ProjectDesignSystem['radius'], value: string) => {
+        updateDesignSystemDraft((current) => ({
+            ...current,
+            radius: {
+                ...current.radius,
+                [field]: value,
+            },
+        }));
     };
 
     const screenPreviewById = useMemo(() => {
@@ -3962,6 +4259,9 @@ Return a polished, consistent screen without introducing a new navigation patter
     const hasDesignSystem = Boolean(designSystem);
     const isDesignSystemView = chatPanelView === 'design-system';
     const designSystemForPanel = isDesignSystemEditing && designSystemDraft ? designSystemDraft : designSystem;
+    const designTokenEntries = designSystemForPanel
+        ? (Object.entries(designSystemForPanel.tokens) as Array<[DesignTokenKey, string]>)
+        : [];
 
     return (
         <>
@@ -4481,69 +4781,190 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         </div>
                                     </div>
 
-                                    {isDesignSystemEditing && (
-                                        <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
-                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Quick Edit</p>
-                                            <div className="grid grid-cols-2 gap-2.5">
-                                                {Object.entries(designSystemForPanel.tokens).map(([tokenName, tokenValue]) => (
-                                                    <label key={`edit-${tokenName}`} className="space-y-1">
-                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{tokenName}</span>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(tokenValue) ? tokenValue : '#000000'}
-                                                                onChange={(event) => updateDesignSystemDraft((current) => ({
-                                                                    ...current,
-                                                                    tokens: {
-                                                                        ...current.tokens,
-                                                                        [tokenName]: event.target.value,
-                                                                    },
-                                                                }))}
-                                                                className="h-8 w-9 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                value={tokenValue}
-                                                                onChange={(event) => updateDesignSystemDraft((current) => ({
-                                                                    ...current,
-                                                                    tokens: {
-                                                                        ...current.tokens,
-                                                                        [tokenName]: event.target.value,
-                                                                    },
-                                                                }))}
-                                                                className="flex-1 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                            />
-                                                        </div>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
                                     <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                                         <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Color Tokens</p>
+                                        {isDesignSystemEditing && (
+                                            <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">
+                                                Click any token card to edit its color.
+                                            </p>
+                                        )}
                                         <div className="mt-3 grid grid-cols-2 gap-2">
-                                            {Object.entries(designSystemForPanel.tokens).map(([tokenName, tokenValue]) => (
-                                                <div key={tokenName} className="rounded-xl bg-[var(--ui-surface-3)] ring-1 ring-[var(--ui-border)] p-2">
+                                            {designTokenEntries.map(([tokenName, tokenValue]) => {
+                                                const isActive = isDesignSystemEditing && activeTokenEditor === tokenName;
+                                                return (
+                                                <div
+                                                    key={tokenName}
+                                                    role={isDesignSystemEditing ? 'button' : undefined}
+                                                    tabIndex={isDesignSystemEditing ? 0 : -1}
+                                                    onClick={() => {
+                                                        if (!isDesignSystemEditing) return;
+                                                        setActiveTokenEditor(tokenName);
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                        if (!isDesignSystemEditing) return;
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            setActiveTokenEditor(tokenName);
+                                                        }
+                                                    }}
+                                                    className={`rounded-xl bg-[var(--ui-surface-3)] ring-1 p-2 transition-colors ${isDesignSystemEditing ? 'cursor-pointer hover:bg-[var(--ui-surface-4)]' : ''} ${isActive ? 'ring-[var(--ui-primary)]' : 'ring-[var(--ui-border)]'}`}
+                                                >
                                                     <div className="h-7 rounded-md ring-1 ring-black/10" style={{ background: tokenValue }} />
                                                     <p className="mt-1 text-[10px] font-semibold text-[var(--ui-text)]">{tokenName}</p>
                                                     <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{tokenValue}</p>
+                                                    {isActive && (
+                                                        <div className="mt-2 pt-2 border-t border-[var(--ui-border)] space-y-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="color"
+                                                                    value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(tokenValue) ? tokenValue : '#000000'}
+                                                                    onClick={(event) => event.stopPropagation()}
+                                                                    onChange={(event) => updateDesignSystemTokenDraft(tokenName, event.target.value)}
+                                                                    className="h-8 w-9 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    value={tokenValue}
+                                                                    onClick={(event) => event.stopPropagation()}
+                                                                    onChange={(event) => updateDesignSystemTokenDraft(tokenName, event.target.value)}
+                                                                    className="flex-1 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
 
                                     <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
                                         <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Type, Spacing, Motion</p>
-                                        <p className="text-xs text-[var(--ui-text-muted)]">
-                                            <span className="text-[var(--ui-text)] font-semibold">Typography:</span> {designSystemForPanel.typography.displayFont} / {designSystemForPanel.typography.bodyFont}
-                                        </p>
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold text-[var(--ui-text)]">Typography</p>
+                                            {isDesignSystemEditing ? (
+                                                <div className="space-y-2">
+                                                    <label className="space-y-1 block">
+                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Font Stack</span>
+                                                        <input
+                                                            type="text"
+                                                            list="design-system-font-stacks"
+                                                            value={designSystemForPanel.typography.displayFont}
+                                                            onChange={(event) => updateDesignSystemTypographyDraft('displayFont', event.target.value)}
+                                                            className="w-full h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                        />
+                                                    </label>
+                                                    <label className="space-y-1 block">
+                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Body Font Stack</span>
+                                                        <input
+                                                            type="text"
+                                                            list="design-system-font-stacks"
+                                                            value={designSystemForPanel.typography.bodyFont}
+                                                            onChange={(event) => updateDesignSystemTypographyDraft('bodyFont', event.target.value)}
+                                                            className="w-full h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                        />
+                                                    </label>
+                                                    <datalist id="design-system-font-stacks">
+                                                        {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
+                                                            <option key={fontStack} value={fontStack} />
+                                                        ))}
+                                                    </datalist>
+                                                    <div className="space-y-2">
+                                                        <div>
+                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Presets</p>
+                                                            <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                                                                {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
+                                                                    const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.displayFont, fontStack);
+                                                                    return (
+                                                                        <button
+                                                                            key={`display-font-stack-${fontStack}`}
+                                                                            type="button"
+                                                                            onClick={() => updateDesignSystemTypographyDraft('displayFont', fontStack)}
+                                                                            className={`shrink-0 min-w-[110px] rounded-lg border p-2 text-left transition-colors ${isSelected
+                                                                                ? 'border-[var(--ui-primary)] bg-[var(--ui-primary)]/10'
+                                                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
+                                                                                }`}
+                                                                        >
+                                                                            <span className="block text-sm leading-none text-[var(--ui-text)]" style={{ fontFamily: fontStack }}>Ag</span>
+                                                                            <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
+                                                                                {extractPrimaryFontFamily(fontStack)}
+                                                                            </span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Body Presets</p>
+                                                            <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                                                                {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
+                                                                    const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.bodyFont, fontStack);
+                                                                    return (
+                                                                        <button
+                                                                            key={`body-font-stack-${fontStack}`}
+                                                                            type="button"
+                                                                            onClick={() => updateDesignSystemTypographyDraft('bodyFont', fontStack)}
+                                                                            className={`shrink-0 min-w-[110px] rounded-lg border p-2 text-left transition-colors ${isSelected
+                                                                                ? 'border-[var(--ui-primary)] bg-[var(--ui-primary)]/10'
+                                                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
+                                                                                }`}
+                                                                        >
+                                                                            <span className="block text-xs leading-tight text-[var(--ui-text)]" style={{ fontFamily: fontStack }}>The quick fox</span>
+                                                                            <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
+                                                                                {extractPrimaryFontFamily(fontStack)}
+                                                                            </span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-[var(--ui-text-muted)]">
+                                                    {designSystemForPanel.typography.displayFont} / {designSystemForPanel.typography.bodyFont}
+                                                </p>
+                                            )}
+                                        </div>
                                         <p className="text-xs text-[var(--ui-text-muted)]">
                                             <span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {designSystemForPanel.spacing.baseUnit}px base, {designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}
                                         </p>
-                                        <p className="text-xs text-[var(--ui-text-muted)]">
-                                            <span className="text-[var(--ui-text)] font-semibold">Radius:</span> card {designSystemForPanel.radius.card}, control {designSystemForPanel.radius.control}, pill {designSystemForPanel.radius.pill}
-                                        </p>
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold text-[var(--ui-text)]">Corner Radius</p>
+                                            {(['card', 'control', 'pill'] as const).map((radiusKey) => (
+                                                <label key={`radius-${radiusKey}`} className="flex items-center justify-between gap-2">
+                                                    <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{radiusKey}</span>
+                                                    {isDesignSystemEditing ? (
+                                                        <input
+                                                            type="text"
+                                                            value={designSystemForPanel.radius[radiusKey]}
+                                                            onChange={(event) => updateDesignSystemRadiusDraft(radiusKey, event.target.value)}
+                                                            className="w-24 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                        />
+                                                    ) : (
+                                                        <span className="text-xs text-[var(--ui-text-muted)]">{designSystemForPanel.radius[radiusKey]}</span>
+                                                    )}
+                                                </label>
+                                            ))}
+                                            {isDesignSystemEditing && (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {DESIGN_RADIUS_PRESETS.map((radiusPreset) => (
+                                                        <button
+                                                            key={`radius-preset-${radiusPreset}`}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                updateDesignSystemRadiusDraft('card', radiusPreset);
+                                                                updateDesignSystemRadiusDraft('control', radiusPreset);
+                                                                updateDesignSystemRadiusDraft('pill', radiusPreset);
+                                                            }}
+                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                        >
+                                                            {radiusPreset}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                         <p className="text-xs text-[var(--ui-text-muted)]">
                                             <span className="text-[var(--ui-text)] font-semibold">Motion:</span> {designSystemForPanel.motion.style} ({designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms)
                                         </p>
