@@ -13,6 +13,9 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_PRICE_PRO_MONTHLY=price_xxx
 STRIPE_PRICE_TEAM_MONTHLY=price_xxx
 STRIPE_PRICE_TOPUP_1000=price_xxx
+# optional: comma-separated operations that require an active paid plan
+# default: generate_image,synthesize_screen_images
+BILLING_PAID_ONLY_OPERATIONS=generate_image,synthesize_screen_images
 
 # choose one Firebase Admin env method (no repo file path required):
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
@@ -120,6 +123,7 @@ stripe listen --forward-to localhost:3001/api/stripe/webhook
 2. Add endpoint: `https://<your-api-domain>/api/stripe/webhook`
 3. Subscribe at minimum to:
    - `checkout.session.completed`
+   - `invoice.paid`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
 4. Copy endpoint signing secret (`whsec_...`) -> `STRIPE_WEBHOOK_SECRET`.
@@ -152,7 +156,15 @@ npm run dev --workspace=apps/web
 6. Reopen Billing tab and verify ledger entry + increased balance.
 7. Run a generation and verify credits decrease.
 
-## 9) Security Notes
+## 9) Idempotency (recommended)
+
+For metered `POST` routes, send:
+
+`X-Idempotency-Key: <stable-uuid-per-logical-request>`
+
+If the same key is retried for the same operation, the API reuses the original billing reservation to prevent double-charge.
+
+## 10) Security Notes
 
 - Never commit service-account JSON or Stripe secret keys to git.
 - Keep live and test Stripe keys isolated by environment.

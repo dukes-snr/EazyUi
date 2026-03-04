@@ -72,6 +72,26 @@ export type BillingLedgerItem = {
     createdAt: string;
 };
 
+export type BillingPurchase = {
+    id: string;
+    purchaseKind: 'subscription' | 'topup' | 'other';
+    productKey?: string;
+    planId?: BillingPlanId;
+    amountTotal: number;
+    currency: string;
+    quantity: number;
+    status: string;
+    description?: string;
+    invoiceNumber?: string;
+    invoiceUrl?: string;
+    invoicePdfUrl?: string;
+    sourceType: 'checkout' | 'invoice';
+    sourceId: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
 export type BillingSummary = {
     uid: string;
     planId: BillingPlanId;
@@ -94,6 +114,8 @@ export type BillingReservation = {
     reservedCredits: number;
     balanceAfterReserve: number;
     expiresAt: string;
+    status?: 'open' | 'settled' | 'released' | 'partially_settled';
+    reused?: boolean;
 };
 
 export type BillingEstimateInput = {
@@ -210,6 +232,8 @@ db.exec(`
     ON billing_reservations(uid, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_billing_reservations_uid_request
     ON billing_reservations(uid, request_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_reservations_uid_operation_request
+    ON billing_reservations(uid, operation, request_id);
 
   CREATE TABLE IF NOT EXISTS billing_ledger (
     id TEXT PRIMARY KEY,
@@ -229,6 +253,42 @@ db.exec(`
     ON billing_ledger(uid, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_billing_profiles_stripe_customer
     ON billing_profiles(stripe_customer_id);
+
+  CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    received_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS billing_purchases (
+    id TEXT PRIMARY KEY,
+    uid TEXT NOT NULL,
+    source_key TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    purchase_kind TEXT NOT NULL,
+    product_key TEXT,
+    plan_id TEXT,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    stripe_invoice_id TEXT,
+    stripe_payment_intent_id TEXT,
+    stripe_price_id TEXT,
+    amount_total INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'usd',
+    quantity INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'paid',
+    description TEXT,
+    invoice_number TEXT,
+    invoice_url TEXT,
+    invoice_pdf_url TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_billing_purchases_uid_created_at
+    ON billing_purchases(uid, created_at DESC);
 `);
 
 function parseIso(value: string): Date {
@@ -308,6 +368,9 @@ const insertReservationStmt = db.prepare(`
 const selectReservationByIdStmt = db.prepare<[string, string], BillingReservationRow>(
     'SELECT * FROM billing_reservations WHERE id = ? AND uid = ?'
 );
+const selectReservationByRequestStmt = db.prepare<[string, BillingOperation, string], BillingReservationRow>(
+    'SELECT * FROM billing_reservations WHERE uid = ? AND operation = ? AND request_id = ? ORDER BY created_at DESC LIMIT 1'
+);
 
 const updateReservationStmt = db.prepare(`
   UPDATE billing_reservations
@@ -339,6 +402,100 @@ type BillingLedgerRow = {
 const listLedgerStmt = db.prepare(
     'SELECT id, type, operation, credits_delta, balance_after, request_id, reservation_id, project_id, metadata, created_at FROM billing_ledger WHERE uid = ? ORDER BY created_at DESC LIMIT ?'
 );
+type BillingPurchaseRow = {
+    id: string;
+    uid: string;
+    source_key: string;
+    source_type: string;
+    source_id: string;
+    purchase_kind: string;
+    product_key: string | null;
+    plan_id: string | null;
+    stripe_customer_id: string | null;
+    stripe_subscription_id: string | null;
+    stripe_invoice_id: string | null;
+    stripe_payment_intent_id: string | null;
+    stripe_price_id: string | null;
+    amount_total: number;
+    currency: string;
+    quantity: number;
+    status: string;
+    description: string | null;
+    invoice_number: string | null;
+    invoice_url: string | null;
+    invoice_pdf_url: string | null;
+    metadata: string | null;
+    created_at: string;
+    updated_at: string;
+};
+const selectPurchaseBySourceKeyStmt = db.prepare<string, BillingPurchaseRow>(
+    'SELECT * FROM billing_purchases WHERE source_key = ? LIMIT 1'
+);
+const selectPurchaseByIdStmt = db.prepare<[string, string], BillingPurchaseRow>(
+    'SELECT * FROM billing_purchases WHERE uid = ? AND id = ? LIMIT 1'
+);
+const upsertPurchaseStmt = db.prepare(`
+  INSERT INTO billing_purchases (
+    id, uid, source_key, source_type, source_id, purchase_kind, product_key, plan_id,
+    stripe_customer_id, stripe_subscription_id, stripe_invoice_id, stripe_payment_intent_id, stripe_price_id,
+    amount_total, currency, quantity, status, description, invoice_number, invoice_url, invoice_pdf_url,
+    metadata, created_at, updated_at
+  ) VALUES (
+    @id, @uid, @source_key, @source_type, @source_id, @purchase_kind, @product_key, @plan_id,
+    @stripe_customer_id, @stripe_subscription_id, @stripe_invoice_id, @stripe_payment_intent_id, @stripe_price_id,
+    @amount_total, @currency, @quantity, @status, @description, @invoice_number, @invoice_url, @invoice_pdf_url,
+    @metadata, @created_at, @updated_at
+  )
+  ON CONFLICT(source_key) DO UPDATE SET
+    source_type = @source_type,
+    source_id = @source_id,
+    purchase_kind = @purchase_kind,
+    product_key = @product_key,
+    plan_id = @plan_id,
+    stripe_customer_id = @stripe_customer_id,
+    stripe_subscription_id = @stripe_subscription_id,
+    stripe_invoice_id = @stripe_invoice_id,
+    stripe_payment_intent_id = @stripe_payment_intent_id,
+    stripe_price_id = @stripe_price_id,
+    amount_total = @amount_total,
+    currency = @currency,
+    quantity = @quantity,
+    status = @status,
+    description = @description,
+    invoice_number = @invoice_number,
+    invoice_url = @invoice_url,
+    invoice_pdf_url = @invoice_pdf_url,
+    metadata = @metadata,
+    updated_at = @updated_at
+`);
+const listPurchasesStmt = db.prepare(
+    'SELECT * FROM billing_purchases WHERE uid = ? ORDER BY created_at DESC LIMIT ?'
+);
+const insertStripeWebhookEventStmt = db.prepare(
+    'INSERT OR IGNORE INTO stripe_webhook_events (id, event_type, received_at) VALUES (?, ?, ?)'
+);
+
+function mapPurchaseRow(row: BillingPurchaseRow): BillingPurchase {
+    return {
+        id: row.id,
+        purchaseKind: (row.purchase_kind === 'subscription' || row.purchase_kind === 'topup') ? row.purchase_kind : 'other',
+        productKey: row.product_key || undefined,
+        planId: row.plan_id ? normalizePlanId(row.plan_id) : undefined,
+        amountTotal: row.amount_total,
+        currency: String(row.currency || 'usd').toUpperCase(),
+        quantity: Math.max(1, Number(row.quantity || 1)),
+        status: row.status || 'paid',
+        description: row.description || undefined,
+        invoiceNumber: row.invoice_number || undefined,
+        invoiceUrl: row.invoice_url || undefined,
+        invoicePdfUrl: row.invoice_pdf_url || undefined,
+        sourceType: row.source_type === 'invoice' ? 'invoice' : 'checkout',
+        sourceId: row.source_id,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
+}
 
 function hydrateProfile(uid: string, now = new Date()): BillingProfileRow {
     const existing = selectProfileStmt.get(uid);
@@ -596,6 +753,23 @@ export function reserveCredits(input: {
         const profileBefore = hydrateProfile(payload.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
 
+        const existing = selectReservationByRequestStmt.get(payload.uid, payload.operation, payload.requestId);
+        if (existing) {
+            if (profile.updated_at !== profileBefore.updated_at) {
+                persistProfile(profile);
+            }
+            return {
+                reservationId: existing.id,
+                requestId: existing.request_id,
+                operation: existing.operation,
+                reservedCredits: existing.reserved_credits,
+                balanceAfterReserve: profileBalance(profile),
+                expiresAt: existing.expires_at,
+                status: existing.status as BillingReservation['status'],
+                reused: true,
+            } as BillingReservation;
+        }
+
         const amount = clampNonNegative(payload.reservedCredits);
         const available = profileBalance(profile);
         if (available < amount) {
@@ -656,7 +830,9 @@ export function reserveCredits(input: {
             reservedCredits: amount,
             balanceAfterReserve: balanceAfter,
             expiresAt,
-        };
+            status: 'open',
+            reused: false,
+        } as BillingReservation;
     });
 
     return tx(input);
@@ -905,6 +1081,90 @@ export function resolveTopupCreditsForPriceId(priceId: string | null | undefined
     const topup1000 = String(process.env.STRIPE_PRICE_TOPUP_1000 || '').trim();
     if (topup1000 && normalized === topup1000) return 1000;
     return 0;
+}
+
+export function recordStripeWebhookEvent(eventId: string, eventType: string): boolean {
+    const id = String(eventId || '').trim();
+    if (!id) return false;
+    const result = insertStripeWebhookEventStmt.run(id, String(eventType || '').trim() || 'unknown', new Date().toISOString());
+    return result.changes > 0;
+}
+
+export function upsertBillingPurchase(input: {
+    uid: string;
+    sourceType: 'checkout' | 'invoice';
+    sourceId: string;
+    purchaseKind: 'subscription' | 'topup' | 'other';
+    productKey?: string;
+    planId?: BillingPlanId | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+    stripeInvoiceId?: string | null;
+    stripePaymentIntentId?: string | null;
+    stripePriceId?: string | null;
+    amountTotal: number;
+    currency?: string;
+    quantity?: number;
+    status?: string;
+    description?: string;
+    invoiceNumber?: string | null;
+    invoiceUrl?: string | null;
+    invoicePdfUrl?: string | null;
+    metadata?: Record<string, unknown>;
+    createdAt?: string;
+}): BillingPurchase {
+    const tx = db.transaction((payload: typeof input) => {
+        const sourceId = String(payload.sourceId || '').trim();
+        if (!sourceId) {
+            throw new Error('Purchase sourceId is required');
+        }
+        const sourceKey = `${payload.sourceType}:${sourceId}`;
+        const nowAt = new Date().toISOString();
+        const existing = selectPurchaseBySourceKeyStmt.get(sourceKey);
+        const id = existing?.id || uuidv4();
+        const createdAt = payload.createdAt || existing?.created_at || nowAt;
+        upsertPurchaseStmt.run({
+            id,
+            uid: payload.uid,
+            source_key: sourceKey,
+            source_type: payload.sourceType,
+            source_id: sourceId,
+            purchase_kind: payload.purchaseKind,
+            product_key: payload.productKey || null,
+            plan_id: payload.planId || null,
+            stripe_customer_id: payload.stripeCustomerId || null,
+            stripe_subscription_id: payload.stripeSubscriptionId || null,
+            stripe_invoice_id: payload.stripeInvoiceId || null,
+            stripe_payment_intent_id: payload.stripePaymentIntentId || null,
+            stripe_price_id: payload.stripePriceId || null,
+            amount_total: clampNonNegative(payload.amountTotal),
+            currency: String(payload.currency || 'usd').toLowerCase(),
+            quantity: Math.max(1, clampNonNegative(payload.quantity || 1)),
+            status: String(payload.status || 'paid'),
+            description: payload.description || null,
+            invoice_number: payload.invoiceNumber || null,
+            invoice_url: payload.invoiceUrl || null,
+            invoice_pdf_url: payload.invoicePdfUrl || null,
+            metadata: payload.metadata ? JSON.stringify(payload.metadata) : null,
+            created_at: createdAt,
+            updated_at: nowAt,
+        });
+        const row = selectPurchaseBySourceKeyStmt.get(sourceKey);
+        if (!row) throw new Error('Failed to persist purchase');
+        return mapPurchaseRow(row);
+    });
+    return tx(input);
+}
+
+export function listBillingPurchases(uid: string, limit = 40): BillingPurchase[] {
+    const size = Math.max(1, Math.min(200, Math.floor(limit)));
+    const rows = listPurchasesStmt.all(uid, size) as BillingPurchaseRow[];
+    return rows.map(mapPurchaseRow);
+}
+
+export function getBillingPurchase(uid: string, purchaseId: string): BillingPurchase | null {
+    const row = selectPurchaseByIdStmt.get(uid, purchaseId);
+    return row ? mapPurchaseRow(row) : null;
 }
 
 export function buildBillingSummaryForApi(uid: string): BillingSummary {

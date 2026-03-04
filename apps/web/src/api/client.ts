@@ -297,6 +297,26 @@ export interface BillingLedgerItem {
     createdAt: string;
 }
 
+export interface BillingPurchaseItem {
+    id: string;
+    purchaseKind: 'subscription' | 'topup' | 'other';
+    productKey?: string;
+    planId?: 'free' | 'pro' | 'team';
+    amountTotal: number;
+    currency: string;
+    quantity: number;
+    status: string;
+    description?: string;
+    invoiceNumber?: string;
+    invoiceUrl?: string;
+    invoicePdfUrl?: string;
+    sourceType: 'checkout' | 'invoice';
+    sourceId: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface BillingSummaryResponse {
     summary: BillingSummary;
     stripe?: {
@@ -641,6 +661,34 @@ class ApiClient {
             method: 'GET',
             signal,
         });
+    }
+
+    async getBillingPurchases(limit = 50, signal?: AbortSignal): Promise<{ items: BillingPurchaseItem[] }> {
+        const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+        return this.request<{ items: BillingPurchaseItem[] }>(`/billing/purchases?limit=${safeLimit}`, {
+            method: 'GET',
+            signal,
+        });
+    }
+
+    async downloadBillingInvoice(purchaseId: string, signal?: AbortSignal): Promise<{ filename: string; html: string }> {
+        const authHeader = await this.getAuthHeaderValue();
+        const response = await fetch(`${API_BASE}/billing/purchases/${encodeURIComponent(purchaseId)}/invoice`, {
+            method: 'GET',
+            headers: {
+                'Authorization': authHeader,
+            },
+            signal,
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+            throw new Error(error.message || `HTTP ${response.status}`);
+        }
+        const disposition = response.headers.get('content-disposition') || '';
+        const match = disposition.match(/filename="([^"]+)"/i);
+        const filename = match?.[1] || `eazyui-invoice-${purchaseId}.html`;
+        const html = await response.text();
+        return { filename, html };
     }
 
     async estimateBilling(request: BillingEstimateRequest, signal?: AbortSignal): Promise<BillingEstimateResponse> {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, CreditCard, FolderOpen, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, User as UserIcon, UserCircle2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, CreditCard, Download, FolderOpen, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
+import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 
@@ -53,9 +53,13 @@ export function ProjectSettingsPage({
     const [onDemandUsage, setOnDemandUsage] = useState(false);
     const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
     const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
+    const [billingPurchases, setBillingPurchases] = useState<BillingPurchaseItem[]>([]);
     const [billingLoading, setBillingLoading] = useState(false);
     const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
     const [billingBlockingMessage, setBillingBlockingMessage] = useState<string | null>(null);
+    const [billingModal, setBillingModal] = useState<null | 'upgrade' | 'purchase'>(null);
+    const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
+    const [usageDaysFilter, setUsageDaysFilter] = useState<1 | 7 | 30 | 90>(7);
     const [hoveredActivity, setHoveredActivity] = useState<{ key: string; count: number } | null>(null);
     const [activityTooltip, setActivityTooltip] = useState<{ label: string; left: number; top: number } | null>(null);
     const activityGridRef = useRef<HTMLDivElement | null>(null);
@@ -80,9 +84,14 @@ export function ProjectSettingsPage({
     const refreshBillingData = async () => {
         try {
             setBillingLoading(true);
-            const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(40)]);
+            const [summaryRes, ledgerRes, purchasesRes] = await Promise.all([
+                apiClient.getBillingSummary(),
+                apiClient.getBillingLedger(40),
+                apiClient.getBillingPurchases(60),
+            ]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
+            setBillingPurchases(purchasesRes.items || []);
         } catch (error) {
             pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
         } finally {
@@ -186,11 +195,91 @@ export function ProjectSettingsPage({
     const usagePct = Math.max(0, Math.min(100, Math.round((usedCredits / Math.max(planCreditCap, 1)) * 100)));
     const resetAt = billingSummary ? new Date(billingSummary.periodEndAt) : null;
     const daysToReset = resetAt ? Math.max(0, Math.ceil((resetAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null;
-    const billingHistoryRows = useMemo(() => {
-        return [...billingLedger]
+    const purchaseHistoryRows = useMemo(() => {
+        return [...billingPurchases]
             .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-            .slice(-20);
-    }, [billingLedger]);
+            .slice(0, 30);
+    }, [billingPurchases]);
+    const billingHistoryDisplayRows = useMemo(() => {
+        if (purchaseHistoryRows.length > 0) {
+            return purchaseHistoryRows.map((item) => ({
+                id: item.id,
+                label: item.description
+                    || item.productKey?.replace(/_/g, ' ')
+                    || item.purchaseKind.replace(/_/g, ' '),
+                amountTotal: item.amountTotal,
+                currency: item.currency,
+                createdAt: item.createdAt,
+                purchase: item,
+                source: 'purchase' as const,
+            }));
+        }
+        return billingLedger
+            .filter((item) => item.creditsDelta > 0 && (item.type === 'grant' || item.type === 'adjustment'))
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+            .slice(0, 30)
+            .map((item) => {
+                const reason = String((item.metadata as any)?.reason || '').toLowerCase();
+                const label = reason.includes('topup')
+                    ? 'Credit top-up'
+                    : reason.includes('plan')
+                        ? 'Plan purchase'
+                        : 'Billing credit grant';
+                return {
+                    id: `legacy-${item.id}`,
+                    label,
+                    amountTotal: Math.max(0, item.creditsDelta) * 100,
+                    currency: 'USD',
+                    createdAt: item.createdAt,
+                    purchase: null as BillingPurchaseItem | null,
+                    source: 'legacy' as const,
+                };
+            });
+    }, [purchaseHistoryRows, billingLedger]);
+    const currentPlanLabel = billingSummary?.planLabel || 'Free';
+    const currentPlanStatus = billingSummary?.status || 'active';
+    const creditsBalanceLabel = billingSummary
+        ? `${billingSummary.balanceCredits.toLocaleString()} credits`
+        : '--';
+    const nextResetLabel = resetAt ? resetAt.toLocaleDateString() : '--';
+    const usageFilterStart = useMemo(() => {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - (usageDaysFilter - 1));
+        return start;
+    }, [usageDaysFilter]);
+    const usageActivityRows = useMemo(() => {
+        const startTs = usageFilterStart.getTime();
+        return [...billingLedger]
+            .filter((item) => item.creditsDelta < 0 && new Date(item.createdAt).getTime() >= startTs)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }, [billingLedger, usageFilterStart]);
+    const usageCreditsInWindow = useMemo(
+        () => usageActivityRows.reduce((sum, item) => sum + Math.abs(item.creditsDelta), 0),
+        [usageActivityRows]
+    );
+    const usageFilterLabel = usageDaysFilter === 1 ? 'today' : `last ${usageDaysFilter} days`;
+
+    const handleDownloadInvoice = async (purchase: BillingPurchaseItem) => {
+        try {
+            setInvoiceBusyId(purchase.id);
+            const { filename, html } = await apiClient.downloadBillingInvoice(purchase.id);
+            const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = filename;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+            pushToast({ kind: 'success', title: 'Invoice ready', message: `Downloaded ${filename}` });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Invoice failed', message: (error as Error).message || 'Could not generate invoice.' });
+        } finally {
+            setInvoiceBusyId(null);
+        }
+    };
 
     const tabTitle = {
         profile: `Hello! ${authDisplayName}`,
@@ -454,12 +543,277 @@ export function ProjectSettingsPage({
 
                         {settingsTab === 'settings' && <div className="space-y-5"><SectionCard title="User Info"><Row label="Name" value={authDisplayName} /><Row label="Email" value={authUser?.email || 'No email'} /><Row label="Theme" value={<div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]"><button type="button" onClick={() => setTheme('light')} className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${theme === 'light' ? 'bg-[var(--ui-surface-3)]' : ''}`}><Sun size={12} />Light</button><button type="button" onClick={() => setTheme('dark')} className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${theme === 'dark' ? 'bg-[var(--ui-surface-3)]' : ''}`}><Moon size={12} />Dark</button></div>} /></SectionCard><SectionCard title="Integrations"><Row label="Vercel" value={<button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]"><Link2 size={12} />Connect</button>} /><Row label="Supabase" value={<button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]"><Link2 size={12} />Connect</button>} /></SectionCard><SectionCard title="Account"><Row label="Verify email" value={<button type="button" onClick={() => void handleSendVerification()} disabled={verificationBusy} className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)] disabled:opacity-60"><Mail size={12} />{verificationBusy ? 'Sending...' : 'Send'}</button>} /><Row label="Start new project" value={<button type="button" onClick={() => void handleNewProject()} className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 text-xs text-rose-300 hover:bg-rose-500/20"><AlertTriangle size={12} />New Project</button>} /></SectionCard></div>}
 
-                        {settingsTab === 'billing' && <div className="space-y-5"><SectionCard title="Subscription Plan"><Row label="Current Plan" value={<span className="text-xl font-semibold">{billingSummary?.planLabel || 'Free'}</span>} /><Row label="Upgrade" value={<div className="flex flex-wrap gap-2"><button type="button" onClick={() => void handleBillingCheckout('pro')} disabled={billingActionBusy !== null} className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black disabled:opacity-60">{billingActionBusy === 'pro' ? 'Opening...' : 'Pro'}</button><button type="button" onClick={() => void handleBillingCheckout('team')} disabled={billingActionBusy !== null} className="rounded-md border border-[var(--ui-border)] px-3 py-1.5 text-xs disabled:opacity-60">{billingActionBusy === 'team' ? 'Opening...' : 'Team'}</button><button type="button" onClick={() => void handleBillingCheckout('topup_1000')} disabled={billingActionBusy !== null} className="rounded-md border border-[var(--ui-border)] px-3 py-1.5 text-xs disabled:opacity-60">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Top-up'}</button></div>} /></SectionCard><SectionCard title="Billing History"><div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead><tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]"><th className="border-b border-[var(--ui-border)] px-3 py-2">Operation</th><th className="border-b border-[var(--ui-border)] px-3 py-2">Credits</th><th className="border-b border-[var(--ui-border)] px-3 py-2">Date</th></tr></thead><tbody>{billingHistoryRows.length === 0 ? <tr><td colSpan={3} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">No billing rows yet.</td></tr> : billingHistoryRows.map((item) => <tr key={item.id}><td className="border-b border-[var(--ui-border)] px-3 py-2">{(item.operation || item.type).replace(/_/g, ' ')}</td><td className={`border-b border-[var(--ui-border)] px-3 py-2 font-semibold ${item.creditsDelta < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td><td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">{new Date(item.createdAt).toLocaleString()}</td></tr>)}</tbody></table></div><div className="mt-3"><button type="button" onClick={() => void handleOpenBillingPortal()} disabled={billingActionBusy !== null} className="inline-flex h-8 items-center rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)] disabled:opacity-60">{billingActionBusy === 'portal' ? 'Opening...' : 'Payment settings'}</button></div></SectionCard></div>}
+                        {settingsTab === 'billing' && (
+                            <div className="space-y-5">
+                                <SectionCard title="Subscription Plan">
+                                    <div className="grid gap-3 md:grid-cols-3">
+                                        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3 md:col-span-2">
+                                            <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">Current Plan</p>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <span className="text-2xl font-semibold">{currentPlanLabel}</span>
+                                                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${currentPlanStatus === 'active' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                                                    {currentPlanStatus}
+                                                </span>
+                                            </div>
+                                            <p className="mt-3 text-5xl font-black leading-none tracking-[-0.02em] text-emerald-300">{billingSummary ? billingSummary.balanceCredits.toLocaleString() : '--'}</p>
+                                            <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">Available Credits</p>
+                                            <p className="mt-2 text-sm text-[var(--ui-text-subtle)]">Balance: {creditsBalanceLabel}</p>
+                                            <p className="text-sm text-[var(--ui-text-subtle)]">Next reset: {nextResetLabel}</p>
+                                        </div>
+                                        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                            <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">Actions</p>
+                                            <div className="mt-2 space-y-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setBillingModal('upgrade')}
+                                                    className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-black hover:bg-emerald-400"
+                                                >
+                                                    <WalletCards size={14} />
+                                                    Upgrade plan
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setBillingModal('purchase')}
+                                                    className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-[var(--ui-border)] px-3 text-sm hover:bg-[var(--ui-surface-3)]"
+                                                >
+                                                    <CreditCard size={14} />
+                                                    Buy credits
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleOpenBillingPortal()}
+                                                    disabled={billingActionBusy !== null}
+                                                    className="inline-flex h-9 w-full items-center justify-center rounded-md border border-[var(--ui-border)] px-3 text-sm hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                                >
+                                                    {billingActionBusy === 'portal' ? 'Opening...' : 'Payment settings'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </SectionCard>
 
-                        {settingsTab === 'usage' && <div className="space-y-5"><SectionCard title="Usage Summary"><p className="text-sm text-[var(--ui-text-subtle)]">You are on {billingSummary?.planLabel || 'Free Plan'}. Usage resets in {daysToReset ?? '--'} days {resetAt ? `on ${resetAt.toLocaleString()}` : ''}.</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--ui-surface-3)]"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${usagePct}%` }} /></div><p className="mt-2 text-xs text-[var(--ui-text-subtle)]">{usedCredits.toLocaleString()} / {planCreditCap.toLocaleString()} credits used</p></SectionCard><SectionCard title="On-demand"><Row label="Enabled" value={<button type="button" onClick={() => setOnDemandUsage((v) => !v)} className={`inline-flex h-8 items-center rounded-md px-3 text-xs ${onDemandUsage ? 'bg-emerald-500 text-black' : 'border border-[var(--ui-border)]'}`}>{onDemandUsage ? 'On' : 'Off'}</button>} /></SectionCard></div>}
+                                <SectionCard title="Billing History">
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-left text-sm">
+                                            <thead>
+                                                <tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Purchase</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Amount</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Date</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Invoice</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {billingHistoryDisplayRows.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={4} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">No purchases yet.</td>
+                                                    </tr>
+                                                ) : billingHistoryDisplayRows.map((item) => {
+                                                    const amount = (item.amountTotal / 100).toLocaleString(undefined, {
+                                                        style: 'currency',
+                                                        currency: item.currency || 'USD',
+                                                    });
+                                                    return (
+                                                        <tr key={item.id}>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2">
+                                                                <div className="font-medium text-[var(--ui-text)]">{item.label}</div>
+                                                                <div className="text-xs text-[var(--ui-text-subtle)]">{item.source === 'purchase' ? item.purchase?.purchaseKind : 'legacy'}</div>
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 font-semibold text-emerald-400">{amount}</td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">{new Date(item.createdAt).toLocaleString()}</td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right">
+                                                                {item.purchase ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => void handleDownloadInvoice(item.purchase!)}
+                                                                        disabled={invoiceBusyId !== null}
+                                                                        className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-2.5 text-xs hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                                                    >
+                                                                        {invoiceBusyId === item.purchase.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                                                                        {invoiceBusyId === item.purchase.id ? 'Generating...' : 'Invoice'}
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="text-xs text-[var(--ui-text-subtle)]">N/A</span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </SectionCard>
+                            </div>
+                        )}
+
+                        {settingsTab === 'usage' && (
+                            <div className="space-y-5">
+                                <SectionCard title="Usage Summary">
+                                    <p className="text-sm text-[var(--ui-text-subtle)]">
+                                        You are on {billingSummary?.planLabel || 'Free Plan'}. Usage resets in {daysToReset ?? '--'} days {resetAt ? `on ${resetAt.toLocaleString()}` : ''}.
+                                    </p>
+                                    <p className="mt-4 text-5xl font-black leading-none tracking-[-0.02em] text-emerald-300">
+                                        {billingSummary ? billingSummary.balanceCredits.toLocaleString() : '--'}
+                                    </p>
+                                    <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">Current Credit Balance</p>
+                                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--ui-surface-3)]">
+                                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${usagePct}%` }} />
+                                    </div>
+                                    <p className="mt-2 text-xs text-[var(--ui-text-subtle)]">{usedCredits.toLocaleString()} / {planCreditCap.toLocaleString()} credits used</p>
+                                </SectionCard>
+                                <SectionCard title="Credit Activity">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        {([1, 7, 30, 90] as const).map((days) => (
+                                            <button
+                                                key={days}
+                                                type="button"
+                                                onClick={() => setUsageDaysFilter(days)}
+                                                className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-semibold transition-colors ${
+                                                    usageDaysFilter === days
+                                                        ? 'border-emerald-400/70 bg-emerald-500/15 text-emerald-300'
+                                                        : 'border-[var(--ui-border)] text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)]'
+                                                }`}
+                                            >
+                                                {days === 1 ? 'Today' : `${days} days`}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">
+                                        {usageCreditsInWindow.toLocaleString()} credits consumed in {usageFilterLabel} across {usageActivityRows.length} events.
+                                    </p>
+                                    <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--ui-border)]">
+                                        <table className="min-w-full text-left text-sm">
+                                            <thead>
+                                                <tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Time</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Action</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Credits</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {billingLoading ? (
+                                                    <tr>
+                                                        <td colSpan={3} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                            <span className="inline-flex items-center gap-2">
+                                                                <Loader2 size={14} className="animate-spin" />
+                                                                Loading usage activity...
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ) : usageActivityRows.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={3} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                            No usage activity in this period.
+                                                        </td>
+                                                    </tr>
+                                                ) : usageActivityRows.map((item) => {
+                                                    const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
+                                                    const metadataReason = typeof item.metadata?.reason === 'string' ? item.metadata.reason : '';
+                                                    return (
+                                                        <tr key={item.id}>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                                {new Date(item.createdAt).toLocaleString()}
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2">
+                                                                <div className="font-medium text-[var(--ui-text)]">{actionLabel}</div>
+                                                                <div className="text-xs text-[var(--ui-text-subtle)]">
+                                                                    {metadataReason || item.projectId || 'Usage event'}
+                                                                </div>
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right font-semibold text-rose-300">
+                                                                -{Math.abs(item.creditsDelta).toLocaleString()}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </SectionCard>
+                                <SectionCard title="On-demand">
+                                    <Row
+                                        label="Enabled"
+                                        value={
+                                            <button type="button" onClick={() => setOnDemandUsage((v) => !v)} className={`inline-flex h-8 items-center rounded-md px-3 text-xs ${onDemandUsage ? 'bg-emerald-500 text-black' : 'border border-[var(--ui-border)]'}`}>
+                                                {onDemandUsage ? 'On' : 'Off'}
+                                            </button>
+                                        }
+                                    />
+                                </SectionCard>
+                            </div>
+                        )}
                     </div>
                 </main>
             </div>
+            {billingModal && (
+                <div className="absolute inset-0 z-40 grid place-items-center bg-black/60 p-4">
+                    <div className="w-full max-w-[560px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+                        <div className="flex items-center justify-between border-b border-[var(--ui-border)] px-5 py-4">
+                            <div>
+                                <h3 className="text-lg font-semibold text-[var(--ui-text)]">
+                                    {billingModal === 'upgrade' ? 'Upgrade Subscription' : 'Purchase Credits'}
+                                </h3>
+                                <p className="text-sm text-[var(--ui-text-subtle)]">
+                                    {billingModal === 'upgrade'
+                                        ? 'Choose a plan that fits your usage.'
+                                        : 'Buy one-time credits that stack with your current balance.'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setBillingModal(null)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--ui-border)] hover:bg-[var(--ui-surface-3)]"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 p-5">
+                            {billingModal === 'upgrade' ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleBillingCheckout('pro')}
+                                        disabled={billingActionBusy !== null}
+                                        className="flex w-full items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-left hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--ui-text)]">Pro Plan</p>
+                                            <p className="text-xs text-[var(--ui-text-subtle)]">3,000 monthly credits + rollover</p>
+                                        </div>
+                                        <span className="text-xs font-semibold text-emerald-300">{billingActionBusy === 'pro' ? 'Opening...' : 'Choose Pro'}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleBillingCheckout('team')}
+                                        disabled={billingActionBusy !== null}
+                                        className="flex w-full items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-left hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--ui-text)]">Team Plan</p>
+                                            <p className="text-xs text-[var(--ui-text-subtle)]">15,000 monthly credits + rollover</p>
+                                        </div>
+                                        <span className="text-xs font-semibold text-emerald-300">{billingActionBusy === 'team' ? 'Opening...' : 'Choose Team'}</span>
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => void handleBillingCheckout('topup_1000')}
+                                    disabled={billingActionBusy !== null}
+                                    className="flex w-full items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-left hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                >
+                                    <div>
+                                        <p className="text-sm font-semibold text-[var(--ui-text)]">Top-up 1,000 Credits</p>
+                                        <p className="text-xs text-[var(--ui-text-subtle)]">One-time purchase for additional generation capacity</p>
+                                    </div>
+                                    <span className="text-xs font-semibold text-emerald-300">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy Now'}</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

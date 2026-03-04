@@ -21,6 +21,7 @@ import {
     inferCreditModelProfile,
     InsufficientCreditsError,
     listBillingLedgerForApi,
+    recordStripeWebhookEvent,
     reserveCredits,
     resolvePlanFromStripePriceId,
     resolveStripePriceIdForPlan,
@@ -28,11 +29,15 @@ import {
     setUserPlan,
     settleReservation,
     getStripeCustomerId,
+    getBillingPurchase,
     attachStripeCustomer,
     findUidByStripeCustomerId,
+    listBillingPurchases,
     type BillingOperation,
+    type BillingSummary,
     type CreditModelProfile,
     type ReservationOutcome,
+    upsertBillingPurchase,
 } from './services/billing.js';
 import {
     createStripeBillingPortalSession,
@@ -76,6 +81,21 @@ function resolveAuthHeader(request: { headers: Record<string, unknown> }): strin
     if (typeof value === 'string') return value;
     if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
     return undefined;
+}
+
+function resolveHeaderString(headers: Record<string, unknown>, key: string): string | undefined {
+    const value = headers[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) return value[0].trim();
+    return undefined;
+}
+
+function resolveBillingRequestId(request: { id: string; headers: Record<string, unknown> }): string {
+    const idempotencyKey = resolveHeaderString(request.headers, 'x-idempotency-key')
+        || resolveHeaderString(request.headers, 'idempotency-key')
+        || resolveHeaderString(request.headers, 'x-request-id');
+    if (!idempotencyKey) return request.id;
+    return idempotencyKey.slice(0, 180);
 }
 
 async function requireAuthenticatedUser(
@@ -131,12 +151,132 @@ function sendInsufficientCredits(
         error: 'Insufficient credits',
         message: `Need ${error.requiredCredits} credits but only ${error.availableCredits} available.`,
         code: 'INSUFFICIENT_CREDITS',
+        paywallCode: 'insufficient_credits',
         details: {
             operation: error.operation,
             requiredCredits: error.requiredCredits,
             availableCredits: error.availableCredits,
         },
     });
+}
+
+const KNOWN_BILLING_OPERATIONS: BillingOperation[] = [
+    'design_system',
+    'generate',
+    'generate_stream',
+    'edit',
+    'complete_screen',
+    'generate_image',
+    'synthesize_screen_images',
+    'transcribe_audio',
+    'plan_route',
+    'plan_assist',
+];
+
+const DEFAULT_PAID_ONLY_OPERATIONS: BillingOperation[] = [
+    'generate_image',
+    'synthesize_screen_images',
+];
+
+function parsePaidOnlyOperations(): Set<BillingOperation> {
+    const configured = String(process.env.BILLING_PAID_ONLY_OPERATIONS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const source = configured.length > 0 ? configured : DEFAULT_PAID_ONLY_OPERATIONS;
+    const known = new Set<string>(KNOWN_BILLING_OPERATIONS);
+    const resolved = source.filter((operation): operation is BillingOperation => known.has(operation));
+    return new Set<BillingOperation>(resolved);
+}
+
+const PAID_ONLY_OPERATIONS = parsePaidOnlyOperations();
+
+function sendPlanRequired(
+    reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+    params: { operation: BillingOperation; planId: BillingSummary['planId']; status: BillingSummary['status'] }
+) {
+    return reply.status(402).send({
+        error: 'Paid plan required',
+        message: 'This action requires an active paid plan. Upgrade to Pro or Team to continue.',
+        code: 'PLAN_REQUIRED',
+        paywallCode: 'plan_required',
+        details: {
+            operation: params.operation,
+            currentPlanId: params.planId,
+            currentPlanStatus: params.status,
+            requiredPlan: 'pro_or_team',
+        },
+    });
+}
+
+function ensureBillingEntitlementOrReply(input: {
+    reply: { status: (code: number) => { send: (body: unknown) => unknown } };
+    traceId: string;
+    route: string;
+    uid: string;
+    operation: BillingOperation;
+    estimatedCredits: number;
+}): BillingSummary | null {
+    const summary = buildBillingSummaryForApi(input.uid);
+    const requiresPaidPlan = PAID_ONLY_OPERATIONS.has(input.operation);
+    const hasActivePaidPlan = summary.planId !== 'free' && summary.status === 'active';
+
+    if (requiresPaidPlan && !hasActivePaidPlan) {
+        fastify.log.info({
+            traceId: input.traceId,
+            route: input.route,
+            stage: 'billing_entitlement',
+            uid: input.uid,
+            operation: input.operation,
+            decision: 'blocked',
+            reason: 'plan_required',
+            planId: summary.planId,
+            planStatus: summary.status,
+            estimatedCredits: input.estimatedCredits,
+            balanceCredits: summary.balanceCredits,
+        }, 'billing entitlement blocked');
+        sendPlanRequired(input.reply, {
+            operation: input.operation,
+            planId: summary.planId,
+            status: summary.status,
+        });
+        return null;
+    }
+
+    if (input.estimatedCredits > 0 && summary.balanceCredits < input.estimatedCredits) {
+        const insufficient = new InsufficientCreditsError({
+            operation: input.operation,
+            requiredCredits: input.estimatedCredits,
+            availableCredits: summary.balanceCredits,
+        });
+        fastify.log.info({
+            traceId: input.traceId,
+            route: input.route,
+            stage: 'billing_entitlement',
+            uid: input.uid,
+            operation: input.operation,
+            decision: 'blocked',
+            reason: 'insufficient_credits',
+            estimatedCredits: input.estimatedCredits,
+            balanceCredits: summary.balanceCredits,
+        }, 'billing entitlement blocked');
+        sendInsufficientCredits(input.reply, insufficient);
+        return null;
+    }
+
+    fastify.log.info({
+        traceId: input.traceId,
+        route: input.route,
+        stage: 'billing_entitlement',
+        uid: input.uid,
+        operation: input.operation,
+        decision: 'allowed',
+        estimatedCredits: input.estimatedCredits,
+        balanceCredits: summary.balanceCredits,
+        planId: summary.planId,
+        planStatus: summary.status,
+    }, 'billing entitlement allowed');
+    return summary;
 }
 
 async function getRenderBrowser() {
@@ -347,6 +487,131 @@ fastify.get<{
     }
 });
 
+fastify.get<{
+    Querystring: { limit?: string };
+}>('/api/billing/purchases', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/billing/purchases');
+    if (!user) return;
+    try {
+        const limit = Math.max(1, Math.min(200, Number(request.query.limit || 50)));
+        const items = listBillingPurchases(user.uid, limit);
+        return { items };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/billing/purchases', err: error }, 'billing purchases failed');
+        return reply.status(500).send({
+            error: 'Failed to load purchase history',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get<{
+    Params: { purchaseId: string };
+}>('/api/billing/purchases/:purchaseId/invoice', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/billing/purchases/:purchaseId/invoice');
+    if (!user) return;
+    try {
+        const purchase = getBillingPurchase(user.uid, request.params.purchaseId);
+        if (!purchase) {
+            return reply.status(404).send({
+                error: 'Purchase not found',
+                message: 'No purchase was found for this invoice request.',
+            });
+        }
+        const amount = (purchase.amountTotal / 100).toLocaleString(undefined, {
+            style: 'currency',
+            currency: purchase.currency || 'USD',
+        });
+        const issueDate = new Date(purchase.createdAt).toLocaleString();
+        const invoiceNumber = purchase.invoiceNumber || `EAZY-${purchase.id.slice(0, 8).toUpperCase()}`;
+        const lineItemDescription = purchase.description || (purchase.productKey
+            ? purchase.productKey.replace(/_/g, ' ')
+            : purchase.purchaseKind === 'subscription'
+                ? 'Subscription purchase'
+                : 'Credits purchase');
+
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice ${invoiceNumber}</title>
+  <style>
+    body { font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; background: #f7f8fb; color: #0f172a; margin: 0; }
+    .wrap { max-width: 760px; margin: 28px auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    .head { padding: 22px 26px; background: #0b1020; color: #fff; }
+    .head h1 { margin: 0; font-size: 22px; }
+    .head p { margin: 6px 0 0; opacity: .82; font-size: 13px; }
+    .section { padding: 20px 26px; border-top: 1px solid #e2e8f0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
+    .label { font-size: 12px; color: #475569; text-transform: uppercase; letter-spacing: .06em; }
+    .value { margin-top: 4px; font-size: 14px; font-weight: 600; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 0; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+    th { color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .total { text-align: right; font-size: 18px; font-weight: 700; margin-top: 16px; }
+    .muted { color: #64748b; font-size: 12px; }
+    a { color: #2563eb; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>EazyUI Invoice</h1>
+      <p>${invoiceNumber}</p>
+    </div>
+    <div class="section">
+      <div class="grid">
+        <div>
+          <div class="label">Billed To</div>
+          <div class="value">${String(user.email || user.uid)}</div>
+        </div>
+        <div>
+          <div class="label">Issue Date</div>
+          <div class="value">${issueDate}</div>
+        </div>
+        <div>
+          <div class="label">Status</div>
+          <div class="value">${purchase.status}</div>
+        </div>
+        <div>
+          <div class="label">Purchase Type</div>
+          <div class="value">${purchase.purchaseKind}</div>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <table>
+        <thead>
+          <tr><th>Description</th><th>Qty</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>${lineItemDescription}</td><td>${purchase.quantity}</td><td>${amount}</td></tr>
+        </tbody>
+      </table>
+      <div class="total">Total: ${amount}</div>
+      <p class="muted">Invoice source: ${purchase.sourceType} / ${purchase.sourceId}</p>
+      ${purchase.invoiceUrl ? `<p class="muted">Stripe invoice: <a href="${purchase.invoiceUrl}" target="_blank" rel="noreferrer">Open hosted invoice</a></p>` : ''}
+      ${purchase.invoicePdfUrl ? `<p class="muted">Stripe PDF: <a href="${purchase.invoicePdfUrl}" target="_blank" rel="noreferrer">Open PDF</a></p>` : ''}
+    </div>
+  </div>
+</body>
+</html>`;
+
+        const filename = `eazyui-invoice-${purchase.id.slice(0, 8)}.html`;
+        return reply
+            .header('Content-Type', 'text/html; charset=utf-8')
+            .header('Content-Disposition', `attachment; filename="${filename}"`)
+            .send(html);
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/billing/purchases/:purchaseId/invoice', err: error }, 'billing invoice generation failed');
+        return reply.status(500).send({
+            error: 'Failed to generate invoice',
+            message: (error as Error).message,
+        });
+    }
+});
+
 fastify.post<{
     Body: {
         operation: BillingOperation;
@@ -508,6 +773,7 @@ fastify.post<{
         rawBody: true,
     },
 }, async (request, reply) => {
+    const traceId = request.id;
     const signature = String(request.headers['stripe-signature'] || '').trim();
     if (!signature) {
         return reply.status(400).send({ error: 'Missing Stripe signature header' });
@@ -515,6 +781,16 @@ fastify.post<{
     try {
         const raw = ((request as any).rawBody as Buffer | undefined) || Buffer.from(JSON.stringify(request.body || {}));
         const event = constructStripeWebhookEvent(raw, signature);
+        const firstSeen = recordStripeWebhookEvent(event.id, event.type);
+        if (!firstSeen) {
+            fastify.log.info({
+                traceId,
+                route: '/api/stripe/webhook',
+                eventId: event.id,
+                eventType: event.type,
+            }, 'stripe webhook duplicate ignored');
+            return reply.send({ received: true, duplicate: true });
+        }
 
         if (event.type === 'checkout.session.completed') {
             const checkout = event.data.object as any;
@@ -530,6 +806,51 @@ fastify.post<{
                 const linePrice = session.line_items?.data?.[0]?.price?.id || null;
                 const planId = resolvePlanFromStripePriceId(linePrice);
                 const topupCredits = resolveTopupCreditsForPriceId(linePrice);
+                const lineItem = session.line_items?.data?.[0];
+                const quantity = Number(lineItem?.quantity || 1);
+                const invoiceRef = typeof session.invoice === 'string'
+                    ? session.invoice
+                    : session.invoice?.id || '';
+                const sourceType = invoiceRef ? 'invoice' : 'checkout';
+                const sourceId = invoiceRef || session.id;
+                const sourceInvoice = typeof session.invoice === 'object' ? session.invoice : null;
+                const productKey = String(session.metadata?.productKey || '').trim();
+                const purchaseKind: 'subscription' | 'topup' | 'other' = planId
+                    ? 'subscription'
+                    : topupCredits > 0
+                        ? 'topup'
+                        : 'other';
+
+                upsertBillingPurchase({
+                    uid,
+                    sourceType,
+                    sourceId,
+                    purchaseKind,
+                    productKey: productKey || undefined,
+                    planId: planId || undefined,
+                    stripeCustomerId: customerId || undefined,
+                    stripeSubscriptionId: (typeof session.subscription === 'string'
+                        ? session.subscription
+                        : session.subscription?.id) || undefined,
+                    stripeInvoiceId: invoiceRef || undefined,
+                    stripePaymentIntentId: (typeof session.payment_intent === 'string'
+                        ? session.payment_intent
+                        : session.payment_intent?.id) || undefined,
+                    stripePriceId: linePrice || undefined,
+                    amountTotal: Number(session.amount_total || session.amount_subtotal || 0),
+                    currency: String(session.currency || 'usd'),
+                    quantity,
+                    status: String(session.payment_status || session.status || 'paid'),
+                    description: String(lineItem?.description || lineItem?.price?.nickname || productKey || 'Checkout purchase'),
+                    invoiceNumber: sourceInvoice?.number || undefined,
+                    invoiceUrl: sourceInvoice?.hosted_invoice_url || undefined,
+                    invoicePdfUrl: sourceInvoice?.invoice_pdf || undefined,
+                    metadata: {
+                        stripeEventId: event.id,
+                        checkoutSessionId: session.id,
+                    },
+                    createdAt: new Date((Number(session.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+                });
                 if (planId) {
                     setUserPlan({
                         uid,
@@ -547,6 +868,60 @@ fastify.post<{
                             sessionId: session.id,
                             priceId: linePrice,
                         },
+                    });
+                }
+            }
+        } else if (event.type === 'invoice.paid') {
+            const invoice = event.data.object as any;
+            const customerId = String(invoice.customer || '').trim();
+            const uid = customerId ? findUidByStripeCustomerId(customerId) : null;
+            if (uid) {
+                const priceId = invoice.lines?.data?.[0]?.price?.id
+                    || invoice.parent?.subscription_details?.metadata?.price_id
+                    || '';
+                const mappedPlan = resolvePlanFromStripePriceId(priceId);
+                const topupCredits = resolveTopupCreditsForPriceId(priceId);
+                const line = invoice.lines?.data?.[0];
+                const productKeyFromMetadata = String(invoice.metadata?.productKey || '').trim()
+                    || String(invoice.parent?.subscription_details?.metadata?.productKey || '').trim();
+                const purchaseKind: 'subscription' | 'topup' | 'other' = mappedPlan
+                    ? 'subscription'
+                    : topupCredits > 0
+                        ? 'topup'
+                        : 'other';
+                upsertBillingPurchase({
+                    uid,
+                    sourceType: 'invoice',
+                    sourceId: String(invoice.id || '').trim(),
+                    purchaseKind,
+                    productKey: productKeyFromMetadata || undefined,
+                    planId: mappedPlan || undefined,
+                    stripeCustomerId: customerId || undefined,
+                    stripeSubscriptionId: String(invoice.subscription || '').trim() || undefined,
+                    stripeInvoiceId: String(invoice.id || '').trim() || undefined,
+                    stripePaymentIntentId: String(invoice.payment_intent || '').trim() || undefined,
+                    stripePriceId: priceId || undefined,
+                    amountTotal: Number(invoice.amount_paid || invoice.total || 0),
+                    currency: String(invoice.currency || 'usd'),
+                    quantity: Number(line?.quantity || 1),
+                    status: String(invoice.status || 'paid'),
+                    description: String(line?.description || 'Invoice payment'),
+                    invoiceNumber: String(invoice.number || '').trim() || undefined,
+                    invoiceUrl: String(invoice.hosted_invoice_url || '').trim() || undefined,
+                    invoicePdfUrl: String(invoice.invoice_pdf || '').trim() || undefined,
+                    metadata: {
+                        stripeEventId: event.id,
+                    },
+                    createdAt: new Date((Number(invoice.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+                });
+                if (mappedPlan) {
+                    setUserPlan({
+                        uid,
+                        planId: mappedPlan,
+                        status: 'active',
+                        stripeSubscriptionId: String(invoice.subscription || '').trim() || null,
+                        stripePriceId: priceId || null,
+                        reason: 'stripe_invoice_paid',
                     });
                 }
             }
@@ -571,7 +946,7 @@ fastify.post<{
 
         return reply.send({ received: true });
     } catch (error) {
-        fastify.log.error({ traceId: request.id, route: '/api/stripe/webhook', err: error }, 'stripe webhook failed');
+        fastify.log.error({ traceId, route: '/api/stripe/webhook', err: error }, 'stripe webhook failed');
         return reply.status(400).send({
             error: 'Webhook processing failed',
             message: (error as Error).message,
@@ -595,6 +970,7 @@ fastify.post<{
     const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -609,12 +985,20 @@ fastify.post<{
         expectedScreenCount: 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/generate',
+        uid: user.uid,
+        operation: 'generate',
+        estimatedCredits: reservationEstimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'generate',
             reservedCredits: reservationEstimate.estimatedCredits,
             projectId,
@@ -703,6 +1087,7 @@ fastify.post<{
     const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -711,19 +1096,29 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/design-system');
     if (!user) return;
     const bundled = Boolean(bundleWithFirstGeneration);
+    const designSystemEstimate = !bundled
+        ? estimateCredits({
+            operation: 'design_system',
+            modelProfile: toCreditModelProfile(preferredModel),
+        })
+        : null;
+    if (designSystemEstimate && !ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/design-system',
+        uid: user.uid,
+        operation: 'design_system',
+        estimatedCredits: designSystemEstimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         if (!bundled) {
-            const estimate = estimateCredits({
-                operation: 'design_system',
-                modelProfile: toCreditModelProfile(preferredModel),
-            });
             reservation = reserveCredits({
                 uid: user.uid,
-                requestId: traceId,
+                requestId: billingRequestId,
                 operation: 'design_system',
-                reservedCredits: estimate.estimatedCredits,
+                reservedCredits: designSystemEstimate?.estimatedCredits || 0,
                 projectId,
                 metadata: {
                     route: '/api/design-system',
@@ -830,6 +1225,7 @@ fastify.post<{
     const { instruction, html, screenId, images, preferredModel, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!instruction?.trim()) {
         return reply.status(400).send({ error: 'Instruction is required' });
@@ -845,12 +1241,20 @@ fastify.post<{
         operation: 'edit',
         modelProfile: toCreditModelProfile(preferredModel),
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/edit',
+        uid: user.uid,
+        operation: 'edit',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'edit',
             reservedCredits: estimate.estimatedCredits,
             projectId,
@@ -955,6 +1359,7 @@ fastify.post<{
     const { appPrompt, stylePreset, platform, preferredModel, maxImages, projectId, screens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
@@ -970,12 +1375,20 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
         expectedImageCount: screens.length,
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/synthesize-screen-images',
+        uid: user.uid,
+        operation: 'synthesize_screen_images',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'synthesize_screen_images',
             reservedCredits: estimate.estimatedCredits,
             projectId,
@@ -1062,6 +1475,7 @@ fastify.post<{
     const { prompt, instruction, preferredModel, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1073,12 +1487,20 @@ fastify.post<{
         operation: 'generate_image',
         modelProfile: toCreditModelProfile(preferredModel),
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/generate-image',
+        uid: user.uid,
+        operation: 'generate_image',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'generate_image',
             reservedCredits: estimate.estimatedCredits,
             projectId,
@@ -1151,6 +1573,8 @@ fastify.post<{
     };
 }>('/api/transcribe-audio', async (request, reply) => {
     const { audioBase64, mimeType, language, model } = request.body;
+    const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!audioBase64?.trim()) {
         return reply.status(400).send({ error: 'audioBase64 is required' });
@@ -1168,12 +1592,20 @@ fastify.post<{
         modelProfile: toCreditModelProfile(model),
         expectedMinutes: approxMinutes,
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/transcribe-audio',
+        uid: user.uid,
+        operation: 'transcribe_audio',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: request.id,
+            requestId: billingRequestId,
             operation: 'transcribe_audio',
             reservedCredits: estimate.estimatedCredits,
             metadata: {
@@ -1275,6 +1707,19 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/plan');
     if (!user) return;
+    const plannerOperation: BillingOperation = phase === 'route' ? 'plan_route' : 'plan_assist';
+    const plannerEstimate = estimateCredits({
+        operation: plannerOperation,
+        modelProfile: toCreditModelProfile(preferredModel),
+    });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/plan',
+        uid: user.uid,
+        operation: plannerOperation,
+        estimatedCredits: plannerEstimate.estimatedCredits,
+    })) return;
 
     try {
         fastify.log.info({
@@ -1505,6 +1950,7 @@ fastify.post<{
     } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1518,6 +1964,14 @@ fastify.post<{
         expectedScreenCount: 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/generate-stream',
+        uid: user.uid,
+        operation: 'generate_stream',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
     let chunkCount = 0;
     let charCount = 0;
@@ -1535,7 +1989,7 @@ fastify.post<{
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'generate_stream',
             reservedCredits: estimate.estimatedCredits,
             projectId,
@@ -1666,6 +2120,7 @@ fastify.post<{
     const { screenName, partialHtml, prompt, platform, stylePreset, projectDesignSystem, preferredModel, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
 
     if (!screenName?.trim()) {
         return reply.status(400).send({ error: 'screenName is required' });
@@ -1681,12 +2136,20 @@ fastify.post<{
         operation: 'complete_screen',
         modelProfile: toCreditModelProfile(preferredModel),
     });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/complete-screen',
+        uid: user.uid,
+        operation: 'complete_screen',
+        estimatedCredits: estimate.estimatedCredits,
+    })) return;
     let reservation: { reservationId: string } | null = null;
 
     try {
         reservation = reserveCredits({
             uid: user.uid,
-            requestId: traceId,
+            requestId: billingRequestId,
             operation: 'complete_screen',
             reservedCredits: estimate.estimatedCredits,
             projectId,

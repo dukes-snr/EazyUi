@@ -44,6 +44,7 @@ export async function createStripeCheckoutSession(params: {
         success_url: params.successUrl,
         cancel_url: params.cancelUrl,
         allow_promotion_codes: true,
+        ...(params.mode === 'payment' ? { invoice_creation: { enabled: true } } : {}),
         metadata: {
             uid: params.uid,
             productKey: params.productKey,
@@ -83,6 +84,6 @@ export async function retrieveCheckoutSessionWithLineItems(sessionId: string): P
         throw new Error('Stripe is not configured. Missing STRIPE_SECRET_KEY.');
     }
     return stripe.checkout.sessions.retrieve(sessionId, {
-        expand: ['line_items.data.price', 'subscription'],
+        expand: ['line_items.data.price', 'subscription', 'invoice'],
     });
 }
