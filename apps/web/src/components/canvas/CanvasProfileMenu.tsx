@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     AlertTriangle,
     BarChart3,
+    Bell,
+    CircleHelp,
     ChevronDown,
     CreditCard,
     Download,
@@ -15,6 +17,7 @@ import {
     Moon,
     Save,
     Settings,
+    Star,
     Sun,
     User as UserIcon,
     UserCircle2,
@@ -59,16 +62,18 @@ function heatClass(level: number): string {
 }
 
 export function CanvasProfileMenu() {
-    const { theme, setTheme, pushToast, removeToast, requestConfirmation } = useUiStore();
+    const { theme, setTheme, pushToast, removeToast, requestConfirmation, toasts } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
     const { doc, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
     const { clearHistory } = useHistoryStore();
-    const { projectId, lastSavedAt, dirty, isSaving, autosaveEnabled, isHydrating, markSaved, setSaving, resetProjectState } = useProjectStore();
+    const { projectId, dirty, isSaving, markSaved, setSaving, resetProjectState } = useProjectStore();
 
     const [openProfile, setOpenProfile] = useState(false);
     const [openExport, setOpenExport] = useState(false);
+    const [openNotifications, setOpenNotifications] = useState(false);
+    const [openCredits, setOpenCredits] = useState(false);
     const [openSettingsModal, setOpenSettingsModal] = useState(false);
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('profile');
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
@@ -79,43 +84,65 @@ export function CanvasProfileMenu() {
     const [billingLoading, setBillingLoading] = useState(false);
     const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
     const [exportActionBusy, setExportActionBusy] = useState<ExportAction | null>(null);
+    const [saveLabel, setSaveLabel] = useState<'saving' | 'saved' | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const saveLabelTimerRef = useRef<number | null>(null);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
         selectedBoardId: doc.selection.selectedBoardId,
         selectedNodeIds: doc.selection.selectedNodeIds,
     });
     const selectionLabel = scope === 'selected' ? `${exportScreens.length} selected` : `${exportScreens.length} total`;
-    const projectStatus = isHydrating ? 'Loading project...' : isSaving ? (autosaveEnabled ? 'Auto save' : 'Saving...') : dirty ? 'Unsaved changes' : lastSavedAt ? 'Saved' : 'Not saved yet';
     const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'You';
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
 
     useEffect(() => {
-        if (!openProfile && !openExport) return;
+        if (!openProfile && !openExport && !openNotifications && !openCredits) return;
         const onPointerDown = (event: MouseEvent) => {
             if (!menuRef.current) return;
             if (!menuRef.current.contains(event.target as Node)) {
                 setOpenProfile(false);
                 setOpenExport(false);
+                setOpenNotifications(false);
+                setOpenCredits(false);
             }
         };
         document.addEventListener('pointerdown', onPointerDown);
         return () => document.removeEventListener('pointerdown', onPointerDown);
-    }, [openProfile, openExport]);
+    }, [openProfile, openExport, openNotifications, openCredits]);
+
+    useEffect(() => {
+        if (!openCredits) return;
+        if (billingLoading) return;
+        if (billingSummary) return;
+        void refreshBillingData();
+    }, [openCredits, billingLoading, billingSummary]);
+
+    useEffect(() => {
+        return () => {
+            if (saveLabelTimerRef.current) {
+                window.clearTimeout(saveLabelTimerRef.current);
+                saveLabelTimerRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         const unsub = observeAuthState((user) => setAuthUser(user));
         return () => unsub();
     }, []);
 
-    const refreshBillingData = async () => {
+    const refreshBillingData = async (options?: { silent?: boolean }) => {
+        const silent = Boolean(options?.silent);
         try {
             setBillingLoading(true);
             const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(40)]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
         } catch (error) {
-            pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
+            if (!silent) {
+                pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
+            }
         } finally {
             setBillingLoading(false);
         }
@@ -125,6 +152,33 @@ export function CanvasProfileMenu() {
         if (!openSettingsModal) return;
         void refreshBillingData();
     }, [openSettingsModal]);
+
+    useEffect(() => {
+        if (!authUser) return;
+
+        void refreshBillingData({ silent: true });
+
+        const onFocus = () => {
+            void refreshBillingData({ silent: true });
+        };
+        const onVisibility = () => {
+            if (!document.hidden) {
+                void refreshBillingData({ silent: true });
+            }
+        };
+
+        const intervalId = window.setInterval(() => {
+            void refreshBillingData({ silent: true });
+        }, 20_000);
+
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            window.clearInterval(intervalId);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [authUser]);
 
     const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
         try {
@@ -187,15 +241,26 @@ export function CanvasProfileMenu() {
 
     const handleSaveNow = async () => {
         if (!spec || isSaving) return;
+        if (saveLabelTimerRef.current) {
+            window.clearTimeout(saveLabelTimerRef.current);
+            saveLabelTimerRef.current = null;
+        }
+        setSaveLabel('saving');
         const savingToastId = pushToast({ kind: 'loading', title: 'Saving canvas', message: 'Persisting screens, chat, and canvas state...', durationMs: 0 });
         try {
             setSaving(true);
             const saved = await apiClient.save({ projectId: projectId || undefined, designSpec: spec as any, canvasDoc: doc, chatState: { messages } });
             markSaved(saved.projectId, saved.savedAt);
             pushToast({ kind: 'success', title: 'Project saved', message: `Project ${saved.projectId.slice(0, 8)} updated.` });
+            setSaveLabel('saved');
+            saveLabelTimerRef.current = window.setTimeout(() => {
+                setSaveLabel(null);
+                saveLabelTimerRef.current = null;
+            }, 4000);
         } catch (error) {
             setSaving(false);
             pushToast({ kind: 'error', title: 'Save failed', message: (error as Error).message || 'Unable to save project.' });
+            setSaveLabel(null);
         } finally {
             removeToast(savingToastId);
         }
@@ -298,35 +363,59 @@ export function CanvasProfileMenu() {
         }, {});
     const mostFrequentModel = Object.entries(modelHistogram).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
     const anyExportBusy = exportActionBusy !== null;
+    const selectedScreensCount = scope === 'selected' ? exportScreens.length : 0;
+    const balanceCredits = billingSummary?.balanceCredits ?? 0;
+    const notifications = toasts
+        .filter((item) => item.kind !== 'loading')
+        .slice(-8)
+        .reverse();
+
+    const goToHelp = () => {
+        setOpenProfile(false);
+        window.history.pushState({}, '', '/learn');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    };
 
     return (
         <>
             <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
-                <div className="canvas-profile-trigger-2 px-2.5 gap-2">
-                    <button type="button" onClick={() => void handleSaveNow()} disabled={isSaving} className="canvas-profile-avatar" title={isSaving ? 'Saving project...' : 'Save project'}>
-                        {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    </button>
-                    <span className={`text-[11px] font-medium ${!dirty && !isSaving && !!lastSavedAt ? 'text-emerald-300' : 'text-[var(--ui-text-subtle)]'}`}>{projectStatus}</span>
-                </div>
+                <button
+                    type="button"
+                    onClick={() => void handleSaveNow()}
+                    disabled={isSaving}
+                    className="inline-flex h-11 items-center gap-2 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] px-3 text-[var(--ui-text)] shadow-[0_18px_30px_rgba(0,0,0,0.2)] backdrop-blur-[10px] transition-colors hover:bg-[var(--ui-canvas-profile-hover)] disabled:cursor-not-allowed disabled:opacity-65"
+                    title={isSaving ? 'Saving project...' : 'Save project'}
+                >
+                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    {saveLabel && (
+                        <span className="text-xs font-semibold text-[var(--ui-text-muted)]">
+                            {saveLabel === 'saving' ? 'Saving...' : 'Saved'}
+                        </span>
+                    )}
+                </button>
 
                 <div className="relative">
                     <button
                         type="button"
-                        onClick={() => { setOpenExport((v) => !v); setOpenProfile(false); }}
-                        className="canvas-profile-trigger"
+                        onClick={() => {
+                            setOpenExport((v) => !v);
+                            setOpenProfile(false);
+                            setOpenNotifications(false);
+                            setOpenCredits(false);
+                        }}
+                        className="relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] text-[var(--ui-text)] shadow-[0_18px_30px_rgba(0,0,0,0.2)] backdrop-blur-[10px] transition-colors hover:bg-[var(--ui-canvas-profile-hover)]"
                         title={anyExportBusy ? 'Export in progress...' : 'Export options'}
                     >
-                        <div className="canvas-profile-avatar">
-                            {anyExportBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                        {anyExportBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                        <div className="absolute -right-1.5 -top-1.5 min-w-[18px] rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-primary)] px-1 text-center text-[10px] font-semibold leading-[16px] text-white">
+                            {selectedScreensCount}
                         </div>
-                        <div className="canvas-profile-meta">
-                            <span className="canvas-profile-name">{anyExportBusy ? 'Exporting...' : 'Export'}</span>
-                            <span className="canvas-profile-role">{selectionLabel}</span>
-                        </div>
-                        <ChevronDown size={14} className={`transition-transform ${openExport ? 'rotate-180' : ''}`} />
                     </button>
                     {openExport && (
-                        <div className="canvas-profile-menu">
+                        <div className="canvas-profile-menu w-[260px]">
+                            <div className="px-2 pb-2 text-[11px] text-[var(--ui-text-subtle)]">
+                                Export scope: <span className="font-semibold text-[var(--ui-text)]">{selectionLabel}</span>
+                            </div>
                             <button
                                 type="button"
                                 className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
@@ -380,16 +469,117 @@ export function CanvasProfileMenu() {
                 </div>
 
                 <div className="relative">
-                    <button type="button" onClick={() => { setOpenProfile((v) => !v); setOpenExport(false); }} className="h-11 w-11 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] inline-flex items-center justify-center hover:bg-[var(--ui-canvas-profile-hover)] transition-colors" title="Profile and settings">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setOpenNotifications((v) => !v);
+                            setOpenExport(false);
+                            setOpenProfile(false);
+                            setOpenCredits(false);
+                        }}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] text-[var(--ui-text)] shadow-[0_18px_30px_rgba(0,0,0,0.2)] backdrop-blur-[10px] transition-colors hover:bg-[var(--ui-canvas-profile-hover)]"
+                        title="Notifications"
+                    >
+                        <Bell size={16} />
+                    </button>
+                    {openNotifications && (
+                        <div className="canvas-profile-menu w-[300px]">
+                            <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                Notifications
+                            </div>
+                            {notifications.length === 0 ? (
+                                <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-subtle)]">
+                                    No notifications yet.
+                                </div>
+                            ) : (
+                                <div className="max-h-[280px] space-y-1 overflow-y-auto pr-1">
+                                    {notifications.map((item) => (
+                                        <div key={item.id} className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                            <div className="text-xs font-semibold text-[var(--ui-text)]">{item.title}</div>
+                                            {item.message && <div className="mt-0.5 text-[11px] text-[var(--ui-text-subtle)]">{item.message}</div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setOpenCredits((v) => !v);
+                            setOpenExport(false);
+                            setOpenProfile(false);
+                            setOpenNotifications(false);
+                        }}
+                        className="inline-flex h-11 items-center gap-2 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] px-3 text-[var(--ui-text)] shadow-[0_18px_30px_rgba(0,0,0,0.2)] backdrop-blur-[10px] transition-colors hover:bg-[var(--ui-canvas-profile-hover)]"
+                        title="Credits"
+                    >
+                        <Star size={15} className="text-amber-300" />
+                        <span className="text-sm font-semibold">{billingLoading && !billingSummary ? '...' : balanceCredits.toLocaleString()}</span>
+                        <ChevronDown size={13} className={`transition-transform ${openCredits ? 'rotate-180' : ''}`} />
+                    </button>
+                    {openCredits && (
+                        <div className="canvas-profile-menu w-[260px]">
+                            <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">Available Credits</div>
+                                <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+                                    {balanceCredits.toLocaleString()}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item mt-2"
+                                onClick={() => void handleBillingCheckout('topup_1000')}
+                                disabled={billingActionBusy !== null}
+                            >
+                                <Zap size={14} />
+                                <span>{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Top up credits'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="canvas-profile-menu-item"
+                                onClick={() => openSettingsAt('billing')}
+                            >
+                                <CreditCard size={14} />
+                                <span>Plan & Billing</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setOpenProfile((v) => !v);
+                            setOpenExport(false);
+                            setOpenNotifications(false);
+                            setOpenCredits(false);
+                        }}
+                        className="h-11 w-11 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] inline-flex items-center justify-center shadow-[0_18px_30px_rgba(0,0,0,0.2)] hover:bg-[var(--ui-canvas-profile-hover)] transition-colors"
+                        title="Profile and settings"
+                    >
                         <div className="canvas-profile-avatar canvas-profile-avatar-lg">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full rounded-full object-cover" /> : <UserCircle2 size={16} />}</div>
                     </button>
                     {openProfile && (
-                        <div className="canvas-profile-menu">
+                        <div className="canvas-profile-menu w-[320px]">
+                            <div className="mb-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
+                                <div className="text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</div>
+                                <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">{authUser?.email || 'No email'}</div>
+                            </div>
+                            <div className="mb-2 flex items-center justify-between rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs">
+                                <span className="inline-flex items-center gap-1 text-[var(--ui-text-subtle)]"><Star size={13} className="text-amber-300" /> Credits</span>
+                                <span className="font-semibold text-[var(--ui-text)]">{balanceCredits.toLocaleString()}</span>
+                            </div>
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><UserIcon size={14} /><span>Profile</span></button>
                             {!authUser?.emailVerified && <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><Mail size={14} /><span>Verify Email</span></button>}
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('settings')}><Settings size={14} /><span>Settings</span></button>
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('billing')}><CreditCard size={14} /><span>Plan & Billing</span></button>
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('usage')}><BarChart3 size={14} /><span>Usage</span></button>
+                            <button type="button" className="canvas-profile-menu-item" onClick={goToHelp}><CircleHelp size={14} /><span>Get Help</span></button>
                             <button type="button" className="canvas-profile-menu-item" onClick={() => void handleSignOut()}><LogOut size={14} /><span>Log Out</span></button>
                         </div>
                     )}

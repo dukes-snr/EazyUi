@@ -282,6 +282,12 @@ function App() {
                 markSaved(saved.projectId, saved.savedAt);
                 autosaveFailureCountRef.current = 0;
                 autosavePausedUntilRef.current = 0;
+                pushToast({
+                    kind: 'success',
+                    title: 'Autosaved',
+                    message: 'Project saved in the background.',
+                    durationMs: 1400,
+                });
             } catch (error) {
                 const nextFailureCount = autosaveFailureCountRef.current + 1;
                 autosaveFailureCountRef.current = nextFailureCount;

@@ -18,7 +18,7 @@
   --ui-surface-2: #171717;
   --ui-surface-3: #1f1f1f;
   --ui-surface-4: #212429;
-  --ui-popover: #121219;
+  --ui-popover: #171717;
   --ui-border: #2A3140;
   --ui-border-light: #3A4250;
   --ui-text: #E8ECF2;
@@ -513,5 +513,5 @@ textarea::placeholder {
 }
 
 .canvas-profile-menu-item:hover {
-  background: var(--ui-surface-2);
+  background: var(--ui-surface-3);
 }
