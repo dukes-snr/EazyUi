@@ -27,6 +27,302 @@
     z-index: 60;
 }
 
+.edit-workspace-overlay {
+    position: absolute;
+    inset: 16px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--ui-surface-1);
+    z-index: 65;
+}
+
+.edit-workspace-modal {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
+.edit-workspace-layers-drawer {
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+    border-right: 0 solid var(--ui-border);
+    transition: width 0.28s ease, min-width 0.28s ease, border-right-width 0.28s ease;
+    background: var(--ui-surface-1);
+}
+
+.edit-workspace-layers-drawer.open {
+    width: 360px;
+    min-width: 360px;
+    border-right-width: 1px;
+}
+
+.edit-workspace-layers-drawer .layers-panel {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+}
+
+.edit-workspace-preview-pane {
+    flex: 1;
+    max-width: none;
+    min-width: 0;
+    min-height: 0;
+    background: var(--ui-surface-1);
+}
+
+.edit-workspace-layers-toggle {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 10px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-2);
+    color: var(--ui-text);
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.edit-workspace-layers-toggle:hover {
+    background: var(--ui-surface-3);
+    border-color: var(--ui-border-light);
+}
+
+.edit-workspace-screen-title {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.edit-workspace-screen-chip {
+    max-width: 100%;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-2);
+    padding: 0 14px;
+    color: var(--ui-text);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.edit-workspace-screen-chip span {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.edit-workspace-preview-canvas {
+    height: 100%;
+    min-height: 0;
+    position: relative;
+}
+
+.edit-workspace-floating-controls {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    z-index: 73;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    pointer-events: none;
+}
+
+.edit-workspace-floating-controls > * {
+    pointer-events: auto;
+}
+
+.edit-workspace-editor-pane {
+    flex: 0 0 320px;
+    max-width: 320px;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    border-left: 1px solid var(--ui-border);
+    background: var(--ui-surface-1);
+}
+
+.edit-workspace-editor-pane .edit-panel,
+.edit-workspace-editor-pane .edit-panel.open {
+    width: 100%;
+    min-width: 0;
+}
+
+.edit-ai-composer-shell {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    z-index: 72;
+    width: min(860px, calc(100% - 28px));
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.edit-ai-composer {
+    pointer-events: auto;
+    border-radius: 16px;
+    border: 1px solid var(--ui-border);
+    background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.edit-ai-context-row {
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+}
+
+.edit-ai-selected-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--ui-primary) 58%, var(--ui-border));
+    background: color-mix(in srgb, var(--ui-primary) 18%, transparent);
+    color: var(--ui-text);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+}
+
+.edit-ai-selected-chip span {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.edit-ai-selected-empty {
+    font-size: 11px;
+    color: var(--ui-text-subtle);
+}
+
+.edit-ai-input-row {
+    display: grid;
+    grid-template-columns: 1fr 42px;
+    gap: 8px;
+    align-items: end;
+}
+
+.edit-ai-textarea {
+    width: 100%;
+    min-height: 64px;
+    max-height: 180px;
+    resize: vertical;
+    border-radius: 12px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-1);
+    color: var(--ui-text);
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.edit-ai-textarea:focus {
+    border-color: color-mix(in srgb, var(--ui-primary) 60%, var(--ui-border));
+}
+
+.edit-ai-textarea:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.edit-ai-send {
+    height: 42px;
+    width: 42px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--ui-primary) 54%, var(--ui-border));
+    background: color-mix(in srgb, var(--ui-primary) 22%, transparent);
+    color: var(--ui-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.edit-ai-send:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ui-primary) 32%, transparent);
+}
+
+.edit-ai-send:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.edit-ai-send.danger {
+    border-color: color-mix(in srgb, #fb7185 52%, var(--ui-border));
+    background: color-mix(in srgb, #fb7185 18%, transparent);
+}
+
+.edit-ai-feedback-row {
+    min-height: 18px;
+}
+
+.edit-ai-feedback {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.edit-ai-feedback.loading {
+    color: var(--ui-text-subtle);
+}
+
+.edit-ai-feedback.error {
+    color: #fca5a5;
+}
+
+.edit-ai-feedback.success {
+    color: #86efac;
+}
+
+@media (max-width: 1360px) {
+    .edit-workspace-layers-drawer.open {
+        width: 320px;
+        min-width: 320px;
+    }
+
+    .edit-workspace-preview-pane {
+        flex: 1;
+        max-width: none;
+    }
+
+    .edit-workspace-editor-pane {
+        flex-basis: 300px;
+        max-width: 300px;
+    }
+
+    .edit-workspace-editor-pane .edit-panel,
+    .edit-workspace-editor-pane .edit-panel.open {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
 .app-canvas-shell {
     flex: 1;
     min-width: 0;

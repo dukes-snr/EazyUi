@@ -921,14 +921,14 @@ RULES:
 
                 <div className="px-4 pt-3 pb-2 border-b border-[var(--ui-border)]">
                     <div className="inline-flex rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 w-full">
-                        {(['blocks', 'style', 'symbols'] as const).map((tab) => (
+                        {(['style', 'symbols'] as const).map((tab) => (
                             <button
                                 key={tab}
                                 type="button"
                                 onClick={() => setActiveTab(tab)}
                                 className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${activeTab === tab ? 'bg-[var(--ui-tab-active-bg)] text-[var(--ui-text)] shadow-sm' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'}`}
                             >
-                                {tab === 'blocks' ? 'AI Edit' : tab === 'style' ? 'Edit' : 'Images'}
+                                {tab === 'style' ? 'Edit' : 'Images'}
                             </button>
                         ))
                         }

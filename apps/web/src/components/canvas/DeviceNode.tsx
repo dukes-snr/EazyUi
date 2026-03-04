@@ -970,7 +970,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     return (
         <div className={`device-node-container relative transition-all duration-300 group ${isEditMode && !isEditingScreen ? 'opacity-40' : ''}`}>
             <NodeToolbar
-                isVisible={selected && selectedCount === 1}
+                isVisible={selected && selectedCount === 1 && !isEditMode}
                 position={Position.Top}
                 offset={50}
             >

@@ -6,8 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
-import { EditPanel } from './components/edit/EditPanel';
-import { LayersPanel } from './components/edit/LayersPanel';
+import { EditWorkspaceOverlay } from './components/edit/EditWorkspaceOverlay';
 import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { LandingPage } from './components/landing/LandingPage';
 import { LearnPage } from './components/marketing/LearnPage';
@@ -598,11 +597,10 @@ function App() {
         <div className={`app-layout ${isEditMode ? 'edit-mode' : ''} ${route.kind === 'app-project-settings' ? 'project-settings-active' : ''}`}>
             <ChatPanel initialRequest={initialRequest} />
             <div className="app-canvas-shell">
-                <LayersPanel />
-                <CanvasWorkspace />
-                <EditPanel />
-                {showInspector && <InspectorPanel />}
+                {!isEditMode && <CanvasWorkspace mode="default" />}
+                {!isEditMode && showInspector && <InspectorPanel />}
             </div>
+            {route.kind !== 'app-project-settings' && <EditWorkspaceOverlay />}
             {route.kind === 'app-project-settings' && (
                 <div className="project-settings-overlay">
                     <ProjectSettingsPage

@@ -67,7 +67,7 @@ function createCopiedScreenName(sourceName: string, usedNames: Set<string>): str
 }
 
 // Inner component to use React Flow hooks if needed
-function CanvasWorkspaceContent() {
+function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit-workspace' }) {
     const { spec, addScreens, removeScreen } = useDesignStore();
     const { projectId, isHydrating } = useProjectStore();
     const {
@@ -90,7 +90,9 @@ function CanvasWorkspaceContent() {
     const { pushToast, requestConfirmation } = useUiStore();
     const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
+    const isEditWorkspace = mode === 'edit-workspace';
     const autoFocusedProjectIdRef = useRef<string | null>(null);
+    const editWorkspaceFocusedScreenRef = useRef<string | null>(null);
     const copiedScreensRef = useRef<CopiedScreenPayload[]>([]);
     const pasteCountRef = useRef(0);
 
@@ -116,7 +118,17 @@ function CanvasWorkspaceContent() {
         };
     }, []);
 
-    const focusNodesTopAligned = useCallback((targetNodes: Node[], duration = 800, includeToolbarChrome = false) => {
+    const focusNodesTopAligned = useCallback((
+        targetNodes: Node[],
+        duration = 800,
+        includeToolbarChrome = false,
+        paddingOverrides?: {
+            sidePadding?: number;
+            topPadding?: number;
+            bottomPadding?: number;
+        },
+        verticalAlign: 'top' | 'center' = 'top'
+    ) => {
         if (!targetNodes.length) return;
 
         let minX = Infinity;
@@ -135,27 +147,41 @@ function CanvasWorkspaceContent() {
         const boundsWidth = Math.max(1, maxX - minX);
         const boundsHeight = Math.max(1, maxY - minY);
         const viewport = getCanvasViewportSize();
-        const sidePadding = includeToolbarChrome ? 110 : 72;
-        const topPadding = includeToolbarChrome ? 132 : 40;
-        const bottomPadding = includeToolbarChrome ? 56 : 40;
+        const sidePadding = paddingOverrides?.sidePadding ?? (includeToolbarChrome ? 110 : 72);
+        const topPadding = paddingOverrides?.topPadding ?? (includeToolbarChrome ? 132 : 40);
+        const bottomPadding = paddingOverrides?.bottomPadding ?? (includeToolbarChrome ? 56 : 40);
+
+        const availableWidth = Math.max(120, viewport.width - sidePadding * 2);
+        const availableHeight = Math.max(120, viewport.height - topPadding - bottomPadding);
 
         // Fit by both width/height so multi-screen focus reliably keeps all frames visible.
-        const zoomByWidth = (viewport.width - sidePadding * 2) / boundsWidth;
-        const zoomByHeight = (viewport.height - topPadding - bottomPadding) / boundsHeight;
+        const zoomByWidth = availableWidth / boundsWidth;
+        const zoomByHeight = availableHeight / boundsHeight;
         const zoom = Math.max(0.05, Math.min(1.1, Math.min(zoomByWidth, zoomByHeight)));
 
-        const x = viewport.width / 2 - ((minX + boundsWidth / 2) * zoom);
-        const y = topPadding - minY * zoom;
+        const frameCenterX = sidePadding + availableWidth / 2;
+        const contentCenterX = minX + boundsWidth / 2;
+        const x = frameCenterX - contentCenterX * zoom;
+        const y = verticalAlign === 'center'
+            ? (topPadding + availableHeight / 2) - (minY + boundsHeight / 2) * zoom
+            : topPadding - minY * zoom;
 
         setViewport({ x, y, zoom }, { duration, ease: easeInOutCubic, interpolate: 'smooth' });
     }, [getCanvasViewportSize, getNodeSize, setViewport]);
 
-    // Initialize nodes from doc.boards and spec.screens
+    const visibleBoards = useMemo(() => {
+        if (isEditWorkspace && isEditMode && editScreenId) {
+            return doc.boards.filter((board) => board.screenId === editScreenId);
+        }
+        return doc.boards;
+    }, [doc.boards, editScreenId, isEditMode, isEditWorkspace]);
+
+    // Initialize nodes from boards and spec.screens
     const initialNodes = useMemo(() => {
         if (!spec) return [];
 
         // Map based on boards to respect arrangement order
-        return doc.boards.map((board) => {
+        return visibleBoards.map((board) => {
             const screen = screensById.get(board.screenId);
             if (!screen) return null;
 
@@ -174,7 +200,7 @@ function CanvasWorkspaceContent() {
                 selected: false,
             } as Node;
         }).filter(Boolean) as Node[];
-    }, [spec, doc.boards, screensById]); // Selection sync happens in dedicated effect
+    }, [spec, visibleBoards, screensById]); // Selection sync happens in dedicated effect
 
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
     const [edges, , onEdgesChange] = useEdgesState([]);
@@ -186,6 +212,17 @@ function CanvasWorkspaceContent() {
             const targetNode = nodes.find(n => n.id === focusNodeId);
 
             if (targetNode) {
+                if (isEditWorkspace) {
+                    focusNodesTopAligned([targetNode], 520, false, {
+                        topPadding: 48,
+                        bottomPadding: 210,
+                        sidePadding: 72,
+                    });
+                    selectNodes([focusNodeId]);
+                    setFocusNodeId(null);
+                    return;
+                }
+
                 // Calculate center of the node
                 const { width, height } = getNodeSize(targetNode);
                 const isDesktopNode = width >= 1024;
@@ -210,7 +247,7 @@ function CanvasWorkspaceContent() {
                 setFocusNodeId(null);
             }
         }
-    }, [focusNodeId, getNodeSize, focusNodesTopAligned, setCenter, setFocusNodeId, nodes, selectNodes]);
+    }, [focusNodeId, getNodeSize, focusNodesTopAligned, isEditWorkspace, setCenter, setFocusNodeId, nodes, selectNodes]);
 
     // Handle focusing a group of nodes from chat/edit flows
     useEffect(() => {
@@ -231,12 +268,35 @@ function CanvasWorkspaceContent() {
 
     // After a project finishes loading, focus all screens with room for device toolbar chrome.
     useEffect(() => {
+        if (!isEditWorkspace || !isEditMode || !editScreenId) {
+            editWorkspaceFocusedScreenRef.current = null;
+            return;
+        }
+        if (editWorkspaceFocusedScreenRef.current === editScreenId) return;
+        if (nodes.length === 0) return;
+
+        const targetNode = nodes.find((node) => node.id === editScreenId) || nodes[0];
+        if (!targetNode) return;
+        const raf = window.requestAnimationFrame(() => {
+            // Reserve extra bottom room so the screen starts above the AI composer.
+            focusNodesTopAligned([targetNode], 520, false, {
+                topPadding: 48,
+                bottomPadding: 210,
+                sidePadding: 72,
+            });
+            editWorkspaceFocusedScreenRef.current = editScreenId;
+        });
+        return () => window.cancelAnimationFrame(raf);
+    }, [editScreenId, focusNodesTopAligned, isEditMode, isEditWorkspace, nodes]);
+
+    useEffect(() => {
         if (isHydrating) {
             autoFocusedProjectIdRef.current = null;
         }
     }, [isHydrating]);
 
     useEffect(() => {
+        if (isEditWorkspace) return;
         if (isHydrating) return;
         if (!projectId || !spec || nodes.length === 0) return;
         if (autoFocusedProjectIdRef.current === projectId) return;
@@ -250,11 +310,11 @@ function CanvasWorkspaceContent() {
         const frame = window.requestAnimationFrame(() => {
             if (cancelled) return;
             // First fit pass immediately after nodes are mounted.
-            focusNodesTopAligned(targetNodes, 900, true);
+            focusNodesTopAligned(targetNodes, 900, true, undefined, 'center');
             // Second pass settles final dimensions for a stable centered view.
             delayedPass = window.setTimeout(() => {
                 if (cancelled) return;
-                focusNodesTopAligned(targetNodes, 520, true);
+                focusNodesTopAligned(targetNodes, 520, true, undefined, 'center');
                 autoFocusedProjectIdRef.current = projectId;
             }, 220);
         });
@@ -266,7 +326,7 @@ function CanvasWorkspaceContent() {
                 window.clearTimeout(delayedPass);
             }
         };
-    }, [isHydrating, projectId, spec, nodes, focusNodesTopAligned]);
+    }, [isEditWorkspace, isHydrating, projectId, spec, nodes, focusNodesTopAligned]);
 
     // Update nodes when structure or selection changes
     // But avoid resetting positions while users are interacting via React Flow
@@ -685,37 +745,39 @@ function CanvasWorkspaceContent() {
 
     return (
         <div className="canvas-workspace relative h-full w-full">
-            <div className="absolute left-4 top-4 z-50">
-                <div className="inline-flex items-center ml-[50px] gap-1 text-[12px] text-[var(--ui-text-muted)]">
-                    <button
-                        type="button"
-                        onClick={() => navigateTo('/app')}
-                        className="hover:text-[var(--ui-text)]"
-                    >
-                        Home
-                    </button>
-                    <ChevronRight size={12} />
-                    <button
-                        type="button"
-                        onClick={() => navigateTo('/app/projects')}
-                        className="hover:text-[var(--ui-text)]"
-                    >
-                        Projects
-                    </button>
-                    <ChevronRight size={12} />
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (!projectId) return;
-                            navigateTo(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
-                        }}
-                        className="max-w-[170px] truncate text-[var(--ui-text)] hover:text-[var(--ui-text)]"
-                        title={spec?.name || 'Project'}
-                    >
-                        {spec?.name || 'Project'}
-                    </button>
+            {!isEditWorkspace && (
+                <div className="absolute left-4 top-4 z-50">
+                    <div className="inline-flex items-center ml-[50px] gap-1 text-[12px] text-[var(--ui-text-muted)]">
+                        <button
+                            type="button"
+                            onClick={() => navigateTo('/app')}
+                            className="hover:text-[var(--ui-text)]"
+                        >
+                            Home
+                        </button>
+                        <ChevronRight size={12} />
+                        <button
+                            type="button"
+                            onClick={() => navigateTo('/app/projects')}
+                            className="hover:text-[var(--ui-text)]"
+                        >
+                            Projects
+                        </button>
+                        <ChevronRight size={12} />
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!projectId) return;
+                                navigateTo(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
+                            }}
+                            className="max-w-[170px] truncate text-[var(--ui-text)] hover:text-[var(--ui-text)]"
+                            title={spec?.name || 'Project'}
+                        >
+                            {spec?.name || 'Project'}
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
 
             <ReactFlow
                 nodes={nodes}
@@ -730,7 +792,7 @@ function CanvasWorkspaceContent() {
                 fitView
                 fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
                 minZoom={0.05}
-                maxZoom={2}
+                maxZoom={isEditWorkspace ? 4 : 2}
 
                 // Interaction Logic
                 panOnDrag={panOnDrag}
@@ -763,24 +825,28 @@ function CanvasWorkspaceContent() {
                 />
             </ReactFlow>
 
-            <CanvasToolbar />
+            {!isEditWorkspace && <CanvasToolbar />}
 
             {/* Multi-Selection Toolbar */}
-            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-                <MultiSelectToolbar />
-            </div>
+            {!isEditWorkspace && (
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+                    <MultiSelectToolbar />
+                </div>
+            )}
 
-            <div className="absolute top-4 right-4 z-50">
-                <CanvasProfileMenu />
-            </div>
+            {!isEditWorkspace && (
+                <div className="absolute top-4 right-4 z-50">
+                    <CanvasProfileMenu />
+                </div>
+            )}
         </div>
     );
 }
 
-export function CanvasWorkspace() {
+export function CanvasWorkspace({ mode = 'default' }: { mode?: 'default' | 'edit-workspace' }) {
     return (
         <ReactFlowProvider>
-            <CanvasWorkspaceContent />
+            <CanvasWorkspaceContent mode={mode} />
         </ReactFlowProvider>
     );
 }
