@@ -971,6 +971,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(prompt, 180);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1006,6 +1007,7 @@ fastify.post<{
                 route: '/api/generate',
                 modelProfile: reservationEstimate.modelProfile,
                 bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+                requestPreview,
             },
         });
         fastify.log.info({
@@ -1088,6 +1090,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(prompt, 180);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1122,6 +1125,7 @@ fastify.post<{
                 projectId,
                 metadata: {
                     route: '/api/design-system',
+                    requestPreview,
                 },
             });
         }
@@ -1226,6 +1230,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(instruction, 180);
 
     if (!instruction?.trim()) {
         return reply.status(400).send({ error: 'Instruction is required' });
@@ -1261,6 +1266,7 @@ fastify.post<{
             metadata: {
                 route: '/api/edit',
                 screenId,
+                requestPreview,
             },
         });
         fastify.log.info({
@@ -1360,6 +1366,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(appPrompt, 180);
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
@@ -1395,6 +1402,7 @@ fastify.post<{
             metadata: {
                 route: '/api/synthesize-screen-images',
                 screenCount: screens.length,
+                requestPreview,
             },
         });
         fastify.log.info({
@@ -1476,6 +1484,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(instruction || prompt, 180);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1506,6 +1515,7 @@ fastify.post<{
             projectId,
             metadata: {
                 route: '/api/generate-image',
+                requestPreview,
             },
         });
         fastify.log.info({
@@ -1575,6 +1585,7 @@ fastify.post<{
     const { audioBase64, mimeType, language, model } = request.body;
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(`Voice transcription (${language || 'auto'})`, 180);
 
     if (!audioBase64?.trim()) {
         return reply.status(400).send({ error: 'audioBase64 is required' });
@@ -1611,6 +1622,7 @@ fastify.post<{
             metadata: {
                 route: '/api/transcribe-audio',
                 approxMinutes,
+                requestPreview,
             },
         });
         fastify.log.info({
@@ -1951,6 +1963,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(prompt, 180);
 
     if (!prompt?.trim()) {
         return reply.status(400).send({ error: 'Prompt is required' });
@@ -1996,6 +2009,7 @@ fastify.post<{
             metadata: {
                 route: '/api/generate-stream',
                 bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+                requestPreview,
             },
         });
     } catch (error) {
@@ -2121,6 +2135,7 @@ fastify.post<{
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(prompt || `Complete ${screenName}`, 180);
 
     if (!screenName?.trim()) {
         return reply.status(400).send({ error: 'screenName is required' });
@@ -2156,6 +2171,7 @@ fastify.post<{
             metadata: {
                 route: '/api/complete-screen',
                 screenName,
+                requestPreview,
             },
         });
         fastify.log.info({

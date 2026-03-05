@@ -497,6 +497,19 @@ function mapPurchaseRow(row: BillingPurchaseRow): BillingPurchase {
     };
 }
 
+function parseMetadataObject(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as Record<string, unknown>;
+        }
+    } catch {
+        // ignore malformed metadata payload
+    }
+    return {};
+}
+
 function hydrateProfile(uid: string, now = new Date()): BillingProfileRow {
     const existing = selectProfileStmt.get(uid);
     if (existing) {
@@ -864,6 +877,10 @@ export function settleReservation(input: {
         const profileBefore = hydrateProfile(payload.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
         const reserved = reservation.reserved_credits;
+        const reservationMetadata = parseMetadataObject(reservation.metadata);
+        const reservationRequestPreview = typeof reservationMetadata.requestPreview === 'string'
+            ? reservationMetadata.requestPreview
+            : undefined;
 
         let target = reserved;
         if (payload.outcome === 'failed') {
@@ -914,6 +931,7 @@ export function settleReservation(input: {
                 outcome: payload.outcome,
                 reservedCredits: reserved,
                 finalChargedCredits: finalCharged,
+                ...(reservationRequestPreview ? { requestPreview: reservationRequestPreview } : {}),
                 ...(payload.metadata || {}),
             }),
             created_at: nowAt,
@@ -925,7 +943,7 @@ export function settleReservation(input: {
             status,
             final_credits: finalCharged,
             metadata: JSON.stringify({
-                ...(reservation.metadata ? JSON.parse(reservation.metadata) : {}),
+                ...reservationMetadata,
                 settlement: {
                     outcome: payload.outcome,
                     finalChargedCredits: finalCharged,

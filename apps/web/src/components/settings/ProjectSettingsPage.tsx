@@ -4,6 +4,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
+import { extractLedgerRequestPreview } from '../../utils/billingUsage';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
 
@@ -687,13 +688,14 @@ export function ProjectSettingsPage({
                                                 <tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2">Time</th>
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2">Action</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Request</th>
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Credits</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {billingLoading ? (
                                                     <tr>
-                                                        <td colSpan={3} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                        <td colSpan={4} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
                                                             <span className="inline-flex items-center gap-2">
                                                                 <Loader2 size={14} className="animate-spin" />
                                                                 Loading usage activity...
@@ -702,13 +704,14 @@ export function ProjectSettingsPage({
                                                     </tr>
                                                 ) : usageActivityRows.length === 0 ? (
                                                     <tr>
-                                                        <td colSpan={3} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                        <td colSpan={4} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
                                                             No usage activity in this period.
                                                         </td>
                                                     </tr>
                                                 ) : usageActivityRows.map((item) => {
                                                     const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
                                                     const metadataReason = typeof item.metadata?.reason === 'string' ? item.metadata.reason : '';
+                                                    const requestPreview = extractLedgerRequestPreview(item.metadata);
                                                     return (
                                                         <tr key={item.id}>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
@@ -719,6 +722,15 @@ export function ProjectSettingsPage({
                                                                 <div className="text-xs text-[var(--ui-text-subtle)]">
                                                                     {metadataReason || item.projectId || 'Usage event'}
                                                                 </div>
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                                {requestPreview ? (
+                                                                    <span className="block max-w-[320px] truncate whitespace-nowrap" title={requestPreview}>
+                                                                        {requestPreview}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-[var(--ui-text-subtle)]">-</span>
+                                                                )}
                                                             </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right font-semibold text-rose-300">
                                                                 -{Math.abs(item.creditsDelta).toLocaleString()}

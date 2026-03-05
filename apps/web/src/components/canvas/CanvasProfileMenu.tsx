@@ -29,6 +29,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
+import { extractLedgerRequestPreview } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
@@ -742,8 +743,41 @@ export function CanvasProfileMenu() {
                                         <SectionCard title="Usage Events">
                                             <div className="overflow-x-auto">
                                                 <table className="min-w-full text-left">
-                                                    <thead><tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]"><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Time</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Model</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Cost</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Source</th></tr></thead>
-                                                    <tbody>{usageEvents.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td></tr> : usageEvents.map((item) => <tr key={`usage-${item.id}`} className="text-sm text-[var(--ui-text)]"><td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(item.createdAt).toLocaleString()}</td><td className="border-b border-[var(--ui-border)] px-4 py-3">{typeof item.metadata?.model === 'string' ? item.metadata.model : 'Default model'}</td><td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{(item.operation || item.type).replace(/_/g, ' ')}</td></tr>)}</tbody>
+                                                    <thead>
+                                                        <tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Time</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Model</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Request</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Cost</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Source</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {usageEvents.length === 0 ? (
+                                                            <tr>
+                                                                <td colSpan={5} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td>
+                                                            </tr>
+                                                        ) : usageEvents.map((item) => {
+                                                            const requestPreview = extractLedgerRequestPreview(item.metadata);
+                                                            return (
+                                                                <tr key={`usage-${item.id}`} className="text-sm text-[var(--ui-text)]">
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(item.createdAt).toLocaleString()}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{typeof item.metadata?.model === 'string' ? item.metadata.model : 'Default model'}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">
+                                                                        {requestPreview ? (
+                                                                            <span className="block max-w-[320px] truncate whitespace-nowrap" title={requestPreview}>
+                                                                                {requestPreview}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span>-</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{(item.operation || item.type).replace(/_/g, ' ')}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
                                                 </table>
                                             </div>
                                         </SectionCard>
