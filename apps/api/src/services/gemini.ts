@@ -75,11 +75,24 @@ const GENERATION_CONFIG = {
     maxOutputTokens: 16384,
 };
 
-function getGenerationConfig(hasReferenceImages: boolean) {
-    if (!hasReferenceImages) return GENERATION_CONFIG;
+function resolveModelTemperature(value: unknown, fallback: number): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.max(0, Math.min(2, numeric));
+}
+
+function getGenerationConfig(hasReferenceImages: boolean, temperature?: number) {
+    const fallbackTemperature = 1;
+    const resolvedTemperature = resolveModelTemperature(temperature, fallbackTemperature);
+    if (!hasReferenceImages) {
+        return {
+            ...GENERATION_CONFIG,
+            temperature: resolvedTemperature,
+        };
+    }
     return {
         ...GENERATION_CONFIG,
-        temperature: 0.35,
+        temperature: resolvedTemperature,
         topP: 0.85,
     };
 }
@@ -648,6 +661,7 @@ export interface GenerateOptions {
     platform?: string;
     images?: string[];
     preferredModel?: string;
+    temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
 }
 
@@ -657,6 +671,7 @@ export interface GenerateProjectDesignSystemOptions {
     platform?: string;
     images?: string[];
     preferredModel?: string;
+    temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
 }
 
@@ -1369,11 +1384,13 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
     const stylePreset = safeString(options.stylePreset, 'modern', 32).toLowerCase();
     const platform = safeString(options.platform, 'mobile', 32).toLowerCase();
     const images = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+    const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] design-system:start', {
         stylePreset,
         platform,
         imagesCount: images.length,
         preferredModel: options.preferredModel || null,
+        temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
         promptPreview: prompt.slice(0, 180),
     });
@@ -1448,7 +1465,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                 systemPrompt,
                 prompt: userPrompt,
                 maxCompletionTokens: 1900,
-                temperature: 0.35,
+                temperature: modelTemperature,
                 topP: 0.85,
                 responseFormat: 'json_object',
                 thinking: false,
@@ -1460,7 +1477,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                 systemPrompt,
                 prompt: userPrompt,
                 maxCompletionTokens: 1900,
-                temperature: 0.35,
+                temperature: modelTemperature,
                 topP: 0.85,
                 responseFormat: 'json_object',
                 reasoningEffort: 'low',
@@ -1476,7 +1493,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                     parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }, ...imageParts],
                 }],
                 generationConfig: {
-                    temperature: 0.35,
+                    temperature: modelTemperature,
                     topP: 0.85,
                     maxOutputTokens: 2600,
                 },
@@ -1500,16 +1517,18 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
 
 export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+    const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] generateDesign:start', {
         stylePreset,
         platform,
         imagesCount: images.length,
         preferredModel: preferredModel || null,
+        temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
         promptPreview: String(prompt || '').slice(0, 180),
     });
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
-    const generationConfig = getGenerationConfig(images.length > 0);
+    const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
     const imageAnalysis = await analyzeReferenceImages(images);
     const projectDesignSystem = await generateProjectDesignSystem({
         prompt,
@@ -1517,6 +1536,7 @@ export async function generateDesign(options: GenerateOptions): Promise<HtmlDesi
         platform,
         images,
         preferredModel,
+        temperature: modelTemperature,
         projectDesignSystem: options.projectDesignSystem,
     });
     const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
@@ -1570,7 +1590,7 @@ ${designSystemGuidance}
                         systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
-                        temperature: images.length > 0 ? 0.32 : 0.52,
+                        temperature: modelTemperature,
                         topP: images.length > 0 ? 0.85 : 0.9,
                         responseFormat: 'json_object',
                         thinking: false,
@@ -1580,7 +1600,7 @@ ${designSystemGuidance}
                         systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
-                        temperature: images.length > 0 ? 0.32 : 0.52,
+                        temperature: modelTemperature,
                         topP: images.length > 0 ? 0.85 : 0.9,
                         reasoningEffort: 'low',
                         responseFormat: 'json_object',
@@ -1651,16 +1671,18 @@ ${designSystemGuidance}
 
 export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+    const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] generateDesignStream:start', {
         stylePreset,
         platform,
         imagesCount: images.length,
         preferredModel: preferredModel || null,
+        temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
         promptPreview: String(prompt || '').slice(0, 180),
     });
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
-    const generationConfig = getGenerationConfig(images.length > 0);
+    const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
     const imageAnalysis = await analyzeReferenceImages(images);
     const projectDesignSystem = await generateProjectDesignSystem({
         prompt,
@@ -1668,6 +1690,7 @@ export async function* generateDesignStream(options: GenerateOptions): AsyncGene
         platform,
         images,
         preferredModel,
+        temperature: modelTemperature,
         projectDesignSystem: options.projectDesignSystem,
     });
     const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
@@ -1711,6 +1734,7 @@ export interface EditOptions {
     screenId: string;
     images?: string[];
     preferredModel?: string;
+    temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
     consistencyProfile?: {
         canonicalNavbarLabels?: string[];
@@ -1736,6 +1760,7 @@ export interface CompleteScreenOptions {
     prompt?: string;
     platform?: string;
     stylePreset?: string;
+    temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
 }
 
@@ -1810,12 +1835,14 @@ export async function generateImageAsset(options: GenerateImageOptions): Promise
 
 export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
     const { instruction, html, images = [], preferredModel } = options;
+    const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] editDesign:start', {
         screenId: options.screenId,
         htmlChars: String(html || '').length,
         instructionPreview: String(instruction || '').slice(0, 180),
         imagesCount: images.length,
         preferredModel: preferredModel || null,
+        temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
         hasConsistencyProfile: Boolean(options.consistencyProfile),
         referenceScreens: (options.referenceScreens || []).map((screen) => screen.name).slice(0, 4),
@@ -1884,7 +1911,7 @@ ${designSystemGuidance}`.trim();
                     systemPrompt: 'You are an expert UI designer that edits HTML.',
                     prompt: fastUserPrompt,
                     maxTokens: 1800,
-                    temperature: 0.5,
+                    temperature: modelTemperature,
                     thinking: false,
                 })
                 : await groqChatCompletion({
@@ -1892,7 +1919,7 @@ ${designSystemGuidance}`.trim();
                     systemPrompt: 'You are an expert UI designer that edits HTML.',
                     prompt: fastUserPrompt,
                     maxTokens: 1800,
-                    temperature: 0.5,
+                    temperature: modelTemperature,
                 });
             const { text, modelUsed } = completion;
             const parsed = parseEditResponse(text);
@@ -1922,7 +1949,10 @@ ${designSystemGuidance}`.trim();
     try {
         const result = await selectedModel.model.generateContent({
             contents: [{ role: 'user', parts }],
-            generationConfig: GENERATION_CONFIG,
+            generationConfig: {
+                ...GENERATION_CONFIG,
+                temperature: modelTemperature,
+            },
         });
         const parsed = parseEditResponse(result.response.text());
         console.info('[Gemini] editDesign:complete-gemini', {
@@ -1948,7 +1978,10 @@ ${designSystemGuidance}`.trim();
         const fallbackModel = getGenerativeModel(IMAGE_FALLBACK_MODEL);
         const fallbackResult = await fallbackModel.model.generateContent({
             contents: [{ role: 'user', parts }],
-            generationConfig: GENERATION_CONFIG,
+            generationConfig: {
+                ...GENERATION_CONFIG,
+                temperature: modelTemperature,
+            },
         });
         const parsed = parseEditResponse(fallbackResult.response.text());
         const fallbackNote = `(Image model quota exceeded; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`;
@@ -1967,6 +2000,7 @@ ${designSystemGuidance}`.trim();
 
 export async function completePartialScreen(options: CompleteScreenOptions): Promise<string> {
     const { screenName, partialHtml, prompt, platform, stylePreset } = options;
+    const modelTemperature = resolveModelTemperature(options.temperature, 1);
     const projectDesignSystem = options.projectDesignSystem
         ? normalizeProjectDesignSystem(
             options.projectDesignSystem,
@@ -1991,7 +2025,7 @@ ${partialHtml}
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         generationConfig: {
             ...GENERATION_CONFIG,
-            temperature: 0.4,
+            temperature: modelTemperature,
         },
     });
 

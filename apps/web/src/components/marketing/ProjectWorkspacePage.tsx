@@ -1,4 +1,4 @@
-import { ArrowUp, FolderOpen, House, Loader2, LogOut, Monitor, Plus, RefreshCcw, Smartphone, Sparkles, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, CircleStar, FolderOpen, Gem, House, LineSquiggle, Loader2, LogOut, Monitor, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -54,10 +54,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [creatingFromPrompt, setCreatingFromPrompt] = useState(false);
   const [starterImages, setStarterImages] = useState<string[]>([]);
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
   const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
+  const [showStyleMenu, setShowStyleMenu] = useState(false);
+  const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
   const [openAvatarMenu, setOpenAvatarMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
+  const styleMenuRef = useRef<HTMLDivElement | null>(null);
 
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
   const authEmail = authUser?.email || 'No email';
@@ -76,6 +80,24 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const { agentState: workspaceOrbState, colors: workspaceOrbColors } = useOrbVisuals(workspaceOrbActivity);
   const workspaceOrbInput = creatingFromPrompt ? 0.55 : 0.18;
   const workspaceOrbOutput = creatingFromPrompt ? 0.88 : starterPrompt.trim().length > 0 ? 0.44 : 0.2;
+  const StyleIcon = stylePreset === 'minimal'
+    ? LineSquiggle
+    : stylePreset === 'vibrant'
+      ? Palette
+      : stylePreset === 'luxury'
+        ? Gem
+        : stylePreset === 'playful'
+          ? Smile
+          : CircleStar;
+  const styleButtonTone = stylePreset === 'minimal'
+    ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
+    : stylePreset === 'vibrant'
+      ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
+      : stylePreset === 'luxury'
+        ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
+        : stylePreset === 'playful'
+          ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
+          : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
 
   const loadProjects = async () => {
     if (!authReady || !isAuthenticated) return;
@@ -112,6 +134,30 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     }
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [openAvatarMenu]);
+
+  useEffect(() => {
+    if (!showStyleMenu) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!styleMenuRef.current) return;
+      if (styleMenuRef.current.contains(event.target as Node)) return;
+      setShowStyleMenu(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowStyleMenu(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showStyleMenu]);
+
+  useEffect(() => {
+    apiClient.setComposerTemperature(modelTemperature);
+  }, [modelTemperature]);
 
   useEffect(() => {
     const available = new Set(projects.map((project) => project.id));
@@ -214,8 +260,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         prompt: nextPrompt,
         images: starterImages,
         platform: deviceType,
-        stylePreset: 'modern',
+        stylePreset,
         modelProfile,
+        modelTemperature,
       })
     );
     onNavigate('/app/projects/new');
@@ -465,6 +512,55 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   >
                     <Sparkles size={12} />
                   </button>
+                </div>
+                <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowStyleMenu((open) => !open)}
+                    className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
+                    title="Select style preset"
+                  >
+                    <StyleIcon size={14} />
+                  </button>
+                  {showStyleMenu && (
+                    <div className="absolute bottom-12 right-0 w-56 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
+                      {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setStylePreset(preset)}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
+                            ? 'bg-indigo-500/20 text-[var(--ui-text)]'
+                            : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
+                            }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                      <div className="mt-2 border-t border-[var(--ui-border)] pt-2 px-1">
+                        <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                          <span>Temporary</span>
+                          <span>{modelTemperature.toFixed(2)}</span>
+                        </div>
+                        <label className="mt-1.5 block text-[11px] text-[var(--ui-text-muted)]">
+                          Temperature
+                          <input
+                            type="range"
+                            min={0}
+                            max={2}
+                            step={0.01}
+                            value={modelTemperature}
+                            onChange={(event) => {
+                              const numeric = Number(event.target.value);
+                              if (!Number.isFinite(numeric)) return;
+                              setModelTemperature(Math.max(0, Math.min(2, numeric)));
+                            }}
+                            className="mt-2 w-full accent-[var(--ui-primary)] cursor-pointer"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

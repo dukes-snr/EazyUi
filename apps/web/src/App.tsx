@@ -156,6 +156,7 @@ function App() {
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
+        modelTemperature?: number;
     } | null>(null);
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
     const isCanvasRoute = route.kind === 'app-project-canvas' || route.kind === 'app-project-settings';
@@ -341,6 +342,7 @@ function App() {
                     platform?: 'mobile' | 'tablet' | 'desktop';
                     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
                     modelProfile?: DesignModelProfile;
+                    modelTemperature?: number;
                 };
                 const prompt = (parsed.prompt || '').trim();
                 const images = Array.isArray(parsed.images) ? parsed.images.filter((x) => typeof x === 'string') : [];
@@ -352,6 +354,7 @@ function App() {
                         platform: parsed.platform,
                         stylePreset: parsed.stylePreset,
                         modelProfile: parsed.modelProfile,
+                        modelTemperature: Number.isFinite(parsed.modelTemperature) ? Number(parsed.modelTemperature) : undefined,
                     });
                 }
             } catch {
@@ -552,8 +555,8 @@ function App() {
                 onSignOut={handleSignOut}
                 onSendVerification={handleSendVerification}
                 verificationBusy={verificationBusy}
-                onStart={({ prompt, images, platform, stylePreset, modelProfile }) => {
-                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile }));
+                onStart={({ prompt, images, platform, stylePreset, modelProfile, modelTemperature }) => {
+                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile, modelTemperature }));
                     navigate('/app/projects/new');
                 }}
                 onNavigate={(path) => navigate(path)}

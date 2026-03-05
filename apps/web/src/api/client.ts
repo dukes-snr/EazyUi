@@ -6,6 +6,15 @@ import { auth } from '@/lib/firebase';
 import { deleteProjectFirestore, getProjectFirestore, listProjectsFirestore, saveProjectFirestore } from '@/lib/firestoreData';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api';
+const COMPOSER_TEMPERATURE_KEY = 'eazyui:composer-temperature';
+const DEFAULT_COMPOSER_TEMPERATURE = 1;
+
+function normalizeComposerTemperature(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.min(2, numeric));
+}
 
 // Types matching the backend
 export interface HtmlScreen {
@@ -143,6 +152,7 @@ export interface GenerateRequest {
     projectDesignSystem?: ProjectDesignSystem;
     bundleIncludesDesignSystem?: boolean;
     projectId?: string;
+    temperature?: number;
 }
 
 export interface GenerateResponse {
@@ -163,6 +173,7 @@ export interface EditRequest {
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
     projectId?: string;
+    temperature?: number;
     consistencyProfile?: {
         canonicalNavbarLabels?: string[];
         canonicalNavbarSignature?: string;
@@ -252,6 +263,7 @@ export interface CompleteScreenRequest {
     projectDesignSystem?: ProjectDesignSystem;
     preferredModel?: string;
     projectId?: string;
+    temperature?: number;
 }
 
 export interface GenerateDesignSystemRequest {
@@ -263,6 +275,7 @@ export interface GenerateDesignSystemRequest {
     projectDesignSystem?: ProjectDesignSystem;
     bundleWithFirstGeneration?: boolean;
     projectId?: string;
+    temperature?: number;
 }
 
 export interface GenerateDesignSystemResponse {
@@ -481,6 +494,7 @@ export interface PlannerRequest {
     routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
     preferredModel?: string;
+    temperature?: number;
 }
 
 export interface RenderScreenImageRequest {
@@ -508,6 +522,47 @@ export interface ProjectResponse {
 }
 
 class ApiClient {
+    private composerTemperature: number | null = null;
+
+    private loadComposerTemperature(): number | null {
+        if (typeof window === 'undefined') return this.composerTemperature;
+        const stored = normalizeComposerTemperature(window.sessionStorage.getItem(COMPOSER_TEMPERATURE_KEY));
+        if (stored === null) return this.composerTemperature;
+        this.composerTemperature = stored;
+        return stored;
+    }
+
+    private resolveComposerTemperature(): number {
+        const loaded = this.loadComposerTemperature();
+        if (loaded !== null) return loaded;
+        return DEFAULT_COMPOSER_TEMPERATURE;
+    }
+
+    private withComposerTemperature<T extends { temperature?: number }>(request: T): T {
+        const explicit = normalizeComposerTemperature(request.temperature);
+        if (explicit !== null) {
+            return { ...request, temperature: explicit };
+        }
+        return {
+            ...request,
+            temperature: this.resolveComposerTemperature(),
+        };
+    }
+
+    setComposerTemperature(value: number | null | undefined): number {
+        const normalized = normalizeComposerTemperature(value);
+        const nextValue = normalized ?? DEFAULT_COMPOSER_TEMPERATURE;
+        this.composerTemperature = nextValue;
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(COMPOSER_TEMPERATURE_KEY, String(nextValue));
+        }
+        return nextValue;
+    }
+
+    getComposerTemperature(): number {
+        return this.resolveComposerTemperature();
+    }
+
     private requireAuthUid(): string {
         const uid = auth.currentUser?.uid;
         if (!uid) throw new Error('You must be logged in to access project data.');
@@ -547,9 +602,10 @@ class ApiClient {
     }
 
     async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
+        const payload = this.withComposerTemperature(request);
         return this.request<GenerateResponse>('/generate', {
             method: 'POST',
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
     }
@@ -558,9 +614,10 @@ class ApiClient {
         request: GenerateDesignSystemRequest,
         signal?: AbortSignal
     ): Promise<GenerateDesignSystemResponse> {
+        const payload = this.withComposerTemperature(request);
         return this.request<GenerateDesignSystemResponse>('/design-system', {
             method: 'POST',
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
     }
@@ -570,6 +627,7 @@ class ApiClient {
         onChunk: (chunk: string) => void,
         signal?: AbortSignal
     ): Promise<void> {
+        const payload = this.withComposerTemperature(request);
         const authHeader = await this.getAuthHeaderValue();
         const response = await fetch(`${API_BASE}/generate-stream`, {
             method: 'POST',
@@ -577,7 +635,7 @@ class ApiClient {
                 'Content-Type': 'application/json',
                 'Authorization': authHeader,
             },
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
 
@@ -600,9 +658,10 @@ class ApiClient {
 
 
     async edit(request: EditRequest, signal?: AbortSignal): Promise<EditResponse> {
+        const payload = this.withComposerTemperature(request);
         return this.request<EditResponse>('/edit', {
             method: 'POST',
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
     }
@@ -627,9 +686,10 @@ class ApiClient {
     }
 
     async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<{ html: string }> {
+        const payload = this.withComposerTemperature(request);
         return this.request<{ html: string }>('/complete-screen', {
             method: 'POST',
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
     }
@@ -655,9 +715,10 @@ class ApiClient {
     }
 
     async plan(request: PlannerRequest, signal?: AbortSignal): Promise<PlannerResponse> {
+        const payload = this.withComposerTemperature(request);
         return this.request<PlannerResponse>('/plan', {
             method: 'POST',
-            body: JSON.stringify(request),
+            body: JSON.stringify(payload),
             signal,
         });
     }

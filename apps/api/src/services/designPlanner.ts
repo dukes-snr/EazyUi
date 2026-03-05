@@ -104,6 +104,7 @@ export type PlannerInput = {
     routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
     preferredModel?: string;
+    temperature?: number;
 };
 
 export type ImagePromptPlannerInput = {
@@ -388,6 +389,12 @@ function clampConfidence(value: unknown, fallback = 0.6): number {
     return Math.max(0, Math.min(1, numeric));
 }
 
+function resolvePlannerTemperature(value: unknown, fallback = 1): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.max(0, Math.min(2, numeric));
+}
+
 function defaultActionForIntent(intent: PlannerRouteResponse['intent']): 'edit' | 'generate' | 'assist' {
     if (intent === 'edit_existing_screen') return 'edit';
     if (intent === 'chat_assist') return 'assist';
@@ -579,6 +586,7 @@ Known screen names:
 ${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n') || 'none'}`;
 
     const multimodalCapable = model === 'meta-llama/llama-4-maverick-17b-128e-instruct' && referenceImages.length > 0;
+    const assistTemperature = resolvePlannerTemperature(input.temperature, 1);
     const completion = await groqChatCompletion(multimodalCapable ? {
         model,
         prompt: '',
@@ -595,14 +603,14 @@ ${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n')
             },
         ],
         maxCompletionTokens: 900,
-        temperature: 0.35,
+        temperature: assistTemperature,
         topP: 0.9,
     } : {
         model,
         systemPrompt: assistInstruction,
         prompt: userPrompt,
         maxCompletionTokens: 900,
-        temperature: 0.35,
+        temperature: assistTemperature,
         topP: 0.9,
     });
     return (completion.text || '').trim();
@@ -619,6 +627,7 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
     const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
         ? 'llama-3.1-8b-instant'
         : 'llama-3.3-70b-versatile';
+    const plannerTemperature = resolvePlannerTemperature(input.temperature, 1);
     const modelsToTry: GroqModelId[] = [primaryModel, fallbackModel];
     console.info('[Planner] start', {
         traceId,
@@ -632,6 +641,7 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
         hasProjectMemorySummary: Boolean(input.projectMemorySummary?.trim()),
         referenceImages: hasReferenceImages ? (input.referenceImages || []).length : 0,
         preferredModel: input.preferredModel || null,
+        temperature: plannerTemperature,
         appPromptPreview: previewForLog(input.appPrompt),
         modelsToTry,
     });
@@ -679,7 +689,7 @@ Return JSON only.`,
                             },
                         ],
                         maxCompletionTokens: 2300,
-                        temperature: 0.3,
+                        temperature: plannerTemperature,
                         topP: 0.85,
                         // JSON response_format can conflict with multimodal on some Groq routes/models.
                         responseFormat: undefined,
@@ -690,7 +700,7 @@ Return JSON only.`,
                         systemPrompt: buildSystemPrompt(input.phase),
                         prompt: buildUserPrompt(input),
                         maxCompletionTokens: 2300,
-                        temperature: 0.3,
+                        temperature: plannerTemperature,
                         topP: 0.85,
                         responseFormat: 'json_object',
                     });

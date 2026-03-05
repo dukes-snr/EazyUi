@@ -962,12 +962,13 @@ fastify.post<{
         platform?: string;
         images?: string[];
         preferredModel?: string;
+        temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
         bundleIncludesDesignSystem?: boolean;
         projectId?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1019,10 +1020,11 @@ fastify.post<{
             stylePreset,
             imagesCount: images?.length || 0,
             preferredModel,
+            temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             promptPreview: previewText(prompt),
         }, 'generate: start');
-        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
+        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
         const versionId = uuidv4();
         const charge = estimateCredits({
             operation: 'generate',
@@ -1081,12 +1083,13 @@ fastify.post<{
         platform?: string;
         images?: string[];
         preferredModel?: string;
+        temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
         bundleWithFirstGeneration?: boolean;
         projectId?: string;
     };
 }>('/api/design-system', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, preferredModel, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1138,6 +1141,7 @@ fastify.post<{
             stylePreset,
             imagesCount: images?.length || 0,
             preferredModel,
+            temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             bundledWithFirstGeneration: bundled,
             promptPreview: previewText(prompt),
@@ -1148,6 +1152,7 @@ fastify.post<{
             platform,
             images,
             preferredModel,
+            temperature,
             projectDesignSystem,
         });
         let billingMeta: { creditsCharged: number; creditsRemaining: number; reservationId?: string } | undefined;
@@ -1212,6 +1217,7 @@ fastify.post<{
         screenId: string;
         images?: string[];
         preferredModel?: string;
+        temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
         projectId?: string;
         consistencyProfile?: {
@@ -1226,7 +1232,7 @@ fastify.post<{
         }>;
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId, images, preferredModel, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const { instruction, html, screenId, images, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1278,6 +1284,7 @@ fastify.post<{
             htmlChars: html.length,
             imagesCount: images?.length || 0,
             preferredModel,
+            temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             consistencyRuleCount: consistencyProfile?.rules?.length || 0,
             canonicalNavbarLabels: consistencyProfile?.canonicalNavbarLabels?.slice(0, 8) || [],
@@ -1290,6 +1297,7 @@ fastify.post<{
             screenId,
             images,
             preferredModel,
+            temperature,
             projectDesignSystem,
             consistencyProfile,
             referenceScreens,
@@ -1694,6 +1702,7 @@ fastify.post<{
         routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
         referenceImages?: string[];
         preferredModel?: string;
+        temperature?: number;
     };
 }>('/api/plan', async (request, reply) => {
     const {
@@ -1709,6 +1718,7 @@ fastify.post<{
         routeReferenceScreens,
         referenceImages,
         preferredModel,
+        temperature,
     } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
@@ -1750,6 +1760,7 @@ fastify.post<{
             routeReferenceScreenNames: (routeReferenceScreens || []).map((screen) => screen.name).slice(0, 3),
             referenceImagesCount: referenceImages?.length || 0,
             preferredModel,
+            temperature,
             appPromptPreview: previewText(appPrompt),
         }, 'plan: start');
         const plan = await runDesignPlanner({
@@ -1765,6 +1776,7 @@ fastify.post<{
             routeReferenceScreens,
             referenceImages,
             preferredModel,
+            temperature,
         });
         if (plan.phase === 'route') {
             fastify.log.info({
@@ -1945,6 +1957,7 @@ fastify.post<{
         platform?: string;
         images?: string[];
         preferredModel?: string;
+        temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
         bundleIncludesDesignSystem?: boolean;
         projectId?: string;
@@ -1956,6 +1969,7 @@ fastify.post<{
         platform,
         images,
         preferredModel,
+        temperature,
         projectDesignSystem,
         bundleIncludesDesignSystem,
         projectId,
@@ -2037,11 +2051,12 @@ fastify.post<{
             stylePreset,
             imagesCount: images?.length || 0,
             preferredModel,
+            temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
             promptPreview: previewText(prompt),
         }, 'generate-stream: start');
-        const stream = generateDesignStream({ prompt, stylePreset, platform, images, preferredModel, projectDesignSystem });
+        const stream = generateDesignStream({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
 
         for await (const chunk of stream) {
             chunkCount += 1;
@@ -2128,10 +2143,11 @@ fastify.post<{
         stylePreset?: string;
         projectDesignSystem?: ProjectDesignSystem;
         preferredModel?: string;
+        temperature?: number;
         projectId?: string;
     };
 }>('/api/complete-screen', async (request, reply) => {
-    const { screenName, partialHtml, prompt, platform, stylePreset, projectDesignSystem, preferredModel, projectId } = request.body;
+    const { screenName, partialHtml, prompt, platform, stylePreset, projectDesignSystem, preferredModel, temperature, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2183,6 +2199,7 @@ fastify.post<{
             partialHtmlChars: partialHtml.length,
             platform,
             stylePreset,
+            temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             promptPreview: previewText(prompt),
         }, 'complete-screen: start');
@@ -2192,6 +2209,7 @@ fastify.post<{
             prompt,
             platform,
             stylePreset,
+            temperature,
             projectDesignSystem,
         });
         const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', estimate.estimatedCredits, {

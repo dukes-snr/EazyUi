@@ -1798,6 +1798,7 @@ type ChatPanelProps = {
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
+        modelTemperature?: number;
     } | null;
 };
 
@@ -1812,6 +1813,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     });
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
+    const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
@@ -2523,6 +2525,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [showStyleMenu]);
+
+    useEffect(() => {
+        apiClient.setComposerTemperature(modelTemperature);
+    }, [modelTemperature]);
 
     // Auto-collapse chat when edit mode is active
     useEffect(() => {
@@ -3874,6 +3880,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         const nextPlatform = initialRequest?.platform;
         const nextStylePreset = initialRequest?.stylePreset;
         const nextModelProfile = initialRequest?.modelProfile;
+        const nextModelTemperature = initialRequest?.modelTemperature;
         if (!requestId || !next) return;
         if (messages.length > 0 || isGenerating) return;
         if (initialRequestSubmittedRef.current === requestId) return;
@@ -3882,6 +3889,11 @@ Return a polished, consistent screen without introducing a new navigation patter
         if (nextPlatform) setPlatform(nextPlatform);
         if (nextStylePreset) setStylePreset(nextStylePreset);
         if (nextModelProfile) setModelProfile(nextModelProfile);
+        if (Number.isFinite(nextModelTemperature)) {
+            const safeTemperature = Math.max(0, Math.min(2, Number(nextModelTemperature)));
+            setModelTemperature(safeTemperature);
+            apiClient.setComposerTemperature(safeTemperature);
+        }
         pinToLatest('auto');
         void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
     }, [initialRequest, messages.length, isGenerating]);
@@ -4396,6 +4408,7 @@ Return a polished, consistent screen without introducing a new navigation patter
     };
 
     const handleSubmit = () => {
+        apiClient.setComposerTemperature(modelTemperature);
         pinToLatest('smooth');
         const referenceScreens = getScreenReferencesFromComposer();
         if (planMode) {
@@ -5571,13 +5584,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 w-40 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
+                                        <div className="absolute bottom-12 right-0 w-56 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
                                             {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
                                                 <button
                                                     key={preset}
                                                     onClick={() => {
                                                         setStylePreset(preset);
-                                                        setShowStyleMenu(false);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
                                                         ? 'bg-indigo-500/20 text-[var(--ui-text)]'
@@ -5587,6 +5599,28 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     {preset}
                                                 </button>
                                             ))}
+                                            <div className="mt-2 border-t border-[var(--ui-border)] pt-2 px-1">
+                                                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                                    <span>Temporary</span>
+                                                    <span>{modelTemperature.toFixed(2)}</span>
+                                                </div>
+                                                <label className="mt-1.5 block text-[11px] text-[var(--ui-text-muted)]">
+                                                    Temperature
+                                                    <input
+                                                        type="range"
+                                                        min={0}
+                                                        max={2}
+                                                        step={0.01}
+                                                        value={modelTemperature}
+                                                        onChange={(event) => {
+                                                            const numeric = Number(event.target.value);
+                                                            if (!Number.isFinite(numeric)) return;
+                                                            setModelTemperature(Math.max(0, Math.min(2, numeric)));
+                                                        }}
+                                                        className="mt-2 w-full accent-[var(--ui-primary)] cursor-pointer"
+                                                    />
+                                                </label>
+                                            </div>
                                         </div>
                                     )}
                                 </div>

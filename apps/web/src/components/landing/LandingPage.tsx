@@ -17,6 +17,7 @@ type LandingPageProps = {
         platform: 'mobile' | 'tablet' | 'desktop';
         stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile: DesignModelProfile;
+        modelTemperature?: number;
     }) => void;
     onNavigate: (path: string) => void;
     userProfile?: {
