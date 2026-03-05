@@ -490,8 +490,16 @@ function App() {
 
     // Keyboard shortcuts
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
+        const isEditableTarget = (target: EventTarget | null) => {
+            if (!(target instanceof HTMLElement)) return false;
+            if (target.isContentEditable) return true;
+            if (target.closest('[contenteditable="true"]')) return true;
+            if (target.closest('input, textarea, select, [role="textbox"]')) return true;
+            return false;
+        };
 
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (isEditableTarget(e.target)) return;
 
             // Space for panning
             if (e.code === 'Space' && !e.repeat) {

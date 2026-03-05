@@ -403,6 +403,8 @@ export function EditPanel() {
         redoAndRebuild,
         rebuildHtml,
         exitEdit,
+        pointer,
+        patches,
         aiEditHistoryByScreen,
         addAiEditHistory,
     } = useEditStore();
@@ -471,6 +473,8 @@ export function EditPanel() {
         if (!screenId) return [];
         return aiEditHistoryByScreen[screenId] || [];
     }, [aiEditHistoryByScreen, screenId]);
+    const canUndo = pointer > 0;
+    const canRedo = pointer < patches.length;
 
     const applyScreenHtmlImmediately = (nextHtml: string) => {
         if (!screenId) return;
@@ -753,13 +757,13 @@ export function EditPanel() {
     };
 
     const onUndo = () => {
-        if (!screenId) return;
+        if (!screenId || !canUndo) return;
         const rebuilt = undoAndRebuild();
         if (rebuilt) updateScreen(screenId, rebuilt);
     };
 
     const onRedo = () => {
-        if (!screenId) return;
+        if (!screenId || !canRedo) return;
         const rebuilt = redoAndRebuild();
         if (rebuilt) updateScreen(screenId, rebuilt);
     };
@@ -1037,11 +1041,19 @@ RULES:
                 </div>
 
                 <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--ui-border)]">
-                    <button onClick={onUndo} className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] flex items-center gap-2">
+                    <button
+                        onClick={onUndo}
+                        disabled={!canUndo}
+                        className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:cursor-not-allowed disabled:opacity-45 flex items-center gap-2"
+                    >
                         <Undo2 size={14} />
                         Undo
                     </button>
-                    <button onClick={onRedo} className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] flex items-center gap-2">
+                    <button
+                        onClick={onRedo}
+                        disabled={!canRedo}
+                        className="h-8 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-4)] px-3 text-[11px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:cursor-not-allowed disabled:opacity-45 flex items-center gap-2"
+                    >
                         <Redo2 size={14} />
                         Redo
                     </button>

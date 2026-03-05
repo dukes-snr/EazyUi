@@ -25,7 +25,7 @@ import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { CanvasProfileMenu } from './CanvasProfileMenu';
-import { dispatchClearSelection } from '../../utils/editMessaging';
+import { dispatchClearSelection, dispatchDeleteSelected } from '../../utils/editMessaging';
 
 // Define custom node types
 const nodeTypes = {
@@ -86,7 +86,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         activeTool,
         setActiveTool,
     } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, exitEdit } = useEditStore();
+    const { isEditMode, screenId: editScreenId, exitEdit, selected: editSelected } = useEditStore();
     const { isGenerating } = useChatStore();
     const { pushToast, requestConfirmation } = useUiStore();
     const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
@@ -596,6 +596,44 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
             const key = event.key.toLowerCase();
             const primary = event.ctrlKey || event.metaKey;
 
+            if (isEditMode && editScreenId) {
+                if (event.key === 'Escape') {
+                    if (editSelected) {
+                        dispatchClearSelection(editScreenId);
+                    } else {
+                        exitEdit();
+                    }
+                    event.preventDefault();
+                    return;
+                }
+
+                if (primary && key === 'z' && !event.shiftKey) {
+                    const state = useEditStore.getState();
+                    if (state.pointer <= 0) return;
+                    const rebuilt = state.undoAndRebuild();
+                    if (!rebuilt) return;
+                    useDesignStore.getState().updateScreen(editScreenId, rebuilt, 'complete');
+                    event.preventDefault();
+                    return;
+                }
+
+                if (primary && (key === 'y' || (key === 'z' && event.shiftKey))) {
+                    const state = useEditStore.getState();
+                    if (state.pointer >= state.patches.length) return;
+                    const rebuilt = state.redoAndRebuild();
+                    if (!rebuilt) return;
+                    useDesignStore.getState().updateScreen(editScreenId, rebuilt, 'complete');
+                    event.preventDefault();
+                    return;
+                }
+
+                if (!primary && (event.key === 'Delete' || event.key === 'Backspace')) {
+                    dispatchDeleteSelected(editScreenId);
+                    event.preventDefault();
+                    return;
+                }
+            }
+
             if (!primary && event.key === 'Escape') {
                 if (doc.selection.selectedNodeIds.length > 0) {
                     clearSelection();
@@ -741,6 +779,8 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         copySelectionToClipboard,
         deleteSelectedScreens,
         doc.selection.selectedNodeIds.length,
+        editScreenId,
+        editSelected,
         exitEdit,
         fitView,
         isEditMode,
