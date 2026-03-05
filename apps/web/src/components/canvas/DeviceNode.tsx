@@ -567,8 +567,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const { projectId, markSaved, setSaving } = useProjectStore();
     const { modelProfile, pushToast, removeToast, requestConfirmation } = useUiStore();
     const selectedCount = doc.selection.selectedNodeIds.length;
-    const width = (data.width as number) || 375;
-    const initialHeight = (data.height as number) || 812;
+    const width = (data.width as number) || 402;
+    const initialHeight = (data.height as number) || 874;
     const statusBarColor = extractTokenColor(String(data.html || ''), 'text') || '#111111';
     const statusBarStyle = {
         paddingTop: 16,
@@ -593,7 +593,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 updateScreen(data.screenId as string, data.html as string, undefined, 768, 1024);
                 break;
             case 'mobile':
-                updateScreen(data.screenId as string, data.html as string, undefined, 375, 812);
+                updateScreen(data.screenId as string, data.html as string, undefined, 402, 874);
                 break;
             case 'submit-edit':
                 const editPayload = typeof payload === 'string'

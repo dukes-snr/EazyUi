@@ -33,8 +33,8 @@ export const ComponentNodeSchema: z.ZodType<ComponentNode> = BaseComponentNodeSc
 export const ScreenSchema = z.object({
     screenId: z.string().describe('Unique screen identifier'),
     name: z.string().describe('Human-readable screen name'),
-    width: z.number().default(375).describe('Screen width in pixels'),
-    height: z.number().default(812).describe('Screen height in pixels'),
+    width: z.number().default(402).describe('Screen width in pixels'),
+    height: z.number().default(874).describe('Screen height in pixels'),
     root: ComponentNodeSchema.describe('Root component node'),
 });
 

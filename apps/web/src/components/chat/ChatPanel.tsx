@@ -1262,8 +1262,8 @@ function ScreenReferenceThumb({
         return () => observer.disconnect();
     }, [mountIframe]);
 
-    const sourceW = Math.max(280, Math.min(1440, preview?.width || 375));
-    const rawSourceH = preview?.height || 812;
+    const sourceW = Math.max(280, Math.min(1440, preview?.width || 402));
+    const rawSourceH = preview?.height || 874;
     // Clamp very tall captured screens so thumbnails remain readable and stable.
     const sourceH = Math.max(Math.round(sourceW * 1.1), Math.min(rawSourceH, Math.round(sourceW * 2.2)));
     const thumbH = preview
@@ -2608,8 +2608,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 try {
                     const rendered = await apiClient.renderScreenImage({
                         html: screen.html,
-                        width: Math.max(320, Math.min(1280, screen.width || 375)),
-                        height: Math.max(480, Math.min(2200, screen.height || 812)),
+                        width: Math.max(320, Math.min(1280, screen.width || 402)),
+                        height: Math.max(480, Math.min(2200, screen.height || 874)),
                         scale: 1,
                     });
                     if (!rendered?.pngBase64) return null;
@@ -3224,7 +3224,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             ? { width: 1280, height: 1200 }
             : platformToUse === 'tablet'
                 ? { width: 768, height: 1024 }
-                : { width: 375, height: 812 };
+                : { width: 402, height: 874 };
         let startTime = Date.now();
         let plannerPlan: PlannerPlanResponse | null = null;
         let plannerSuggestedProjectName = '';
@@ -3356,7 +3356,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             const existingBoards = useCanvasStore.getState().doc.boards;
             const startX = existingBoards.length > 0
-                ? Math.max(...existingBoards.map(b => b.x + (b.width || 375))) + 100
+                ? Math.max(...existingBoards.map(b => b.x + (b.width || 402))) + 100
                 : 100;
             startTime = Date.now();
 

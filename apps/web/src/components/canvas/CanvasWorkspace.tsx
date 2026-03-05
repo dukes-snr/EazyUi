@@ -98,8 +98,8 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const pasteCountRef = useRef(0);
 
     const getNodeSize = useCallback((node: Node) => {
-        const width = node.measured?.width ?? (node.data?.width as number) ?? 375;
-        const height = node.measured?.height ?? (node.data?.height as number) ?? 812;
+        const width = node.measured?.width ?? (node.data?.width as number) ?? 402;
+        const height = node.measured?.height ?? (node.data?.height as number) ?? 874;
         return { width, height };
     }, []);
 

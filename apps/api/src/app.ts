@@ -1901,8 +1901,8 @@ fastify.post<{
     };
 }>('/api/render-screen-image', async (request, reply) => {
     const html = String(request.body?.html || '');
-    const width = Math.max(240, Math.min(2400, Number(request.body?.width || 375)));
-    const height = Math.max(240, Math.min(3200, Number(request.body?.height || 812)));
+    const width = Math.max(240, Math.min(2400, Number(request.body?.width || 402)));
+    const height = Math.max(240, Math.min(3200, Number(request.body?.height || 874)));
     const scale = Math.max(1, Math.min(3, Number(request.body?.scale || 2)));
 
     if (!html.trim()) {

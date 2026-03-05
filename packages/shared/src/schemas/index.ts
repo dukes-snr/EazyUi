@@ -237,7 +237,7 @@ export const STYLE_PRESET_TOKENS: Record<StylePreset, Partial<{ colors: Record<s
 export type PlatformPreset = 'mobile' | 'tablet' | 'desktop' | 'responsive';
 
 export const PLATFORM_DIMENSIONS: Record<PlatformPreset, { width: number; height: number }> = {
-    mobile: { width: 375, height: 812 },
+    mobile: { width: 402, height: 874 },
     tablet: { width: 768, height: 1024 },
     desktop: { width: 1440, height: 900 },
     responsive: { width: 1440, height: 900 },

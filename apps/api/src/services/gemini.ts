@@ -645,7 +645,7 @@ const PLACEHOLDER_MAP_ALLOWED = [...FAST_MAP_IMAGE_FALLBACKS] as const;
 // ============================================================================
 
 const PLATFORM_DIMENSIONS: Record<string, { width: number; height: number }> = {
-    mobile: { width: 375, height: 812 },
+    mobile: { width: 402, height: 874 },
     tablet: { width: 768, height: 1024 },
     desktop: { width: 1280, height: 1200 },
     watch: { width: 184, height: 224 },

@@ -15,10 +15,10 @@ interface Screen {
 }
 
 const DEVICE_DIMENSIONS: Record<string, { width: number; height: number }> = {
-    mobile: { width: 375, height: 812 },
+    mobile: { width: 402, height: 874 },
     tablet: { width: 768, height: 1024 },
     desktop: { width: 1280, height: 1200 },
-    none: { width: 375, height: 812 }, // Default fallbacks
+    none: { width: 402, height: 874 }, // Default fallbacks
 };
 
 interface CanvasState {

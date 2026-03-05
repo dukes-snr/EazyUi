@@ -33,7 +33,7 @@ export type DeviceFrame = z.infer<typeof DeviceFrameSchema>;
 
 // Device dimensions lookup
 export const DEVICE_DIMENSIONS: Record<DeviceFrame, { width: number; height: number }> = {
-    'none': { width: 375, height: 812 },
+    'none': { width: 402, height: 874 },
     'iphone-14': { width: 390, height: 844 },
     'iphone-14-pro': { width: 393, height: 852 },
     'iphone-14-pro-max': { width: 430, height: 932 },

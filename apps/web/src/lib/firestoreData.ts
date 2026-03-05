@@ -576,8 +576,8 @@ function stripHeavyInlineAssetsForRender(html: string): string {
 }
 
 function buildFallbackCoverDataUrl(params: { screenName: string; width: number; height: number; index: number }): string {
-  const safeWidth = Math.max(280, Math.min(420, params.width || 375));
-  const safeHeight = Math.max(560, Math.min(920, params.height || 812));
+  const safeWidth = Math.max(280, Math.min(420, params.width || 402));
+  const safeHeight = Math.max(560, Math.min(920, params.height || 874));
   const title = (params.screenName || "Screen").replace(/[<>&"]/g, "").slice(0, 36);
   const hue = (params.index * 37) % 360;
   const svg = `
@@ -603,8 +603,8 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
   const rendered: string[] = [];
   for (let index = 0; index < targets.length; index += 1) {
     const screen = targets[index];
-    const width = Math.max(280, Math.min(420, screen.width || 375));
-    const height = Math.max(560, Math.min(920, screen.height || 812));
+    const width = Math.max(280, Math.min(420, screen.width || 402));
+    const height = Math.max(560, Math.min(920, screen.height || 874));
     let base64 = await renderScreenImageBase64({
       html: screen.html,
       width,
@@ -632,8 +632,8 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
     }
     rendered.push(buildFallbackCoverDataUrl({
       screenName: String(screen.name || "Screen"),
-      width: Number(screen.width || 375),
-      height: Number(screen.height || 812),
+      width: Number(screen.width || 402),
+      height: Number(screen.height || 874),
       index,
     }));
   }
@@ -1112,8 +1112,8 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
     : Array.from(screensById.values()).map((s) => ({
       screenId: s.screenId,
       name: s.name || "Untitled Screen",
-      width: s.width || 375,
-      height: s.height || 812,
+      width: s.width || 402,
+      height: s.height || 874,
       status: s.status || "complete",
     }));
 
