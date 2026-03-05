@@ -467,7 +467,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             </div>
           )}
 
-          {!loading && projects.length > 0 && (
+          {!loading && projects.length > 0 && hasSelectedProjects && (
             <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
               <label className="inline-flex items-center gap-2 text-sm text-[var(--ui-text-muted)]">
                 <input
@@ -546,9 +546,6 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                                 : 'h-[230px] w-[116px]'
                                 }`}
                             >
-                              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center pt-2">
-                                <div className="h-1.5 w-10 rounded-full bg-white/20" />
-                              </div>
                               <div className="absolute inset-[3px] overflow-hidden rounded-[15px] bg-[#121623]">
                                 <img
                                   src={imageUrl}

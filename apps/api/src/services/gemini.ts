@@ -263,6 +263,15 @@ TOKEN USAGE RULES:
 - Accent usage must be restrained: only primary CTAs, key highlights, and active states.
 `;
 
+const THEME_AWARENESS_RULES = `
+THEME AWARENESS (MANDATORY):
+- Designs must remain readable in both light and dark mode variants.
+- Do NOT hardcode fragile pairs like text-white on white surfaces or text-black on near-black surfaces.
+- Avoid fixed icon/text colors on buttons unless contrast is verified; prefer semantic token-based foregrounds.
+- For controls/chips/buttons, explicitly ensure icon + label contrast against their background in both modes.
+- Only use raw white/black text for intentional overlays on media (hero images/video), not for core controls.
+`;
+
 const IMAGE_WHITELIST = `
 IMAGES (WEB URL POLICY):
 - For non-map visuals, use real internet image URLs (https URLs) that match the screen context.
@@ -421,6 +430,7 @@ STYLING & CONTENT:
 - ALWAYS prefer CSS Gradients for containers and decorative elements.
 
 ${TOKEN_CONTRACT}
+${THEME_AWARENESS_RULES}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
@@ -498,6 +508,7 @@ PROHIBITED:
 - No generic Bootstrap/Material Design templates.
 
 ${TOKEN_CONTRACT}
+${THEME_AWARENESS_RULES}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
@@ -535,6 +546,7 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 6. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
 7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
 8. Do NOT use markdown fences.
+9. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
 
 Current HTML:
 `;
@@ -557,6 +569,7 @@ Rules:
 - Use prompt-specific labels; no filler copy (no "Lorem ipsum", "Item 1", "Product Name").
 - Define tailwind.config theme.extend.colors with semantic tokens: bg, surface, text, muted, accent.
 - Use those semantic tokens for major surfaces and CTA.
+- Keep icon/text contrast readable in both light and dark modes; avoid brittle text-white/text-black defaults on controls.
 - Avoid invented class names that are not valid Tailwind utilities.
 - Brand icons must use Iconify + Simple Icons (never placeholder text like LOGO_GOOGLE).
 - Do NOT include mobile OS status bar rows (time/signal/wifi/battery); runtime provides this chrome.
@@ -830,6 +843,77 @@ function safeStringList(input: unknown, fallback: string[], maxItems = 8): strin
     return next.length > 0 ? next : fallback;
 }
 
+function toTitleCaseIfLower(value: string): string {
+    if (/[A-Z]/.test(value)) return value;
+    return value.replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+
+function sanitizeProjectNameCandidate(input: string): string {
+    const raw = String(input || '').trim();
+    if (!raw) return '';
+
+    const firstClause = raw.split(/[|:;,]/)[0] || raw;
+    const withoutQuotes = firstClause.replace(/^["'`]+|["'`]+$/g, '').trim();
+    const withoutSuffix = withoutQuotes
+        .replace(/\bdesign\s+system\b/gi, ' ')
+        .replace(/\bproject\s+design\b/gi, ' ')
+        .trim();
+    const beforeQualifiers = withoutSuffix.split(/\b(with|for|like|featuring|including|that|where)\b/i)[0] || withoutSuffix;
+    const withoutLead = beforeQualifiers
+        .replace(/^(create|build|design|generate|make|craft|an?|the)\s+/i, '')
+        .trim();
+
+    const noise = new Set([
+        'app', 'application', 'ui', 'ux', 'screen', 'screens', 'page', 'pages',
+        'mobile', 'desktop', 'web', 'website', 'design', 'system', 'project',
+        'new', 'beautiful', 'smooth',
+    ]);
+    const words = withoutLead
+        .replace(/[^\w\s&-]/g, ' ')
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter(Boolean)
+        .filter((word) => !noise.has(word.toLowerCase()));
+
+    const candidateWords = (words.length > 0 ? words : withoutLead.split(/\s+/).filter(Boolean)).slice(0, 4);
+    const candidate = toTitleCaseIfLower(candidateWords.join(' ').trim());
+    return candidate.slice(0, 48).trim();
+}
+
+function extractExplicitProjectNameFromPrompt(prompt: string): string {
+    const text = String(prompt || '');
+    const explicitMatch = text.match(/(?:called|named|name\s+it|project\s+name(?:\s+is)?|app\s+name(?:\s+is)?)\s*[:\-]?\s*["']?([a-zA-Z0-9][a-zA-Z0-9&\-\s]{1,50})["']?/i);
+    if (explicitMatch?.[1]) return sanitizeProjectNameCandidate(explicitMatch[1]);
+    const quotedMatch = text.match(/["']([a-zA-Z0-9][a-zA-Z0-9&\-\s]{1,40})["']/);
+    if (quotedMatch?.[1]) return sanitizeProjectNameCandidate(quotedMatch[1]);
+    return '';
+}
+
+function deriveProjectNameFromPrompt(prompt: string): string {
+    const explicit = extractExplicitProjectNameFromPrompt(prompt);
+    if (explicit) return explicit;
+    return sanitizeProjectNameCandidate(prompt);
+}
+
+function normalizeProjectSystemName(input: unknown, prompt: string, fallback: string): string {
+    const candidates = [
+        typeof input === 'string' ? input : '',
+        deriveProjectNameFromPrompt(prompt),
+        fallback,
+    ];
+
+    for (const candidate of candidates) {
+        const cleaned = sanitizeProjectNameCandidate(candidate);
+        if (!cleaned) continue;
+        const normalized = cleaned.toLowerCase();
+        if (['untitled', 'untitled project', 'project', 'new project'].includes(normalized)) continue;
+        return cleaned;
+    }
+
+    const fallbackClean = sanitizeProjectNameCandidate(fallback);
+    return fallbackClean || 'New Project';
+}
+
 function clampNumber(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
 }
@@ -848,6 +932,34 @@ function parseHexColor(value: string): { r: number; g: number; b: number } | nul
 
 function rgbToHex(r: number, g: number, b: number): string {
     return `#${[r, g, b].map((part) => clampNumber(Math.round(part), 0, 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function relativeLuminance(r: number, g: number, b: number): number {
+    const toLinear = (channel: number) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    };
+    const rr = toLinear(r);
+    const gg = toLinear(g);
+    const bb = toLinear(b);
+    return 0.2126 * rr + 0.7152 * gg + 0.0722 * bb;
+}
+
+function contrastRatio(a: number, b: number): number {
+    const light = Math.max(a, b);
+    const dark = Math.min(a, b);
+    return (light + 0.05) / (dark + 0.05);
+}
+
+function pickReadableForeground(background: string): string {
+    const parsed = parseHexColor(background);
+    if (!parsed) return '#0F172A';
+    const bgLum = relativeLuminance(parsed.r, parsed.g, parsed.b);
+    const whiteLum = relativeLuminance(255, 255, 255);
+    const darkLum = relativeLuminance(15, 23, 42);
+    const whiteContrast = contrastRatio(bgLum, whiteLum);
+    const darkContrast = contrastRatio(bgLum, darkLum);
+    return whiteContrast >= darkContrast ? '#FFFFFF' : '#0F172A';
 }
 
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -988,12 +1100,13 @@ function buildFallbackProjectDesignSystem(
     platform: string
 ): ProjectDesignSystem {
     const preset = DESIGN_SYSTEM_SEEDS[stylePreset] || DESIGN_SYSTEM_SEEDS.modern;
-    const appIntent = safeString(prompt, 'App', 80);
+    const projectName = normalizeProjectSystemName('', prompt, 'New Project');
+    const appIntent = safeString(prompt, projectName, 80);
     const tokenModes = resolveTokenModesFromSource(preset.tokens, preset.themeMode);
     const activeMode = resolveActiveThemeMode(preset.themeMode);
     return {
         version: 1,
-        systemName: `${appIntent} Design System`,
+        systemName: projectName,
         intentSummary: `A cohesive ${stylePreset} interface system for ${appIntent}.`,
         stylePreset,
         platform,
@@ -1104,7 +1217,7 @@ function normalizeProjectDesignSystem(
 
     return {
         version: 1,
-        systemName: safeString(raw.systemName, fallback.systemName, 120),
+        systemName: normalizeProjectSystemName(raw.systemName, prompt, fallback.systemName),
         intentSummary: safeString(raw.intentSummary, fallback.intentSummary, 220),
         stylePreset: safeString(raw.stylePreset, stylePreset, 32),
         platform: safeString(raw.platform, platform, 32),
@@ -1162,6 +1275,10 @@ function buildDesignSystemGuidance(system: ProjectDesignSystem): string {
     const modeTokens = system.tokenModes || resolveTokenModesFromSource(system.tokens, system.themeMode);
     const activeMode = resolveActiveThemeMode(system.themeMode);
     const activeTokens = activeMode === 'dark' ? modeTokens.dark : modeTokens.light;
+    const lightOnAccent = pickReadableForeground(modeTokens.light.accent);
+    const darkOnAccent = pickReadableForeground(modeTokens.dark.accent);
+    const lightOnSurface = pickReadableForeground(modeTokens.light.surface);
+    const darkOnSurface = pickReadableForeground(modeTokens.dark.surface);
     return `
 PROJECT DESIGN SYSTEM (STRICT, REUSE THIS ON ALL SCREENS):
 System: ${system.systemName}
@@ -1198,6 +1315,17 @@ Dark mode tokens:
 - stroke: ${modeTokens.dark.stroke}
 - accent: ${modeTokens.dark.accent}
 - accent2: ${modeTokens.dark.accent2}
+
+Theme-awareness rules (MANDATORY in generated HTML):
+- Use semantic tokens for all major component colors; avoid hardcoded black/white button/icon combos.
+- Keep button/icon/text contrast valid in BOTH modes.
+- If a component uses accent backgrounds, prefer these foregrounds:
+  - light mode on accent: ${lightOnAccent}
+  - dark mode on accent: ${darkOnAccent}
+- If a component uses surface backgrounds, prefer these foregrounds:
+  - light mode on surface: ${lightOnSurface}
+  - dark mode on surface: ${darkOnSurface}
+- Never produce unreadable pairs (e.g., white icon on white button, black icon on black background).
 
 Typography:
 - display font: ${system.typography.displayFont}
@@ -1268,11 +1396,11 @@ Return strict JSON only.
 Output schema:
 {
   "version": 1,
-  "systemName": "string",
+  "systemName": "short product/project name only",
   "intentSummary": "string",
   "stylePreset": "modern|minimal|vibrant|luxury|playful",
   "platform": "mobile|tablet|desktop",
-  "themeMode": "light|dark|mixed",
+  "themeMode": "light|dark",
   "tokens": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." },
   "tokenModes": {
     "light": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." },
@@ -1295,9 +1423,11 @@ Output schema:
 Rules:
 - Make this system cohesive enough to drive ALL next screens in one project.
 - Output practical tokens/rules that are easy to apply in Tailwind HTML generation.
+- systemName must be a concise project/product name only (2-4 words). No commas, no full prompt sentence, no "Design System" suffix.
 - Always provide both light and dark token sets in tokenModes.
 - Use "themeMode" as the active mode ("light" or "dark"), not "mixed".
 - Set "tokens" to the active mode palette (matching themeMode), not a third unrelated set.
+- Ensure theme-aware contrast decisions for controls/icons in both modes (avoid unreadable white-on-white or black-on-black states).
 - Keep rules concrete and short.
 - Prefer semantic colors over arbitrary color names.`;
 
@@ -1305,7 +1435,8 @@ Rules:
 Style preset: ${stylePreset}
 Platform: ${platform}
 ${imageAnalysis || ''}
-Generate the design system that should be reused for this whole project.`;
+Generate the design system that should be reused for this whole project.
+Infer and set a clean project/product name in systemName (not a sentence, not "Design System").`;
 
     try {
         const preferredModel = options.preferredModel;

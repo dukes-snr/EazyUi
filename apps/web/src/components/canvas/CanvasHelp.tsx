@@ -310,7 +310,7 @@ export function CanvasHelp() {
                     </div>
                 )}
 
-                {!helpOpen && (
+                {/* {!helpOpen && (
                     <button
                         type="button"
                         onClick={() => setLauncherOpen((value) => !value)}
@@ -318,7 +318,7 @@ export function CanvasHelp() {
                     >
                         <CircleQuestionMark size={24} />
                     </button>
-                )}
+                )} */}
             </div>
 
             {helpOpen && (

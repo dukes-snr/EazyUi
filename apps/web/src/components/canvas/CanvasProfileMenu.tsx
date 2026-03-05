@@ -574,6 +574,30 @@ export function CanvasProfileMenu() {
                                 <span className="inline-flex items-center gap-1 text-[var(--ui-text-subtle)]"><Star size={13} className="text-amber-300" /> Credits</span>
                                 <span className="font-semibold text-[var(--ui-text)]">{balanceCredits.toLocaleString()}</span>
                             </div>
+                            <div className="mb-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                <div className="flex items-center justify-between text-xs text-[var(--ui-text-subtle)]">
+                                    <span className="inline-flex items-center gap-1"><Sun size={12} /> Theme</span>
+                                    <span className="text-[11px] uppercase tracking-[0.08em]">{theme}</span>
+                                </div>
+                                <div className="mt-2 inline-flex w-full overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('light')}
+                                        className={`inline-flex h-8 flex-1 items-center justify-center gap-1 text-xs transition-colors ${theme === 'light' ? 'bg-[var(--ui-primary)] text-white' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                    >
+                                        <Sun size={12} />
+                                        <span>Light</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTheme('dark')}
+                                        className={`inline-flex h-8 flex-1 items-center justify-center gap-1 border-l border-[var(--ui-border)] text-xs transition-colors ${theme === 'dark' ? 'bg-[var(--ui-primary)] text-white' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                    >
+                                        <Moon size={12} />
+                                        <span>Dark</span>
+                                    </button>
+                                </div>
+                            </div>
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><UserIcon size={14} /><span>Profile</span></button>
                             {!authUser?.emailVerified && <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('profile')}><Mail size={14} /><span>Verify Email</span></button>}
                             <button type="button" className="canvas-profile-menu-item" onClick={() => openSettingsAt('settings')}><Settings size={14} /><span>Settings</span></button>

@@ -764,7 +764,24 @@ function buildPlanCallToAction(plan: PlannerPlanResponse): PlannerCtaPayload['ca
 function normalizeSuggestedProjectName(value: string | undefined): string {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    return raw.replace(/^["'`]+|["'`]+$/g, '').slice(0, 72).trim();
+    const firstClause = raw.split(/[|:;,]/)[0] || raw;
+    const withoutQuotes = firstClause.replace(/^["'`]+|["'`]+$/g, '').trim();
+    const compact = withoutQuotes
+        .replace(/\bdesign\s+system\b/gi, ' ')
+        .replace(/\bproject\s+design\b/gi, ' ')
+        .replace(/^(create|build|design|generate|make|craft|an?|the)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const beforeQualifiers = compact.split(/\b(with|for|like|featuring|including|that|where)\b/i)[0] || compact;
+    const cleaned = beforeQualifiers
+        .replace(/[^\w\s&-]/g, ' ')
+        .replace(/\b(app|application|ui|ux|screen|screens|page|pages|mobile|web|website)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const words = cleaned.split(' ').filter(Boolean).slice(0, 4);
+    const candidate = words.join(' ').trim();
+    if (!candidate) return '';
+    return candidate.slice(0, 72).trim();
 }
 
 function deriveProjectNameFromPrompt(prompt: string): string {
@@ -4626,7 +4643,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 onClick={() => setChatPanelView((current) => current === 'chat' ? 'design-system' : 'chat')}
                                 disabled={!hasDesignSystem}
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${isDesignSystemView
-                                    ? 'bg-indigo-500/20 text-indigo-200 ring-indigo-300/40 hover:bg-indigo-500/25'
+                                    ? 'bg-[var(--ui-primary)] text-white ring-[var(--ui-primary)] hover:bg-[var(--ui-primary-hover)]'
                                     : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
                                     } ${!hasDesignSystem ? 'opacity-60 cursor-not-allowed hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text-muted)]' : ''}`}
                                 title={hasDesignSystem ? (isDesignSystemView ? 'Switch to chat view' : 'Show generated design system') : 'Generate a screen first to create a design system'}
@@ -5348,7 +5365,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 scrollToLatest('smooth');
                                 setShowScrollToLatest(false);
                             }}
-                            className="absolute left-1/2 -translate-x-1/2 bottom-[190px] z-20 h-9 min-w-9 px-2 rounded-full bg-[var(--ui-primary)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] shadow-lg hover:bg-[var(--ui-primary-hover)] transition-colors inline-flex items-center justify-center"
+                            className="absolute left-1/2 -translate-x-1/2 bottom-[190px] z-20 h-9 min-w-9 px-2 rounded-full bg-[var(--ui-primary)] text-white ring-1 ring-[var(--ui-primary)] shadow-lg hover:bg-[var(--ui-primary-hover)] transition-colors inline-flex items-center justify-center"
                             title="Scroll to latest"
                         >
                             <ArrowDown size={16} />
