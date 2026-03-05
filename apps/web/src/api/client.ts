@@ -34,6 +34,28 @@ export interface ProjectDesignSystem {
         accent: string;
         accent2: string;
     };
+    tokenModes?: {
+        light: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+        dark: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+    };
     typography: {
         displayFont: string;
         bodyFont: string;

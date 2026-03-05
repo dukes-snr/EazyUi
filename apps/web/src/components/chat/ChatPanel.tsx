@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject, type React
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil } from 'lucide-react';
+import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -316,6 +316,207 @@ function applyTypographyToScreenHtml(html: string, displayStack: string, bodySta
             nextHtml = nextHtml.replace(/<\/head>/i, `    <link href="${fontsHref}" rel="stylesheet">\n</head>`);
         }
     }
+
+    return { html: nextHtml, changed };
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function parseHexColor(value: string): { r: number; g: number; b: number } | null {
+    const clean = String(value || '').trim().replace('#', '');
+    if (!/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(clean)) return null;
+    const full = clean.length === 3 ? clean.split('').map((part) => `${part}${part}`).join('') : clean;
+    const n = Number.parseInt(full, 16);
+    return {
+        r: (n >> 16) & 255,
+        g: (n >> 8) & 255,
+        b: n & 255,
+    };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+    return `#${[r, g, b].map((part) => clampNumber(Math.round(part), 0, 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+    const rr = r / 255;
+    const gg = g / 255;
+    const bb = b / 255;
+    const max = Math.max(rr, gg, bb);
+    const min = Math.min(rr, gg, bb);
+    const delta = max - min;
+    let h = 0;
+    const l = (max + min) / 2;
+    const s = delta === 0 ? 0 : delta / (1 - Math.abs((2 * l) - 1));
+    if (delta !== 0) {
+        if (max === rr) h = ((gg - bb) / delta) % 6;
+        else if (max === gg) h = ((bb - rr) / delta) + 2;
+        else h = ((rr - gg) / delta) + 4;
+    }
+    const normalizedHue = Math.round((h * 60 + 360) % 360);
+    return {
+        h: normalizedHue,
+        s: clampNumber(s * 100, 0, 100),
+        l: clampNumber(l * 100, 0, 100),
+    };
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+    const hh = ((h % 360) + 360) % 360;
+    const ss = clampNumber(s, 0, 100) / 100;
+    const ll = clampNumber(l, 0, 100) / 100;
+
+    const c = (1 - Math.abs((2 * ll) - 1)) * ss;
+    const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+    const m = ll - (c / 2);
+
+    let rr = 0;
+    let gg = 0;
+    let bb = 0;
+    if (hh < 60) {
+        rr = c; gg = x; bb = 0;
+    } else if (hh < 120) {
+        rr = x; gg = c; bb = 0;
+    } else if (hh < 180) {
+        rr = 0; gg = c; bb = x;
+    } else if (hh < 240) {
+        rr = 0; gg = x; bb = c;
+    } else if (hh < 300) {
+        rr = x; gg = 0; bb = c;
+    } else {
+        rr = c; gg = 0; bb = x;
+    }
+
+    return {
+        r: Math.round((rr + m) * 255),
+        g: Math.round((gg + m) * 255),
+        b: Math.round((bb + m) * 255),
+    };
+}
+
+function mapTokenToThemeVariant(
+    tokenName: DesignTokenKey,
+    colorValue: string,
+    targetMode: 'light' | 'dark'
+): string {
+    if (tokenName === 'accent' || tokenName === 'accent2') return colorValue;
+    const parsed = parseHexColor(colorValue);
+    if (!parsed) return colorValue;
+    const hsl = rgbToHsl(parsed.r, parsed.g, parsed.b);
+    const targetLightnessDark: Record<DesignTokenKey, number> = {
+        bg: 7,
+        surface: 12,
+        surface2: 17,
+        text: 95,
+        muted: 68,
+        stroke: 30,
+        accent: hsl.l,
+        accent2: hsl.l,
+    };
+    const targetLightnessLight: Record<DesignTokenKey, number> = {
+        bg: 97,
+        surface: 100,
+        surface2: 94,
+        text: 10,
+        muted: 45,
+        stroke: 90,
+        accent: hsl.l,
+        accent2: hsl.l,
+    };
+
+    const targetLightness = targetMode === 'dark'
+        ? targetLightnessDark[tokenName]
+        : targetLightnessLight[tokenName];
+    const targetSaturation = tokenName === 'text' || tokenName === 'muted' || tokenName === 'stroke'
+        ? Math.min(hsl.s, 24)
+        : Math.min(hsl.s, 18);
+    const rgb = hslToRgb(hsl.h, targetSaturation, targetLightness);
+    return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+
+function buildThemeVariantTokens(
+    tokens: ProjectDesignSystem['tokens'],
+    targetMode: 'light' | 'dark'
+): ProjectDesignSystem['tokens'] {
+    return {
+        ...tokens,
+        bg: mapTokenToThemeVariant('bg', tokens.bg, targetMode),
+        surface: mapTokenToThemeVariant('surface', tokens.surface, targetMode),
+        surface2: mapTokenToThemeVariant('surface2', tokens.surface2, targetMode),
+        text: mapTokenToThemeVariant('text', tokens.text, targetMode),
+        muted: mapTokenToThemeVariant('muted', tokens.muted, targetMode),
+        stroke: mapTokenToThemeVariant('stroke', tokens.stroke, targetMode),
+        accent: tokens.accent,
+        accent2: tokens.accent2,
+    };
+}
+
+function resolveActiveThemeMode(themeMode: ProjectDesignSystem['themeMode']): 'light' | 'dark' {
+    return themeMode === 'dark' ? 'dark' : 'light';
+}
+
+function resolveDesignSystemTokenModes(
+    system: ProjectDesignSystem
+): { light: ProjectDesignSystem['tokens']; dark: ProjectDesignSystem['tokens'] } {
+    if (system.tokenModes?.light && system.tokenModes?.dark) {
+        return {
+            light: { ...system.tokenModes.light },
+            dark: { ...system.tokenModes.dark },
+        };
+    }
+    const activeMode = resolveActiveThemeMode(system.themeMode);
+    if (activeMode === 'dark') {
+        return {
+            dark: { ...system.tokens },
+            light: buildThemeVariantTokens(system.tokens, 'light'),
+        };
+    }
+    return {
+        light: { ...system.tokens },
+        dark: buildThemeVariantTokens(system.tokens, 'dark'),
+    };
+}
+
+function normalizeProjectDesignSystemModes(system: ProjectDesignSystem): ProjectDesignSystem {
+    const tokenModes = resolveDesignSystemTokenModes(system);
+    const activeMode = resolveActiveThemeMode(system.themeMode);
+    return {
+        ...system,
+        tokenModes,
+        tokens: activeMode === 'dark' ? { ...tokenModes.dark } : { ...tokenModes.light },
+    };
+}
+
+function areRadiusValuesEquivalent(left: string | undefined, right: string | undefined): boolean {
+    return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
+function applyRadiusToScreenHtml(
+    html: string,
+    radius: ProjectDesignSystem['radius']
+): { html: string; changed: boolean } {
+    let nextHtml = String(html || '');
+    let changed = false;
+
+    nextHtml = nextHtml.replace(/(\bxl\s*:\s*)(["'`])([^"'`]+)\2/i, (full, prefix: string, quote: string, current: string) => {
+        if (areRadiusValuesEquivalent(current, radius.control)) return full;
+        changed = true;
+        return `${prefix}${quote}${radius.control}${quote}`;
+    });
+
+    nextHtml = nextHtml.replace(/((["']?)2xl\2\s*:\s*)(["'`])([^"'`]+)\3/i, (full, prefix: string, _keyQuote: string, quote: string, current: string) => {
+        if (areRadiusValuesEquivalent(current, radius.card)) return full;
+        changed = true;
+        return `${prefix}${quote}${radius.card}${quote}`;
+    });
+
+    nextHtml = nextHtml.replace(/((["']?)3xl\2\s*:\s*)(["'`])([^"'`]+)\3/i, (full, prefix: string, _keyQuote: string, quote: string, current: string) => {
+        if (areRadiusValuesEquivalent(current, radius.pill)) return full;
+        changed = true;
+        return `${prefix}${quote}${radius.pill}${quote}`;
+    });
 
     return { html: nextHtml, changed };
 }
@@ -1614,6 +1815,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
     const [activeTokenEditor, setActiveTokenEditor] = useState<DesignTokenKey | null>(null);
+    const [designSystemInspectorTab, setDesignSystemInspectorTab] = useState<'colors' | 'fonts' | 'corners'>('colors');
+    const [openFontDropdown, setOpenFontDropdown] = useState<'display' | 'body' | null>(null);
+    const [openRadiusDropdown, setOpenRadiusDropdown] = useState<keyof ProjectDesignSystem['radius'] | null>(null);
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -1737,6 +1941,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const applyProjectDesignSystem = (designSystem: ProjectDesignSystem | undefined) => {
         if (!designSystem) return;
+        const normalizedDesignSystem = normalizeProjectDesignSystemModes(designSystem);
         const currentSpec = useDesignStore.getState().spec;
         if (!currentSpec) {
             const now = new Date().toISOString();
@@ -1744,7 +1949,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 id: uuidv4(),
                 name: 'Untitled project',
                 screens: [],
-                designSystem,
+                designSystem: normalizedDesignSystem,
                 createdAt: now,
                 updatedAt: now,
             });
@@ -1752,7 +1957,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
         useDesignStore.getState().setSpec({
             ...currentSpec,
-            designSystem,
+            designSystem: normalizedDesignSystem,
             updatedAt: new Date().toISOString(),
         });
     };
@@ -1764,31 +1969,49 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const openDesignSystemEditor = (source?: ProjectDesignSystem) => {
         const effective = source || useDesignStore.getState().spec?.designSystem;
         if (!effective) return;
-        applyProjectDesignSystem(effective);
-        setDesignSystemDraft(cloneDesignSystem(effective));
-        const tokenKeys = Object.keys(effective.tokens || {}) as DesignTokenKey[];
+        const normalized = normalizeProjectDesignSystemModes(effective);
+        applyProjectDesignSystem(normalized);
+        setDesignSystemDraft(cloneDesignSystem(normalized));
+        const tokenKeys = Object.keys(normalized.tokens || {}) as DesignTokenKey[];
         setActiveTokenEditor(tokenKeys[0] || null);
         setIsDesignSystemEditing(true);
+        setDesignSystemInspectorTab('colors');
+        setOpenFontDropdown(null);
+        setOpenRadiusDropdown(null);
         setChatPanelView('design-system');
     };
 
     const cancelDesignSystemEdit = () => {
-        setIsDesignSystemEditing(false);
-        setDesignSystemDraft(null);
-        setActiveTokenEditor(null);
+        const current = useDesignStore.getState().spec?.designSystem;
+        if (!current) return;
+        const normalized = normalizeProjectDesignSystemModes(current);
+        setDesignSystemDraft(cloneDesignSystem(normalized));
+        const tokenKeys = Object.keys(normalized.tokens || {}) as DesignTokenKey[];
+        setActiveTokenEditor(tokenKeys[0] || null);
+        setOpenFontDropdown(null);
+        setOpenRadiusDropdown(null);
     };
 
     const saveDesignSystemEdit = () => {
         if (!designSystemDraft) return;
         const currentSpec = useDesignStore.getState().spec;
-        const previousDesignSystem = currentSpec?.designSystem;
-        const tokenPatches = buildDesignTokenColorPatches(previousDesignSystem, designSystemDraft);
+        const normalizedDraft = normalizeProjectDesignSystemModes(designSystemDraft);
+        const previousDesignSystem = currentSpec?.designSystem
+            ? normalizeProjectDesignSystemModes(currentSpec.designSystem)
+            : undefined;
+        const tokenPatches = buildDesignTokenColorPatches(previousDesignSystem, normalizedDraft);
         const typographyChanged = Boolean(previousDesignSystem?.typography) && (
-            !areFontStacksEquivalent(previousDesignSystem?.typography.displayFont, designSystemDraft.typography.displayFont)
-            || !areFontStacksEquivalent(previousDesignSystem?.typography.bodyFont, designSystemDraft.typography.bodyFont)
+            !areFontStacksEquivalent(previousDesignSystem?.typography.displayFont, normalizedDraft.typography.displayFont)
+            || !areFontStacksEquivalent(previousDesignSystem?.typography.bodyFont, normalizedDraft.typography.bodyFont)
+        );
+        const radiusChanged = Boolean(previousDesignSystem?.radius) && (
+            !areRadiusValuesEquivalent(previousDesignSystem?.radius.card, normalizedDraft.radius.card)
+            || !areRadiusValuesEquivalent(previousDesignSystem?.radius.control, normalizedDraft.radius.control)
+            || !areRadiusValuesEquivalent(previousDesignSystem?.radius.pill, normalizedDraft.radius.pill)
         );
         let patchedScreenCount = 0;
         let patchedTypographyScreenCount = 0;
+        let patchedRadiusScreenCount = 0;
 
         if (currentSpec) {
             const patchedScreens = currentSpec.screens.map((screen) => {
@@ -1802,12 +2025,21 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 if (typographyChanged) {
                     const typographyResult = applyTypographyToScreenHtml(
                         nextHtml,
-                        designSystemDraft.typography.displayFont,
-                        designSystemDraft.typography.bodyFont
+                        normalizedDraft.typography.displayFont,
+                        normalizedDraft.typography.bodyFont
                     );
                     nextHtml = typographyResult.html;
                     if (typographyResult.changed) {
                         patchedTypographyScreenCount += 1;
+                        screenChanged = true;
+                    }
+                }
+
+                if (radiusChanged) {
+                    const radiusResult = applyRadiusToScreenHtml(nextHtml, normalizedDraft.radius);
+                    nextHtml = radiusResult.html;
+                    if (radiusResult.changed) {
+                        patchedRadiusScreenCount += 1;
                         screenChanged = true;
                     }
                 }
@@ -1821,24 +2053,28 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             });
             useDesignStore.getState().setSpec({
                 ...currentSpec,
-                designSystem: designSystemDraft,
+                designSystem: normalizedDraft,
                 screens: patchedScreens,
                 updatedAt: new Date().toISOString(),
             });
         } else {
-            applyProjectDesignSystem(designSystemDraft);
+            applyProjectDesignSystem(normalizedDraft);
         }
 
-        setIsDesignSystemEditing(false);
-        setDesignSystemDraft(null);
-        setActiveTokenEditor(null);
-        if ((tokenPatches.length > 0 || typographyChanged) && patchedScreenCount > 0) {
+        setIsDesignSystemEditing(true);
+        setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
+        setOpenFontDropdown(null);
+        setOpenRadiusDropdown(null);
+        if ((tokenPatches.length > 0 || typographyChanged || radiusChanged) && patchedScreenCount > 0) {
             const applied: string[] = [];
             if (tokenPatches.length > 0) {
                 applied.push(`${tokenPatches.length} color token update${tokenPatches.length === 1 ? '' : 's'}`);
             }
             if (typographyChanged) {
                 applied.push(`typography updates on ${patchedTypographyScreenCount} screen${patchedTypographyScreenCount === 1 ? '' : 's'}`);
+            }
+            if (radiusChanged) {
+                applied.push(`radius updates on ${patchedRadiusScreenCount} screen${patchedRadiusScreenCount === 1 ? '' : 's'}`);
             }
             notifySuccess(
                 'Design system updated',
@@ -1857,13 +2093,25 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     };
 
     const updateDesignSystemTokenDraft = (tokenName: DesignTokenKey, value: string) => {
-        updateDesignSystemDraft((current) => ({
-            ...current,
-            tokens: {
-                ...current.tokens,
-                [tokenName]: value,
-            },
-        }));
+        updateDesignSystemDraft((current) => {
+            const tokenModes = resolveDesignSystemTokenModes(current);
+            const activeMode = resolveActiveThemeMode(current.themeMode);
+            const next = {
+                ...current,
+                tokens: {
+                    ...current.tokens,
+                    [tokenName]: value,
+                },
+                tokenModes: {
+                    ...tokenModes,
+                    [activeMode]: {
+                        ...tokenModes[activeMode],
+                        [tokenName]: value,
+                    },
+                },
+            };
+            return normalizeProjectDesignSystemModes(next);
+        });
     };
 
     const updateDesignSystemTypographyDraft = (field: 'displayFont' | 'bodyFont', value: string) => {
@@ -1884,6 +2132,20 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 [field]: value,
             },
         }));
+    };
+
+    const toggleDesignSystemThemeVariant = () => {
+        updateDesignSystemDraft((current) => {
+            const tokenModes = resolveDesignSystemTokenModes(current);
+            const currentMode = resolveActiveThemeMode(current.themeMode);
+            const targetMode = currentMode === 'dark' ? 'light' : 'dark';
+            return {
+                ...current,
+                themeMode: targetMode,
+                tokenModes,
+                tokens: { ...tokenModes[targetMode] },
+            };
+        });
     };
 
     const screenPreviewById = useMemo(() => {
@@ -1968,12 +2230,25 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     }, [chatPanelView, spec?.designSystem, designSystemDraft]);
 
     useEffect(() => {
-        if (!isDesignSystemEditing) return;
-        if (!spec?.designSystem && !designSystemDraft) {
-            setIsDesignSystemEditing(false);
-            setDesignSystemDraft(null);
+        if (chatPanelView !== 'design-system') {
+            setOpenFontDropdown(null);
+            setOpenRadiusDropdown(null);
+            return;
         }
-    }, [isDesignSystemEditing, spec?.designSystem, designSystemDraft]);
+        if (!spec?.designSystem && !designSystemDraft) {
+            setChatPanelView('chat');
+            return;
+        }
+        if (spec?.designSystem && !designSystemDraft) {
+            const cloned = cloneDesignSystem(normalizeProjectDesignSystemModes(spec.designSystem));
+            setDesignSystemDraft(cloned);
+            const tokenKeys = Object.keys(cloned.tokens || {}) as DesignTokenKey[];
+            setActiveTokenEditor((current) => current || tokenKeys[0] || null);
+        }
+        if (!isDesignSystemEditing) {
+            setIsDesignSystemEditing(true);
+        }
+    }, [chatPanelView, isDesignSystemEditing, spec?.designSystem, designSystemDraft]);
 
     const commitProjectTitle = async () => {
         if (!spec) return;
@@ -4256,12 +4531,27 @@ Return a polished, consistent screen without introducing a new navigation patter
                 : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
     const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
     const designSystem = spec?.designSystem;
+    const normalizedStoredDesignSystem = designSystem ? normalizeProjectDesignSystemModes(designSystem) : null;
+    const normalizedDesignSystemDraft = designSystemDraft ? normalizeProjectDesignSystemModes(designSystemDraft) : null;
     const hasDesignSystem = Boolean(designSystem);
     const isDesignSystemView = chatPanelView === 'design-system';
-    const designSystemForPanel = isDesignSystemEditing && designSystemDraft ? designSystemDraft : designSystem;
+    const designSystemForPanel = (isDesignSystemEditing && normalizedDesignSystemDraft)
+        ? normalizedDesignSystemDraft
+        : normalizedStoredDesignSystem;
+    const isDesignSystemEditable = isDesignSystemView && Boolean(designSystemForPanel);
+    const hasDesignSystemDraftChanges = Boolean(
+        normalizedStoredDesignSystem
+        && normalizedDesignSystemDraft
+        && JSON.stringify(normalizedDesignSystemDraft) !== JSON.stringify(normalizedStoredDesignSystem)
+    );
     const designTokenEntries = designSystemForPanel
         ? (Object.entries(designSystemForPanel.tokens) as Array<[DesignTokenKey, string]>)
         : [];
+    const selectedDesignTokenEntry = designTokenEntries.find(([tokenName]) => tokenName === activeTokenEditor)
+        || designTokenEntries[0]
+        || null;
+    const selectedDesignTokenName = selectedDesignTokenEntry?.[0] || null;
+    const selectedDesignTokenValue = selectedDesignTokenEntry?.[1] || '';
 
     return (
         <>
@@ -4735,260 +5025,316 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 </div>
                             ) : (
                                 <>
-                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Generated Design System</p>
-                                        <h3 className="mt-1 text-[15px] font-semibold text-[var(--ui-text)]">{designSystemForPanel.systemName}</h3>
-                                        <p className="mt-2 text-xs text-[var(--ui-text-muted)] leading-relaxed">{designSystemForPanel.intentSummary}</p>
-                                        <div className="mt-3 flex items-center justify-between gap-2">
-                                            <div className="flex flex-wrap gap-1.5">
-                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                    {designSystemForPanel.stylePreset}
-                                                </span>
-                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                    {designSystemForPanel.platform}
-                                                </span>
-                                                <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                    {designSystemForPanel.themeMode}
-                                                </span>
-                                            </div>
-                                            {!isDesignSystemEditing ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => openDesignSystemEditor(designSystemForPanel)}
-                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
-                                                >
-                                                    <Pencil size={12} />
-                                                    <span>Edit</span>
-                                                </button>
-                                            ) : (
-                                                <div className="flex items-center gap-1.5">
-                                                    <button
-                                                        type="button"
-                                                        onClick={cancelDesignSystemEdit}
-                                                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={saveDesignSystemEdit}
-                                                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-indigo-600 text-indigo-100 ring-1 ring-indigo-300/60 hover:bg-indigo-500"
-                                                    >
-                                                        Save
-                                                    </button>
+                                    <div className="relative overflow-hidden rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
+                                        <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full blur-3xl opacity-35" style={{ background: designSystemForPanel.tokens.accent }} />
+                                        <div className="pointer-events-none absolute -left-12 -bottom-16 h-36 w-36 rounded-full blur-3xl opacity-30" style={{ background: designSystemForPanel.tokens.accent2 }} />
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Design DNA</p>
+                                        <div className="relative mt-2 flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <h3 className="text-[28px] leading-[1.05] tracking-[-0.02em] font-semibold text-[var(--ui-text)] break-words" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>
+                                                    {designSystemForPanel.systemName}
+                                                </h3>
+                                                <p className="mt-2 text-[12px] text-[var(--ui-text-muted)] leading-relaxed max-w-[280px]">{designSystemForPanel.intentSummary}</p>
+                                                <div className="mt-3 flex flex-wrap gap-1.5">
+                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                        {designSystemForPanel.stylePreset}
+                                                    </span>
+                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                        {designSystemForPanel.platform}
+                                                    </span>
+                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
+                                                        {designSystemForPanel.themeMode}
+                                                    </span>
                                                 </div>
-                                            )}
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Typography</p>
+                                                <p className="text-[44px] leading-[0.9] text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>Aa</p>
+                                                <p className="text-[30px] leading-[0.95] text-[var(--ui-text-muted)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>Aa</p>
+                                            </div>
+                                        </div>
+                                        <div className="relative mt-4 text-[11px] text-[var(--ui-text-muted)]">
+                                            Live editing mode is on. Changes are staged until you save and apply.
                                         </div>
                                     </div>
 
-                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Color Tokens</p>
-                                        {isDesignSystemEditing && (
-                                            <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">
-                                                Click any token card to edit its color.
-                                            </p>
-                                        )}
-                                        <div className="mt-3 grid grid-cols-2 gap-2">
-                                            {designTokenEntries.map(([tokenName, tokenValue]) => {
-                                                const isActive = isDesignSystemEditing && activeTokenEditor === tokenName;
-                                                return (
-                                                <div
-                                                    key={tokenName}
-                                                    role={isDesignSystemEditing ? 'button' : undefined}
-                                                    tabIndex={isDesignSystemEditing ? 0 : -1}
+                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5">
+                                        <div className="grid grid-cols-3 gap-1">
+                                            {([
+                                                ['colors', 'Colors'],
+                                                ['fonts', 'Fonts'],
+                                                ['corners', 'Corners'],
+                                            ] as const).map(([tabKey, tabLabel]) => (
+                                                <button
+                                                    key={`ds-tab-${tabKey}`}
+                                                    type="button"
                                                     onClick={() => {
-                                                        if (!isDesignSystemEditing) return;
-                                                        setActiveTokenEditor(tokenName);
+                                                        setDesignSystemInspectorTab(tabKey);
+                                                        setOpenFontDropdown(null);
+                                                        setOpenRadiusDropdown(null);
                                                     }}
-                                                    onKeyDown={(event) => {
-                                                        if (!isDesignSystemEditing) return;
-                                                        if (event.key === 'Enter' || event.key === ' ') {
-                                                            event.preventDefault();
-                                                            setActiveTokenEditor(tokenName);
-                                                        }
-                                                    }}
-                                                    className={`rounded-xl bg-[var(--ui-surface-3)] ring-1 p-2 transition-colors ${isDesignSystemEditing ? 'cursor-pointer hover:bg-[var(--ui-surface-4)]' : ''} ${isActive ? 'ring-[var(--ui-primary)]' : 'ring-[var(--ui-border)]'}`}
+                                                    className={`h-8 rounded-lg text-[11px] font-semibold transition-colors ${designSystemInspectorTab === tabKey
+                                                        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border-light)]'
+                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
+                                                        }`}
                                                 >
-                                                    <div className="h-7 rounded-md ring-1 ring-black/10" style={{ background: tokenValue }} />
-                                                    <p className="mt-1 text-[10px] font-semibold text-[var(--ui-text)]">{tokenName}</p>
-                                                    <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{tokenValue}</p>
-                                                    {isActive && (
-                                                        <div className="mt-2 pt-2 border-t border-[var(--ui-border)] space-y-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    type="color"
-                                                                    value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(tokenValue) ? tokenValue : '#000000'}
-                                                                    onClick={(event) => event.stopPropagation()}
-                                                                    onChange={(event) => updateDesignSystemTokenDraft(tokenName, event.target.value)}
-                                                                    className="h-8 w-9 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
-                                                                />
-                                                                <input
-                                                                    type="text"
-                                                                    value={tokenValue}
-                                                                    onClick={(event) => event.stopPropagation()}
-                                                                    onChange={(event) => updateDesignSystemTokenDraft(tokenName, event.target.value)}
-                                                                    className="flex-1 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                                />
-                                                            </div>
+                                                    {tabLabel}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {designSystemInspectorTab === 'colors' && (
+                                    <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                                <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Color Constellation</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">
+                                                    Click any color planet to edit it live.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={toggleDesignSystemThemeVariant}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                title="Toggle light/dark variant tokens"
+                                            >
+                                                {designSystemForPanel.themeMode === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
+                                                <span>{designSystemForPanel.themeMode === 'dark' ? 'Light Variant' : 'Dark Variant'}</span>
+                                            </button>
+                                        </div>
+                                        <div className="mt-4 grid grid-cols-2 gap-2.5">
+                                            {designTokenEntries.map(([tokenName, tokenValue]) => {
+                                                const isActive = selectedDesignTokenName === tokenName;
+                                                return (
+                                                    <button
+                                                        key={tokenName}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (!isDesignSystemEditable) return;
+                                                            setActiveTokenEditor(tokenName);
+                                                        }}
+                                                        className={`rounded-2xl bg-[var(--ui-surface-3)] p-3 text-left ring-1 transition-all ${isDesignSystemEditable ? 'hover:bg-[var(--ui-surface-4)] cursor-pointer' : 'cursor-default'} ${isActive ? 'ring-[var(--ui-primary)] shadow-lg shadow-[var(--ui-primary)]/10' : 'ring-[var(--ui-border)]'}`}
+                                                    >
+                                                        <div className="mx-auto relative h-14 w-14">
+                                                            <span className="absolute inset-0 rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)]" />
+                                                            <span className="absolute inset-[4px] rounded-full ring-2 ring-black/10" style={{ background: tokenValue }} />
                                                         </div>
-                                                    )}
-                                                </div>
+                                                        <p className="mt-2 text-[11px] font-semibold text-[var(--ui-text)] capitalize">{tokenName}</p>
+                                                        <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{tokenValue}</p>
+                                                    </button>
                                                 );
                                             })}
                                         </div>
+                                        {isDesignSystemEditable && selectedDesignTokenName && (
+                                            <div className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-[11px] font-semibold text-[var(--ui-text)] capitalize">{selectedDesignTokenName}</p>
+                                                    <p className="text-[10px] text-[var(--ui-text-muted)]">Active token</p>
+                                                </div>
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(selectedDesignTokenValue) ? selectedDesignTokenValue : '#000000'}
+                                                        onChange={(event) => updateDesignSystemTokenDraft(selectedDesignTokenName, event.target.value)}
+                                                        className="h-9 w-11 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={selectedDesignTokenValue}
+                                                        onChange={(event) => updateDesignSystemTokenDraft(selectedDesignTokenName, event.target.value)}
+                                                        className="flex-1 h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
+                                    )}
 
-                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
-                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Type, Spacing, Motion</p>
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-semibold text-[var(--ui-text)]">Typography</p>
-                                            {isDesignSystemEditing ? (
-                                                <div className="space-y-2">
-                                                    <label className="space-y-1 block">
-                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Font Stack</span>
-                                                        <input
-                                                            type="text"
-                                                            list="design-system-font-stacks"
-                                                            value={designSystemForPanel.typography.displayFont}
-                                                            onChange={(event) => updateDesignSystemTypographyDraft('displayFont', event.target.value)}
-                                                            className="w-full h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                        />
-                                                    </label>
-                                                    <label className="space-y-1 block">
-                                                        <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Body Font Stack</span>
-                                                        <input
-                                                            type="text"
-                                                            list="design-system-font-stacks"
-                                                            value={designSystemForPanel.typography.bodyFont}
-                                                            onChange={(event) => updateDesignSystemTypographyDraft('bodyFont', event.target.value)}
-                                                            className="w-full h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                        />
-                                                    </label>
-                                                    <datalist id="design-system-font-stacks">
-                                                        {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
-                                                            <option key={fontStack} value={fontStack} />
-                                                        ))}
-                                                    </datalist>
-                                                    <div className="space-y-2">
-                                                        <div>
-                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Presets</p>
-                                                            <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                                                                {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
-                                                                    const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.displayFont, fontStack);
-                                                                    return (
-                                                                        <button
-                                                                            key={`display-font-stack-${fontStack}`}
-                                                                            type="button"
-                                                                            onClick={() => updateDesignSystemTypographyDraft('displayFont', fontStack)}
-                                                                            className={`shrink-0 min-w-[110px] rounded-lg border p-2 text-left transition-colors ${isSelected
-                                                                                ? 'border-[var(--ui-primary)] bg-[var(--ui-primary)]/10'
-                                                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
-                                                                                }`}
-                                                                        >
-                                                                            <span className="block text-sm leading-none text-[var(--ui-text)]" style={{ fontFamily: fontStack }}>Ag</span>
-                                                                            <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
-                                                                                {extractPrimaryFontFamily(fontStack)}
-                                                                            </span>
-                                                                        </button>
-                                                                    );
-                                                                })}
-                                                            </div>
+                                    {designSystemInspectorTab === 'fonts' && (
+                                        <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
+                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Typography Stage</p>
+                                            <div className="grid grid-cols-1 gap-2.5">
+                                                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Display</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setOpenFontDropdown((current) => (current === 'display' ? null : 'display'))}
+                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                        >
+                                                            Choose font
+                                                        </button>
+                                                    </div>
+                                                    <p className="mt-1 text-[34px] leading-[0.95] text-[var(--ui-text)] break-words" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>Aa</p>
+                                                    <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{designSystemForPanel.typography.displayFont}</p>
+                                                    {openFontDropdown === 'display' && (
+                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
+                                                            {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
+                                                                <button
+                                                                    key={`dropdown-display-${fontStack}`}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        updateDesignSystemTypographyDraft('displayFont', fontStack);
+                                                                        setOpenFontDropdown(null);
+                                                                    }}
+                                                                    className="w-full rounded-md px-2 py-1.5 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                                    style={{ fontFamily: fontStack }}
+                                                                >
+                                                                    {extractPrimaryFontFamily(fontStack)}
+                                                                </button>
+                                                            ))}
                                                         </div>
-                                                        <div>
-                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Body Presets</p>
-                                                            <div className="mt-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                                                                {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
-                                                                    const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.bodyFont, fontStack);
-                                                                    return (
-                                                                        <button
-                                                                            key={`body-font-stack-${fontStack}`}
-                                                                            type="button"
-                                                                            onClick={() => updateDesignSystemTypographyDraft('bodyFont', fontStack)}
-                                                                            className={`shrink-0 min-w-[110px] rounded-lg border p-2 text-left transition-colors ${isSelected
-                                                                                ? 'border-[var(--ui-primary)] bg-[var(--ui-primary)]/10'
-                                                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
-                                                                                }`}
-                                                                        >
-                                                                            <span className="block text-xs leading-tight text-[var(--ui-text)]" style={{ fontFamily: fontStack }}>The quick fox</span>
-                                                                            <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
-                                                                                {extractPrimaryFontFamily(fontStack)}
-                                                                            </span>
-                                                                        </button>
-                                                                    );
-                                                                })}
-                                                            </div>
+                                                    )}
+                                                </div>
+                                                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Body</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setOpenFontDropdown((current) => (current === 'body' ? null : 'body'))}
+                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                        >
+                                                            Choose font
+                                                        </button>
+                                                    </div>
+                                                    <p className="mt-1 text-[16px] leading-[1.25] text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>The quick brown fox jumps.</p>
+                                                    <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{designSystemForPanel.typography.bodyFont}</p>
+                                                    {openFontDropdown === 'body' && (
+                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
+                                                            {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
+                                                                <button
+                                                                    key={`dropdown-body-${fontStack}`}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        updateDesignSystemTypographyDraft('bodyFont', fontStack);
+                                                                        setOpenFontDropdown(null);
+                                                                    }}
+                                                                    className="w-full rounded-md px-2 py-1.5 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                                    style={{ fontFamily: fontStack }}
+                                                                >
+                                                                    {extractPrimaryFontFamily(fontStack)}
+                                                                </button>
+                                                            ))}
                                                         </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Presets</p>
+                                                    <div className="mt-1.5 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                                                        {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
+                                                            const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.displayFont, fontStack);
+                                                            return (
+                                                                <button
+                                                                    key={`display-font-stack-${fontStack}`}
+                                                                    type="button"
+                                                                    onClick={() => updateDesignSystemTypographyDraft('displayFont', fontStack)}
+                                                                    className={`shrink-0 rounded-xl border p-2.5 text-left transition-all ${isSelected
+                                                                        ? 'min-w-[184px] scale-[1.03] border-[var(--ui-primary)] bg-[var(--ui-primary)]/15 shadow-lg shadow-[var(--ui-primary)]/15'
+                                                                        : 'min-w-[128px] border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
+                                                                        }`}
+                                                                >
+                                                                    <span className={`block leading-none text-[var(--ui-text)] ${isSelected ? 'text-[32px]' : 'text-[20px]'}`} style={{ fontFamily: fontStack }}>Aa</span>
+                                                                    <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
+                                                                        {extractPrimaryFontFamily(fontStack)}
+                                                                    </span>
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
-                                            ) : (
-                                                <p className="text-xs text-[var(--ui-text-muted)]">
-                                                    {designSystemForPanel.typography.displayFont} / {designSystemForPanel.typography.bodyFont}
-                                                </p>
-                                            )}
+                                            </div>
                                         </div>
-                                        <p className="text-xs text-[var(--ui-text-muted)]">
-                                            <span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {designSystemForPanel.spacing.baseUnit}px base, {designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}
-                                        </p>
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-semibold text-[var(--ui-text)]">Corner Radius</p>
-                                            {(['card', 'control', 'pill'] as const).map((radiusKey) => (
-                                                <label key={`radius-${radiusKey}`} className="flex items-center justify-between gap-2">
-                                                    <span className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{radiusKey}</span>
-                                                    {isDesignSystemEditing ? (
-                                                        <input
-                                                            type="text"
-                                                            value={designSystemForPanel.radius[radiusKey]}
-                                                            onChange={(event) => updateDesignSystemRadiusDraft(radiusKey, event.target.value)}
-                                                            className="w-24 h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                        />
-                                                    ) : (
-                                                        <span className="text-xs text-[var(--ui-text-muted)]">{designSystemForPanel.radius[radiusKey]}</span>
-                                                    )}
-                                                </label>
-                                            ))}
-                                            {isDesignSystemEditing && (
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {DESIGN_RADIUS_PRESETS.map((radiusPreset) => (
-                                                        <button
-                                                            key={`radius-preset-${radiusPreset}`}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                updateDesignSystemRadiusDraft('card', radiusPreset);
-                                                                updateDesignSystemRadiusDraft('control', radiusPreset);
-                                                                updateDesignSystemRadiusDraft('pill', radiusPreset);
-                                                            }}
-                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
-                                                        >
-                                                            {radiusPreset}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-[var(--ui-text-muted)]">
-                                            <span className="text-[var(--ui-text)] font-semibold">Motion:</span> {designSystemForPanel.motion.style} ({designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms)
-                                        </p>
-                                    </div>
+                                    )}
 
-                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
-                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Rules</p>
-                                        <div>
-                                            <p className="text-[11px] font-semibold text-emerald-300 mb-1">Do</p>
-                                            <ul className="space-y-1">
-                                                {designSystemForPanel.rules.do.map((rule, index) => (
-                                                    <li key={`do-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
+                                    {designSystemInspectorTab === 'corners' && (
+                                        <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
+                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Corners, Spacing & Motion</p>
+                                            <p className="text-[11px] text-[var(--ui-text-muted)]">
+                                                <span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {designSystemForPanel.spacing.baseUnit}px base, {designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}
+                                            </p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {(['card', 'control', 'pill'] as const).map((radiusKey) => (
+                                                    <div key={`radius-preview-${radiusKey}`} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{radiusKey}</p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setOpenRadiusDropdown((current) => (current === radiusKey ? null : radiusKey))}
+                                                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                            >
+                                                                Set
+                                                            </button>
+                                                        </div>
+                                                        <div className="mt-2 h-8 w-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)]" style={{ borderRadius: designSystemForPanel.radius[radiusKey] }} />
+                                                        <p className="mt-2 text-[10px] text-[var(--ui-text-muted)]">{designSystemForPanel.radius[radiusKey]}</p>
+                                                        {openRadiusDropdown === radiusKey && (
+                                                            <div className="mt-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 space-y-1">
+                                                                {DESIGN_RADIUS_PRESETS.map((radiusPreset) => (
+                                                                    <button
+                                                                        key={`radius-preset-${radiusKey}-${radiusPreset}`}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            updateDesignSystemRadiusDraft(radiusKey, radiusPreset);
+                                                                            setOpenRadiusDropdown(null);
+                                                                        }}
+                                                                        className="w-full rounded px-2 py-1 text-left text-[10px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                                    >
+                                                                        {radiusPreset}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 ))}
-                                            </ul>
+                                            </div>
+                                            <p className="text-[11px] text-[var(--ui-text-muted)]">
+                                                <span className="text-[var(--ui-text)] font-semibold">Motion:</span> {designSystemForPanel.motion.style} ({designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms)
+                                            </p>
                                         </div>
-                                        <div>
-                                            <p className="text-[11px] font-semibold text-rose-300 mb-1">Don't</p>
-                                            <ul className="space-y-1">
-                                                {designSystemForPanel.rules.dont.map((rule, index) => (
-                                                    <li key={`dont-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
-                                                ))}
-                                            </ul>
+                                    )}
+
+                                    {/* <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-3">
+                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Component Voice & Rules</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
+                                                <p className="text-[10px] text-[var(--ui-text-subtle)] uppercase tracking-[0.08em]">Buttons</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text)]">{designSystemForPanel.componentLanguage.button}</p>
+                                            </div>
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
+                                                <p className="text-[10px] text-[var(--ui-text-subtle)] uppercase tracking-[0.08em]">Cards</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text)]">{designSystemForPanel.componentLanguage.card}</p>
+                                            </div>
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
+                                                <p className="text-[10px] text-[var(--ui-text-subtle)] uppercase tracking-[0.08em]">Inputs</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text)]">{designSystemForPanel.componentLanguage.input}</p>
+                                            </div>
+                                            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
+                                                <p className="text-[10px] text-[var(--ui-text-subtle)] uppercase tracking-[0.08em]">Navigation</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text)]">{designSystemForPanel.componentLanguage.nav}</p>
+                                            </div>
                                         </div>
-                                    </div>
+                                        <div className="grid grid-cols-1 gap-3">
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-emerald-300 mb-1">Do</p>
+                                                <ul className="space-y-1">
+                                                    {designSystemForPanel.rules.do.map((rule, index) => (
+                                                        <li key={`do-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                            <div>
+                                                <p className="text-[11px] font-semibold text-rose-300 mb-1">Don't</p>
+                                                <ul className="space-y-1">
+                                                    {designSystemForPanel.rules.dont.map((rule, index) => (
+                                                        <li key={`dont-${index}`} className="text-xs text-[var(--ui-text-muted)] leading-relaxed">- {rule}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div> */}
                                 </>
                             )}
                         </div>
@@ -5246,10 +5592,30 @@ Return a polished, consistent screen without introducing a new navigation patter
                     </>
                     ) : (
                         <div className="mx-4 mb-6 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3.5">
-                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Design System View</p>
-                            <p className="mt-1 text-xs text-[var(--ui-text-muted)] leading-relaxed">
-                                This view reflects the project-wide style foundation used for all newly generated screens.
-                            </p>
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={cancelDesignSystemEdit}
+                                    disabled={!hasDesignSystemDraftChanges}
+                                    className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges
+                                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]'
+                                        : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
+                                        }`}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={saveDesignSystemEdit}
+                                    disabled={!hasDesignSystemDraftChanges}
+                                    className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges
+                                        ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                        : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
+                                        }`}
+                                >
+                                    Save & Apply
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

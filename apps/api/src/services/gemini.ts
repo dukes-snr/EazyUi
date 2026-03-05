@@ -120,6 +120,28 @@ export interface ProjectDesignSystem {
         accent: string;
         accent2: string;
     };
+    tokenModes?: {
+        light: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+        dark: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+    };
     typography: {
         displayFont: string;
         bodyFont: string;
@@ -808,6 +830,158 @@ function safeStringList(input: unknown, fallback: string[], maxItems = 8): strin
     return next.length > 0 ? next : fallback;
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function parseHexColor(value: string): { r: number; g: number; b: number } | null {
+    const clean = String(value || '').trim().replace('#', '');
+    if (!/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(clean)) return null;
+    const full = clean.length === 3 ? clean.split('').map((part) => `${part}${part}`).join('') : clean;
+    const n = Number.parseInt(full, 16);
+    return {
+        r: (n >> 16) & 255,
+        g: (n >> 8) & 255,
+        b: n & 255,
+    };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+    return `#${[r, g, b].map((part) => clampNumber(Math.round(part), 0, 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+    const rr = r / 255;
+    const gg = g / 255;
+    const bb = b / 255;
+    const max = Math.max(rr, gg, bb);
+    const min = Math.min(rr, gg, bb);
+    const delta = max - min;
+    let h = 0;
+    const l = (max + min) / 2;
+    const s = delta === 0 ? 0 : delta / (1 - Math.abs((2 * l) - 1));
+    if (delta !== 0) {
+        if (max === rr) h = ((gg - bb) / delta) % 6;
+        else if (max === gg) h = ((bb - rr) / delta) + 2;
+        else h = ((rr - gg) / delta) + 4;
+    }
+    const normalizedHue = Math.round((h * 60 + 360) % 360);
+    return {
+        h: normalizedHue,
+        s: clampNumber(s * 100, 0, 100),
+        l: clampNumber(l * 100, 0, 100),
+    };
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+    const hh = ((h % 360) + 360) % 360;
+    const ss = clampNumber(s, 0, 100) / 100;
+    const ll = clampNumber(l, 0, 100) / 100;
+    const c = (1 - Math.abs((2 * ll) - 1)) * ss;
+    const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+    const m = ll - (c / 2);
+
+    let rr = 0;
+    let gg = 0;
+    let bb = 0;
+    if (hh < 60) {
+        rr = c; gg = x; bb = 0;
+    } else if (hh < 120) {
+        rr = x; gg = c; bb = 0;
+    } else if (hh < 180) {
+        rr = 0; gg = c; bb = x;
+    } else if (hh < 240) {
+        rr = 0; gg = x; bb = c;
+    } else if (hh < 300) {
+        rr = x; gg = 0; bb = c;
+    } else {
+        rr = c; gg = 0; bb = x;
+    }
+
+    return {
+        r: Math.round((rr + m) * 255),
+        g: Math.round((gg + m) * 255),
+        b: Math.round((bb + m) * 255),
+    };
+}
+
+function mapTokenToThemeVariant(
+    tokenName: keyof ProjectDesignSystem['tokens'],
+    colorValue: string,
+    targetMode: 'light' | 'dark'
+): string {
+    if (tokenName === 'accent' || tokenName === 'accent2') return colorValue;
+    const parsed = parseHexColor(colorValue);
+    if (!parsed) return colorValue;
+    const hsl = rgbToHsl(parsed.r, parsed.g, parsed.b);
+    const targetLightnessDark: Record<keyof ProjectDesignSystem['tokens'], number> = {
+        bg: 7,
+        surface: 12,
+        surface2: 17,
+        text: 95,
+        muted: 68,
+        stroke: 30,
+        accent: hsl.l,
+        accent2: hsl.l,
+    };
+    const targetLightnessLight: Record<keyof ProjectDesignSystem['tokens'], number> = {
+        bg: 97,
+        surface: 100,
+        surface2: 94,
+        text: 10,
+        muted: 45,
+        stroke: 90,
+        accent: hsl.l,
+        accent2: hsl.l,
+    };
+    const targetLightness = targetMode === 'dark'
+        ? targetLightnessDark[tokenName]
+        : targetLightnessLight[tokenName];
+    const targetSaturation = tokenName === 'text' || tokenName === 'muted' || tokenName === 'stroke'
+        ? Math.min(hsl.s, 24)
+        : Math.min(hsl.s, 18);
+    const rgb = hslToRgb(hsl.h, targetSaturation, targetLightness);
+    return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+
+function buildThemeVariantTokens(
+    tokens: ProjectDesignSystem['tokens'],
+    targetMode: 'light' | 'dark'
+): ProjectDesignSystem['tokens'] {
+    return {
+        ...tokens,
+        bg: mapTokenToThemeVariant('bg', tokens.bg, targetMode),
+        surface: mapTokenToThemeVariant('surface', tokens.surface, targetMode),
+        surface2: mapTokenToThemeVariant('surface2', tokens.surface2, targetMode),
+        text: mapTokenToThemeVariant('text', tokens.text, targetMode),
+        muted: mapTokenToThemeVariant('muted', tokens.muted, targetMode),
+        stroke: mapTokenToThemeVariant('stroke', tokens.stroke, targetMode),
+        accent: tokens.accent,
+        accent2: tokens.accent2,
+    };
+}
+
+function resolveActiveThemeMode(themeMode: ProjectDesignSystem['themeMode']): 'light' | 'dark' {
+    return themeMode === 'dark' ? 'dark' : 'light';
+}
+
+function resolveTokenModesFromSource(
+    activeTokens: ProjectDesignSystem['tokens'],
+    themeMode: ProjectDesignSystem['themeMode']
+): { light: ProjectDesignSystem['tokens']; dark: ProjectDesignSystem['tokens'] } {
+    const activeMode = resolveActiveThemeMode(themeMode);
+    if (activeMode === 'dark') {
+        return {
+            dark: { ...activeTokens },
+            light: buildThemeVariantTokens(activeTokens, 'light'),
+        };
+    }
+    return {
+        light: { ...activeTokens },
+        dark: buildThemeVariantTokens(activeTokens, 'dark'),
+    };
+}
+
 function buildFallbackProjectDesignSystem(
     prompt: string,
     stylePreset: string,
@@ -815,6 +989,8 @@ function buildFallbackProjectDesignSystem(
 ): ProjectDesignSystem {
     const preset = DESIGN_SYSTEM_SEEDS[stylePreset] || DESIGN_SYSTEM_SEEDS.modern;
     const appIntent = safeString(prompt, 'App', 80);
+    const tokenModes = resolveTokenModesFromSource(preset.tokens, preset.themeMode);
+    const activeMode = resolveActiveThemeMode(preset.themeMode);
     return {
         version: 1,
         systemName: `${appIntent} Design System`,
@@ -822,7 +998,8 @@ function buildFallbackProjectDesignSystem(
         stylePreset,
         platform,
         themeMode: preset.themeMode,
-        tokens: { ...preset.tokens },
+        tokens: { ...(activeMode === 'dark' ? tokenModes.dark : tokenModes.light) },
+        tokenModes,
         typography: {
             displayFont: preset.typography.displayFont,
             bodyFont: preset.typography.bodyFont,
@@ -886,6 +1063,9 @@ function normalizeProjectDesignSystem(
     if (!input || typeof input !== 'object') return fallback;
     const raw = input as Record<string, any>;
     const rawTokens = (raw.tokens && typeof raw.tokens === 'object') ? raw.tokens : {};
+    const rawTokenModes = (raw.tokenModes && typeof raw.tokenModes === 'object') ? raw.tokenModes : {};
+    const rawModeLight = (rawTokenModes.light && typeof rawTokenModes.light === 'object') ? rawTokenModes.light : {};
+    const rawModeDark = (rawTokenModes.dark && typeof rawTokenModes.dark === 'object') ? rawTokenModes.dark : {};
     const rawTypography = (raw.typography && typeof raw.typography === 'object') ? raw.typography : {};
     const rawScale = (rawTypography.scale && typeof rawTypography.scale === 'object') ? rawTypography.scale : {};
     const rawSpacing = (raw.spacing && typeof raw.spacing === 'object') ? raw.spacing : {};
@@ -894,6 +1074,33 @@ function normalizeProjectDesignSystem(
     const rawComponents = (raw.componentLanguage && typeof raw.componentLanguage === 'object') ? raw.componentLanguage : {};
     const rawMotion = (raw.motion && typeof raw.motion === 'object') ? raw.motion : {};
     const rawRules = (raw.rules && typeof raw.rules === 'object') ? raw.rules : {};
+    const normalizedThemeMode = safeThemeMode(raw.themeMode, fallback.themeMode);
+
+    const sanitizeTokenSet = (source: Record<string, any>, defaults: ProjectDesignSystem['tokens']): ProjectDesignSystem['tokens'] => ({
+        bg: safeString(source.bg, defaults.bg, 40),
+        surface: safeString(source.surface, defaults.surface, 40),
+        surface2: safeString(source.surface2, defaults.surface2, 40),
+        text: safeString(source.text, defaults.text, 40),
+        muted: safeString(source.muted, defaults.muted, 40),
+        stroke: safeString(source.stroke, defaults.stroke, 40),
+        accent: safeString(source.accent, defaults.accent, 40),
+        accent2: safeString(source.accent2, defaults.accent2, 40),
+    });
+
+    const fallbackLight = fallback.tokenModes?.light || fallback.tokens;
+    const fallbackDark = fallback.tokenModes?.dark || buildThemeVariantTokens(fallback.tokens, 'dark');
+    const lightTokens = sanitizeTokenSet(rawModeLight, fallbackLight);
+    const darkTokens = sanitizeTokenSet(rawModeDark, fallbackDark);
+    const activeMode = resolveActiveThemeMode(normalizedThemeMode);
+    const activeTokensFromModes = activeMode === 'dark' ? darkTokens : lightTokens;
+    const hasRawActiveTokens = Object.keys(rawTokens || {}).length > 0;
+    const activeTokens = hasRawActiveTokens
+        ? sanitizeTokenSet(rawTokens, activeTokensFromModes)
+        : activeTokensFromModes;
+    const normalizedTokenModes = {
+        light: activeMode === 'light' ? { ...activeTokens } : { ...lightTokens },
+        dark: activeMode === 'dark' ? { ...activeTokens } : { ...darkTokens },
+    };
 
     return {
         version: 1,
@@ -901,17 +1108,9 @@ function normalizeProjectDesignSystem(
         intentSummary: safeString(raw.intentSummary, fallback.intentSummary, 220),
         stylePreset: safeString(raw.stylePreset, stylePreset, 32),
         platform: safeString(raw.platform, platform, 32),
-        themeMode: safeThemeMode(raw.themeMode, fallback.themeMode),
-        tokens: {
-            bg: safeString(rawTokens.bg, fallback.tokens.bg, 40),
-            surface: safeString(rawTokens.surface, fallback.tokens.surface, 40),
-            surface2: safeString(rawTokens.surface2, fallback.tokens.surface2, 40),
-            text: safeString(rawTokens.text, fallback.tokens.text, 40),
-            muted: safeString(rawTokens.muted, fallback.tokens.muted, 40),
-            stroke: safeString(rawTokens.stroke, fallback.tokens.stroke, 40),
-            accent: safeString(rawTokens.accent, fallback.tokens.accent, 40),
-            accent2: safeString(rawTokens.accent2, fallback.tokens.accent2, 40),
-        },
+        themeMode: normalizedThemeMode,
+        tokens: activeTokens,
+        tokenModes: normalizedTokenModes,
         typography: {
             displayFont: safeString(rawTypography.displayFont, fallback.typography.displayFont, 80),
             bodyFont: safeString(rawTypography.bodyFont, fallback.typography.bodyFont, 80),
@@ -960,22 +1159,45 @@ function normalizeProjectDesignSystem(
 function buildDesignSystemGuidance(system: ProjectDesignSystem): string {
     const doRules = system.rules.do.map((item) => `- ${item}`).join('\n');
     const dontRules = system.rules.dont.map((item) => `- ${item}`).join('\n');
+    const modeTokens = system.tokenModes || resolveTokenModesFromSource(system.tokens, system.themeMode);
+    const activeMode = resolveActiveThemeMode(system.themeMode);
+    const activeTokens = activeMode === 'dark' ? modeTokens.dark : modeTokens.light;
     return `
 PROJECT DESIGN SYSTEM (STRICT, REUSE THIS ON ALL SCREENS):
 System: ${system.systemName}
 Intent: ${system.intentSummary}
 Preset/Platform: ${system.stylePreset} / ${system.platform}
-Theme mode: ${system.themeMode}
+Theme mode: ${system.themeMode} (active: ${activeMode})
 
-Semantic tokens (map directly in tailwind.config):
-- bg: ${system.tokens.bg}
-- surface: ${system.tokens.surface}
-- surface2: ${system.tokens.surface2}
-- text: ${system.tokens.text}
-- muted: ${system.tokens.muted}
-- stroke: ${system.tokens.stroke}
-- accent: ${system.tokens.accent}
-- accent2: ${system.tokens.accent2}
+Semantic tokens (ACTIVE mode, map directly in tailwind.config):
+- bg: ${activeTokens.bg}
+- surface: ${activeTokens.surface}
+- surface2: ${activeTokens.surface2}
+- text: ${activeTokens.text}
+- muted: ${activeTokens.muted}
+- stroke: ${activeTokens.stroke}
+- accent: ${activeTokens.accent}
+- accent2: ${activeTokens.accent2}
+
+Light mode tokens:
+- bg: ${modeTokens.light.bg}
+- surface: ${modeTokens.light.surface}
+- surface2: ${modeTokens.light.surface2}
+- text: ${modeTokens.light.text}
+- muted: ${modeTokens.light.muted}
+- stroke: ${modeTokens.light.stroke}
+- accent: ${modeTokens.light.accent}
+- accent2: ${modeTokens.light.accent2}
+
+Dark mode tokens:
+- bg: ${modeTokens.dark.bg}
+- surface: ${modeTokens.dark.surface}
+- surface2: ${modeTokens.dark.surface2}
+- text: ${modeTokens.dark.text}
+- muted: ${modeTokens.dark.muted}
+- stroke: ${modeTokens.dark.stroke}
+- accent: ${modeTokens.dark.accent}
+- accent2: ${modeTokens.dark.accent2}
 
 Typography:
 - display font: ${system.typography.displayFont}
@@ -1052,6 +1274,10 @@ Output schema:
   "platform": "mobile|tablet|desktop",
   "themeMode": "light|dark|mixed",
   "tokens": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." },
+  "tokenModes": {
+    "light": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." },
+    "dark": { "bg": "#...", "surface": "#...", "surface2": "#...", "text": "#...", "muted": "#...", "stroke": "#...", "accent": "#...", "accent2": "#..." }
+  },
   "typography": {
     "displayFont": "string",
     "bodyFont": "string",
@@ -1069,6 +1295,9 @@ Output schema:
 Rules:
 - Make this system cohesive enough to drive ALL next screens in one project.
 - Output practical tokens/rules that are easy to apply in Tailwind HTML generation.
+- Always provide both light and dark token sets in tokenModes.
+- Use "themeMode" as the active mode ("light" or "dark"), not "mixed".
+- Set "tokens" to the active mode palette (matching themeMode), not a third unrelated set.
 - Keep rules concrete and short.
 - Prefer semantic colors over arbitrary color names.`;
 

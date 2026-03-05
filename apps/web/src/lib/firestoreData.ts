@@ -176,6 +176,9 @@ function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDe
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   const rawTokens = (raw.tokens && typeof raw.tokens === "object") ? raw.tokens as Record<string, unknown> : {};
+  const rawTokenModes = (raw.tokenModes && typeof raw.tokenModes === "object") ? raw.tokenModes as Record<string, unknown> : {};
+  const rawModeLight = (rawTokenModes.light && typeof rawTokenModes.light === "object") ? rawTokenModes.light as Record<string, unknown> : {};
+  const rawModeDark = (rawTokenModes.dark && typeof rawTokenModes.dark === "object") ? rawTokenModes.dark as Record<string, unknown> : {};
   const rawTypography = (raw.typography && typeof raw.typography === "object") ? raw.typography as Record<string, unknown> : {};
   const rawScale = (rawTypography.scale && typeof rawTypography.scale === "object") ? rawTypography.scale as Record<string, unknown> : {};
   const rawSpacing = (raw.spacing && typeof raw.spacing === "object") ? raw.spacing as Record<string, unknown> : {};
@@ -191,6 +194,31 @@ function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDe
   const spacingDensity = rawSpacing.density === "compact" || rawSpacing.density === "balanced" || rawSpacing.density === "airy"
     ? rawSpacing.density
     : "balanced";
+  const sanitizeTokenSet = (source: Record<string, unknown>, fallback: Record<string, string>) => ({
+    bg: sanitizeMetaString(source.bg, fallback.bg, 40),
+    surface: sanitizeMetaString(source.surface, fallback.surface, 40),
+    surface2: sanitizeMetaString(source.surface2, fallback.surface2, 40),
+    text: sanitizeMetaString(source.text, fallback.text, 40),
+    muted: sanitizeMetaString(source.muted, fallback.muted, 40),
+    stroke: sanitizeMetaString(source.stroke, fallback.stroke, 40),
+    accent: sanitizeMetaString(source.accent, fallback.accent, 40),
+    accent2: sanitizeMetaString(source.accent2, fallback.accent2, 40),
+  });
+
+  const tokens = sanitizeTokenSet(rawTokens, {
+    bg: "#000000",
+    surface: "#111111",
+    surface2: "#222222",
+    text: "#ffffff",
+    muted: "#9ca3af",
+    stroke: "#374151",
+    accent: "#4f46e5",
+    accent2: "#22d3ee",
+  });
+  const tokenModes = {
+    light: sanitizeTokenSet(rawModeLight, tokens),
+    dark: sanitizeTokenSet(rawModeDark, tokens),
+  };
 
   return {
     version: 1,
@@ -199,16 +227,8 @@ function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDe
     stylePreset: sanitizeMetaString(raw.stylePreset, "modern", 32),
     platform: sanitizeMetaString(raw.platform, "mobile", 32),
     themeMode,
-    tokens: {
-      bg: sanitizeMetaString(rawTokens.bg, "#000000", 40),
-      surface: sanitizeMetaString(rawTokens.surface, "#111111", 40),
-      surface2: sanitizeMetaString(rawTokens.surface2, "#222222", 40),
-      text: sanitizeMetaString(rawTokens.text, "#ffffff", 40),
-      muted: sanitizeMetaString(rawTokens.muted, "#9ca3af", 40),
-      stroke: sanitizeMetaString(rawTokens.stroke, "#374151", 40),
-      accent: sanitizeMetaString(rawTokens.accent, "#4f46e5", 40),
-      accent2: sanitizeMetaString(rawTokens.accent2, "#22d3ee", 40),
-    },
+    tokens,
+    tokenModes,
     typography: {
       displayFont: sanitizeMetaString(rawTypography.displayFont, "Plus Jakarta Sans", 80),
       bodyFont: sanitizeMetaString(rawTypography.bodyFont, "Plus Jakarta Sans", 80),
