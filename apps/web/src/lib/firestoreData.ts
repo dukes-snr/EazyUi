@@ -800,10 +800,14 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   let resolvedCoverImageUrls: string[] = existingCoverImageUrls;
   let resolvedCoverImageDataUrls: string[] = existingCoverImageDataUrls;
   let regeneratedCover = false;
+  const forceCoverRefreshOnManualSave = !isAutosave;
   const shouldRefreshCover = nextCoverScreenIds.length > 0 && (
+    forceCoverRefreshOnManualSave
+    || (
     (resolvedCoverImageUrls.length === 0 && resolvedCoverImageDataUrls.length === 0 && !existingData?.coverImageUrl && !existingData?.coverImageDataUrl)
     || existingCoverScreenIds.join("|") !== nextCoverScreenIds.join("|")
     || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
+    )
   );
 
   if (shouldRefreshCover) {

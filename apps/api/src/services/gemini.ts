@@ -274,6 +274,8 @@ TOKEN USAGE RULES:
 - Do NOT use Tailwind default grays (no text-gray-*, bg-gray-*, slate-*, zinc-*).
 - Use semantic tokens instead: bg-bg, bg-surface, text-text, text-muted, border-stroke, bg-accent, etc.
 - Accent usage must be restrained: only primary CTAs, key highlights, and active states.
+- Do NOT define nested 'colors.dark = {...}' objects inside tailwind.config colors; this causes broken theme behavior.
+- Prefer semantic token classes with dark variants that map to dark token values; avoid brittle hardcoded dark hex classes.
 `;
 
 const THEME_AWARENESS_RULES = `
@@ -1675,11 +1677,14 @@ ${designSystemGuidance}
     const screens: HtmlScreen[] = initialResponse.screens.map(s => ({
         screenId: uuidv4(),
         name: s.name,
-        html: enforcePlaceholderCatalogUrls(normalizeBrokenLogoPlaceholders(
-            isFastMode
-                ? enforceFastWorkingImageUrls(normalizeFastFrameworkAssets(s.html))
-                : s.html
-        )),
+        html: enforceThemeAwareTokenUsage(
+            enforcePlaceholderCatalogUrls(normalizeBrokenLogoPlaceholders(
+                isFastMode
+                    ? enforceFastWorkingImageUrls(normalizeFastFrameworkAssets(s.html))
+                    : s.html
+            )),
+            projectDesignSystem
+        ),
         width: dimensions.width,
         height: dimensions.height,
     }));
@@ -1932,7 +1937,11 @@ ${designSystemGuidance}`.trim();
         if (!editedHtml.includes('<!DOCTYPE html>')) {
             throw new Error('Gemini failed to return a full HTML document.');
         }
-        return { html: normalizeBrokenLogoPlaceholders(editedHtml), description };
+        const normalized = enforceThemeAwareTokenUsage(
+            normalizeBrokenLogoPlaceholders(editedHtml),
+            normalizedDesignSystem
+        );
+        return { html: normalized, description };
     };
 
     if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
@@ -2065,7 +2074,10 @@ ${partialHtml}
     if (!completedHtml.includes('<!DOCTYPE html>') || !completedHtml.match(/<\/html>/i)) {
         throw new Error('Gemini failed to return a complete HTML document for partial screen completion.');
     }
-    return enforcePlaceholderCatalogUrls(completedHtml);
+    return enforceThemeAwareTokenUsage(
+        enforcePlaceholderCatalogUrls(completedHtml),
+        projectDesignSystem
+    );
 }
 
 // ============================================================================
@@ -2210,6 +2222,149 @@ function normalizeBrokenLogoPlaceholders(html: string): string {
     }
 
     return next;
+}
+
+function normalizeHexColor(value: string): string | null {
+    const parsed = parseHexColor(value);
+    if (!parsed) return null;
+    return rgbToHex(parsed.r, parsed.g, parsed.b).toLowerCase();
+}
+
+function luminanceFromHex(value: string): number | null {
+    const parsed = parseHexColor(value);
+    if (!parsed) return null;
+    return relativeLuminance(parsed.r, parsed.g, parsed.b);
+}
+
+function hasClassPrefix(classList: string[], prefix: string): boolean {
+    return classList.some((item) => item === prefix || item.startsWith(`${prefix}/`));
+}
+
+function chooseRoleForBg(classList: string[]): keyof ProjectDesignSystem['tokens'] {
+    if (hasClassPrefix(classList, 'bg-bg')) return 'bg';
+    if (hasClassPrefix(classList, 'bg-surface2')) return 'surface2';
+    if (hasClassPrefix(classList, 'bg-surface') || classList.includes('bg-white')) return 'surface';
+    if (hasClassPrefix(classList, 'from-bg') || hasClassPrefix(classList, 'to-bg') || hasClassPrefix(classList, 'via-bg')) return 'bg';
+    if (hasClassPrefix(classList, 'from-surface2') || hasClassPrefix(classList, 'to-surface2') || hasClassPrefix(classList, 'via-surface2')) return 'surface2';
+    if (hasClassPrefix(classList, 'from-surface') || hasClassPrefix(classList, 'to-surface') || hasClassPrefix(classList, 'via-surface')) return 'surface';
+    return 'surface';
+}
+
+function chooseRoleForText(classList: string[]): keyof ProjectDesignSystem['tokens'] {
+    if (hasClassPrefix(classList, 'text-muted')) return 'muted';
+    if (hasClassPrefix(classList, 'text-text')) return 'text';
+    return 'text';
+}
+
+function chooseRoleForBorder(classList: string[]): keyof ProjectDesignSystem['tokens'] {
+    if (hasClassPrefix(classList, 'border-stroke')) return 'stroke';
+    return 'stroke';
+}
+
+function enforceThemeAwareTokenUsage(
+    html: string,
+    projectDesignSystem?: ProjectDesignSystem
+): string {
+    if (!html) return html;
+
+    const fallbackDarkTokens: ProjectDesignSystem['tokens'] = {
+        bg: '#0b1020',
+        surface: '#121933',
+        surface2: '#1c2444',
+        text: '#f3f7ff',
+        muted: '#9aa7c7',
+        stroke: '#2a3764',
+        accent: '#4f8cff',
+        accent2: '#1cc8e8',
+    };
+
+    const modeTokens = projectDesignSystem
+        ? (projectDesignSystem.tokenModes || resolveTokenModesFromSource(projectDesignSystem.tokens, projectDesignSystem.themeMode))
+        : null;
+    const darkTokens = modeTokens?.dark || fallbackDarkTokens;
+
+    let nextHtml = String(html || '');
+    let changed = false;
+
+    // Remove invalid nested colors.dark object in tailwind.config output.
+    const withoutNestedDarkPalette = nextHtml.replace(/\bdark\s*:\s*\{[\s\S]*?\}\s*,?/gi, (full) => {
+        const normalized = full.trim();
+        if (!normalized.startsWith('dark:')) return full;
+        changed = true;
+        return '';
+    });
+    nextHtml = withoutNestedDarkPalette;
+
+    const rewriteClassToken = (token: string, classList: string[]): string => {
+        const match = token.match(/^dark:(bg|text|border|from|to|via)-\[#([0-9a-fA-F]{3,8})\](\/\d{1,3})?$/);
+        const named = token.match(/^dark:(bg|text|border|from|to|via)-(white|black)(\/\d{1,3})?$/);
+
+        let property: 'bg' | 'text' | 'border' | 'from' | 'to' | 'via' | null = null;
+        let hex: string | null = null;
+        let opacity = '';
+
+        if (match) {
+            property = match[1] as any;
+            hex = normalizeHexColor(`#${match[2]}`);
+            opacity = match[3] || '';
+        } else if (named) {
+            property = named[1] as any;
+            hex = named[2] === 'white' ? '#ffffff' : '#000000';
+            opacity = named[3] || '';
+        }
+        if (!property || !hex) return token;
+
+        const luminance = luminanceFromHex(hex);
+        const isBright = typeof luminance === 'number' ? luminance > 0.62 : false;
+        const isDarkValue = typeof luminance === 'number' ? luminance < 0.36 : false;
+
+        if (property === 'bg' || property === 'from' || property === 'to' || property === 'via') {
+            const role = chooseRoleForBg(classList);
+            if (isBright) {
+                changed = true;
+                return `dark:${property}-[${darkTokens[role]}]${opacity}`;
+            }
+            if (property === 'bg' && token === 'dark:bg-black') {
+                changed = true;
+                return `dark:bg-[${darkTokens.surface}]${opacity}`;
+            }
+            return token;
+        }
+
+        if (property === 'text') {
+            const role = chooseRoleForText(classList);
+            if (isDarkValue || token === 'dark:text-black') {
+                changed = true;
+                return `dark:text-[${darkTokens[role]}]${opacity}`;
+            }
+            if (isBright && role === 'muted') {
+                changed = true;
+                return `dark:text-[${darkTokens.muted}]${opacity}`;
+            }
+            return token;
+        }
+
+        if (property === 'border') {
+            const role = chooseRoleForBorder(classList);
+            if (isBright || token === 'dark:border-white') {
+                changed = true;
+                return `dark:border-[${darkTokens[role]}]${opacity}`;
+            }
+            return token;
+        }
+
+        return token;
+    };
+
+    nextHtml = nextHtml.replace(/\bclass\s*=\s*(["'])([\s\S]*?)\1/gi, (full, quote: string, classValue: string) => {
+        const classes = String(classValue || '').split(/\s+/).filter(Boolean);
+        if (classes.length === 0) return full;
+        const rewritten = classes.map((token) => rewriteClassToken(token, classes));
+        if (rewritten.join(' ') === classes.join(' ')) return full;
+        return `class=${quote}${rewritten.join(' ')}${quote}`;
+    });
+
+    return changed ? nextHtml : html;
 }
 
 function recoverHtmlFromMalformedFastOutput(raw: string): string | null {

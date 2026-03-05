@@ -342,6 +342,103 @@ function rgbToHex(r: number, g: number, b: number): string {
     return `#${[r, g, b].map((part) => clampNumber(Math.round(part), 0, 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
+function relativeLuminance(r: number, g: number, b: number): number {
+    const toLinear = (channel: number) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    };
+    const rr = toLinear(r);
+    const gg = toLinear(g);
+    const bb = toLinear(b);
+    return 0.2126 * rr + 0.7152 * gg + 0.0722 * bb;
+}
+
+function normalizeHexColor(value: string): string | null {
+    const parsed = parseHexColor(value);
+    if (!parsed) return null;
+    return rgbToHex(parsed.r, parsed.g, parsed.b).toLowerCase();
+}
+
+function hasClassPrefix(classList: string[], prefix: string): boolean {
+    return classList.some((item) => item === prefix || item.startsWith(`${prefix}/`));
+}
+
+function applyThemeVariantClassRepairsToHtml(
+    html: string,
+    designSystem: ProjectDesignSystem
+): { html: string; changed: boolean } {
+    let nextHtml = String(html || '');
+    let changed = false;
+
+    const tokenModes = resolveDesignSystemTokenModes(designSystem);
+    const darkTokens = tokenModes.dark;
+
+    nextHtml = nextHtml.replace(/\bdark\s*:\s*\{[\s\S]*?\}\s*,?/gi, (full) => {
+        if (!full.trim().startsWith('dark:')) return full;
+        changed = true;
+        return '';
+    });
+
+    nextHtml = nextHtml.replace(/\bclass\s*=\s*(["'])([\s\S]*?)\1/gi, (full, quote: string, classValue: string) => {
+        const classes = String(classValue || '').split(/\s+/).filter(Boolean);
+        if (classes.length === 0) return full;
+
+        const roleForBg: DesignTokenKey =
+            hasClassPrefix(classes, 'bg-bg') ? 'bg'
+                : hasClassPrefix(classes, 'bg-surface2') ? 'surface2'
+                    : hasClassPrefix(classes, 'bg-surface') || classes.includes('bg-white') ? 'surface'
+                        : 'surface';
+        const roleForText: DesignTokenKey = hasClassPrefix(classes, 'text-muted') ? 'muted' : 'text';
+        const roleForBorder: DesignTokenKey = 'stroke';
+
+        const rewritten = classes.map((token) => {
+            const match = token.match(/^dark:(bg|text|border|from|to|via)-\[#([0-9a-fA-F]{3,8})\](\/\d{1,3})?$/);
+            const named = token.match(/^dark:(bg|text|border|from|to|via)-(white|black)(\/\d{1,3})?$/);
+            const rawHex = match ? `#${match[2]}` : named ? (named[2] === 'white' ? '#ffffff' : '#000000') : null;
+            if (!rawHex) return token;
+            const normalizedHex = normalizeHexColor(rawHex);
+            if (!normalizedHex) return token;
+            const parsed = parseHexColor(normalizedHex);
+            if (!parsed) return token;
+            const lum = relativeLuminance(parsed.r, parsed.g, parsed.b);
+            const property = (match?.[1] || named?.[1]) as 'bg' | 'text' | 'border' | 'from' | 'to' | 'via';
+            const opacity = (match?.[3] || named?.[3] || '');
+
+            if (property === 'bg' || property === 'from' || property === 'to' || property === 'via') {
+                if (lum > 0.62 || token === 'dark:bg-black') {
+                    changed = true;
+                    return `dark:${property}-[${darkTokens[roleForBg]}]${opacity}`;
+                }
+                return token;
+            }
+            if (property === 'text') {
+                if (lum < 0.45 || token === 'dark:text-black') {
+                    changed = true;
+                    return `dark:text-[${darkTokens[roleForText]}]${opacity}`;
+                }
+                if (lum > 0.72 && roleForText === 'muted') {
+                    changed = true;
+                    return `dark:text-[${darkTokens.muted}]${opacity}`;
+                }
+                return token;
+            }
+            if (property === 'border') {
+                if (lum > 0.58 || token === 'dark:border-white') {
+                    changed = true;
+                    return `dark:border-[${darkTokens[roleForBorder]}]${opacity}`;
+                }
+                return token;
+            }
+            return token;
+        });
+
+        if (rewritten.join(' ') === classes.join(' ')) return full;
+        return `class=${quote}${rewritten.join(' ')}${quote}`;
+    });
+
+    return { html: nextHtml, changed };
+}
+
 function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
     const rr = r / 255;
     const gg = g / 255;
@@ -2033,6 +2130,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         let patchedScreenCount = 0;
         let patchedTypographyScreenCount = 0;
         let patchedRadiusScreenCount = 0;
+        let patchedThemeScreenCount = 0;
 
         if (currentSpec) {
             const patchedScreens = currentSpec.screens.map((screen) => {
@@ -2063,6 +2161,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                         patchedRadiusScreenCount += 1;
                         screenChanged = true;
                     }
+                }
+
+                const themeRepairResult = applyThemeVariantClassRepairsToHtml(nextHtml, normalizedDraft);
+                nextHtml = themeRepairResult.html;
+                if (themeRepairResult.changed) {
+                    patchedThemeScreenCount += 1;
+                    screenChanged = true;
                 }
 
                 if (!screenChanged) return screen;
@@ -2096,6 +2201,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             }
             if (radiusChanged) {
                 applied.push(`radius updates on ${patchedRadiusScreenCount} screen${patchedRadiusScreenCount === 1 ? '' : 's'}`);
+            }
+            if (patchedThemeScreenCount > 0) {
+                applied.push(`theme class repairs on ${patchedThemeScreenCount} screen${patchedThemeScreenCount === 1 ? '' : 's'}`);
             }
             notifySuccess(
                 'Design system updated',
