@@ -592,6 +592,32 @@ export function EditPanel() {
         const handler = (event: MessageEvent) => {
             if (!event.data || !event.data.type) return;
             if (!isEditMode) return;
+            if (event.data.type === 'editor/inline_text_preview') {
+                const incomingScreenId = event.data.screenId as string | undefined;
+                const uid = event.data.uid as string | undefined;
+                const text = String(event.data.text || '');
+                if (!incomingScreenId || incomingScreenId !== screenId || !uid) return;
+                if (selected?.uid === uid) {
+                    setSelected({ ...selected, textContent: text });
+                    setTextValue(text);
+                }
+                return;
+            }
+            if (event.data.type === 'editor/inline_text_commit') {
+                const incomingScreenId = event.data.screenId as string | undefined;
+                const uid = event.data.uid as string | undefined;
+                const text = String(event.data.text || '');
+                if (!incomingScreenId || incomingScreenId !== screenId || !uid) return;
+                applyPatch({ op: 'set_text', uid, text });
+                const payload = event.data.payload as any;
+                if (payload?.uid === uid) {
+                    setSelected(payload);
+                } else if (selected?.uid === uid) {
+                    setSelected({ ...selected, textContent: text });
+                }
+                setTextValue(text);
+                return;
+            }
             if (event.data.type === 'editor/request_delete') {
                 const incomingScreenId = event.data.screenId as string | undefined;
                 const uid = event.data.uid as string | undefined;
@@ -625,7 +651,7 @@ export function EditPanel() {
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec, selected?.uid]);
+    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec, selected]);
 
     useEffect(() => {
         if (!selected) return;

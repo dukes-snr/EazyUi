@@ -287,10 +287,13 @@ THEME AWARENESS (MANDATORY):
 
 const IMAGE_WHITELIST = `
 IMAGES (WEB URL POLICY):
-- For non-map visuals, use real internet image URLs (https URLs) that match the screen context.
+- For non-map visuals, use Unsplash image URLs only (https://images.unsplash.com/photo-...).
 - Do NOT use placeholder.net for non-map content.
-- Keep image choices consistent with app domain and tone.
-- Prefer stable direct image URLs over short-lived random endpoints.
+- Keep image choices tightly aligned to UI context (domain, component purpose, and nearby copy).
+- Prefer stable Unsplash photo URLs (not random endpoints) and include quality params like:
+  ?auto=format&fit=crop&w=1200&q=80
+- If an <img> has alt text, the selected image subject must closely match that alt text.
+- Avoid visually generic or mismatched photos (e.g., random office scenes in food/travel/fitness flows).
 - For maps/location visuals only, use placeholder map URLs from placehold.net:
   - https://placehold.net/map-400x400.png
   - https://placehold.net/map-600x600.png
@@ -557,7 +560,7 @@ RULES:
 2. Must include <!DOCTYPE html>, <html>, <head>, <body>, and closing tags.
 3. Preserve and continue the existing design direction and content as much as possible.
 4. Keep Tailwind CDN, Google Fonts, Material Symbols, and token contract in <head>.
-5. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
+5. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
 6. Respect runtime transparent status-bar overlay safe-area behavior:
    - no OS status bar row
    - no fake top strip background
@@ -572,7 +575,7 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
 4. Preserve data-uid and data-editable attributes on existing elements.
 5. You MAY restructure layout to achieve the instruction.
-6. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
+6. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
 7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
 8. Do NOT use markdown fences.
 9. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
@@ -640,7 +643,9 @@ Rules:
 
 const FAST_UNSPLASH_IMAGE_RULES = `
 Fast image policy:
-- Use real internet image URLs for non-map images.
+- Use Unsplash image URLs only for non-map images (https://images.unsplash.com/photo-...).
+- Ensure each chosen photo context matches the component purpose and alt text.
+- Prefer stable photo URLs with params like ?auto=format&fit=crop&w=1200&q=80.
 - Map placeholders:
   - https://placehold.net/map-400x400.png
   - https://placehold.net/map-600x600.png

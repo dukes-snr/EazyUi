@@ -169,6 +169,16 @@ function injectStatusBarOverlay(html: string, options: {
     box-sizing: border-box;
     background: transparent !important;
   }
+  #eazyui-safe-top-occluder {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--eazyui-safe-top);
+    pointer-events: none;
+    z-index: 2147482990;
+    background: var(--eazyui-safe-top-bg, transparent);
+  }
   #eazyui-statusbar-overlay > * {
     position: relative;
     z-index: 1;
@@ -334,6 +344,51 @@ function injectStatusBarOverlay(html: string, options: {
       }
     }
 
+    function hasVisibleColor(value) {
+      if (!value) return false;
+      var color = String(value).trim().toLowerCase();
+      if (!color || color === 'transparent') return false;
+      if (color === 'rgba(0, 0, 0, 0)' || color === 'rgba(0,0,0,0)') return false;
+      if (color === 'hsla(0, 0%, 0%, 0)' || color === 'hsla(0,0%,0%,0)') return false;
+      return true;
+    }
+
+    function getBestSafeTopBg() {
+      var selectors = [
+        '[data-eazyui-safe-top="force"]',
+        'header',
+        '[role="banner"]',
+        'nav'
+      ];
+      for (var i = 0; i < selectors.length; i += 1) {
+        var list = Array.from(document.querySelectorAll(selectors[i]));
+        for (var j = 0; j < list.length; j += 1) {
+          var el = list[j];
+          if (!(el instanceof HTMLElement)) continue;
+          if (el.id === 'eazyui-statusbar-overlay' || el.id === 'eazyui-safe-top-occluder') continue;
+          var rect = el.getBoundingClientRect();
+          if (rect.bottom < 0 || rect.top > SAFE_TOP + 24) continue;
+          var cs = window.getComputedStyle(el);
+          if (hasVisibleColor(cs.backgroundColor)) return cs.backgroundColor;
+        }
+      }
+
+      if (document.body) {
+        var bodyColor = window.getComputedStyle(document.body).backgroundColor;
+        if (hasVisibleColor(bodyColor)) return bodyColor;
+      }
+      if (document.documentElement) {
+        var htmlColor = window.getComputedStyle(document.documentElement).backgroundColor;
+        if (hasVisibleColor(htmlColor)) return htmlColor;
+      }
+      return '#000000';
+    }
+
+    function updateSafeTopOccluderBg() {
+      var bg = getBestSafeTopBg();
+      document.documentElement.style.setProperty('--eazyui-safe-top-bg', bg);
+    }
+
     function scheduleApply() {
       if (ticking) return;
       ticking = true;
@@ -341,11 +396,20 @@ function injectStatusBarOverlay(html: string, options: {
       rafId = requestAnimationFrame(function () {
         ticking = false;
         applySafeTop();
+        updateSafeTopOccluderBg();
       });
     }
 
     function installOverlay() {
       if (!document.body) return;
+      if (!document.getElementById('eazyui-safe-top-occluder')) {
+        var occluder = document.createElement('div');
+        occluder.id = 'eazyui-safe-top-occluder';
+        occluder.setAttribute('data-editable', 'false');
+        occluder.setAttribute('data-eazyui-safe-top', 'off');
+        occluder.setAttribute('aria-hidden', 'true');
+        document.body.insertAdjacentElement('afterbegin', occluder);
+      }
       if (!document.getElementById('eazyui-statusbar-overlay')) {
         document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(statusMarkup)});
       }
@@ -422,7 +486,8 @@ function injectEditorScript(html: string, screenId: string) {
     '.__eazyui-selection-hud-tag { text-transform: lowercase; font-weight: 600; color: #f8fafc; border: 1px solid rgba(20,184,166,.45); border-radius: 6px; background: rgba(15,23,42,.96); padding: 4px 8px; }\\n' +
     '.__eazyui-selection-hud-btn { all: unset; cursor: pointer; color: #fecaca; font-size: 11px; font-weight: 600; line-height: 1; border: 1px solid rgba(248,113,113,.45); border-radius: 6px; background: rgba(127,29,29,.72); padding: 4px 8px; }\\n' +
     '.__eazyui-selection-hud-btn:hover { background: rgba(153,27,27,.85); color: #fee2e2; }\\n' +
-    '.__eazyui-hover-tag { position: absolute; display: none; transform: translateY(-100%); text-transform: lowercase; font-weight: 600; font-size: 11px; line-height: 1; color: #dbeafe; border: 1px solid rgba(59,130,246,.5); border-radius: 6px; background: rgba(30,58,138,.82); padding: 4px 8px; pointer-events: none; z-index: 1000000; }';
+    '.__eazyui-hover-tag { position: absolute; display: none; transform: translateY(-100%); text-transform: lowercase; font-weight: 600; font-size: 11px; line-height: 1; color: #dbeafe; border: 1px solid rgba(59,130,246,.5); border-radius: 6px; background: rgba(30,58,138,.82); padding: 4px 8px; pointer-events: none; z-index: 1000000; }\\n' +
+    '.__eazyui-inline-editing { cursor: text !important; outline: 2px solid rgba(16,185,129,.8); outline-offset: 2px; }';
   document.head.appendChild(style);
 
   const hoverBox = document.createElement('div');
@@ -452,7 +517,145 @@ function injectEditorScript(html: string, screenId: string) {
 
   let hoverEl = null;
   let selectedEl = null;
+  let inlineEditingEl = null;
+  let inlineEditingOriginalText = '';
   const ROOT_TAGS = new Set(['html', 'body']);
+  const INLINE_TEXT_TAGS = new Set(['p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'label', 'small', 'strong', 'em', 'b', 'i', 'a', 'button', 'li']);
+
+  function hasNestedInteractiveOrMedia(el) {
+    return !!el.querySelector('img,svg,iconify-icon,video,canvas,picture,input,textarea,select,button,a');
+  }
+
+  function isInlineTextEditable(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (!el.matches(EDIT_SELECTOR)) return false;
+    if (el.closest('#eazyui-statusbar-overlay')) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    if (ROOT_TAGS.has(tag)) return false;
+    if (el.classList.contains('material-symbols-rounded')) return false;
+    if (tag === 'input' || tag === 'textarea') return true;
+    if (!INLINE_TEXT_TAGS.has(tag)) return false;
+    if (hasNestedInteractiveOrMedia(el)) return false;
+    const text = (el.textContent || '').trim();
+    return text.length > 0;
+  }
+
+  function resolveInlineTextTarget(node) {
+    const base = node instanceof Element ? node : node && node.parentElement;
+    if (!base) return null;
+    const boundary = getEditable(base);
+    if (!boundary) return null;
+    let current = base;
+    while (current) {
+      if (isInlineTextEditable(current)) return current;
+      if (current === boundary) break;
+      current = current.parentElement;
+    }
+    return isInlineTextEditable(boundary) ? boundary : null;
+  }
+
+  function getNodeText(el) {
+    if (!el) return '';
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return String(el.value || '');
+    return String(el.textContent || '');
+  }
+
+  function setCaretToEnd(el) {
+    try {
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch {
+      // ignore selection errors
+    }
+  }
+
+  function previewInlineTextEdit() {
+    if (!inlineEditingEl) return;
+    const uid = ensureUid(inlineEditingEl);
+    if (!uid) return;
+    window.parent.postMessage({
+      type: 'editor/inline_text_preview',
+      screenId: SCREEN_ID,
+      uid,
+      text: getNodeText(inlineEditingEl)
+    }, '*');
+  }
+
+  function finishInlineTextEdit(commit) {
+    if (!inlineEditingEl) return;
+    const el = inlineEditingEl;
+    const tag = (el.tagName || '').toLowerCase();
+    const uid = ensureUid(el);
+    const nextText = getNodeText(el);
+    const finalText = commit ? nextText : inlineEditingOriginalText;
+
+    if (tag === 'input' || tag === 'textarea') {
+      el.value = finalText;
+      el.blur();
+    } else {
+      el.contentEditable = 'false';
+      el.removeAttribute('spellcheck');
+      el.textContent = finalText;
+    }
+    el.classList.remove('__eazyui-inline-editing');
+
+    inlineEditingEl = null;
+    inlineEditingOriginalText = '';
+
+    if (uid) {
+      if (commit) {
+        window.parent.postMessage({
+          type: 'editor/inline_text_commit',
+          screenId: SCREEN_ID,
+          uid,
+          text: finalText,
+          payload: buildInfo(el)
+        }, '*');
+      } else {
+        window.parent.postMessage({
+          type: 'editor/inline_text_preview',
+          screenId: SCREEN_ID,
+          uid,
+          text: finalText
+        }, '*');
+      }
+    }
+    if (selectedEl && selectedEl === el) {
+      setBox(selectBox, selectedEl);
+    }
+  }
+
+  function startInlineTextEdit(el) {
+    if (!isInlineTextEditable(el)) return false;
+    if (inlineEditingEl && inlineEditingEl !== el) {
+      finishInlineTextEdit(true);
+    }
+    inlineEditingEl = el;
+    inlineEditingOriginalText = getNodeText(el);
+    const tag = (el.tagName || '').toLowerCase();
+    el.classList.add('__eazyui-inline-editing');
+
+    if (tag === 'input' || tag === 'textarea') {
+      el.focus();
+      if (typeof el.setSelectionRange === 'function') {
+        const length = String(el.value || '').length;
+        el.setSelectionRange(length, length);
+      }
+    } else {
+      el.contentEditable = 'true';
+      el.setAttribute('spellcheck', 'false');
+      el.focus();
+      setCaretToEnd(el);
+    }
+    previewInlineTextEdit();
+    return true;
+  }
 
   function getDeviceFrameRadius() {
     try {
@@ -686,20 +889,73 @@ function injectEditorScript(html: string, screenId: string) {
     if (selectionHud.contains(event.target) || hoverTag.contains(event.target)) {
       return;
     }
+    if (inlineEditingEl && inlineEditingEl.contains && inlineEditingEl.contains(event.target)) {
+      return;
+    }
     const target = getEditable(event.target);
     if (!target) {
+      if (inlineEditingEl) finishInlineTextEdit(true);
       clearSelection();
       window.parent.postMessage({ type: 'editor/clear_selection', screenId: SCREEN_ID }, '*');
       return;
+    }
+    if (inlineEditingEl && inlineEditingEl !== target) {
+      finishInlineTextEdit(true);
     }
     event.preventDefault();
     event.stopPropagation();
     selectElement(target);
   }, true);
 
+  document.addEventListener('dblclick', (event) => {
+    if (selectionHud.contains(event.target) || hoverTag.contains(event.target)) return;
+    const target = resolveInlineTextTarget(event.target);
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectElement(target);
+    startInlineTextEdit(target);
+  }, true);
+
+  document.addEventListener('input', (event) => {
+    if (!inlineEditingEl) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target !== inlineEditingEl) return;
+    previewInlineTextEdit();
+  }, true);
+
+  document.addEventListener('focusout', (event) => {
+    if (!inlineEditingEl) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target !== inlineEditingEl) return;
+    window.setTimeout(() => {
+      if (!inlineEditingEl) return;
+      const active = document.activeElement;
+      if (active && inlineEditingEl.contains(active)) return;
+      finishInlineTextEdit(true);
+    }, 0);
+  }, true);
+
+  document.addEventListener('keydown', (event) => {
+    if (!inlineEditingEl) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      finishInlineTextEdit(false);
+      return;
+    }
+    const tag = (inlineEditingEl.tagName || '').toLowerCase();
+    if (event.key === 'Enter' && !event.shiftKey && tag !== 'textarea') {
+      event.preventDefault();
+      event.stopPropagation();
+      finishInlineTextEdit(true);
+    }
+  }, true);
+
   selectionHudDelete.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (inlineEditingEl) finishInlineTextEdit(true);
     requestDeleteSelection();
   });
 
@@ -776,9 +1032,11 @@ function injectEditorScript(html: string, screenId: string) {
       if (container) selectElement(container);
     }
     if (data.type === 'editor/clear_selection') {
+      if (inlineEditingEl) finishInlineTextEdit(true);
       clearSelection();
     }
     if (data.type === 'editor/delete_selected') {
+      if (inlineEditingEl) finishInlineTextEdit(true);
       requestDeleteSelection();
     }
   });
