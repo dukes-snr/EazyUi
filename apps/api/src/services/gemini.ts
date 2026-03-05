@@ -354,8 +354,18 @@ const DEVICE_CHROME_RULES = `
 DEVICE CHROME (MANDATORY):
 - Do NOT design or render a mobile OS status bar inside screen HTML.
 - Prohibited status-bar elements include: time text (e.g., 9:41), signal/wifi/battery icons, notch-only rows, or any top strip that mimics OS chrome.
-- The runtime device node renders status bar chrome globally. Your HTML must start with app content only.
-- If needed, add top spacing for app content using padding/margin, but never include OS status bar UI.
+- The runtime device node renders a transparent status bar overlay globally. Your HTML must start with app content only.
+- Do NOT add fake status-bar backgrounds or top strips.
+`;
+
+const SAFE_TOP_LAYOUT_RULES = `
+SAFE TOP LAYOUT (MANDATORY):
+- Assume a transparent status bar overlay sits on top of content.
+- Keep hero/image backgrounds full-bleed to the top edge when needed.
+- Put top controls (back/search/menu/header actions) inside a dedicated top controls container near the top.
+- Mark that container with: data-eazyui-safe-top="force"
+- If an element must never be shifted by runtime safe-top handling, mark it with: data-eazyui-safe-top="off"
+- Do NOT hardcode brittle fixed top offsets that fight runtime safe-area handling.
 `;
 
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
@@ -448,6 +458,7 @@ ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
 ${DEVICE_CHROME_RULES}
+${SAFE_TOP_LAYOUT_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 `;
@@ -526,6 +537,7 @@ ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
 ${ICON_POLICY_RULES}
 ${DEVICE_CHROME_RULES}
+${SAFE_TOP_LAYOUT_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
 
@@ -546,6 +558,10 @@ RULES:
 3. Preserve and continue the existing design direction and content as much as possible.
 4. Keep Tailwind CDN, Google Fonts, Material Symbols, and token contract in <head>.
 5. For map/location visuals, use placehold.net map URLs. For non-map visuals, internet image URLs are allowed.
+6. Respect runtime transparent status-bar overlay safe-area behavior:
+   - no OS status bar row
+   - no fake top strip background
+   - top controls container should use data-eazyui-safe-top="force" when present.
 `;
 
 const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
@@ -560,6 +576,7 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
 8. Do NOT use markdown fences.
 9. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
+10. Safe-top behavior: assume transparent status-bar overlay; keep hero/media full-bleed and mark top controls wrappers with data-eazyui-safe-top="force". Use data-eazyui-safe-top="off" only where shifting must be disabled.
 
 Current HTML:
 `;
@@ -586,6 +603,8 @@ Rules:
 - Avoid invented class names that are not valid Tailwind utilities.
 - Brand icons must use Iconify + Simple Icons (never placeholder text like LOGO_GOOGLE).
 - Do NOT include mobile OS status bar rows (time/signal/wifi/battery); runtime provides this chrome.
+- Assume transparent status-bar overlay; do not add fake top strip backgrounds.
+- Put top controls/header action wrappers in a container with data-eazyui-safe-top="force".
 - Do not include reasoning, analysis, notes, or planning text.
 - No markdown fences.
 `;
@@ -603,6 +622,7 @@ Rules:
 - Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
 - Keep markup concise and visually rich; avoid long repeated sections.
 - Do NOT include a mobile OS status bar row (time/signal/wifi/battery).
+- Assume transparent status-bar overlay; keep hero/media full-bleed and use data-eazyui-safe-top="force" for top controls container.
 - No reasoning or markdown.
 `;
 const FAST_EDIT_HTML_PROMPT = `Edit the HTML to match the user instruction.
@@ -614,6 +634,7 @@ Rules:
 - Keep existing data-uid and data-editable attributes where present.
 - Brand icons must use Iconify + Simple Icons (no placeholder text).
 - Do NOT include mobile OS status bar UI (time/signal/wifi/battery row).
+- Respect transparent status-bar overlay safe-top behavior; top controls wrappers should use data-eazyui-safe-top="force" when appropriate.
 - No markdown fences.
 `;
 
@@ -1341,6 +1362,12 @@ Theme-awareness rules (MANDATORY in generated HTML):
   - light mode on surface: ${lightOnSurface}
   - dark mode on surface: ${darkOnSurface}
 - Never produce unreadable pairs (e.g., white icon on white button, black icon on black background).
+
+Safe-top/status overlay behavior (MANDATORY in generated HTML):
+- Runtime injects a transparent status-bar overlay above content.
+- Never render OS status-bar rows or fake top strip backgrounds.
+- Put top controls wrappers near top in a container with data-eazyui-safe-top="force".
+- Use data-eazyui-safe-top="off" only for elements that must not be shifted.
 
 Typography:
 - display font: ${system.typography.displayFont}

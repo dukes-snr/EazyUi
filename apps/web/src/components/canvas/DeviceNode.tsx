@@ -2,7 +2,7 @@ import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
-import { BatteryFull, ImagePlus, Signal, Wifi } from 'lucide-react';
+import { ImagePlus } from 'lucide-react';
 import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
@@ -121,29 +121,271 @@ function injectScrollbarHide(html: string) {
     return `${warningFilterScript}\n${styleTag}\n${html}`;
 }
 
-function injectStatusBarContentInset(html: string, insetPx: number) {
-    const safeInset = Math.max(0, Math.round(insetPx || 0));
+function injectStatusBarOverlay(html: string, options: {
+    insetPx: number;
+    textColor: string;
+    paddingTop: number;
+    paddingBottom: number;
+    paddingX: number;
+    iconGap: number;
+    iconSize: number;
+    fontSize: number;
+    fontWeight: number;
+}) {
+    const safeInset = Math.max(0, Math.round(options.insetPx || 0));
     if (!safeInset) return html;
 
+    const statusTextColor = (options.textColor || '#111111').trim();
+
     const styleTag = `
-<style id="eazyui-statusbar-inset">
-  :root { --eazyui-statusbar-inset: ${safeInset}px; }
-  body {
-    padding-top: var(--eazyui-statusbar-inset) !important;
-    box-sizing: border-box;
+<style id="eazyui-statusbar-overlay-style">
+  :root {
+    --eazyui-safe-top: ${safeInset}px;
+    --eazyui-statusbar-color: ${statusTextColor};
+    --eazyui-statusbar-pt: ${Math.max(0, Math.round(options.paddingTop))}px;
+    --eazyui-statusbar-pb: ${Math.max(0, Math.round(options.paddingBottom))}px;
+    --eazyui-statusbar-px: ${Math.max(0, Math.round(options.paddingX))}px;
+    --eazyui-statusbar-icon-gap: ${Math.max(0, Math.round(options.iconGap))}px;
+    --eazyui-statusbar-icon-size: ${Math.max(8, Math.round(options.iconSize))}px;
+    --eazyui-statusbar-font-size: ${Math.max(10, Math.round(options.fontSize))}px;
+    --eazyui-statusbar-font-weight: ${Math.max(400, Math.round(options.fontWeight))};
   }
-  body > [class*="fixed"][class*="top-0"],
-  body > [class*="sticky"][class*="top-0"],
-  body > [style*="position: fixed"][style*="top: 0"],
-  body > [style*="position:sticky"][style*="top:0"] {
-    top: var(--eazyui-statusbar-inset) !important;
+  #eazyui-statusbar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    min-height: var(--eazyui-safe-top);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--eazyui-statusbar-pt) var(--eazyui-statusbar-px) var(--eazyui-statusbar-pb);
+    color: var(--eazyui-statusbar-color, #111111);
+    font-size: var(--eazyui-statusbar-font-size);
+    font-weight: var(--eazyui-statusbar-font-weight);
+    line-height: 1;
+    pointer-events: none;
+    z-index: 2147483000;
+    box-sizing: border-box;
+    background: transparent !important;
+  }
+  #eazyui-statusbar-overlay > * {
+    position: relative;
+    z-index: 1;
+  }
+  #eazyui-statusbar-overlay .__eazyui-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--eazyui-statusbar-icon-gap);
+  }
+  #eazyui-statusbar-overlay .__eazyui-icons svg {
+    width: var(--eazyui-statusbar-icon-size);
+    height: var(--eazyui-statusbar-icon-size);
+    stroke: currentColor;
+    fill: none;
   }
 </style>`;
 
-    if (html.includes('</head>')) {
-        return html.replace('</head>', `${styleTag}\n</head>`);
+    const statusMarkup = `
+<div id="eazyui-statusbar-overlay" data-editable="false" data-eazyui-safe-top="off" aria-hidden="true">
+  <span data-editable="false">9:41</span>
+  <span class="__eazyui-icons" data-editable="false">
+    <svg viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" data-editable="false">
+      <path d="M2 18h2" data-editable="false"></path>
+      <path d="M6 14h2" data-editable="false"></path>
+      <path d="M10 10h2" data-editable="false"></path>
+      <path d="M14 6h2" data-editable="false"></path>
+    </svg>
+    <svg viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" data-editable="false">
+      <path d="M2.5 9.5a14 14 0 0 1 19 0" data-editable="false"></path>
+      <path d="M6 13a9 9 0 0 1 12 0" data-editable="false"></path>
+      <path d="M9.5 16.5a4.5 4.5 0 0 1 5 0" data-editable="false"></path>
+      <path d="M12 20h.01" data-editable="false"></path>
+    </svg>
+    <svg viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" data-editable="false">
+      <rect x="2" y="7" width="18" height="10" rx="2" ry="2" data-editable="false"></rect>
+      <path d="M22 11v2" data-editable="false"></path>
+      <path d="M5 10h10" data-editable="false"></path>
+    </svg>
+  </span>
+</div>`;
+
+    const script = `
+<script>
+  (function () {
+    if (window.__eazyuiSafeTopInstalled) return;
+    window.__eazyuiSafeTopInstalled = true;
+
+    var SAFE_TOP = ${safeInset};
+    var SHIFT_ATTR = 'data-eazyui-safe-shifted';
+    var TOP_ATTR = 'data-eazyui-orig-top';
+    var MARGIN_ATTR = 'data-eazyui-orig-margin-top';
+    var PADDING_ATTR = 'data-eazyui-orig-padding-top';
+    var ticking = false;
+    var rafId = 0;
+    var timeoutId = 0;
+
+    function toPx(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+      return String(Math.round(value)) + 'px';
     }
-    return `${styleTag}\n${html}`;
+
+    function parsePx(value) {
+      if (!value || value === 'auto') return null;
+      var parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function markOriginal(el, attr, value) {
+      if (!el.hasAttribute(attr)) el.setAttribute(attr, value || '');
+    }
+
+    function restoreElement(el) {
+      var origTop = el.getAttribute(TOP_ATTR);
+      var origMargin = el.getAttribute(MARGIN_ATTR);
+      var origPadding = el.getAttribute(PADDING_ATTR);
+      if (origTop !== null) {
+        if (origTop) el.style.top = origTop;
+        else el.style.removeProperty('top');
+      }
+      if (origMargin !== null) {
+        if (origMargin) el.style.marginTop = origMargin;
+        else el.style.removeProperty('margin-top');
+      }
+      if (origPadding !== null) {
+        if (origPadding) el.style.paddingTop = origPadding;
+        else el.style.removeProperty('padding-top');
+      }
+      el.removeAttribute(SHIFT_ATTR);
+      el.removeAttribute(TOP_ATTR);
+      el.removeAttribute(MARGIN_ATTR);
+      el.removeAttribute(PADDING_ATTR);
+    }
+
+    function clearShifts() {
+      var shifted = document.querySelectorAll('[' + SHIFT_ATTR + ']');
+      shifted.forEach(function (el) {
+        restoreElement(el);
+      });
+    }
+
+    function isLikelyMediaContainer(el) {
+      var cs = window.getComputedStyle(el);
+      var hasBgImage = cs.backgroundImage && cs.backgroundImage !== 'none';
+      var hasMediaChild = !!el.querySelector('img,video,picture,canvas,svg');
+      var rect = el.getBoundingClientRect();
+      var isLarge = rect.height > Math.max(220, window.innerHeight * 0.38);
+      return isLarge && (hasBgImage || hasMediaChild);
+    }
+
+    function isInteractiveContainer(el) {
+      var idClass = ((el.id || '') + ' ' + (el.className || '')).toLowerCase();
+      if (/header|nav|topbar|toolbar|actions|controls|appbar/.test(idClass)) return true;
+      return !!el.querySelector('button,a,input,textarea,select,[role="button"],[aria-label],[data-action]');
+    }
+
+    function shiftElement(el) {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.id === 'eazyui-statusbar-overlay') return false;
+      if (el.closest('#eazyui-statusbar-overlay')) return false;
+      if (el.getAttribute('data-eazyui-safe-top') === 'off') return false;
+      if (el.closest('[data-eazyui-safe-top="off"]')) return false;
+      if (el.closest('[' + SHIFT_ATTR + ']')) return false;
+
+      var rect = el.getBoundingClientRect();
+      if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height)) return false;
+      if (rect.bottom <= 0) return false;
+      var nearTop = rect.top <= SAFE_TOP + 14;
+      if (!nearTop) return false;
+
+      var force = el.getAttribute('data-eazyui-safe-top') === 'force';
+      var pos = window.getComputedStyle(el).position;
+      var isPositioned = pos === 'fixed' || pos === 'sticky' || pos === 'absolute' || pos === 'relative';
+      if (!isPositioned && !force) return false;
+      if (isLikelyMediaContainer(el) && !force) return false;
+
+      var interactive = isInteractiveContainer(el);
+      if (!interactive && !force) return false;
+
+      if (pos === 'fixed' || pos === 'sticky' || pos === 'absolute') {
+        var topValue = window.getComputedStyle(el).top;
+        markOriginal(el, TOP_ATTR, topValue);
+        var topPx = parsePx(topValue);
+        el.style.top = toPx((topPx === null ? 0 : topPx) + SAFE_TOP) || '';
+      } else {
+        var marginTop = window.getComputedStyle(el).marginTop;
+        markOriginal(el, MARGIN_ATTR, marginTop);
+        var marginPx = parsePx(marginTop);
+        el.style.marginTop = toPx((marginPx === null ? 0 : marginPx) + SAFE_TOP) || '';
+      }
+      el.setAttribute(SHIFT_ATTR, '1');
+      return true;
+    }
+
+    function applySafeTop() {
+      if (!document.body) return;
+      clearShifts();
+
+      var all = Array.from(document.body.querySelectorAll('*'));
+      for (var i = 0; i < all.length; i += 1) {
+        var el = all[i];
+        if (!(el instanceof HTMLElement)) continue;
+        shiftElement(el);
+      }
+    }
+
+    function scheduleApply() {
+      if (ticking) return;
+      ticking = true;
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(function () {
+        ticking = false;
+        applySafeTop();
+      });
+    }
+
+    function installOverlay() {
+      if (!document.body) return;
+      if (!document.getElementById('eazyui-statusbar-overlay')) {
+        document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(statusMarkup)});
+      }
+      scheduleApply();
+    }
+
+    window.addEventListener('load', installOverlay, { once: true });
+    window.addEventListener('resize', scheduleApply);
+    window.addEventListener('orientationchange', scheduleApply);
+    document.addEventListener('DOMContentLoaded', installOverlay, { once: true });
+
+    var observer = new MutationObserver(function () {
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(scheduleApply, 30);
+    });
+
+    function observe() {
+      if (!document.body) {
+        window.setTimeout(observe, 30);
+        return;
+      }
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: false });
+      installOverlay();
+      window.setTimeout(scheduleApply, 60);
+      window.setTimeout(scheduleApply, 180);
+      window.setTimeout(scheduleApply, 520);
+    }
+
+    observe();
+  })();
+</script>`;
+
+    const withStyle = html.includes('</head>')
+        ? html.replace('</head>', `${styleTag}\n</head>`)
+        : `${styleTag}\n${html}`;
+
+    if (withStyle.includes('</body>')) {
+        return withStyle.replace('</body>', `${script}\n</body>`);
+    }
+    return `${withStyle}\n${script}`;
 }
 
 function extractTokenColor(html: string, tokenName: 'text' | 'bg'): string | null {
@@ -898,7 +1140,17 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const noScrollbarHtml = injectScrollbarHide(data.html as string);
     const baseHtml = isDesktop
         ? noScrollbarHtml
-        : injectStatusBarContentInset(noScrollbarHtml, statusBarInset);
+        : injectStatusBarOverlay(noScrollbarHtml, {
+            insetPx: statusBarInset,
+            textColor: statusBarColor,
+            paddingTop: statusBarStyle.paddingTop,
+            paddingBottom: statusBarStyle.paddingBottom,
+            paddingX: statusBarStyle.paddingX,
+            iconGap: statusBarStyle.iconGap,
+            iconSize: statusBarStyle.iconSize,
+            fontSize: statusBarStyle.fontSize,
+            fontWeight: statusBarStyle.fontWeight,
+        });
     const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
     const injectedHtml = isDesktop && data.screenId
         ? injectHeightScript(withEditor, data.screenId as string)
@@ -1071,33 +1323,6 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                         }}
                     >
-                        <div
-                            style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                minHeight: statusBarInset,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: `${statusBarStyle.paddingTop}px ${statusBarStyle.paddingX}px ${statusBarStyle.paddingBottom}px`,
-                                zIndex: 20,
-                                pointerEvents: 'none',
-                                background: 'transparent',
-                                color: statusBarColor,
-                                fontSize: statusBarStyle.fontSize,
-                                fontWeight: statusBarStyle.fontWeight,
-                                lineHeight: 1,
-                            }}
-                        >
-                            <span style={{ letterSpacing: 0.1 }}>9:41</span>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: statusBarStyle.iconGap }}>
-                                <Signal size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
-                                <Wifi size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
-                                <BatteryFull size={statusBarStyle.iconSize} strokeWidth={2.2} color={statusBarColor} />
-                            </span>
-                        </div>
                         <iframe
                             srcDoc={stableSrcDoc}
                             title="Preview"
