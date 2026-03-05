@@ -175,8 +175,10 @@
 
 .edit-ai-composer {
     pointer-events: auto;
-    /* backdrop-filter: blur(12px);
-    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32); */
+    border-radius: 18px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-1);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
     padding: 10px;
     display: flex;
     flex-direction: column;
@@ -189,7 +191,7 @@
     border-radius: 16px;
     display: flex;
     border: 1px solid var(--ui-border);
-    background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent);
+    background: var(--ui-surface-2);
     align-items: center;
 }
 
@@ -225,6 +227,24 @@
     grid-template-columns: 1fr 42px;
     gap: 8px;
     align-items: end;
+}
+
+.edit-ai-input-core {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.edit-ai-orb-wrap {
+    margin-top: 2px;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-3);
+    padding: 2px;
 }
 
 .edit-ai-textarea {

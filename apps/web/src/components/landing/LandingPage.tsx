@@ -5,7 +5,9 @@ import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
+import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
+import { Orb } from '../ui/Orb';
 import TextType from '../ui/TextType';
 
 type LandingPageProps = {
@@ -339,6 +341,10 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const showSendAction = hasPromptText;
     const actionIsStop = isRecording;
     const actionDisabled = isTranscribing && !isRecording;
+    const landingOrbActivity: OrbActivityState = (isRecording || isTranscribing || showSendAction) ? 'talking' : 'idle';
+    const { agentState: landingOrbState, colors: landingOrbColors } = useOrbVisuals(landingOrbActivity);
+    const landingOrbInput = isRecording ? 0.9 : isTranscribing ? 0.58 : showSendAction ? 0.45 : 0.2;
+    const landingOrbOutput = (showSendAction || isRecording || isTranscribing) ? 0.5 : 0.2;
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
         : stylePreset === 'vibrant'
@@ -479,7 +485,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     <div className="mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl p-3 md:p-4 text-left">
                         <div className="relative">
                             {!prompt.trim() && !isPromptFocused && (
-                                <div className="pointer-events-none absolute left-2 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
+                                <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
                                     <TextType
                                         text={TYPED_PLACEHOLDER_SUGGESTIONS}
                                         className="text-[16px] text-[var(--ui-text-subtle)] text-left"
@@ -493,21 +499,34 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     />
                                 </div>
                             )}
-                            <textarea
-                                value={prompt}
-                                onChange={(e) => setPrompt(e.target.value)}
-                                onFocus={() => setIsPromptFocused(true)}
-                                onBlur={() => setIsPromptFocused(false)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        submit();
-                                    }
-                                }}
-                                placeholder=""
-                                className="no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0"
-                                style={{ border: 'none', boxShadow: 'none' }}
-                            />
+                            <div className="flex items-start gap-2 px-1">
+                                <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                                    <Orb
+                                        className="h-full w-full"
+                                        colors={landingOrbColors}
+                                        seed={9101}
+                                        agentState={landingOrbState}
+                                        volumeMode="manual"
+                                        manualInput={landingOrbInput}
+                                        manualOutput={landingOrbOutput}
+                                    />
+                                </div>
+                                <textarea
+                                    value={prompt}
+                                    onChange={(e) => setPrompt(e.target.value)}
+                                    onFocus={() => setIsPromptFocused(true)}
+                                    onBlur={() => setIsPromptFocused(false)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            submit();
+                                        }
+                                    }}
+                                    placeholder=""
+                                    className="no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0"
+                                    style={{ border: 'none', boxShadow: 'none' }}
+                                />
+                            </div>
                         </div>
 
                         {images.length > 0 && (

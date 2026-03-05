@@ -10,6 +10,8 @@ import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loa
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
+import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
+import { Orb } from '../ui/Orb';
 import appLogo from '../../assets/Ui-logo.png';
 
 const FEEDBACK_BUCKETS = {
@@ -4528,6 +4530,14 @@ Return a polished, consistent screen without introducing a new navigation patter
     const showSendAction = hasPromptText;
     const actionIsStop = isGenerating || isRecording;
     const actionDisabled = !showSendAction && !isGenerating && isTranscribing;
+    const composerOrbActivity: OrbActivityState = isGenerating
+        ? 'thinking'
+        : (showSendAction || isRecording || isTranscribing)
+            ? 'talking'
+            : 'idle';
+    const { agentState: composerOrbState, colors: composerOrbColors } = useOrbVisuals(composerOrbActivity);
+    const composerOrbInput = isRecording ? 0.92 : isTranscribing ? 0.48 : 0.18;
+    const composerOrbOutput = isGenerating ? 0.88 : (showSendAction || isRecording || isTranscribing) ? 0.44 : 0.2;
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
         : stylePreset === 'vibrant'
@@ -4789,7 +4799,19 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="w-full max-w-[95%] space-y-2">
+                                    <div className="w-full max-w-[95%] flex items-start gap-2">
+                                        <div className="mt-1 h-8 w-8 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-0.5">
+                                            <Orb
+                                                className="h-full w-full"
+                                                colors={['#60A5FA', '#A78BFA']}
+                                                seed={message.id.length * 137}
+                                                agentState={(message.status === 'pending' || message.status === 'streaming') ? 'thinking' : 'talking'}
+                                                volumeMode="manual"
+                                                manualInput={(message.status === 'pending' || message.status === 'streaming') ? 0.64 : 0.22}
+                                                manualOutput={(message.status === 'pending' || message.status === 'streaming') ? 0.52 : 0.72}
+                                            />
+                                        </div>
+                                        <div className="flex-1 space-y-2">
                                         {(() => {
                                             const proposal = (message.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
                                             if (!proposal || message.status !== 'complete') return null;
@@ -5021,6 +5043,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     </div>
                                                 );
                                             })())}
+                                        </div>
                                         </div>
                                     </div>
                                 )}
@@ -5427,24 +5450,37 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     ))}
                                 </div>
                             )}
-                            <textarea
-                                name=""
-                                id=""
-                                ref={textareaRef}
-                                value={prompt}
-                                onChange={handlePromptChange}
-                                onClick={handlePromptCursorSync}
-                                onKeyUp={handlePromptCursorSync}
-                                onKeyDown={handleKeyDown}
-                                placeholder="Describe your UI you want to create... (type @ to reference screens)"
-                                disabled={isGenerating}
-                                className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] px-2 py-1 leading-relaxed"
-                                style={{ border: 'none', boxShadow: 'none' }}
-                            />
+                            <div className="flex items-start gap-2 px-1">
+                                <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                                    <Orb
+                                        className="h-full w-full"
+                                        colors={composerOrbColors}
+                                        seed={2401}
+                                        agentState={composerOrbState}
+                                        volumeMode="manual"
+                                        manualInput={composerOrbInput}
+                                        manualOutput={composerOrbOutput}
+                                    />
+                                </div>
+                                <textarea
+                                    name=""
+                                    id=""
+                                    ref={textareaRef}
+                                    value={prompt}
+                                    onChange={handlePromptChange}
+                                    onClick={handlePromptCursorSync}
+                                    onKeyUp={handlePromptCursorSync}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder="Describe your UI you want to create... (type @ to reference screens)"
+                                    disabled={isGenerating}
+                                    className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] pr-2 py-1 leading-relaxed"
+                                    style={{ border: 'none', boxShadow: 'none' }}
+                                />
+                            </div>
                             {isMentionOpen && filteredMentionScreens.length > 0 && (
                                 <div
                                     ref={mentionMenuRef}
-                                    className="absolute left-2 right-2 bottom-[2px] mb-14 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl max-h-56 overflow-y-auto z-50"
+                                    className="absolute left-12 right-2 bottom-[2px] mb-14 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl max-h-56 overflow-y-auto z-50"
                                 >
                                     {filteredMentionScreens.map((screen, index) => (
                                         <button

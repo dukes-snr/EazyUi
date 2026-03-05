@@ -40,6 +40,16 @@
   --ui-toast-guide-fill: #1f1638;
   --ui-toast-loading-fill: #141922;
 
+  /* Orb palette by activity state */
+  --ui-orb-idle-1: #5ab9de;
+  --ui-orb-idle-2: #3ae1e1;
+  --ui-orb-thinking-1: #6366F1;
+  --ui-orb-thinking-2: #22D3EE;
+  --ui-orb-talking-1: #22C55E;
+  --ui-orb-talking-2: #14B8A6;
+  --ui-orb-listening-1: #F59E0B;
+  --ui-orb-listening-2: #F97316;
+
   /* Backward-compatible aliases */
   --color-bg: var(--ui-bg);
   --color-surface: var(--ui-surface-1);
@@ -122,6 +132,16 @@
   --ui-toast-error-fill: #fff1f2;
   --ui-toast-guide-fill: #f5f3ff;
   --ui-toast-loading-fill: #f8fafc;
+
+  /* Orb palette by activity state */
+  --ui-orb-idle-1: #2de8c0;
+  --ui-orb-idle-2: #3f98e1;
+  --ui-orb-thinking-1: #4F46E5;
+  --ui-orb-thinking-2: #0284C7;
+  --ui-orb-talking-1: #16A34A;
+  --ui-orb-talking-2: #0F766E;
+  --ui-orb-listening-1: #D97706;
+  --ui-orb-listening-2: #EA580C;
 
   --color-bg: var(--ui-bg);
   --color-surface: var(--ui-surface-1);

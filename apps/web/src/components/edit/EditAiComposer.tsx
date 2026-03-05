@@ -6,6 +6,8 @@ import { useEditStore } from '../../stores/edit-store';
 import { dispatchSelectUid } from '../../utils/editMessaging';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
 import { getPreferredTextModel } from '../../constants/designModels';
+import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
+import { Orb } from '../ui/Orb';
 
 export function EditAiComposer() {
     const { spec, updateScreen } = useDesignStore();
@@ -34,6 +36,11 @@ export function EditAiComposer() {
         if (!selected) return null;
         return `${selected.tagName.toLowerCase()} · ${selected.elementType} · ${selected.uid}`;
     }, [selected]);
+
+    const editOrbActivity: OrbActivityState = busy ? 'thinking' : prompt.trim() ? 'talking' : 'idle';
+    const { agentState: editOrbState, colors: editOrbColors } = useOrbVisuals(editOrbActivity);
+    const editOrbInput = busy ? 0.6 : prompt.trim() ? 0.38 : 0.15;
+    const editOrbOutput = busy ? 0.8 : prompt.trim() ? 0.55 : 0.2;
 
     const applyAiEdit = async () => {
         if (!isEditMode || !screenId || !activeScreen || !selected) return;
@@ -143,21 +150,34 @@ RULES:
                 </div>
 
                 <div className="edit-ai-input-row">
-                    <textarea
-                        value={prompt}
-                        onChange={(event) => setPrompt(event.target.value)}
-                        onKeyDown={(event) => {
-                            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                                event.preventDefault();
-                                void applyAiEdit();
-                            }
-                        }}
-                        placeholder={selected
-                            ? 'Describe exactly what to change for the selected element...'
-                            : 'Select an element first...'}
-                        disabled={!selected || busy}
-                        className="edit-ai-textarea"
-                    />
+                    <div className="edit-ai-input-core">
+                        <div className="edit-ai-orb-wrap">
+                            <Orb
+                                className="h-full w-full"
+                                colors={editOrbColors}
+                                seed={5209}
+                                agentState={editOrbState}
+                                volumeMode="manual"
+                                manualInput={editOrbInput}
+                                manualOutput={editOrbOutput}
+                            />
+                        </div>
+                        <textarea
+                            value={prompt}
+                            onChange={(event) => setPrompt(event.target.value)}
+                            onKeyDown={(event) => {
+                                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                                    event.preventDefault();
+                                    void applyAiEdit();
+                                }
+                            }}
+                            placeholder={selected
+                                ? 'Describe exactly what to change for the selected element...'
+                                : 'Select an element first...'}
+                            disabled={!selected || busy}
+                            className="edit-ai-textarea"
+                        />
+                    </div>
                     {busy ? (
                         <button
                             type="button"

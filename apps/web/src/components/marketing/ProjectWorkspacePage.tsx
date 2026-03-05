@@ -6,7 +6,9 @@ import logo from '../../assets/Ui-logo.png';
 import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
 import { useUiStore } from '../../stores';
+import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
+import { Orb } from '../ui/Orb';
 
 type ProjectWorkspacePageProps = {
   authReady: boolean;
@@ -66,6 +68,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const selectedIdSet = new Set(selectedProjectIds);
   const hasSelectedProjects = selectedProjectIds.length > 0;
   const allSelected = projects.length > 0 && projects.every((project) => selectedIdSet.has(project.id));
+  const workspaceOrbActivity: OrbActivityState = creatingFromPrompt
+    ? 'thinking'
+    : starterPrompt.trim().length > 0
+      ? 'talking'
+      : 'idle';
+  const { agentState: workspaceOrbState, colors: workspaceOrbColors } = useOrbVisuals(workspaceOrbActivity);
+  const workspaceOrbInput = creatingFromPrompt ? 0.55 : 0.18;
+  const workspaceOrbOutput = creatingFromPrompt ? 0.88 : starterPrompt.trim().length > 0 ? 0.44 : 0.2;
 
   const loadProjects = async () => {
     if (!authReady || !isAuthenticated) return;
@@ -368,19 +378,32 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </div>
               )}
               <div className="flex items-end gap-2 rounded-2xl px-1">
-                <textarea
-                  value={starterPrompt}
-                  onChange={(event) => setStarterPrompt(event.target.value)}
-                  onKeyDown={(event) => {
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                      event.preventDefault();
-                      handleCreateFromPrompt();
-                    }
-                  }}
-                  placeholder="What do you want to create?"
-                  rows={3}
-                  className="min-h-[64px] max-h-[220px] flex-1 resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
-                />
+                <div className="flex min-w-0 flex-1 items-start gap-2">
+                  <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                    <Orb
+                      className="h-full w-full"
+                      colors={workspaceOrbColors}
+                      seed={7307}
+                      agentState={workspaceOrbState}
+                      volumeMode="manual"
+                      manualInput={workspaceOrbInput}
+                      manualOutput={workspaceOrbOutput}
+                    />
+                  </div>
+                  <textarea
+                    value={starterPrompt}
+                    onChange={(event) => setStarterPrompt(event.target.value)}
+                    onKeyDown={(event) => {
+                      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                        event.preventDefault();
+                        handleCreateFromPrompt();
+                      }
+                    }}
+                    placeholder="What do you want to create?"
+                    rows={3}
+                    className="min-h-[64px] max-h-[220px] w-full resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
+                  />
+                </div>
                 <button
                   type="submit"
                   disabled={!starterPrompt.trim() || creatingFromPrompt}

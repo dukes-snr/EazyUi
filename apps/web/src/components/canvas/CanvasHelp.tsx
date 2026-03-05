@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { BookOpen, Bot, ChevronRight, CircleHelp, Heart, Search, Sparkles, X, CircleQuestionMark } from 'lucide-react';
+import { BookOpen, Bot, ChevronRight, CircleHelp, Heart, Search, Sparkles, X } from 'lucide-react';
 import { useUiStore } from '../../stores';
 
 type HelpTab = 'get-started' | 'ask' | 'docs' | 'guides';
