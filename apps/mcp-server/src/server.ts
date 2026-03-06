@@ -59,6 +59,7 @@ const app = Fastify({ logger: false });
 const apiClient = new EazyUiApiClient({
   baseUrl: config.apiBaseUrl,
   timeoutMs: config.fetchTimeoutMs,
+  heavyTimeoutMs: config.fetchHeavyTimeoutMs,
   retries: config.fetchRetries,
   internalApiKey: config.internalApiKey,
 });
@@ -73,6 +74,7 @@ app.get('/health', async () => {
     requireAuth: config.requireAuth,
     devUid: config.devUid || null,
     fetchTimeoutMs: config.fetchTimeoutMs,
+    fetchHeavyTimeoutMs: config.fetchHeavyTimeoutMs,
     fetchRetries: config.fetchRetries,
     internalApiKeyConfigured: Boolean(config.internalApiKey),
     envPath: envPath || 'default',

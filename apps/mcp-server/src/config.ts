@@ -7,6 +7,7 @@ export interface McpServerConfig {
   requireAuth: boolean;
   devUid?: string;
   fetchTimeoutMs: number;
+  fetchHeavyTimeoutMs: number;
   fetchRetries: number;
 }
 
@@ -27,7 +28,11 @@ export function loadConfig(): McpServerConfig {
     enableMutatingTools: toBooleanFlag(process.env.MCP_ENABLE_MUTATIONS, true),
     requireAuth: toBooleanFlag(process.env.MCP_REQUIRE_AUTH, true),
     devUid: (process.env.MCP_DEV_UID || '').trim() || undefined,
-    fetchTimeoutMs: Math.max(2_000, Math.min(120_000, Number(process.env.MCP_FETCH_TIMEOUT_MS || 90_000))),
+    fetchTimeoutMs: Math.max(2_000, Math.min(300_000, Number(process.env.MCP_FETCH_TIMEOUT_MS || 90_000))),
+    fetchHeavyTimeoutMs: Math.max(
+      120_000,
+      Math.min(900_000, Number(process.env.MCP_FETCH_HEAVY_TIMEOUT_MS || 420_000)),
+    ),
     fetchRetries: Math.max(0, Math.min(3, Number(process.env.MCP_FETCH_RETRIES || 1))),
   };
 }

@@ -600,8 +600,12 @@ class ApiClient {
         requireAuth = true
     ): Promise<T> {
         const headers = new Headers(options.headers || {});
-        if (!headers.has('Content-Type')) {
+        const hasBody = options.body !== undefined && options.body !== null;
+        if (hasBody && !headers.has('Content-Type')) {
             headers.set('Content-Type', 'application/json');
+        }
+        if (!hasBody && headers.has('Content-Type')) {
+            headers.delete('Content-Type');
         }
         if (requireAuth) {
             headers.set('Authorization', await this.getAuthHeaderValue());

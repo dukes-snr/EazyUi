@@ -23,6 +23,7 @@ Default config:
 - `MCP_REQUIRE_AUTH=true`
 - `MCP_DEV_UID=` (used only when `MCP_REQUIRE_AUTH=false`)
 - `MCP_FETCH_TIMEOUT_MS=90000`
+- `MCP_FETCH_HEAVY_TIMEOUT_MS=420000` (used for long AI routes: generate/edit/design-system)
 - `MCP_FETCH_RETRIES=1`
 
 ## Endpoints

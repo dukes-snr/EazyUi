@@ -4,6 +4,7 @@ import type { EazyUiProjectPayload, RequestContext } from './types.js';
 interface ApiClientOptions {
   baseUrl: string;
   timeoutMs: number;
+  heavyTimeoutMs: number;
   retries: number;
   internalApiKey?: string;
 }
@@ -11,12 +12,14 @@ interface ApiClientOptions {
 export class EazyUiApiClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly heavyTimeoutMs: number;
   private readonly retries: number;
   private readonly internalApiKey?: string;
 
   constructor(options: ApiClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.timeoutMs = options.timeoutMs;
+    this.heavyTimeoutMs = options.heavyTimeoutMs;
     this.retries = options.retries;
     this.internalApiKey = options.internalApiKey?.trim() || undefined;
   }
@@ -115,10 +118,11 @@ export class EazyUiApiClient {
     }
     const attempts = this.retries + 1;
     let lastError: Error | null = null;
+    const timeoutMs = isHeavyRoute(path) ? this.heavyTimeoutMs : this.timeoutMs;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch(url, {
           method,
@@ -160,8 +164,13 @@ export class EazyUiApiClient {
 
         return parsed;
       } catch (error) {
-        lastError = error as Error;
-        const isAbort = lastError.name === 'AbortError';
+        const captured = error as Error;
+        const isAbort = captured.name === 'AbortError';
+        if (isAbort) {
+          lastError = new Error(`Upstream ${method} ${path} timed out after ${timeoutMs}ms`);
+        } else {
+          lastError = captured;
+        }
         const canRetry = attempt < attempts;
         if (!canRetry) break;
         log('warn', 'upstream_api_retry_error', {
@@ -180,6 +189,12 @@ export class EazyUiApiClient {
 
     throw lastError || new Error(`API ${method} ${path} failed`);
   }
+}
+
+function isHeavyRoute(path: string): boolean {
+  return path === '/api/generate'
+    || path === '/api/edit'
+    || path === '/api/design-system';
 }
 
 function safeParseJson(value: string): unknown | null {
