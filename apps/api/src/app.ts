@@ -90,6 +90,16 @@ function resolveHeaderString(headers: Record<string, unknown>, key: string): str
     return undefined;
 }
 
+function resolveInternalApiUser(headers: Record<string, unknown>): AuthUserContext | null {
+    const expectedKey = String(process.env.INTERNAL_API_KEY || '').trim();
+    if (!expectedKey) return null;
+    const providedKey = resolveHeaderString(headers, 'x-internal-api-key');
+    if (!providedKey || providedKey !== expectedKey) return null;
+    const uid = resolveHeaderString(headers, 'x-eazyui-uid');
+    if (!uid) return null;
+    return { uid };
+}
+
 function resolveBillingRequestId(request: { id: string; headers: Record<string, unknown> }): string {
     const idempotencyKey = resolveHeaderString(request.headers, 'x-idempotency-key')
         || resolveHeaderString(request.headers, 'idempotency-key')
@@ -103,6 +113,10 @@ async function requireAuthenticatedUser(
     reply: { status: (code: number) => { send: (body: unknown) => unknown } },
     route: string
 ): Promise<AuthUserContext | null> {
+    const internalUser = resolveInternalApiUser(request.headers);
+    if (internalUser) {
+        return internalUser;
+    }
     try {
         const header = resolveAuthHeader(request);
         const user = await verifyAuthHeader(header);
@@ -379,6 +393,7 @@ fastify.get('/api/health', async (request, reply) => {
     const payload = {
         status: 'ok',
         timestamp: new Date().toISOString(),
+        internalAuthConfigured: Boolean(String(process.env.INTERNAL_API_KEY || '').trim()),
         gemini: {
             model,
             apiKeyPresent: Boolean(apiKey),
