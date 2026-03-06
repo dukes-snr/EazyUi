@@ -1,5 +1,6 @@
 import { getApps, initializeApp, applicationDefault, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 
 export type AuthUserContext = {
@@ -71,4 +72,9 @@ export async function verifyAuthHeader(headerValue: string | undefined): Promise
         uid: decoded.uid,
         email: typeof decoded.email === 'string' ? decoded.email : undefined,
     };
+}
+
+export function getFirebaseDb() {
+    ensureFirebaseAdmin();
+    return getFirestore();
 }

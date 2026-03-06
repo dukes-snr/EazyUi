@@ -18,6 +18,26 @@ import type { RequestContext } from './types.js';
 const MCP_SUPPORTED_PROTOCOLS = ['2024-11-05', '2024-10-07'] as const;
 const MCP_DEFAULT_PROTOCOL = MCP_SUPPORTED_PROTOCOLS[0];
 
+function resolveHeaderString(headers: Record<string, unknown>, key: string): string | undefined {
+  const value = headers[key];
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) return value[0].trim();
+  return undefined;
+}
+
+function resolveMcpApiKeyFromHeaders(headers: Record<string, unknown>): string | undefined {
+  const direct = resolveHeaderString(headers, 'x-eazyui-api-key')
+    || resolveHeaderString(headers, 'x-api-key');
+  if (direct && direct.startsWith('eazy_mcp_')) return direct;
+
+  const auth = resolveHeaderString(headers, 'authorization');
+  if (!auth) return undefined;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1]?.trim() || '';
+  if (token.startsWith('eazy_mcp_')) return token;
+  return undefined;
+}
+
 function loadEnv() {
   const candidates = [
     path.resolve(process.cwd(), '.env'),
@@ -25,11 +45,11 @@ function loadEnv() {
   ];
   for (const filePath of candidates) {
     if (fs.existsSync(filePath)) {
-      dotenv.config({ path: filePath });
+      dotenv.config({ path: filePath, override: true });
       return filePath;
     }
   }
-  dotenv.config();
+  dotenv.config({ override: true });
   return null;
 }
 
@@ -62,6 +82,7 @@ app.get('/health', async () => {
 app.post('/mcp', async (request, reply) => {
   const traceId = String(request.headers['x-trace-id'] || `mcp-${randomUUID()}`);
   const authorization = typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined;
+  const mcpApiKey = resolveMcpApiKeyFromHeaders(request.headers as Record<string, unknown>);
   const context: RequestContext = {
     traceId,
     authorization,
@@ -114,8 +135,13 @@ app.post('/mcp', async (request, reply) => {
     }
 
     if (config.requireAuth && rpc.method !== 'tools/list' && rpc.method !== 'resources/list') {
-      const identity = await verifyAuthorizationHeader(authorization);
-      context.uid = identity.uid;
+      if (mcpApiKey) {
+        const resolved = await apiClient.resolveMcpApiKey(context, mcpApiKey);
+        context.uid = resolved.uid;
+      } else {
+        const identity = await verifyAuthorizationHeader(authorization);
+        context.uid = identity.uid;
+      }
     } else if (!config.requireAuth) {
       const headerUid = typeof request.headers['x-eazyui-uid'] === 'string'
         ? request.headers['x-eazyui-uid'].trim()

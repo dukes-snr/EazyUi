@@ -83,6 +83,18 @@ Authorization: Bearer <firebase_id_token>
 
 The MCP server will only read/write under that authenticated user's `users/{uid}` namespace.
 
+MCP also supports API keys created from the web settings page:
+
+```http
+Authorization: Bearer eazy_mcp_<keyId>_<secret>
+```
+
+or:
+
+```http
+x-api-key: eazy_mcp_<keyId>_<secret>
+```
+
 ### Server-to-server API auth bridge
 
 If your MCP client cannot send user Firebase tokens to the API routes, configure:

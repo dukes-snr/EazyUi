@@ -360,6 +360,24 @@ export interface BillingSummaryResponse {
     };
 }
 
+export interface McpApiKeyItem {
+    keyId: string;
+    label: string;
+    keyPrefix: string;
+    status: 'active' | 'revoked';
+    createdAt: string;
+    updatedAt: string;
+    lastUsedAt?: string;
+    revokedAt?: string;
+}
+
+export interface McpApiKeyCreateResponse {
+    key: McpApiKeyItem & {
+        apiKey: string;
+    };
+    warning?: string;
+}
+
 export interface BillingEstimateRequest {
     operation: 'design_system' | 'generate' | 'generate_stream' | 'edit' | 'complete_screen' | 'generate_image' | 'synthesize_screen_images' | 'transcribe_audio' | 'plan_route' | 'plan_assist';
     preferredModel?: string;
@@ -797,6 +815,28 @@ class ApiClient {
         return this.request<{ url: string }>('/billing/portal-session', {
             method: 'POST',
             body: JSON.stringify({ returnUrl }),
+            signal,
+        });
+    }
+
+    async getMcpApiKeys(signal?: AbortSignal): Promise<{ keys: McpApiKeyItem[] }> {
+        return this.request<{ keys: McpApiKeyItem[] }>('/mcp/api-keys', {
+            method: 'GET',
+            signal,
+        });
+    }
+
+    async createMcpApiKey(label?: string, signal?: AbortSignal): Promise<McpApiKeyCreateResponse> {
+        return this.request<McpApiKeyCreateResponse>('/mcp/api-keys', {
+            method: 'POST',
+            body: JSON.stringify({ label }),
+            signal,
+        });
+    }
+
+    async revokeMcpApiKey(keyId: string, signal?: AbortSignal): Promise<{ success: boolean }> {
+        return this.request<{ success: boolean }>(`/mcp/api-keys/${encodeURIComponent(keyId)}`, {
+            method: 'DELETE',
             signal,
         });
     }

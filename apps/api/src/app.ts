@@ -2,7 +2,9 @@
 // API Server - Fastify entry point
 // ============================================================================
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import fs from 'node:fs';
+import path from 'node:path';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyRawBody from 'fastify-raw-body';
@@ -48,6 +50,29 @@ import {
     isStripeConfigured,
     retrieveCheckoutSessionWithLineItems,
 } from './services/stripeBilling.js';
+import {
+    createMcpApiKey,
+    listMcpApiKeys,
+    resolveMcpApiKey,
+    revokeMcpApiKey,
+} from './services/mcpApiKeys.js';
+
+function loadEnv() {
+    const candidates = [
+        path.resolve(process.cwd(), '.env'),
+        path.resolve(process.cwd(), '../../.env'),
+    ];
+    for (const filePath of candidates) {
+        if (fs.existsSync(filePath)) {
+            dotenv.config({ path: filePath, override: true });
+            return filePath;
+        }
+    }
+    dotenv.config({ override: true });
+    return null;
+}
+
+loadEnv();
 
 const fastify = Fastify({
     logger: true,
@@ -83,6 +108,19 @@ function resolveAuthHeader(request: { headers: Record<string, unknown> }): strin
     return undefined;
 }
 
+function resolveMcpApiKeyFromHeaders(headers: Record<string, unknown>): string | null {
+    const direct = resolveHeaderString(headers, 'x-eazyui-api-key')
+        || resolveHeaderString(headers, 'x-api-key');
+    if (direct && direct.startsWith('eazy_mcp_')) return direct;
+
+    const auth = resolveHeaderString(headers, 'authorization');
+    if (!auth) return null;
+    const match = auth.match(/^Bearer\s+(.+)$/i);
+    const token = match?.[1]?.trim() || '';
+    if (token.startsWith('eazy_mcp_')) return token;
+    return null;
+}
+
 function resolveHeaderString(headers: Record<string, unknown>, key: string): string | undefined {
     const value = headers[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
@@ -91,13 +129,37 @@ function resolveHeaderString(headers: Record<string, unknown>, key: string): str
 }
 
 function resolveInternalApiUser(headers: Record<string, unknown>): AuthUserContext | null {
-    const expectedKey = String(process.env.INTERNAL_API_KEY || '').trim();
-    if (!expectedKey) return null;
-    const providedKey = resolveHeaderString(headers, 'x-internal-api-key');
-    if (!providedKey || providedKey !== expectedKey) return null;
+    if (!hasValidInternalApiKey(headers)) return null;
     const uid = resolveHeaderString(headers, 'x-eazyui-uid');
     if (!uid) return null;
     return { uid };
+}
+
+function hasValidInternalApiKey(headers: Record<string, unknown>): boolean {
+    const expectedKey = String(process.env.INTERNAL_API_KEY || '').trim();
+    if (!expectedKey) return false;
+    const providedKey = resolveHeaderString(headers, 'x-internal-api-key');
+    if (!providedKey || providedKey !== expectedKey) return false;
+    return true;
+}
+
+function requireInternalApiKey(
+    request: { headers: Record<string, unknown>; id: string },
+    reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+    route: string
+): boolean {
+    if (hasValidInternalApiKey(request.headers)) return true;
+    fastify.log.warn({
+        traceId: request.id,
+        route,
+        stage: 'internal_auth',
+    }, 'internal auth: failed');
+    reply.status(401).send({
+        error: 'Unauthorized',
+        message: 'Invalid internal API key.',
+        code: 'INTERNAL_AUTH_REQUIRED',
+    });
+    return false;
 }
 
 function resolveBillingRequestId(request: { id: string; headers: Record<string, unknown> }): string {
@@ -113,6 +175,26 @@ async function requireAuthenticatedUser(
     reply: { status: (code: number) => { send: (body: unknown) => unknown } },
     route: string
 ): Promise<AuthUserContext | null> {
+    const mcpApiKey = resolveMcpApiKeyFromHeaders(request.headers);
+    if (mcpApiKey) {
+        try {
+            const resolved = await resolveMcpApiKey(mcpApiKey, {
+                ip: String((request as unknown as { ip?: string }).ip || '').slice(0, 80),
+                userAgent: resolveHeaderString(request.headers, 'user-agent'),
+            });
+            if (resolved) {
+                return { uid: resolved.uid };
+            }
+        } catch (error) {
+            fastify.log.warn({
+                traceId: request.id,
+                route,
+                stage: 'mcp_api_key_auth',
+                err: error,
+            }, 'mcp api key auth: failed');
+        }
+    }
+
     const internalUser = resolveInternalApiUser(request.headers);
     if (internalUser) {
         return internalUser;
@@ -394,6 +476,7 @@ fastify.get('/api/health', async (request, reply) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         internalAuthConfigured: Boolean(String(process.env.INTERNAL_API_KEY || '').trim()),
+        mcpApiKeyPepperConfigured: Boolean(String(process.env.MCP_API_KEY_PEPPER || '').trim() || String(process.env.INTERNAL_API_KEY || '').trim()),
         gemini: {
             model,
             apiKeyPresent: Boolean(apiKey),
@@ -776,6 +859,104 @@ fastify.post<{
         fastify.log.error({ traceId: request.id, route: '/api/billing/portal-session', err: error }, 'billing portal failed');
         return reply.status(500).send({
             error: 'Failed to create billing portal session',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get('/api/mcp/api-keys', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/mcp/api-keys');
+    if (!user) return;
+    try {
+        const keys = await listMcpApiKeys(user.uid);
+        return { keys };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/mcp/api-keys', err: error }, 'mcp api keys list failed');
+        return reply.status(500).send({
+            error: 'Failed to list MCP API keys',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        label?: string;
+    };
+}>('/api/mcp/api-keys', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/mcp/api-keys');
+    if (!user) return;
+    try {
+        const created = await createMcpApiKey(user.uid, request.body?.label);
+        return {
+            key: created,
+            warning: 'This API key is only shown once. Copy it now.',
+        };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/mcp/api-keys', err: error }, 'mcp api key create failed');
+        return reply.status(500).send({
+            error: 'Failed to create MCP API key',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.delete<{
+    Params: {
+        keyId: string;
+    };
+}>('/api/mcp/api-keys/:keyId', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/mcp/api-keys/:keyId');
+    if (!user) return;
+    try {
+        const ok = await revokeMcpApiKey(user.uid, request.params.keyId);
+        if (!ok) {
+            return reply.status(404).send({
+                error: 'API key not found',
+                message: 'No matching MCP API key for this account.',
+            });
+        }
+        return { success: true };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/mcp/api-keys/:keyId', err: error }, 'mcp api key revoke failed');
+        return reply.status(500).send({
+            error: 'Failed to revoke MCP API key',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        apiKey?: string;
+    };
+}>('/api/mcp/resolve-key', async (request, reply) => {
+    if (!requireInternalApiKey(request, reply, '/api/mcp/resolve-key')) return;
+    const rawApiKey = String(request.body?.apiKey || '').trim();
+    if (!rawApiKey) {
+        return reply.status(400).send({
+            error: 'apiKey is required',
+            message: 'Provide an MCP API key to resolve.',
+            code: 'MCP_API_KEY_REQUIRED',
+        });
+    }
+    try {
+        const resolved = await resolveMcpApiKey(rawApiKey, {
+            ip: String(request.ip || '').slice(0, 80),
+            userAgent: resolveHeaderString(request.headers, 'user-agent'),
+        });
+        if (!resolved) {
+            return reply.status(401).send({
+                error: 'Unauthorized',
+                message: 'Invalid or revoked MCP API key.',
+                code: 'MCP_API_KEY_INVALID',
+            });
+        }
+        return resolved;
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/mcp/resolve-key', err: error }, 'mcp api key resolve failed');
+        return reply.status(500).send({
+            error: 'Failed to resolve MCP API key',
             message: (error as Error).message,
         });
     }

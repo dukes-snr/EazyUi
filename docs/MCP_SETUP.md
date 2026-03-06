@@ -13,6 +13,7 @@ FIREBASE_SERVICE_ACCOUNT_JSON={...}
 PORT=3001
 HOST=localhost
 INTERNAL_API_KEY=<same-random-secret-used-by-MCP>
+MCP_API_KEY_PEPPER=<long-random-pepper-for-hashing-issued-mcp-keys>
 
 # MCP
 MCP_SERVER_PORT=3010
@@ -62,6 +63,12 @@ Headers:
 - `Content-Type: application/json`
 - `Authorization: Bearer <firebase-id-token>` (required unless auth is disabled)
 
+You can also authenticate MCP with an API key created from Settings:
+
+- `Authorization: Bearer eazy_mcp_<keyId>_<secret>`
+or
+- `x-api-key: eazy_mcp_<keyId>_<secret>`
+
 Body template:
 
 ```json
@@ -92,6 +99,20 @@ Body template:
 - `design_system.update`
 - `project.save`
 - `project.export` (`html`, `png`, `zip`)
+
+## 4.2) Create MCP API key from web app
+
+1. Open `Settings` -> `MCP API Keys`.
+2. Create a key and copy it immediately (full value is shown once).
+3. Configure your AI IDE MCP client with:
+
+```json
+{
+  "headers": {
+    "Authorization": "Bearer <your_mcp_api_key>"
+  }
+}
+```
 
 ### Optional model profile
 

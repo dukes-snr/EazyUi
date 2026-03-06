@@ -76,6 +76,18 @@ export class EazyUiApiClient {
     );
   }
 
+  async resolveMcpApiKey(
+    context: RequestContext,
+    apiKey: string,
+  ): Promise<{ uid: string; keyId: string; label?: string }> {
+    return this.request<{ uid: string; keyId: string; label?: string }>(
+      context,
+      'POST',
+      '/api/mcp/resolve-key',
+      { apiKey },
+    );
+  }
+
   private async request<T>(
     context: RequestContext,
     method: 'GET' | 'POST',

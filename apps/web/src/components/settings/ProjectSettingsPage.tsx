@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, CreditCard, Download, FolderOpen, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary } from '../../api/client';
+import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { extractLedgerRequestPreview } from '../../utils/billingUsage';
@@ -60,6 +60,12 @@ export function ProjectSettingsPage({
     const [billingBlockingMessage, setBillingBlockingMessage] = useState<string | null>(null);
     const [billingModal, setBillingModal] = useState<null | 'upgrade' | 'purchase'>(null);
     const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
+    const [mcpApiKeys, setMcpApiKeys] = useState<McpApiKeyItem[]>([]);
+    const [mcpKeysLoading, setMcpKeysLoading] = useState(false);
+    const [mcpCreating, setMcpCreating] = useState(false);
+    const [mcpRevokingId, setMcpRevokingId] = useState<string | null>(null);
+    const [mcpKeyLabel, setMcpKeyLabel] = useState('AI IDE');
+    const [latestMcpApiKey, setLatestMcpApiKey] = useState<string>('');
     const [usageDaysFilter, setUsageDaysFilter] = useState<1 | 7 | 30 | 90>(7);
     const [hoveredActivity, setHoveredActivity] = useState<{ key: string; count: number } | null>(null);
     const [activityTooltip, setActivityTooltip] = useState<{ label: string; left: number; top: number } | null>(null);
@@ -100,9 +106,67 @@ export function ProjectSettingsPage({
         }
     };
 
+    const refreshMcpApiKeys = async () => {
+        try {
+            setMcpKeysLoading(true);
+            const response = await apiClient.getMcpApiKeys();
+            setMcpApiKeys(response.keys || []);
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'MCP keys unavailable', message: (error as Error).message || 'Unable to load MCP API keys.' });
+        } finally {
+            setMcpKeysLoading(false);
+        }
+    };
+
     useEffect(() => {
         void refreshBillingData();
+        void refreshMcpApiKeys();
     }, []);
+
+    const copyText = async (value: string, successTitle = 'Copied') => {
+        try {
+            await navigator.clipboard.writeText(value);
+            pushToast({ kind: 'success', title: successTitle, message: 'Saved to clipboard.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Copy failed', message: (error as Error).message || 'Could not copy to clipboard.' });
+        }
+    };
+
+    const handleCreateMcpApiKey = async () => {
+        try {
+            setMcpCreating(true);
+            const created = await apiClient.createMcpApiKey(mcpKeyLabel);
+            setLatestMcpApiKey(created.key.apiKey);
+            setMcpKeyLabel('AI IDE');
+            await refreshMcpApiKeys();
+            pushToast({ kind: 'success', title: 'MCP key created', message: 'Copy the key now. You can only see full value once.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Create key failed', message: (error as Error).message || 'Unable to create MCP API key.' });
+        } finally {
+            setMcpCreating(false);
+        }
+    };
+
+    const handleRevokeMcpApiKey = async (keyId: string) => {
+        const confirmed = await requestConfirmation({
+            title: 'Revoke this API key?',
+            message: 'Agents using this key will lose MCP access immediately.',
+            confirmLabel: 'Revoke key',
+            cancelLabel: 'Cancel',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
+        try {
+            setMcpRevokingId(keyId);
+            await apiClient.revokeMcpApiKey(keyId);
+            await refreshMcpApiKeys();
+            pushToast({ kind: 'info', title: 'Key revoked', message: 'The MCP API key has been disabled.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Revoke failed', message: (error as Error).message || 'Unable to revoke key.' });
+        } finally {
+            setMcpRevokingId(null);
+        }
+    };
 
     const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
         let redirecting = false;
@@ -542,7 +606,210 @@ export function ProjectSettingsPage({
                             </div>
                         )}
 
-                        {settingsTab === 'settings' && <div className="space-y-5"><SectionCard title="User Info"><Row label="Name" value={authDisplayName} /><Row label="Email" value={authUser?.email || 'No email'} /><Row label="Theme" value={<div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]"><button type="button" onClick={() => setTheme('light')} className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${theme === 'light' ? 'bg-[var(--ui-surface-3)]' : ''}`}><Sun size={12} />Light</button><button type="button" onClick={() => setTheme('dark')} className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${theme === 'dark' ? 'bg-[var(--ui-surface-3)]' : ''}`}><Moon size={12} />Dark</button></div>} /></SectionCard><SectionCard title="Integrations"><Row label="Vercel" value={<button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]"><Link2 size={12} />Connect</button>} /><Row label="Supabase" value={<button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]"><Link2 size={12} />Connect</button>} /></SectionCard><SectionCard title="Account"><Row label="Verify email" value={<button type="button" onClick={() => void handleSendVerification()} disabled={verificationBusy} className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)] disabled:opacity-60"><Mail size={12} />{verificationBusy ? 'Sending...' : 'Send'}</button>} /><Row label="Start new project" value={<button type="button" onClick={() => void handleNewProject()} className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 text-xs text-rose-300 hover:bg-rose-500/20"><AlertTriangle size={12} />New Project</button>} /></SectionCard></div>}
+                        {settingsTab === 'settings' && (
+                            <div className="space-y-5">
+                                <SectionCard title="User Info">
+                                    <Row label="Name" value={authDisplayName} />
+                                    <Row label="Email" value={authUser?.email || 'No email'} />
+                                    <Row
+                                        label="Theme"
+                                        value={(
+                                            <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setTheme('light')}
+                                                    className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${theme === 'light' ? 'bg-[var(--ui-surface-3)]' : ''}`}
+                                                >
+                                                    <Sun size={12} />
+                                                    Light
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setTheme('dark')}
+                                                    className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${theme === 'dark' ? 'bg-[var(--ui-surface-3)]' : ''}`}
+                                                >
+                                                    <Moon size={12} />
+                                                    Dark
+                                                </button>
+                                            </div>
+                                        )}
+                                    />
+                                </SectionCard>
+
+                                <SectionCard title="MCP API Keys">
+                                    <p className="mb-3 text-sm text-[var(--ui-text-subtle)]">
+                                        Create API keys for AI IDE MCP access. Keep keys secret. Revoking a key cuts access immediately.
+                                    </p>
+
+                                    <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3 mb-3">
+                                        <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">Key label</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            <input
+                                                value={mcpKeyLabel}
+                                                onChange={(event) => setMcpKeyLabel(event.target.value)}
+                                                placeholder="AI IDE"
+                                                maxLength={80}
+                                                className="h-9 min-w-[220px] flex-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm outline-none focus:border-emerald-400/60"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleCreateMcpApiKey()}
+                                                disabled={mcpCreating}
+                                                className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-black hover:bg-emerald-400 disabled:opacity-60"
+                                            >
+                                                {mcpCreating ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                                                {mcpCreating ? 'Creating...' : 'Create key'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {latestMcpApiKey && (
+                                        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-emerald-300">Copy now - shown once</p>
+                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                <input
+                                                    value={latestMcpApiKey}
+                                                    readOnly
+                                                    className="h-9 min-w-[220px] flex-1 rounded-md border border-emerald-500/30 bg-black/30 px-3 text-xs text-emerald-100"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void copyText(latestMcpApiKey, 'MCP key copied')}
+                                                    className="inline-flex h-9 items-center gap-2 rounded-md border border-emerald-400/50 px-3 text-sm text-emerald-200 hover:bg-emerald-500/15"
+                                                >
+                                                    <Copy size={14} />
+                                                    Copy
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="overflow-x-auto rounded-lg border border-[var(--ui-border)] mb-3">
+                                        <table className="min-w-full text-left text-sm">
+                                            <thead>
+                                                <tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Label</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Prefix</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Status</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Last used</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {mcpKeysLoading ? (
+                                                    <tr>
+                                                        <td colSpan={5} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                            <span className="inline-flex items-center gap-2">
+                                                                <Loader2 size={14} className="animate-spin" />
+                                                                Loading keys...
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ) : mcpApiKeys.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={5} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                            No MCP API keys yet.
+                                                        </td>
+                                                    </tr>
+                                                ) : mcpApiKeys.map((key) => (
+                                                    <tr key={key.keyId}>
+                                                        <td className="border-b border-[var(--ui-border)] px-3 py-2">
+                                                            <div className="font-medium text-[var(--ui-text)]">{key.label}</div>
+                                                            <div className="text-xs text-[var(--ui-text-subtle)]">{new Date(key.createdAt).toLocaleString()}</div>
+                                                        </td>
+                                                        <td className="border-b border-[var(--ui-border)] px-3 py-2 font-mono text-xs text-[var(--ui-text-subtle)]">{key.keyPrefix}...</td>
+                                                        <td className="border-b border-[var(--ui-border)] px-3 py-2">
+                                                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${key.status === 'active' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>
+                                                                {key.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                            {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : 'Never'}
+                                                        </td>
+                                                        <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void handleRevokeMcpApiKey(key.keyId)}
+                                                                disabled={key.status !== 'active' || mcpRevokingId !== null}
+                                                                className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-500/35 px-2.5 text-xs text-rose-300 hover:bg-rose-500/15 disabled:opacity-50"
+                                                            >
+                                                                {mcpRevokingId === key.keyId ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                                                Revoke
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                        <p className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">AI IDE config</p>
+                                        <pre className="mt-2 overflow-x-auto rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 text-xs text-[var(--ui-text-subtle)]">{`{
+  "mcpServers": {
+    "eazyui": {
+      "url": "http://localhost:3010/mcp",
+      "headers": {
+        "Authorization": "Bearer <your_mcp_api_key>"
+      }
+    }
+  }
+}`}</pre>
+                                    </div>
+                                </SectionCard>
+
+                                <SectionCard title="Integrations">
+                                    <Row
+                                        label="Vercel"
+                                        value={(
+                                            <button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]">
+                                                <Link2 size={12} />
+                                                Connect
+                                            </button>
+                                        )}
+                                    />
+                                    <Row
+                                        label="Supabase"
+                                        value={(
+                                            <button type="button" className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)]">
+                                                <Link2 size={12} />
+                                                Connect
+                                            </button>
+                                        )}
+                                    />
+                                </SectionCard>
+
+                                <SectionCard title="Account">
+                                    <Row
+                                        label="Verify email"
+                                        value={(
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleSendVerification()}
+                                                disabled={verificationBusy}
+                                                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] px-3 text-xs hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                            >
+                                                <Mail size={12} />
+                                                {verificationBusy ? 'Sending...' : 'Send'}
+                                            </button>
+                                        )}
+                                    />
+                                    <Row
+                                        label="Start new project"
+                                        value={(
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleNewProject()}
+                                                className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 text-xs text-rose-300 hover:bg-rose-500/20"
+                                            >
+                                                <AlertTriangle size={12} />
+                                                New Project
+                                            </button>
+                                        )}
+                                    />
+                                </SectionCard>
+                            </div>
+                        )}
 
                         {settingsTab === 'billing' && (
                             <div className="space-y-5">
