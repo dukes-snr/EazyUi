@@ -1,6 +1,7 @@
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import fs from 'node:fs';
 
 function parseServiceAccountFromEnv(): Record<string, unknown> | null {
@@ -36,13 +37,39 @@ function parseServiceAccountFromEnv(): Record<string, unknown> | null {
   return null;
 }
 
+function resolveStorageBucket(serviceAccount: Record<string, unknown> | null): string | undefined {
+  const explicit = (process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim();
+  if (explicit) return explicit;
+
+  const serviceAccountProjectId = typeof serviceAccount?.project_id === 'string'
+    ? serviceAccount.project_id.trim()
+    : '';
+  if (serviceAccountProjectId) {
+    return `${serviceAccountProjectId}.appspot.com`;
+  }
+
+  const envProjectId = (process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || '').trim();
+  if (envProjectId) {
+    return `${envProjectId}.appspot.com`;
+  }
+
+  return undefined;
+}
+
 function ensureFirebaseAdmin() {
   if (getApps().length > 0) return getApps()[0];
   const serviceAccount = parseServiceAccountFromEnv();
+  const storageBucket = resolveStorageBucket(serviceAccount);
   if (serviceAccount) {
-    return initializeApp({ credential: cert(serviceAccount as any) });
+    return initializeApp({
+      credential: cert(serviceAccount as any),
+      storageBucket,
+    });
   }
-  return initializeApp({ credential: applicationDefault() });
+  return initializeApp({
+    credential: applicationDefault(),
+    storageBucket,
+  });
 }
 
 export function getFirebaseAuth() {
@@ -53,4 +80,9 @@ export function getFirebaseAuth() {
 export function getFirebaseDb() {
   ensureFirebaseAdmin();
   return getFirestore();
+}
+
+export function getFirebaseStorage() {
+  ensureFirebaseAdmin();
+  return getStorage();
 }

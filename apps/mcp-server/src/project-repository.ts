@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { getFirebaseDb } from './firebase-admin.js';
+import { getFirebaseDb, getFirebaseStorage } from './firebase-admin.js';
 import type { EazyUiHtmlScreen, EazyUiProjectPayload } from './types.js';
 
 type SaveProjectInput = {
@@ -50,6 +50,27 @@ function sanitizeMessageId(value: unknown): string {
   const raw = typeof value === 'string' ? value.trim() : '';
   if (!raw) return randomUUID();
   return raw.replace(/[^\w.-]/g, '_').slice(0, 128) || randomUUID();
+}
+
+function toJsonSafe(value: unknown): unknown {
+  const normalized = value === undefined ? null : value;
+  try {
+    return JSON.parse(JSON.stringify(normalized));
+  } catch {
+    return null;
+  }
+}
+
+function buildWorkspaceSnapshot(input: {
+  designSpec: Record<string, unknown>;
+  canvasDoc?: unknown;
+  chatState?: unknown;
+}): Record<string, unknown> {
+  return {
+    designSpec: toJsonSafe(input.designSpec),
+    canvasDoc: toJsonSafe(input.canvasDoc ?? null),
+    chatState: toJsonSafe(input.chatState ?? null),
+  };
 }
 
 function ensureScreensFromSpec(designSpec: Record<string, unknown>): EazyUiHtmlScreen[] {
@@ -115,6 +136,7 @@ function extractProjectDocMeta(data: Record<string, unknown>, projectId: string)
 
 export class ProjectRepository {
   private readonly db = getFirebaseDb();
+  private readonly storage = getFirebaseStorage();
 
   async getProject(uid: string, projectId: string): Promise<EazyUiProjectPayload> {
     const projectRef = this.db.doc(`users/${uid}/projects/${projectId}`);
@@ -210,7 +232,7 @@ export class ProjectRepository {
     };
   }
 
-  async saveProject(input: SaveProjectInput): Promise<{ projectId: string; savedAt: string; updatedAt: string }> {
+  async saveProject(input: SaveProjectInput): Promise<{ projectId: string; savedAt: string; updatedAt: string; snapshotPath?: string | null; snapshotWritten?: boolean }> {
     const { uid, projectId, expectedUpdatedAt, idempotencyKey } = input;
     const id = projectId || randomUUID();
     const normalizedKey = idempotencyKey?.trim().replace(/[^\w.-]/g, '_').slice(0, 180);
@@ -221,7 +243,10 @@ export class ProjectRepository {
         const data = opSnap.data() as Record<string, unknown>;
         const savedAt = typeof data.savedAt === 'string' ? data.savedAt : nowIso();
         const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : savedAt;
-        return { projectId: id, savedAt, updatedAt };
+        const projectSnap = await this.db.doc(`users/${uid}/projects/${id}`).get();
+        const projectData = projectSnap.exists ? (projectSnap.data() as Record<string, unknown>) : null;
+        const persistedSnapshotPath = typeof projectData?.snapshotPath === 'string' ? projectData.snapshotPath : null;
+        return { projectId: id, savedAt, updatedAt, snapshotPath: persistedSnapshotPath, snapshotWritten: false };
       }
     }
 
@@ -240,8 +265,17 @@ export class ProjectRepository {
     const createdAt = existingData ? normalizeIso(existingData.createdAt, now) : now;
     const name = typeof designSpec.name === 'string' ? designSpec.name : (typeof existingData?.name === 'string' ? existingData.name : 'Untitled project');
     const description = typeof designSpec.description === 'string' ? designSpec.description : '';
+    const snapshotPath = await this.persistSnapshot({
+      uid,
+      projectId: id,
+      snapshot: buildWorkspaceSnapshot({
+        designSpec,
+        canvasDoc: input.canvasDoc ?? null,
+        chatState: input.chatState ?? null,
+      }),
+    });
 
-    await projectRef.set({
+    const projectPatch: Record<string, unknown> = {
       id,
       ownerId: uid,
       name,
@@ -261,7 +295,11 @@ export class ProjectRepository {
       },
       createdAt,
       updatedAt: now,
-    }, { merge: true });
+    };
+    if (snapshotPath) {
+      projectPatch.snapshotPath = snapshotPath;
+    }
+    await projectRef.set(projectPatch, { merge: true });
 
     const existingScreensSnap = await this.db.collection(`users/${uid}/projects/${id}/screens`).get();
     const nextIds = new Set(screens.map((screen) => screen.screenId));
@@ -339,7 +377,32 @@ export class ProjectRepository {
       projectId: id,
       savedAt: now,
       updatedAt: now,
+      snapshotPath: snapshotPath || (typeof existingData?.snapshotPath === 'string' ? existingData.snapshotPath : null),
+      snapshotWritten: Boolean(snapshotPath),
     };
+  }
+
+  private async persistSnapshot(input: {
+    uid: string;
+    projectId: string;
+    snapshot: Record<string, unknown>;
+  }): Promise<string | null> {
+    const snapshotPath = 'snapshots/latest.json';
+    const fullPath = `users/${input.uid}/projects/${input.projectId}/${snapshotPath}`;
+    try {
+      const bucket = this.storage.bucket();
+      const file = bucket.file(fullPath);
+      await file.save(JSON.stringify(input.snapshot), {
+        contentType: 'application/json; charset=utf-8',
+        resumable: false,
+        metadata: {
+          cacheControl: 'no-cache',
+        },
+      });
+      return snapshotPath;
+    } catch {
+      return null;
+    }
   }
 
   async listProjects(uid: string): Promise<Array<{ id: string; name: string; updatedAt: string }>> {

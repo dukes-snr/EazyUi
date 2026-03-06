@@ -518,7 +518,8 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       ? (generated.designSpec as Record<string, unknown>)
       : {};
     const newScreens = ensureScreensFromUnknown(generatedSpec.screens);
-    const mergedScreens = mergeScreens(project.designSpec.screens, newScreens);
+    const mergeResult = mergeScreens(project.designSpec.screens, newScreens);
+    const mergedScreens = mergeResult.screens;
     const acceptedAt = new Date().toISOString();
 
     const saved = await projectRepo.saveProject({
@@ -542,16 +543,18 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       canvasDoc: project.canvasDoc,
       chatState: appendAssistantMessage(
         project.chatState,
-        `Initial design system accepted. Generated ${newScreens.length} screen(s).`,
+        `Initial design system accepted. Added ${mergeResult.addedCount} screen(s).${mergeResult.skippedCount > 0 ? ` Skipped ${mergeResult.skippedCount} duplicates.` : ''}`,
         { source: 'mcp', tool: name },
       ),
     });
 
     return finalize(base, startedAt, {
-      operationSummary: `Accepted initial design system and generated ${newScreens.length} screen(s)`,
+      operationSummary: `Accepted initial design system and added ${mergeResult.addedCount} screen(s)`,
       projectId: input.projectId,
       accepted: true,
       generatedScreenCount: newScreens.length,
+      addedScreenCount: mergeResult.addedCount,
+      skippedDuplicateCount: mergeResult.skippedCount,
       screenCount: mergedScreens.length,
       screens: mergedScreens.map((screen) => ({ screenId: screen.screenId, name: screen.name })),
       savedAt: saved.savedAt,
@@ -654,9 +657,12 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
         immediate: true,
       });
     }
-    const enhancedPrompt = input.targetScreenNames?.length
-      ? `${input.prompt}\n\nGenerate these screens now: ${input.targetScreenNames.join(', ')}.`
+    let enhancedPrompt = input.targetScreenNames?.length
+      ? `${input.prompt}\n\nGenerate these screens now (exactly): ${input.targetScreenNames.join(', ')}.`
       : input.prompt;
+    if (project?.designSpec.designSystem && typeof project.designSpec.designSystem === 'object') {
+      enhancedPrompt = `${enhancedPrompt}\n\n${buildDesignSystemLockInstruction(project.designSpec.designSystem as Record<string, unknown>)}`;
+    }
 
     const generated = await apiClient.generate(context, {
       prompt: enhancedPrompt,
@@ -664,6 +670,8 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       stylePreset: normalizedStylePreset,
       projectId: input.projectId,
       preferredModel,
+      projectDesignSystem: project?.designSpec.designSystem,
+      bundleIncludesDesignSystem: false,
       temperature: input.temperature,
       idempotencyKey: input.idempotencyKey,
     });
@@ -680,17 +688,24 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     const generatedSpec = (generated.designSpec && typeof generated.designSpec === 'object')
       ? (generated.designSpec as Record<string, unknown>)
       : {};
-    const newScreens = ensureScreensFromUnknown(generatedSpec.screens);
-    const mergedScreens = mergeScreens(project.designSpec.screens, newScreens);
+    let newScreens = ensureScreensFromUnknown(generatedSpec.screens);
+    if (input.targetScreenNames?.length) {
+      const targetCanon = new Set(input.targetScreenNames.map((value) => canonicalizeScreenName(value)));
+      const filtered = newScreens.filter((screen) => targetCanon.has(canonicalizeScreenName(screen.name)));
+      if (filtered.length > 0) {
+        newScreens = filtered;
+      }
+    }
+    const mergeResult = mergeScreens(project.designSpec.screens, newScreens);
+    const mergedScreens = mergeResult.screens;
     const nextDesignSpec = {
       ...project.designSpec,
       screens: mergedScreens,
       description: typeof generatedSpec.description === 'string'
         ? generatedSpec.description
         : project.designSpec.description,
-      designSystem: (generatedSpec.designSystem && typeof generatedSpec.designSystem === 'object')
-        ? generatedSpec.designSystem
-        : project.designSpec.designSystem,
+      // Keep project design system locked after acceptance; do not drift from generation output.
+      designSystem: project.designSpec.designSystem,
       updatedAt: new Date().toISOString(),
     };
 
@@ -703,15 +718,17 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       canvasDoc: project.canvasDoc,
       chatState: appendAssistantMessage(
         project.chatState,
-        `Generated ${newScreens.length} screen(s): ${newScreens.map((screen) => screen.name).join(', ')}.`,
+        `Generated ${newScreens.length} candidate screen(s); added ${mergeResult.addedCount}.${mergeResult.skippedCount > 0 ? ` Skipped ${mergeResult.skippedCount} duplicates.` : ''} ${mergeResult.addedNames.length > 0 ? `Added: ${mergeResult.addedNames.join(', ')}.` : ''}`,
         { source: 'mcp', tool: name },
       ),
     });
 
     return finalize(base, startedAt, {
-      operationSummary: `Generated ${newScreens.length} screen(s) and saved project`,
+      operationSummary: `Generated ${newScreens.length} candidate screen(s); added ${mergeResult.addedCount}`,
       projectId: input.projectId,
       generatedScreenCount: newScreens.length,
+      addedScreenCount: mergeResult.addedCount,
+      skippedDuplicateCount: mergeResult.skippedCount,
       savedAt: saved.savedAt,
       updatedAt: saved.updatedAt,
       screens: mergedScreens.map((screen) => ({
@@ -747,7 +764,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       temperature: input.temperature,
       idempotencyKey: input.idempotencyKey,
     });
-    const editedHtml = typeof editResult.html === 'string' ? editResult.html : screen.html;
+    const editedHtml = typeof editResult.html === 'string' ? sanitizeGeneratedHtml(editResult.html) : screen.html;
     const nextScreens = project.designSpec.screens.map((item) => (
       item.screenId === input.screenId
         ? { ...item, html: editedHtml, status: 'complete' as const }
@@ -821,7 +838,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
           temperature: input.temperature,
           idempotencyKey: input.idempotencyKey,
         });
-        const editedHtml = typeof editResult.html === 'string' ? editResult.html : screen.html;
+        const editedHtml = typeof editResult.html === 'string' ? sanitizeGeneratedHtml(editResult.html) : screen.html;
         const targetIndex = updatedScreens.findIndex((item) => item.screenId === screen.screenId);
         if (targetIndex >= 0) {
           updatedScreens[targetIndex] = {
@@ -947,7 +964,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
             temperature: input.temperature,
             idempotencyKey: input.idempotencyKey,
           });
-          const editedHtml = typeof editResult.html === 'string' ? editResult.html : screen.html;
+          const editedHtml = typeof editResult.html === 'string' ? sanitizeGeneratedHtml(editResult.html) : screen.html;
           nextScreens = nextScreens.map((item) => (
             item.screenId === screen.screenId ? { ...item, html: editedHtml } : item
           ));
@@ -1017,6 +1034,8 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       operationSummary: `Saved project ${input.projectId}`,
       projectId: input.projectId,
       reason: input.reason || null,
+      snapshotPath: saved.snapshotPath || null,
+      snapshotUpdated: saved.snapshotWritten === true,
       savedAt: saved.savedAt,
       updatedAt: saved.updatedAt,
     });
@@ -1030,8 +1049,8 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       : project.designSpec.screens;
 
     if (input.format === 'html') {
-      const files = selectedScreens.map((screen) => ({
-        path: `${toSafeFileName(screen.name || screen.screenId)}.html`,
+      const files = buildExportFileEntries(selectedScreens, 'html').map(({ screen, path }) => ({
+        path,
         screenId: screen.screenId,
         screenName: screen.name,
         content: screen.html,
@@ -1046,6 +1065,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
 
     if (input.format === 'png') {
       const images: Array<Record<string, unknown>> = [];
+      const pathByScreenId = new Map(buildExportFileEntries(selectedScreens, 'png').map((entry) => [entry.screen.screenId, entry.path]));
       for (const screen of selectedScreens) {
         const rendered = await apiClient.renderScreenImage(context, {
           html: screen.html,
@@ -1056,7 +1076,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
         images.push({
           screenId: screen.screenId,
           screenName: screen.name,
-          path: `${toSafeFileName(screen.name || screen.screenId)}.png`,
+          path: pathByScreenId.get(screen.screenId) || `${toSafeFileName(screen.name || screen.screenId)}.png`,
           width: rendered.width,
           height: rendered.height,
           dataUrl: `data:image/png;base64,${rendered.pngBase64}`,
@@ -1071,8 +1091,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     }
 
     const zipInput: Record<string, Uint8Array> = {};
-    for (const screen of selectedScreens) {
-      const fileName = `${toSafeFileName(screen.name || screen.screenId)}.html`;
+    for (const { screen, path: fileName } of buildExportFileEntries(selectedScreens, 'html')) {
       zipInput[fileName] = strToU8(screen.html || '');
     }
     zipInput['manifest.json'] = strToU8(
@@ -1196,14 +1215,17 @@ function ensureScreensFromUnknown(value: unknown): EazyUiHtmlScreen[] {
   if (!Array.isArray(value)) return [];
   return value.map((raw, index) => {
     const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const normalizedName = normalizeScreenDisplayName(
+      typeof source.name === 'string' && source.name.trim()
+        ? source.name.trim()
+        : `Generated Screen ${index + 1}`,
+    );
     return {
       screenId: typeof source.screenId === 'string' && source.screenId.trim()
         ? source.screenId.trim()
         : randomUUID(),
-      name: typeof source.name === 'string' && source.name.trim()
-        ? source.name.trim()
-        : `Generated Screen ${index + 1}`,
-      html: typeof source.html === 'string' ? source.html : '',
+      name: normalizedName,
+      html: typeof source.html === 'string' ? sanitizeGeneratedHtml(source.html) : '',
       width: Number.isFinite(Number(source.width)) ? Number(source.width) : 402,
       height: Number.isFinite(Number(source.height)) ? Number(source.height) : 874,
       status: source.status === 'streaming' ? 'streaming' : 'complete',
@@ -1211,18 +1233,45 @@ function ensureScreensFromUnknown(value: unknown): EazyUiHtmlScreen[] {
   });
 }
 
-function mergeScreens(existing: EazyUiHtmlScreen[], incoming: EazyUiHtmlScreen[]): EazyUiHtmlScreen[] {
+function mergeScreens(existing: EazyUiHtmlScreen[], incoming: EazyUiHtmlScreen[]): {
+  screens: EazyUiHtmlScreen[];
+  addedCount: number;
+  skippedCount: number;
+  addedNames: string[];
+  skippedNames: string[];
+} {
   const existingById = new Map(existing.map((screen) => [screen.screenId, screen]));
+  const existingByCanonicalName = new Set(existing.map((screen) => canonicalizeScreenName(screen.name)));
   const merged = [...existing];
+  const addedNames: string[] = [];
+  const skippedNames: string[] = [];
+
   for (const screen of incoming) {
-    if (existingById.has(screen.screenId)) {
-      const newId = `${screen.screenId}-${randomUUID().slice(0, 8)}`;
-      merged.push({ ...screen, screenId: newId });
+    const canonicalName = canonicalizeScreenName(screen.name);
+    if (existingByCanonicalName.has(canonicalName)) {
+      skippedNames.push(screen.name);
       continue;
     }
-    merged.push(screen);
+    if (existingById.has(screen.screenId)) {
+      const newId = `${screen.screenId}-${randomUUID().slice(0, 8)}`.slice(0, 80);
+      const nextScreen = { ...screen, screenId: newId, name: normalizeScreenDisplayName(screen.name) };
+      merged.push(nextScreen);
+      existingByCanonicalName.add(canonicalizeScreenName(nextScreen.name));
+      addedNames.push(nextScreen.name);
+      continue;
+    }
+    const nextScreen = { ...screen, name: normalizeScreenDisplayName(screen.name) };
+    merged.push(nextScreen);
+    existingByCanonicalName.add(canonicalizeScreenName(nextScreen.name));
+    addedNames.push(nextScreen.name);
   }
-  return merged;
+  return {
+    screens: merged,
+    addedCount: addedNames.length,
+    skippedCount: skippedNames.length,
+    addedNames,
+    skippedNames,
+  };
 }
 
 function appendChatMessage(
@@ -1289,6 +1338,85 @@ function buildAuxIdempotencyKey(base: string | undefined, suffix: string): strin
 function toSafeFileName(value: string): string {
   const base = value.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
   return base || 'screen';
+}
+
+function buildExportFileEntries(
+  screens: EazyUiHtmlScreen[],
+  extension: 'html' | 'png',
+): Array<{ screen: EazyUiHtmlScreen; path: string }> {
+  const used = new Map<string, number>();
+  return screens.map((screen) => {
+    const base = toSafeFileName(screen.name || screen.screenId);
+    const count = (used.get(base) || 0) + 1;
+    used.set(base, count);
+    const fileBase = count === 1 ? base : `${base}-${count}`;
+    return {
+      screen,
+      path: `${fileBase}.${extension}`,
+    };
+  });
+}
+
+function canonicalizeScreenName(value: string): string {
+  const normalized = normalizeScreenDisplayName(value).toLowerCase();
+  const tokens = normalized
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => {
+      if (token.length <= 3) return token;
+      if (!token.endsWith('s')) return token;
+      if (token.endsWith('ss')) return token;
+      return token.slice(0, -1);
+    });
+  return tokens.join(' ');
+}
+
+function normalizeScreenDisplayName(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function sanitizeGeneratedHtml(html: string): string {
+  let normalized = html || '';
+  if (!normalized) return normalized;
+
+  // Fix malformed Tailwind theme keys like 'accent-fg:'.
+  normalized = normalized.replace(/(['"])([A-Za-z0-9_-]+):\1(\s*:)/g, '$1$2$1$3');
+
+  // Remove accidental trailing colon in class tokens (e.g. "text-accent-fg:").
+  normalized = normalized.replace(/\b([a-z0-9-]+):(?=(?:\s|["']))/gi, '$1');
+
+  return normalized;
+}
+
+function buildDesignSystemLockInstruction(designSystem: Record<string, unknown>): string {
+  const systemName = coerceString(designSystem.systemName, 'Project Design System');
+  const typography = (designSystem.typography && typeof designSystem.typography === 'object')
+    ? (designSystem.typography as Record<string, unknown>)
+    : {};
+  const radius = (designSystem.radius && typeof designSystem.radius === 'object')
+    ? (designSystem.radius as Record<string, unknown>)
+    : {};
+  const tokens = (designSystem.tokens && typeof designSystem.tokens === 'object')
+    ? (designSystem.tokens as Record<string, unknown>)
+    : {};
+
+  const lockSummary = {
+    systemName,
+    themeMode: coerceOptionalString(designSystem.themeMode) || 'mixed',
+    displayFont: coerceOptionalString(typography.displayFont) || null,
+    bodyFont: coerceOptionalString(typography.bodyFont) || null,
+    radius,
+    tokens,
+  };
+
+  return [
+    'STRICT CONSISTENCY REQUIREMENT:',
+    `Use the existing accepted project design system "${systemName}" exactly.`,
+    'Do not introduce new token names, new font families, or alternate component styles.',
+    'Generate only missing screens for the requested intent; avoid regenerating existing screens with equivalent purpose.',
+    `Design system lock: ${JSON.stringify(lockSummary).slice(0, 2200)}`,
+  ].join(' ');
 }
 
 function deepMerge(
