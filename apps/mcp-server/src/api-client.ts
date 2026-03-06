@@ -99,6 +99,7 @@ export class EazyUiApiClient {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-trace-id': context.traceId,
+      'x-eazyui-source': 'mcp',
     };
     if (payload.idempotencyKey) {
       headers['x-idempotency-key'] = payload.idempotencyKey;

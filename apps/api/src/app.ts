@@ -1918,6 +1918,10 @@ fastify.post<{
     } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(appPrompt, 180);
+    const sourceTag = resolveHeaderString(request.headers, 'x-eazyui-source') || 'web';
+    const isMcpSource = sourceTag === 'mcp';
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
@@ -1926,10 +1930,20 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/plan');
     if (!user) return;
     const plannerOperation: BillingOperation = phase === 'route' ? 'plan_route' : 'plan_assist';
-    const plannerEstimate = estimateCredits({
+    const rawPlannerEstimate = estimateCredits({
         operation: plannerOperation,
         modelProfile: toCreditModelProfile(preferredModel),
     });
+    const plannerEstimate = isMcpSource
+        ? {
+            ...rawPlannerEstimate,
+            estimatedCredits: Math.max(1, rawPlannerEstimate.estimatedCredits),
+            breakdown: {
+                ...rawPlannerEstimate.breakdown,
+                base: Math.max(1, rawPlannerEstimate.breakdown.base),
+            },
+        }
+        : rawPlannerEstimate;
     if (!ensureBillingEntitlementOrReply({
         reply,
         traceId,
@@ -1938,8 +1952,23 @@ fastify.post<{
         operation: plannerOperation,
         estimatedCredits: plannerEstimate.estimatedCredits,
     })) return;
+    let reservation: { reservationId: string } | null = null;
 
     try {
+        if (plannerEstimate.estimatedCredits > 0) {
+            reservation = reserveCredits({
+                uid: user.uid,
+                requestId: billingRequestId,
+                operation: plannerOperation,
+                reservedCredits: plannerEstimate.estimatedCredits,
+                metadata: {
+                    route: '/api/plan',
+                    phase,
+                    source: sourceTag,
+                    requestPreview,
+                },
+            });
+        }
         fastify.log.info({
             traceId,
             route: '/api/plan',
@@ -1957,6 +1986,7 @@ fastify.post<{
             referenceImagesCount: referenceImages?.length || 0,
             preferredModel,
             temperature,
+            source: sourceTag,
             appPromptPreview: previewText(appPrompt),
         }, 'plan: start');
         const plan = await runDesignPlanner({
@@ -2006,8 +2036,36 @@ fastify.post<{
                     ? `nextSuggestions=${plan.nextScreenSuggestions.length}`
                     : `recommendedScreens=${plan.recommendedScreens.length}`,
         }, 'plan: complete');
+        if (reservation) {
+            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', plannerEstimate.estimatedCredits, {
+                route: '/api/plan',
+                phase,
+                source: sourceTag,
+            });
+            fastify.log.info({
+                traceId,
+                route: '/api/plan',
+                stage: 'billing',
+                uid: user.uid,
+                source: sourceTag,
+                creditsCharged: settled.finalChargedCredits,
+                creditsRemaining: settled.summary.balanceCredits,
+                reservationId: reservation.reservationId,
+            }, 'plan: settled');
+        }
         return plan;
     } catch (error) {
+        if (error instanceof InsufficientCreditsError) {
+            return sendInsufficientCredits(reply, error);
+        }
+        if (reservation) {
+            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+                route: '/api/plan',
+                phase,
+                source: sourceTag,
+                error: (error as Error).message,
+            });
+        }
         fastify.log.error({ traceId, route: '/api/plan', durationMs: Date.now() - startedAt, err: error }, 'plan: failed');
         return reply.status(500).send({
             error: 'Failed to create planner output',

@@ -23,6 +23,7 @@ import { apiClient } from './api/client';
 import { createDefaultCanvasDoc, type CanvasDoc } from '@eazyui/shared';
 import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
+import { subscribeProjectRealtime } from './lib/firestoreData';
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
@@ -149,6 +150,7 @@ function App() {
     const autosaveFailureCountRef = useRef(0);
     const autosavePausedUntilRef = useRef(0);
     const autosaveToastSuppressUntilRef = useRef(0);
+    const realtimeSyncToastAtRef = useRef(0);
     const [initialRequest, setInitialRequest] = useState<{
         id: string;
         prompt: string;
@@ -262,6 +264,56 @@ function App() {
             lastSavedFingerprintRef.current = fingerprint;
         }
     }, [isCanvasRoute, isHydrating, dirty, spec?.updatedAt, doc.boards, messages, spec, doc]);
+
+    useEffect(() => {
+        if (!isCanvasRoute || !projectId || !authReady || !authUser) return;
+        const targetProjectId = projectId;
+        const unsubscribe = subscribeProjectRealtime({
+            uid: authUser.uid,
+            projectId: targetProjectId,
+            debounceMs: 240,
+            onUpdate: (project) => {
+                if (useProjectStore.getState().projectId !== targetProjectId) return;
+                if (hydrationRunRef.current !== 0 || useProjectStore.getState().isHydrating) return;
+                const resolvedDoc = ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any);
+                const remoteMessages = Array.isArray((project.chatState as any)?.messages) ? (project.chatState as any).messages : [];
+                const remoteFingerprint = getProjectFingerprint(project.designSpec as any, resolvedDoc, remoteMessages);
+                if (!remoteFingerprint || remoteFingerprint === lastSavedFingerprintRef.current) return;
+
+                const wasDirty = useProjectStore.getState().dirty;
+                unstable_batchedUpdates(() => {
+                    useDesignStore.getState().setSpec(project.designSpec as any);
+                    useCanvasStore.getState().setDoc(resolvedDoc);
+                    useChatStore.getState().hydrateSession(project.chatState as any);
+                });
+                setProjectMemory(project.projectMemory || null);
+                lastSavedFingerprintRef.current = remoteFingerprint;
+                hydratedProjectIdRef.current = project.projectId;
+                markSaved(project.projectId, project.updatedAt);
+
+                if (wasDirty && Date.now() - realtimeSyncToastAtRef.current > 5000) {
+                    realtimeSyncToastAtRef.current = Date.now();
+                    pushToast({
+                        kind: 'info',
+                        title: 'Synced from external update',
+                        message: 'Project was updated from another client (MCP/web) and reloaded live.',
+                    });
+                }
+            },
+            onError: (error) => {
+                if (Date.now() - realtimeSyncToastAtRef.current < 8000) return;
+                realtimeSyncToastAtRef.current = Date.now();
+                pushToast({
+                    kind: 'error',
+                    title: 'Realtime sync paused',
+                    message: error.message || 'Could not receive live project updates.',
+                });
+            },
+        });
+        return () => {
+            unsubscribe();
+        };
+    }, [isCanvasRoute, projectId, authReady, authUser, markSaved, pushToast, setProjectMemory]);
 
     useEffect(() => {
         if (!isCanvasRoute) return;

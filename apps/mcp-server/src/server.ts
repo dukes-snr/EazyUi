@@ -81,8 +81,11 @@ app.get('/health', async () => {
 
 app.post('/mcp', async (request, reply) => {
   const traceId = String(request.headers['x-trace-id'] || `mcp-${randomUUID()}`);
-  const authorization = typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined;
+  const authorizationHeader = typeof request.headers.authorization === 'string'
+    ? request.headers.authorization
+    : undefined;
   const mcpApiKey = resolveMcpApiKeyFromHeaders(request.headers as Record<string, unknown>);
+  const authorization = authorizationHeader || (mcpApiKey ? `Bearer ${mcpApiKey}` : undefined);
   const context: RequestContext = {
     traceId,
     authorization,
@@ -134,19 +137,31 @@ app.post('/mcp', async (request, reply) => {
       return reply.status(204).send();
     }
 
-    if (config.requireAuth && rpc.method !== 'tools/list' && rpc.method !== 'resources/list') {
+    const requiresIdentity = rpc.method !== 'tools/list' && rpc.method !== 'resources/list';
+    if (requiresIdentity) {
       if (mcpApiKey) {
-        const resolved = await apiClient.resolveMcpApiKey(context, mcpApiKey);
-        context.uid = resolved.uid;
-      } else {
+        try {
+          const resolved = await apiClient.resolveMcpApiKey(context, mcpApiKey);
+          context.uid = resolved.uid;
+        } catch (error) {
+          log('warn', 'mcp_api_key_resolve_failed', {
+            traceId,
+            message: (error as Error).message,
+          });
+        }
+      }
+
+      if (!context.uid && config.requireAuth) {
         const identity = await verifyAuthorizationHeader(authorization);
         context.uid = identity.uid;
       }
-    } else if (!config.requireAuth) {
-      const headerUid = typeof request.headers['x-eazyui-uid'] === 'string'
-        ? request.headers['x-eazyui-uid'].trim()
-        : '';
-      context.uid = headerUid || config.devUid;
+
+      if (!context.uid && !config.requireAuth) {
+        const headerUid = typeof request.headers['x-eazyui-uid'] === 'string'
+          ? request.headers['x-eazyui-uid'].trim()
+          : '';
+        context.uid = headerUid || config.devUid;
+      }
     }
 
     if (rpc.method === 'resources/list') {

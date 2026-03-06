@@ -101,7 +101,7 @@ function toKeyPrefix(rawKey: string): string {
 
 function normalizeKeyId(raw: string): string | null {
     const value = raw.trim().toLowerCase();
-    if (!/^[a-z0-9]{12,40}$/.test(value)) return null;
+    if (!/^[a-z0-9_-]{8,64}$/.test(value)) return null;
     return value;
 }
 
@@ -209,11 +209,26 @@ export async function createMcpApiKey(uid: string, labelInput?: string): Promise
 
 export async function revokeMcpApiKey(uid: string, keyIdRaw: string): Promise<boolean> {
     const db = getFirebaseDb();
-    const keyId = normalizeKeyId(keyIdRaw);
-    if (!keyId) return false;
-    const userRef = db.doc(`users/${uid}/mcpApiKeys/${keyId}`);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) return false;
+    const rawKeyId = String(keyIdRaw || '').trim();
+    if (!rawKeyId) return false;
+    const normalizedKeyId = normalizeKeyId(rawKeyId);
+    const candidateIds = Array.from(new Set([
+        rawKeyId,
+        rawKeyId.toLowerCase(),
+        normalizedKeyId || '',
+    ].filter(Boolean)));
+
+    let userRef: ReturnType<typeof db.doc> | null = null;
+    let keyId = '';
+    for (const candidate of candidateIds) {
+        const ref = db.doc(`users/${uid}/mcpApiKeys/${candidate}`);
+        const snap = await ref.get();
+        if (!snap.exists) continue;
+        userRef = ref;
+        keyId = candidate;
+        break;
+    }
+    if (!userRef || !keyId) return false;
 
     const now = nowIso();
     const batch = db.batch();

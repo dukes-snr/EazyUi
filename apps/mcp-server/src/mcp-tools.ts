@@ -288,6 +288,38 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     traceId: context.traceId,
     tool: name,
   };
+  const stagePromptInProjectChat = async (params: {
+    project: EazyUiProjectPayload;
+    content: string;
+    idempotencyKey?: string;
+    expectedUpdatedAt?: string;
+    immediate?: boolean;
+  }): Promise<EazyUiProjectPayload> => {
+    const promptText = params.content.trim();
+    if (!promptText) return params.project;
+    const nextChatState = appendUserMessage(params.project.chatState, promptText, {
+      source: 'mcp',
+      tool: name,
+      requestKind: 'mcp_prompt',
+    });
+    const nextProject: EazyUiProjectPayload = {
+      ...params.project,
+      chatState: nextChatState,
+    };
+    if (!params.immediate || params.expectedUpdatedAt) {
+      return nextProject;
+    }
+    const promptIdempotencyKey = buildAuxIdempotencyKey(params.idempotencyKey, 'prompt');
+    await projectRepo.saveProject({
+      uid: context.uid!,
+      projectId: params.project.projectId,
+      designSpec: params.project.designSpec as unknown as Record<string, unknown>,
+      canvasDoc: params.project.canvasDoc,
+      chatState: nextChatState,
+      idempotencyKey: promptIdempotencyKey,
+    });
+    return nextProject;
+  };
 
   if (name === 'project.list') {
     const projects = await projectRepo.listProjects(context.uid);
@@ -393,13 +425,31 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
         modelProfile: input.modelProfile,
       },
       chatState: {
-        messages: [{
-          id: randomUUID(),
-          role: 'assistant',
-          content: `Created project "${finalName}" with an initial design system proposal. Accept it to generate first screens.`,
-          status: 'complete',
-          timestamp: Date.now(),
-        }],
+        messages: [
+          {
+            id: randomUUID(),
+            role: 'user',
+            content: input.prompt,
+            status: 'complete',
+            timestamp: Date.now(),
+            meta: {
+              source: 'mcp',
+              tool: name,
+              requestKind: 'mcp_prompt',
+            },
+          },
+          {
+            id: randomUUID(),
+            role: 'assistant',
+            content: `Created project "${finalName}" with an initial design system proposal. Accept it to generate first screens.`,
+            status: 'complete',
+            timestamp: Date.now(),
+            meta: {
+              source: 'mcp',
+              tool: name,
+            },
+          },
+        ],
       },
       idempotencyKey: input.idempotencyKey,
     });
@@ -429,7 +479,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
   if (name === 'design_system.accept_initial') {
     const input = DesignSystemAcceptInitialInputSchema.parse(args);
     const preferredModel = resolvePreferredModel(input.modelProfile, 'designer');
-    const project = await projectRepo.getProject(context.uid, input.projectId);
+    let project = await projectRepo.getProject(context.uid, input.projectId);
     const mcpMeta = getProjectMcpMeta(project);
     const pendingAcceptance = mcpMeta.designSystemPendingAcceptance === true;
     if (!pendingAcceptance) {
@@ -441,6 +491,13 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
         screenCount: project.designSpec.screens.length,
       });
     }
+    project = await stagePromptInProjectChat({
+      project,
+      content: 'Proceed with the initial design system and generate the first screen bundle.',
+      idempotencyKey: input.idempotencyKey,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+      immediate: true,
+    });
 
     const initialPrompt = coerceOptionalString(mcpMeta.initialPrompt)
       || coerceOptionalString(project.designSpec.description)
@@ -486,6 +543,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       chatState: appendAssistantMessage(
         project.chatState,
         `Initial design system accepted. Generated ${newScreens.length} screen(s).`,
+        { source: 'mcp', tool: name },
       ),
     });
 
@@ -503,7 +561,12 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
 
   if (name === 'planner.route') {
     const input = PlannerRouteInputSchema.parse(args);
-    const project = await projectRepo.getProject(context.uid, input.projectId);
+    let project = await projectRepo.getProject(context.uid, input.projectId);
+    project = await stagePromptInProjectChat({
+      project,
+      content: input.prompt,
+      immediate: true,
+    });
     const normalizedPlatform = normalizePlatform(input.platform);
     const normalizedStylePreset = normalizeStylePreset(input.stylePreset);
     if (requiresInitialDesignSystemAcceptance(project)) {
@@ -548,11 +611,29 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       preferredModel,
       temperature: input.temperature,
     });
+    const routedAssistantContent = routed && typeof routed === 'object' && typeof (routed as { assistantResponse?: unknown }).assistantResponse === 'string'
+      ? coerceString((routed as { assistantResponse?: unknown }).assistantResponse)
+      : `Planner route: ${(routed as { intent?: unknown }).intent || 'unknown'} -> ${(routed as { action?: unknown }).action || 'assist'}.`;
+    const routedChatState = appendAssistantMessage(
+      project.chatState,
+      routedAssistantContent,
+      { source: 'mcp', tool: name },
+    );
+    const routeSaved = await projectRepo.saveProject({
+      uid: context.uid,
+      projectId: input.projectId,
+      designSpec: project.designSpec as unknown as Record<string, unknown>,
+      canvasDoc: project.canvasDoc,
+      chatState: routedChatState,
+      idempotencyKey: buildAuxIdempotencyKey(undefined, 'route'),
+    });
 
     return finalize(base, startedAt, {
       operationSummary: `Planner route completed for ${input.projectId}`,
       projectId: input.projectId,
       route: routed,
+      savedAt: routeSaved.savedAt,
+      updatedAt: routeSaved.updatedAt,
     });
   }
 
@@ -565,6 +646,13 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     if (input.projectId) {
       project = await projectRepo.getProject(context.uid, input.projectId);
       ensureInitialDesignSystemAcceptedOrThrow(project);
+      project = await stagePromptInProjectChat({
+        project,
+        content: input.prompt,
+        idempotencyKey: input.idempotencyKey,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        immediate: true,
+      });
     }
     const enhancedPrompt = input.targetScreenNames?.length
       ? `${input.prompt}\n\nGenerate these screens now: ${input.targetScreenNames.join(', ')}.`
@@ -613,7 +701,11 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       idempotencyKey: input.idempotencyKey,
       designSpec: nextDesignSpec as Record<string, unknown>,
       canvasDoc: project.canvasDoc,
-      chatState: project.chatState,
+      chatState: appendAssistantMessage(
+        project.chatState,
+        `Generated ${newScreens.length} screen(s): ${newScreens.map((screen) => screen.name).join(', ')}.`,
+        { source: 'mcp', tool: name },
+      ),
     });
 
     return finalize(base, startedAt, {
@@ -632,7 +724,14 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
   if (name === 'screen.edit') {
     const input = ScreenEditInputSchema.parse(args);
     const preferredModel = resolvePreferredModel(input.modelProfile, 'designer');
-    const project = await projectRepo.getProject(context.uid, input.projectId);
+    let project = await projectRepo.getProject(context.uid, input.projectId);
+    project = await stagePromptInProjectChat({
+      project,
+      content: input.instruction,
+      idempotencyKey: input.idempotencyKey,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+      immediate: true,
+    });
     const screen = project.designSpec.screens.find((item) => item.screenId === input.screenId);
     if (!screen) {
       throw new Error(`Screen not found: ${input.screenId}`);
@@ -657,6 +756,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     const nextChatState = appendAssistantMessage(
       project.chatState,
       coerceString(editResult.description, 'Screen edited successfully.'),
+      { source: 'mcp', tool: name },
     );
     const saved = await projectRepo.saveProject({
       uid: context.uid,
@@ -686,7 +786,14 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
   if (name === 'screen.multi_edit') {
     const input = ScreenMultiEditInputSchema.parse(args);
     const preferredModel = resolvePreferredModel(input.modelProfile, 'designer');
-    const project = await projectRepo.getProject(context.uid, input.projectId);
+    let project = await projectRepo.getProject(context.uid, input.projectId);
+    project = await stagePromptInProjectChat({
+      project,
+      content: input.instruction,
+      idempotencyKey: input.idempotencyKey,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+      immediate: true,
+    });
     const targetIds = new Set(input.screenIds);
     const results: Array<Record<string, unknown>> = [];
     const updatedScreens = [...project.designSpec.screens];
@@ -751,6 +858,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
       const nextChatState = appendAssistantMessage(
         project.chatState,
         mergedDescription || `Updated ${successCount} screens.`,
+        { source: 'mcp', tool: name },
       );
       savedInfo = await projectRepo.saveProject({
         uid: context.uid,
@@ -782,7 +890,16 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
   if (name === 'design_system.update') {
     const input = DesignSystemUpdateInputSchema.parse(args);
     const preferredModel = resolvePreferredModel(input.modelProfile, 'designer');
-    const project = await projectRepo.getProject(context.uid, input.projectId);
+    let project = await projectRepo.getProject(context.uid, input.projectId);
+    const designSystemPrompt = input.prompt
+      || (input.patch ? `Apply this design-system patch: ${JSON.stringify(input.patch).slice(0, 2000)}` : '');
+    project = await stagePromptInProjectChat({
+      project,
+      content: designSystemPrompt,
+      idempotencyKey: input.idempotencyKey,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+      immediate: true,
+    });
     let nextDesignSystem: Record<string, unknown> | undefined =
       (project.designSpec.designSystem && typeof project.designSpec.designSystem === 'object')
         ? (project.designSpec.designSystem as Record<string, unknown>)
@@ -854,6 +971,7 @@ export async function executeTool(options: ToolExecutionOptions): Promise<Record
     const nextChatState = appendAssistantMessage(
       project.chatState,
       `Design system updated${input.applyToExistingScreens ? ` and restyled ${restyleResults.filter((item) => item.status === 'success').length} screens` : ''}.`,
+      { source: 'mcp', tool: name },
     );
     const saved = await projectRepo.saveProject({
       uid: context.uid,
@@ -1107,19 +1225,65 @@ function mergeScreens(existing: EazyUiHtmlScreen[], incoming: EazyUiHtmlScreen[]
   return merged;
 }
 
-function appendAssistantMessage(chatState: unknown, content: string): unknown {
-  if (!content.trim()) return chatState;
+function appendChatMessage(
+  chatState: unknown,
+  params: {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    status?: 'pending' | 'streaming' | 'complete' | 'error';
+    meta?: Record<string, unknown>;
+  },
+): unknown {
+  const content = params.content.trim();
+  if (!content) return chatState;
   const rawMessages = (chatState && typeof chatState === 'object' && Array.isArray((chatState as { messages?: unknown }).messages))
     ? [...(((chatState as { messages?: unknown }).messages as Array<Record<string, unknown>>))]
     : [];
   rawMessages.push({
     id: randomUUID(),
-    role: 'assistant',
+    role: params.role,
     content: content.slice(0, 24_000),
-    status: 'complete',
+    status: params.status || 'complete',
     timestamp: Date.now(),
+    meta: params.meta || null,
   });
   return { messages: rawMessages.slice(-250) };
+}
+
+function appendUserMessage(
+  chatState: unknown,
+  content: string,
+  meta?: Record<string, unknown>,
+): unknown {
+  return appendChatMessage(chatState, {
+    role: 'user',
+    content,
+    status: 'complete',
+    meta,
+  });
+}
+
+function appendAssistantMessage(
+  chatState: unknown,
+  content: string,
+  meta?: Record<string, unknown>,
+  status: 'pending' | 'streaming' | 'complete' | 'error' = 'complete',
+): unknown {
+  return appendChatMessage(chatState, {
+    role: 'assistant',
+    content,
+    status,
+    meta,
+  });
+}
+
+function buildAuxIdempotencyKey(base: string | undefined, suffix: string): string | undefined {
+  const source = typeof base === 'string' ? base.trim() : '';
+  if (!source) return undefined;
+  const normalizedSuffix = suffix.trim().replace(/[^\w.-]/g, '_').slice(0, 28) || 'aux';
+  const raw = `${source}-${normalizedSuffix}`;
+  if (raw.length <= 180) return raw;
+  return raw.slice(0, 180);
 }
 
 function toSafeFileName(value: string): string {

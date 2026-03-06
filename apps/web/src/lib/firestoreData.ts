@@ -5,9 +5,11 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
+  type Unsubscribe,
   writeBatch,
 } from "firebase/firestore";
 import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "firebase/storage";
@@ -45,6 +47,16 @@ type WorkspaceSnapshot = {
   canvasDoc: unknown | null;
   chatState: unknown | null;
   projectMemory?: ProjectMemory | null;
+};
+
+export type FirestoreProjectRecord = {
+  projectId: string;
+  designSpec: HtmlDesignSpec;
+  canvasDoc: unknown;
+  chatState: unknown;
+  projectMemory?: ProjectMemory;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type ProjectMetaData = {
@@ -1200,7 +1212,7 @@ async function loadSnapshotPayload(uid: string, projectId: string, snapshotPath:
   return parsed;
 }
 
-export async function getProjectFirestore(uid: string, projectId: string) {
+export async function getProjectFirestore(uid: string, projectId: string): Promise<FirestoreProjectRecord | null> {
   const projectRef = doc(db, "users", uid, "projects", projectId);
   const snap = await getDoc(projectRef);
   if (!snap.exists()) return null;
@@ -1249,6 +1261,88 @@ export async function getProjectFirestore(uid: string, projectId: string) {
   }
 
   return buildProjectFromSubcollections(uid, projectId, data);
+}
+
+export function subscribeProjectRealtime(input: {
+  uid: string;
+  projectId: string;
+  onUpdate: (project: FirestoreProjectRecord) => void;
+  onError?: (error: Error) => void;
+  debounceMs?: number;
+}): () => void {
+  const { uid, projectId, onUpdate, onError } = input;
+  const debounceMs = Math.max(80, Math.min(2000, Number(input.debounceMs || 220)));
+
+  let disposed = false;
+  let timer: number | null = null;
+  let inFlight = false;
+  let queued = false;
+
+  const reportError = (error: unknown) => {
+    if (disposed) return;
+    if (onError) {
+      onError(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    console.error('[firestore] project realtime listener failed', error);
+  };
+
+  const flush = async () => {
+    if (disposed) return;
+    if (inFlight) {
+      queued = true;
+      return;
+    }
+    inFlight = true;
+    try {
+      const project = await getProjectFirestore(uid, projectId);
+      if (!project || disposed) return;
+      onUpdate(project);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      inFlight = false;
+      if (queued && !disposed) {
+        queued = false;
+        scheduleRefresh();
+      }
+    }
+  };
+
+  const scheduleRefresh = () => {
+    if (disposed) return;
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+    timer = window.setTimeout(() => {
+      timer = null;
+      void flush();
+    }, debounceMs);
+  };
+
+  const unsubs: Unsubscribe[] = [
+    onSnapshot(doc(db, "users", uid, "projects", projectId), () => scheduleRefresh(), (error) => reportError(error)),
+    onSnapshot(collection(db, "users", uid, "projects", projectId, "screens"), () => scheduleRefresh(), (error) => reportError(error)),
+    onSnapshot(collection(db, "users", uid, "projects", projectId, "chats", "default", "messages"), () => scheduleRefresh(), (error) => reportError(error)),
+    onSnapshot(doc(db, "users", uid, "projects", projectId, "sessions", "latest"), () => scheduleRefresh(), (error) => reportError(error)),
+  ];
+
+  scheduleRefresh();
+
+  return () => {
+    disposed = true;
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    unsubs.forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch {
+        // no-op
+      }
+    });
+  };
 }
 
 export async function listProjectsFirestore(uid: string): Promise<{ id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string; coverImageUrls?: string[] }[]> {

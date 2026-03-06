@@ -4237,6 +4237,148 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
     };
 
+    const looksLikeDesignSystemPrompt = (value: string): boolean => {
+        const text = value.trim().toLowerCase();
+        if (!text) return false;
+        const mentionsDesign = /(design\s*system|token|palette|color|typography|font|radius|corner|theme|dark mode|light mode)/i.test(text);
+        const mentionsChange = /(update|change|adjust|tweak|make|set|switch|revamp|refine|improve|replace)/i.test(text);
+        return mentionsDesign && mentionsChange;
+    };
+
+    const handlePromptDrivenDesignSystemUpdate = async (params: {
+        userMessageId: string;
+        requestPrompt: string;
+        attachedImages: string[];
+        referenceMeta: ReturnType<typeof buildScreenReferenceMeta>;
+    }) => {
+        const { userMessageId, requestPrompt, attachedImages, referenceMeta } = params;
+        const currentSpec = useDesignStore.getState().spec;
+        const currentDesignSystem = currentSpec?.designSystem;
+        if (!currentDesignSystem) return false;
+
+        const assistantMsgId = addMessage('assistant', 'Updating your design system from this prompt...');
+        updateMessage(userMessageId, {
+            meta: {
+                ...(useChatStore.getState().messages.find((message) => message.id === userMessageId)?.meta || {}),
+                requestKind: 'design_system',
+                ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
+            },
+        });
+        updateMessage(assistantMsgId, {
+            status: 'streaming',
+            meta: {
+                ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                parentUserId: userMessageId,
+                livePreview: true,
+                typedComplete: false,
+            },
+        });
+        setActiveBranchForUser(userMessageId, assistantMsgId);
+
+        const controller = new AbortController();
+        setAbortController(controller);
+        setGenerating(true);
+        startLoadingToast(
+            generationLoadingToastRef,
+            'Updating design system',
+            'Applying token and style updates...'
+        );
+        try {
+            const response = await apiClient.generateDesignSystem({
+                prompt: requestPrompt,
+                stylePreset,
+                platform: selectedPlatform,
+                images: attachedImages,
+                projectId: projectId || undefined,
+                projectDesignSystem: currentDesignSystem,
+                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
+            }, controller.signal);
+            const normalizedDraft = normalizeProjectDesignSystemModes(response.designSystem);
+            const previousDesignSystem = normalizeProjectDesignSystemModes(currentDesignSystem);
+            const tokenPatches = buildDesignTokenColorPatches(previousDesignSystem, normalizedDraft);
+            const typographyChanged =
+                !areFontStacksEquivalent(previousDesignSystem.typography.displayFont, normalizedDraft.typography.displayFont)
+                || !areFontStacksEquivalent(previousDesignSystem.typography.bodyFont, normalizedDraft.typography.bodyFont);
+            const radiusChanged =
+                !areRadiusValuesEquivalent(previousDesignSystem.radius.card, normalizedDraft.radius.card)
+                || !areRadiusValuesEquivalent(previousDesignSystem.radius.control, normalizedDraft.radius.control)
+                || !areRadiusValuesEquivalent(previousDesignSystem.radius.pill, normalizedDraft.radius.pill);
+
+            let patchedScreenCount = 0;
+            const patchedScreens = (currentSpec?.screens || []).map((screen) => {
+                let nextHtml = screen.html;
+                let screenChanged = false;
+
+                const colorResult = applyDesignTokenColorPatchesToHtml(nextHtml, tokenPatches);
+                nextHtml = colorResult.html;
+                screenChanged = screenChanged || colorResult.changed;
+
+                if (typographyChanged) {
+                    const typographyResult = applyTypographyToScreenHtml(
+                        nextHtml,
+                        normalizedDraft.typography.displayFont,
+                        normalizedDraft.typography.bodyFont
+                    );
+                    nextHtml = typographyResult.html;
+                    screenChanged = screenChanged || typographyResult.changed;
+                }
+
+                if (radiusChanged) {
+                    const radiusResult = applyRadiusToScreenHtml(nextHtml, normalizedDraft.radius);
+                    nextHtml = radiusResult.html;
+                    screenChanged = screenChanged || radiusResult.changed;
+                }
+
+                const themeRepairResult = applyThemeVariantClassRepairsToHtml(nextHtml, normalizedDraft);
+                nextHtml = themeRepairResult.html;
+                screenChanged = screenChanged || themeRepairResult.changed;
+
+                if (!screenChanged) return screen;
+                patchedScreenCount += 1;
+                return { ...screen, html: nextHtml };
+            });
+
+            if (currentSpec) {
+                useDesignStore.getState().setSpec({
+                    ...currentSpec,
+                    designSystem: normalizedDraft,
+                    screens: patchedScreens,
+                    updatedAt: new Date().toISOString(),
+                });
+            } else {
+                applyProjectDesignSystem(normalizedDraft);
+            }
+            setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
+
+            const summary = patchedScreenCount > 0
+                ? `Design system updated and synced to ${patchedScreenCount} existing screen${patchedScreenCount === 1 ? '' : 's'}.`
+                : 'Design system updated. Future generations will use the new tokens.';
+            updateMessage(assistantMsgId, {
+                content: `[h2]Design system updated[/h2]\n[p]${summary}[/p]`,
+                status: 'complete',
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                    typedComplete: true,
+                    livePreview: false,
+                },
+            });
+            notifySuccess('Design system updated', summary);
+            return true;
+        } catch (error) {
+            const friendly = getUserFacingError(error);
+            updateMessage(assistantMsgId, {
+                content: `[h2]${friendly.title}[/h2]\n[p]${friendly.summary}[/p]`,
+                status: 'error',
+            });
+            notifyError(friendly.title, friendly.summary);
+            return true;
+        } finally {
+            clearLoadingToast(generationLoadingToastRef);
+            setAbortController(null);
+            setGenerating(false);
+        }
+    };
+
     const handleRoutedGenerateOrEdit = async (
         existingUserMessageId?: string,
         overridePrompt?: string,
@@ -4274,6 +4416,16 @@ Return a polished, consistent screen without introducing a new navigation patter
                 setImages([]);
                 if (fileInputRef.current) fileInputRef.current.value = '';
             }
+        }
+
+        if (looksLikeDesignSystemPrompt(requestPrompt)) {
+            const handledAsDesignSystem = await handlePromptDrivenDesignSystemUpdate({
+                userMessageId: userMsgId,
+                requestPrompt,
+                attachedImages,
+                referenceMeta,
+            });
+            if (handledAsDesignSystem) return;
         }
 
         const executeFallbackRoute = async () => {
