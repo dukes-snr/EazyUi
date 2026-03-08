@@ -729,6 +729,14 @@ export function CanvasProfileMenu() {
 
                                         <SectionCard title="On-Demand Usage"><SettingsRow label="On-Demand Usage" detail="On-demand usage is available with a paid subscription."><ToggleSwitch checked={onDemandUsage} onChange={setOnDemandUsage} /></SettingsRow></SectionCard>
 
+                                        <SectionCard title="How Charging Works">
+                                            <div className="space-y-2 text-sm text-[var(--ui-text-subtle)]">
+                                                <p>Before generation starts, EazyUI reserves the likely charge for that request.</p>
+                                                <p>The fixed operation price is only the minimum floor. On Gemini 3 Pro requests, actual token usage can push the final charge above that floor.</p>
+                                                <p className="text-[var(--ui-text)]">If a request is blocked, the error now shows the upfront reserve amount and explains when that reserve is higher than the minimum floor.</p>
+                                            </div>
+                                        </SectionCard>
+
                                         <SectionCard title="Billing History" action={<button type="button" onClick={() => void handleOpenBillingPortal()} disabled={billingActionBusy !== null} className="h-8 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-3 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'portal' ? 'Opening...' : 'Payment settings'}</button>}>
                                             <div className="overflow-x-auto">
                                                 <table className="min-w-full text-left">

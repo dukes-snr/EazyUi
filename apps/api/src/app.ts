@@ -282,7 +282,8 @@ function resolveUsageCharge(params: {
 
 function sendInsufficientCredits(
     reply: { status: (code: number) => { send: (body: unknown) => unknown } },
-    error: InsufficientCreditsError
+    error: InsufficientCreditsError,
+    details?: Record<string, unknown>
 ) {
     return reply.status(402).send({
         error: 'Insufficient credits',
@@ -293,6 +294,7 @@ function sendInsufficientCredits(
             operation: error.operation,
             requiredCredits: error.requiredCredits,
             availableCredits: error.availableCredits,
+            ...(details || {}),
         },
     });
 }
@@ -353,6 +355,7 @@ function ensureBillingEntitlementOrReply(input: {
     uid: string;
     operation: BillingOperation;
     estimatedCredits: number;
+    minimumFloorCredits?: number;
 }): BillingSummary | null {
     const summary = buildBillingSummaryForApi(input.uid);
     const requiresPaidPlan = PAID_ONLY_OPERATIONS.has(input.operation);
@@ -397,7 +400,13 @@ function ensureBillingEntitlementOrReply(input: {
             estimatedCredits: input.estimatedCredits,
             balanceCredits: summary.balanceCredits,
         }, 'billing entitlement blocked');
-        sendInsufficientCredits(input.reply, insufficient);
+        sendInsufficientCredits(input.reply, insufficient, {
+            reserveEstimatedCredits: input.estimatedCredits,
+            minimumFloorCredits: typeof input.minimumFloorCredits === 'number'
+                ? input.minimumFloorCredits
+                : input.estimatedCredits,
+            pricingMode: 'reserve_then_settle',
+        });
         return null;
     }
 
@@ -1253,6 +1262,12 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/generate');
     if (!user) return;
 
+    const floorEstimate = estimateCredits({
+        operation: 'generate',
+        modelProfile: toCreditModelProfile(preferredModel),
+        expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
+        bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+    });
     const reservationEstimate = estimateReservationCredits({
         operation: 'generate',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -1267,6 +1282,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'generate',
         estimatedCredits: reservationEstimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -1387,6 +1403,12 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/design-system');
     if (!user) return;
     const bundled = Boolean(bundleWithFirstGeneration);
+    const designSystemFloorEstimate = !bundled
+        ? estimateCredits({
+            operation: 'design_system',
+            modelProfile: toCreditModelProfile(preferredModel),
+        })
+        : null;
     const designSystemEstimate = !bundled
         ? estimateReservationCredits({
             operation: 'design_system',
@@ -1401,6 +1423,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'design_system',
         estimatedCredits: designSystemEstimate.estimatedCredits,
+        minimumFloorCredits: designSystemFloorEstimate?.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -1552,6 +1575,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit');
     if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'edit',
+        modelProfile: toCreditModelProfile(preferredModel),
+    });
     const estimate = estimateReservationCredits({
         operation: 'edit',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -1564,6 +1591,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'edit',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -1700,6 +1728,11 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/synthesize-screen-images');
     if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'synthesize_screen_images',
+        modelProfile: toCreditModelProfile(preferredModel),
+        expectedImageCount: screens.length,
+    });
     const estimate = estimateReservationCredits({
         operation: 'synthesize_screen_images',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -1713,6 +1746,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'synthesize_screen_images',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -1826,6 +1860,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-image');
     if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'generate_image',
+        modelProfile: toCreditModelProfile(preferredModel),
+    });
     const estimate = estimateReservationCredits({
         operation: 'generate_image',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -1838,6 +1876,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'generate_image',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -1943,6 +1982,11 @@ fastify.post<{
     if (!user) return;
     const approxBytes = Math.round(audioBase64.length * 0.75);
     const approxMinutes = Math.max(1, Math.ceil(approxBytes / (48000 * 60)));
+    const floorEstimate = estimateCredits({
+        operation: 'transcribe_audio',
+        modelProfile: toCreditModelProfile(model),
+        expectedMinutes: approxMinutes,
+    });
     const estimate = estimateReservationCredits({
         operation: 'transcribe_audio',
         modelProfile: toCreditModelProfile(model),
@@ -1956,6 +2000,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'transcribe_audio',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 
@@ -2405,6 +2450,12 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-stream');
     if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'generate_stream',
+        modelProfile: toCreditModelProfile(preferredModel),
+        expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
+        bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+    });
     const estimate = estimateReservationCredits({
         operation: 'generate_stream',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -2419,6 +2470,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'generate_stream',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
     let chunkCount = 0;
@@ -2619,6 +2671,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/complete-screen');
     if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'complete_screen',
+        modelProfile: toCreditModelProfile(preferredModel),
+    });
     const estimate = estimateReservationCredits({
         operation: 'complete_screen',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -2631,6 +2687,7 @@ fastify.post<{
         uid: user.uid,
         operation: 'complete_screen',
         estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
     })) return;
     let reservation: { reservationId: string } | null = null;
 

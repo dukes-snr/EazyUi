@@ -866,6 +866,14 @@ export function ProjectSettingsPage({
                                     </div>
                                 </SectionCard>
 
+                                <SectionCard title="How Charging Works">
+                                    <div className="space-y-2 text-sm text-[var(--ui-text-subtle)]">
+                                        <p>Before generation starts, EazyUI reserves the likely charge for that request.</p>
+                                        <p>The fixed operation price is only the minimum floor. On Gemini 3 Pro requests, actual token usage can push the final charge above that floor.</p>
+                                        <p className="text-[var(--ui-text)]">If a request is blocked, the error now shows the upfront reserve amount and explains when that reserve is higher than the minimum floor.</p>
+                                    </div>
+                                </SectionCard>
+
                                 <SectionCard title="Billing History">
                                     <div className="overflow-x-auto">
                                         <table className="min-w-full text-left text-sm">

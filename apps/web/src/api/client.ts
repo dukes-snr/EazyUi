@@ -9,6 +9,28 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim
 const COMPOSER_TEMPERATURE_KEY = 'eazyui:composer-temperature';
 const DEFAULT_COMPOSER_TEMPERATURE = 1;
 
+export class ApiRequestError extends Error {
+    status?: number;
+    code?: string;
+    paywallCode?: string;
+    details?: Record<string, unknown>;
+
+    constructor(params: {
+        message: string;
+        status?: number;
+        code?: string;
+        paywallCode?: string;
+        details?: Record<string, unknown>;
+    }) {
+        super(params.message);
+        this.name = 'ApiRequestError';
+        this.status = params.status;
+        this.code = params.code;
+        this.paywallCode = params.paywallCode;
+        this.details = params.details;
+    }
+}
+
 function normalizeComposerTemperature(value: unknown): number | null {
     if (value === null || value === undefined || value === '') return null;
     const numeric = Number(value);
@@ -678,7 +700,13 @@ class ApiClient {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: 'Request failed' }));
-            throw new Error(error.message || `HTTP ${response.status}`);
+            throw new ApiRequestError({
+                message: error.message || `HTTP ${response.status}`,
+                status: response.status,
+                code: typeof error.code === 'string' ? error.code : undefined,
+                paywallCode: typeof error.paywallCode === 'string' ? error.paywallCode : undefined,
+                details: error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : undefined,
+            });
         }
 
         return response.json();
@@ -728,7 +756,13 @@ class ApiClient {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
-            throw new Error(error.message || `HTTP ${response.status}`);
+            throw new ApiRequestError({
+                message: error.message || `HTTP ${response.status}`,
+                status: response.status,
+                code: typeof error.code === 'string' ? error.code : undefined,
+                paywallCode: typeof error.paywallCode === 'string' ? error.paywallCode : undefined,
+                details: error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : undefined,
+            });
         }
         if (!response.body) throw new Error('No response body');
 
@@ -924,7 +958,13 @@ class ApiClient {
         });
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
-            throw new Error(error.message || `HTTP ${response.status}`);
+            throw new ApiRequestError({
+                message: error.message || `HTTP ${response.status}`,
+                status: response.status,
+                code: typeof error.code === 'string' ? error.code : undefined,
+                paywallCode: typeof error.paywallCode === 'string' ? error.paywallCode : undefined,
+                details: error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : undefined,
+            });
         }
         const disposition = response.headers.get('content-disposition') || '';
         const match = disposition.match(/filename="([^"]+)"/i);

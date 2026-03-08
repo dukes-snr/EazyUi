@@ -1,3 +1,5 @@
+import { ApiRequestError } from '../api/client';
+
 export type UserFacingError = {
     title: string;
     summary: string;
@@ -14,12 +16,30 @@ function normalizeMessage(input: unknown): string {
     return 'Unknown error';
 }
 
+function toRoundedNumber(value: unknown): number | null {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.round(numeric));
+}
+
+function extractApiDetails(input: unknown): Record<string, unknown> | null {
+    if (input instanceof ApiRequestError && input.details && typeof input.details === 'object') {
+        return input.details;
+    }
+    if (input && typeof input === 'object' && 'details' in (input as any)) {
+        const details = (input as any).details;
+        if (details && typeof details === 'object') return details as Record<string, unknown>;
+    }
+    return null;
+}
+
 function contains(text: string, pattern: RegExp): boolean {
     return pattern.test(text);
 }
 
-function mapGeminiLikeError(message: string): UserFacingError {
+function mapGeminiLikeError(message: string, input?: unknown): UserFacingError {
     const lower = message.toLowerCase();
+    const details = extractApiDetails(input);
 
     if (contains(lower, /api key was reported as leaked|reported as leaked/)) {
         return {
@@ -94,14 +114,27 @@ function mapGeminiLikeError(message: string): UserFacingError {
     }
 
     if (contains(lower, /insufficient credits|need \d+ credits|credit/)) {
+        const reserveEstimatedCredits = toRoundedNumber(details?.reserveEstimatedCredits);
+        const minimumFloorCredits = toRoundedNumber(details?.minimumFloorCredits);
+        const availableCredits = toRoundedNumber(details?.availableCredits);
+        const summary = reserveEstimatedCredits !== null
+            ? `This request needs ${reserveEstimatedCredits} credits reserved up front${availableCredits !== null ? `, but you only have ${availableCredits}` : ''}.`
+            : 'Your credit balance is too low for this action.';
+        const actions = [
+            'Open Billing and buy a top-up or upgrade your plan.',
+            ...(reserveEstimatedCredits !== null
+                ? [`This request would reserve ${reserveEstimatedCredits} credits before it starts.`]
+                : []),
+            ...(minimumFloorCredits !== null && reserveEstimatedCredits !== null && minimumFloorCredits < reserveEstimatedCredits
+                ? [`The fixed minimum is ${minimumFloorCredits} credits, but likely final usage on this model is higher.`]
+                : []),
+            'Retry with a smaller request (fewer screens/images).',
+            'Try a faster model profile when possible.',
+        ];
         return {
             title: 'Not enough credits',
-            summary: 'Your credit balance is too low for this action.',
-            actions: [
-                'Open Billing and buy a top-up or upgrade your plan.',
-                'Retry with a smaller request (fewer screens/images).',
-                'Try a faster model profile when possible.',
-            ],
+            summary,
+            actions,
         };
     }
 
@@ -166,7 +199,7 @@ function mapGeminiLikeError(message: string): UserFacingError {
 
 export function getUserFacingError(error: unknown): UserFacingError {
     const message = normalizeMessage(error);
-    return mapGeminiLikeError(message);
+    return mapGeminiLikeError(message, error);
 }
 
 export function toTaggedErrorMessage(error: unknown): string {
