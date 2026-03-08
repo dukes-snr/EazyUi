@@ -19,6 +19,7 @@ import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.
 import {
     buildBillingSummaryForApi,
     estimateCredits,
+    estimateReservationCredits,
     grantTopupCredits,
     inferCreditModelProfile,
     InsufficientCreditsError,
@@ -254,6 +255,9 @@ function resolveUsageCharge(params: {
     usage?: TokenUsageSummary;
     fallbackEstimatedCredits: number;
 }): { finalCredits: number; usageQuote?: UsageCreditQuote } {
+    if (params.operation === 'plan_route' || params.operation === 'plan_assist') {
+        return { finalCredits: 0 };
+    }
     const hasUsage = Boolean(
         params.usage
         && (
@@ -271,7 +275,7 @@ function resolveUsageCharge(params: {
         usage: params.usage!,
     });
     return {
-        finalCredits: params.fallbackEstimatedCredits,
+        finalCredits: Math.max(params.fallbackEstimatedCredits, usageQuote.credits),
         usageQuote,
     };
 }
@@ -794,9 +798,10 @@ fastify.post<{
     if (!user) return;
     try {
         const modelProfile = toCreditModelProfile(request.body.preferredModel);
-        const estimate = estimateCredits({
+        const estimate = estimateReservationCredits({
             operation: request.body.operation,
             modelProfile,
+            preferredModel: request.body.preferredModel,
             expectedScreenCount: request.body.expectedScreenCount,
             expectedImageCount: request.body.expectedImageCount,
             expectedMinutes: request.body.expectedMinutes,
@@ -1248,9 +1253,10 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/generate');
     if (!user) return;
 
-    const reservationEstimate = estimateCredits({
+    const reservationEstimate = estimateReservationCredits({
         operation: 'generate',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
         expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
@@ -1382,9 +1388,10 @@ fastify.post<{
     if (!user) return;
     const bundled = Boolean(bundleWithFirstGeneration);
     const designSystemEstimate = !bundled
-        ? estimateCredits({
+        ? estimateReservationCredits({
             operation: 'design_system',
             modelProfile: toCreditModelProfile(preferredModel),
+            preferredModel,
         })
         : null;
     if (designSystemEstimate && !ensureBillingEntitlementOrReply({
@@ -1545,9 +1552,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit');
     if (!user) return;
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'edit',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
     });
     if (!ensureBillingEntitlementOrReply({
         reply,
@@ -1692,9 +1700,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/synthesize-screen-images');
     if (!user) return;
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'synthesize_screen_images',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
         expectedImageCount: screens.length,
     });
     if (!ensureBillingEntitlementOrReply({
@@ -1817,9 +1826,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-image');
     if (!user) return;
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'generate_image',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
     });
     if (!ensureBillingEntitlementOrReply({
         reply,
@@ -1933,9 +1943,10 @@ fastify.post<{
     if (!user) return;
     const approxBytes = Math.round(audioBase64.length * 0.75);
     const approxMinutes = Math.max(1, Math.ceil(approxBytes / (48000 * 60)));
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'transcribe_audio',
         modelProfile: toCreditModelProfile(model),
+        preferredModel: model,
         expectedMinutes: approxMinutes,
     });
     if (!ensureBillingEntitlementOrReply({
@@ -2394,9 +2405,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-stream');
     if (!user) return;
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'generate_stream',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
         expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
@@ -2607,9 +2619,10 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/complete-screen');
     if (!user) return;
-    const estimate = estimateCredits({
+    const estimate = estimateReservationCredits({
         operation: 'complete_screen',
         modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
     });
     if (!ensureBillingEntitlementOrReply({
         reply,

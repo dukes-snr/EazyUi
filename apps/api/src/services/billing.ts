@@ -122,6 +122,7 @@ export type BillingReservation = {
 export type BillingEstimateInput = {
     operation: BillingOperation;
     modelProfile?: CreditModelProfile;
+    preferredModel?: string;
     expectedScreenCount?: number;
     expectedImageCount?: number;
     expectedMinutes?: number;
@@ -196,7 +197,7 @@ const PLAN_DEFINITIONS: Record<BillingPlanId, PlanDefinition> = {
 const COST_TABLE = {
     design_system: 20,
     generate_base: 20,
-    generate_per_screen: 10,
+    generate_per_screen: 13,
     edit: 20,
     complete_screen: 15,
     generate_image: 30,
@@ -212,15 +213,27 @@ const MODEL_MULTIPLIER: Record<CreditModelProfile, number> = {
 };
 
 const USAGE_BILLING_CREDITS_PER_USD = Number(process.env.BILLING_CREDITS_PER_USD || '100');
-const USAGE_BILLING_MARKUP_MULTIPLIER = Number(process.env.BILLING_USAGE_MARKUP_MULTIPLIER || '1.3');
+const USAGE_BILLING_MARKUP_MULTIPLIER = Number(process.env.BILLING_USAGE_MARKUP_MULTIPLIER || '3');
 const USAGE_BILLING_MIN_CREDITS = Number(process.env.BILLING_USAGE_MIN_CREDITS || '1');
 const USAGE_BILLING_FALLBACK_INPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_INPUT_USD_PER_1M || '0.8');
 const USAGE_BILLING_FALLBACK_OUTPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_OUTPUT_USD_PER_1M || '2.4');
+const DEFAULT_TEXT_BILLING_MODEL = String(process.env.GEMINI_MODEL || 'gemini-3-pro-preview').trim() || 'gemini-3-pro-preview';
+const DEFAULT_IMAGE_BILLING_MODEL = String(process.env.GEMINI_IMAGE_MODEL || process.env.GEMINI_IMAGE_FALLBACK_MODEL || 'gemini-2.5-flash-image').trim() || 'gemini-2.5-flash-image';
 
 const TOKEN_PRICING_CATALOG_USD_PER_1M: Record<string, TokenPricingRate> = {
+    'gemini-3.1-pro-preview': { inputUsdPer1M: 2, outputUsdPer1M: 12 },
+    'gemini-3.1-pro-preview-customtools': { inputUsdPer1M: 2, outputUsdPer1M: 12 },
+    'gemini-3-pro-preview': { inputUsdPer1M: 2, outputUsdPer1M: 12 },
+    'gemini-3-pro-preview-customtools': { inputUsdPer1M: 2, outputUsdPer1M: 12 },
+    'gemini-3-flash-preview': { inputUsdPer1M: 0.5, outputUsdPer1M: 3 },
+    'gemini-3.1-flash-lite-preview': { inputUsdPer1M: 0.25, outputUsdPer1M: 1.5 },
+    'gemini-3.1-flash-image-preview': { inputUsdPer1M: 0.5, outputUsdPer1M: 60 },
+    'gemini-3-pro-image-preview': { inputUsdPer1M: 2, outputUsdPer1M: 120 },
     'gemini-2.5-pro': { inputUsdPer1M: 1.25, outputUsdPer1M: 10 },
     'gemini-2.5-flash': { inputUsdPer1M: 0.3, outputUsdPer1M: 2.5 },
+    'gemini-2.5-flash-image': { inputUsdPer1M: 0.3, outputUsdPer1M: 30 },
     'gemini-2.5-flash-lite': { inputUsdPer1M: 0.1, outputUsdPer1M: 0.4 },
+    'gemini-2.5-flash-lite-preview-09-2025': { inputUsdPer1M: 0.1, outputUsdPer1M: 0.4 },
     'gemini-1.5-pro': { inputUsdPer1M: 1.25, outputUsdPer1M: 5 },
     'gemini-1.5-flash': { inputUsdPer1M: 0.35, outputUsdPer1M: 0.53 },
     'llama-3.1-8b-instant': { inputUsdPer1M: 0.05, outputUsdPer1M: 0.08 },
@@ -857,6 +870,61 @@ export function quoteCreditsFromTokenUsage(input: {
     };
 }
 
+function resolveEstimateModelName(operation: BillingOperation, preferredModel?: string): string {
+    const requested = String(preferredModel || '').trim();
+    if (requested) {
+        if (requested === 'image') return DEFAULT_IMAGE_BILLING_MODEL;
+        return requested;
+    }
+    if (operation === 'generate_image') return DEFAULT_IMAGE_BILLING_MODEL;
+    return DEFAULT_TEXT_BILLING_MODEL;
+}
+
+function buildReservationUsageHeuristic(input: BillingEstimateInput): TokenUsageEntry[] {
+    const operation = input.operation;
+    const screens = Math.max(1, clampNonNegative(input.expectedScreenCount || 1));
+    const images = Math.max(1, clampNonNegative(input.expectedImageCount || 1));
+    const minutes = Math.max(1, clampNonNegative(input.expectedMinutes || 1));
+    const model = resolveEstimateModelName(operation, input.preferredModel);
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    if (operation === 'design_system') {
+        inputTokens = 7000;
+        outputTokens = 2500;
+    } else if (operation === 'generate' || operation === 'generate_stream') {
+        inputTokens = 12000 + Math.max(0, screens - 1) * 2500 + (input.bundleIncludesDesignSystem ? 4000 : 0);
+        outputTokens = 7500 + Math.max(0, screens - 1) * 5500 + (input.bundleIncludesDesignSystem ? 2000 : 0);
+    } else if (operation === 'edit') {
+        inputTokens = 18000;
+        outputTokens = 8000;
+    } else if (operation === 'complete_screen') {
+        inputTokens = 12000;
+        outputTokens = 5000;
+    } else if (operation === 'generate_image') {
+        inputTokens = 5000;
+        outputTokens = 1000;
+    } else if (operation === 'synthesize_screen_images') {
+        inputTokens = 8000 + Math.max(0, images - 1) * 1500;
+        outputTokens = 1400 * images;
+    } else if (operation === 'transcribe_audio') {
+        inputTokens = 2500 * minutes;
+        outputTokens = 0;
+    } else {
+        return [];
+    }
+
+    return [{
+        provider: model.toLowerCase().includes('gemini') ? 'gemini' : 'unknown',
+        model,
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        cachedInputTokens: 0,
+    }];
+}
+
 export function estimateCredits(input: BillingEstimateInput): BillingEstimate {
     const operation = input.operation;
     const modelProfile = input.modelProfile || 'quality';
@@ -882,7 +950,7 @@ export function estimateCredits(input: BillingEstimateInput): BillingEstimate {
         base = COST_TABLE.design_system;
     } else if (operation === 'generate' || operation === 'generate_stream') {
         base = COST_TABLE.generate_base;
-        variable = expectedScreens * COST_TABLE.generate_per_screen;
+        variable = Math.max(0, expectedScreens - 1) * COST_TABLE.generate_per_screen;
         bundleDesignSystem = input.bundleIncludesDesignSystem ? COST_TABLE.design_system : 0;
     } else if (operation === 'edit') {
         base = COST_TABLE.edit;
@@ -909,6 +977,29 @@ export function estimateCredits(input: BillingEstimateInput): BillingEstimate {
             multiplier,
             bundleDesignSystem,
         },
+    };
+}
+
+export function estimateReservationCredits(input: BillingEstimateInput): BillingEstimate {
+    const floorEstimate = estimateCredits(input);
+    if (input.operation === 'plan_route' || input.operation === 'plan_assist') {
+        return floorEstimate;
+    }
+
+    const heuristicUsage = buildReservationUsageHeuristic(input);
+    if (!heuristicUsage.length) {
+        return floorEstimate;
+    }
+
+    const usageQuote = quoteCreditsFromTokenUsage({
+        operation: input.operation,
+        usage: heuristicUsage,
+        minimumCredits: 0,
+    });
+
+    return {
+        ...floorEstimate,
+        estimatedCredits: Math.max(floorEstimate.estimatedCredits, usageQuote.credits),
     };
 }
 
