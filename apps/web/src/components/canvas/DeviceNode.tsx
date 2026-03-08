@@ -15,6 +15,7 @@ import '../../styles/DeviceFrames.css';
 const SHOW_STREAMING_OVERLAY = false;
 const SMOOTH_STREAMING_PREVIEW = true;
 const STREAMING_PREVIEW_THROTTLE_MS = 320;
+const BUFFERED_STREAMING_PREVIEW = false;
 
 function injectHeightScript(html: string, screenId: string) {
     const script = `
@@ -95,6 +96,14 @@ function injectHeightScript(html: string, screenId: string) {
 }
 
 function injectScrollbarHide(html: string) {
+    const sanitizedHtml = String(html || '').replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs = '', body = '') => {
+        const attrText = String(attrs).toLowerCase();
+        const bodyText = String(body).toLowerCase();
+        const hasTailwindSrc = /src\s*=\s*["'][^"']*cdn\.tailwindcss\.com[^"']*["']/.test(attrText);
+        const isTailwindConfig = bodyText.includes('tailwind.config');
+        return (hasTailwindSrc || isTailwindConfig) ? full : '';
+    });
+
     const warningFilterScript = `
 <script>
   (function () {
@@ -108,20 +117,67 @@ function injectScrollbarHide(html: string) {
   })();
 </script>`;
 
+    const iconBoot = `
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="dns-prefetch" href="//fonts.googleapis.com">
+<link rel="dns-prefetch" href="//fonts.gstatic.com">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0">
+<script>
+  (function () {
+    if (!document.documentElement) return;
+    document.documentElement.setAttribute('data-eazyui-icons-ready', '0');
+    var done = function () {
+      document.documentElement.setAttribute('data-eazyui-icons-ready', '1');
+    };
+    try {
+      var fonts = document.fonts;
+      if (fonts && typeof fonts.load === 'function') {
+        Promise.race([
+          fonts.load('400 24px "Material Symbols Rounded"'),
+          new Promise(function (resolve) { setTimeout(resolve, 1400); })
+        ]).then(done).catch(done);
+      } else {
+        done();
+      }
+    } catch (_e) {
+      done();
+    }
+  })();
+</script>`;
+
     const styleTag = `
 <style>
   ::-webkit-scrollbar { width: 0; height: 0; }
   ::-webkit-scrollbar-thumb { background: transparent; }
   body { -ms-overflow-style: none; scrollbar-width: none; }
+  .material-symbols-rounded {
+    font-family: 'Material Symbols Rounded';
+    font-weight: 400;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+  }
+  html[data-eazyui-icons-ready="0"] .material-symbols-rounded {
+    color: transparent !important;
+  }
 </style>`;
 
-    if (/<head[^>]*>/i.test(html)) {
-        return html.replace(/<head([^>]*)>/i, `<head$1>${warningFilterScript}\n${styleTag}`);
+    if (/<head[^>]*>/i.test(sanitizedHtml)) {
+        return sanitizedHtml.replace(/<head([^>]*)>/i, `<head$1>${warningFilterScript}\n${iconBoot}\n${styleTag}`);
     }
-    if (html.includes('</head>')) {
-        return html.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
+    if (sanitizedHtml.includes('</head>')) {
+        return sanitizedHtml.replace('</head>', `${warningFilterScript}\n${iconBoot}\n${styleTag}\n</head>`);
     }
-    return `${warningFilterScript}\n${styleTag}\n${html}`;
+    return `${warningFilterScript}\n${iconBoot}\n${styleTag}\n${sanitizedHtml}`;
 }
 
 function injectBodyTopPadding(html: string, paddingTopPx = 30) {
@@ -184,7 +240,7 @@ function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, im
     return `${attrs} style="padding-top: ${paddingTopPx}px${importantSuffix};"`;
 }
 
-function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50, headerPaddingTopPx = 20) {
+function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50, headerPaddingTopPx = 30) {
     const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
     const safeForcePadding = Math.max(0, Math.round(forcePaddingTopPx || 0));
     const safeHeaderPadding = Math.max(0, Math.round(headerPaddingTopPx || 0));
@@ -1343,10 +1399,16 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const injectedHtmlWithNonce = `${injectedHtml}\n<!--eazyui-render:${isEditMode ? 'edit' : 'view'}:${refreshAllTick}-->`;
 
     const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtmlWithNonce);
+    const [bufferedSrcDocs, setBufferedSrcDocs] = useState<[string, string]>([injectedHtmlWithNonce, injectedHtmlWithNonce]);
+    const [activeBufferedFrame, setActiveBufferedFrame] = useState<0 | 1>(0);
     const wasEditingRef = useRef(false);
     const lastReloadTickRef = useRef(reloadTick);
     const streamFlushTimerRef = useRef<number | null>(null);
     const pendingStreamDocRef = useRef<string>(injectedHtmlWithNonce);
+    const pendingBufferedSwapRef = useRef<{ index: 0 | 1 } | null>(null);
+    const queuedBufferedDocRef = useRef<string | null>(null);
+    const activeBufferedFrameRef = useRef<0 | 1>(0);
+    const bufferedSrcDocsRef = useRef<[string, string]>([injectedHtmlWithNonce, injectedHtmlWithNonce]);
 
     useEffect(() => {
         return () => {
@@ -1391,6 +1453,66 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         wasEditingRef.current = isEditingScreen;
         lastReloadTickRef.current = reloadTick;
     }, [injectedHtmlWithNonce, isEditingScreen, reloadTick, isStreaming]);
+
+    const shouldUseBufferedStreamingPreview = BUFFERED_STREAMING_PREVIEW
+        && SMOOTH_STREAMING_PREVIEW
+        && isStreaming
+        && !isEditingScreen;
+
+    useEffect(() => {
+        activeBufferedFrameRef.current = activeBufferedFrame;
+    }, [activeBufferedFrame]);
+
+    useEffect(() => {
+        bufferedSrcDocsRef.current = bufferedSrcDocs;
+    }, [bufferedSrcDocs]);
+
+    const scheduleBufferedSwap = useCallback((nextDoc: string) => {
+        if (pendingBufferedSwapRef.current) {
+            queuedBufferedDocRef.current = nextDoc;
+            return;
+        }
+
+        const inactiveFrame = (activeBufferedFrameRef.current === 0 ? 1 : 0) as 0 | 1;
+        if (bufferedSrcDocsRef.current[inactiveFrame] === nextDoc) {
+            return;
+        }
+
+        pendingBufferedSwapRef.current = { index: inactiveFrame };
+        setBufferedSrcDocs((prev) => {
+            const next: [string, string] = [prev[0], prev[1]];
+            next[inactiveFrame] = nextDoc;
+            return next;
+        });
+    }, []);
+
+    useEffect(() => {
+        if (!shouldUseBufferedStreamingPreview) {
+            setBufferedSrcDocs([stableSrcDoc, stableSrcDoc]);
+            setActiveBufferedFrame(0);
+            pendingBufferedSwapRef.current = null;
+            queuedBufferedDocRef.current = null;
+            activeBufferedFrameRef.current = 0;
+            bufferedSrcDocsRef.current = [stableSrcDoc, stableSrcDoc];
+            return;
+        }
+
+        scheduleBufferedSwap(stableSrcDoc);
+    }, [stableSrcDoc, shouldUseBufferedStreamingPreview, scheduleBufferedSwap]);
+
+    const handleBufferedFrameLoad = useCallback((frameIndex: 0 | 1) => {
+        const pending = pendingBufferedSwapRef.current;
+        if (!pending) return;
+        if (pending.index !== frameIndex) return;
+        setActiveBufferedFrame(frameIndex);
+        activeBufferedFrameRef.current = frameIndex;
+        pendingBufferedSwapRef.current = null;
+        const queued = queuedBufferedDocRef.current;
+        if (queued) {
+            queuedBufferedDocRef.current = null;
+            scheduleBufferedSwap(queued);
+        }
+    }, [scheduleBufferedSwap]);
 
     // Frame Configuration
     let borderWidth = 8;
@@ -1508,27 +1630,64 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                         }}
                     >
-                        <iframe
-                            srcDoc={stableSrcDoc}
-                            title="Preview"
-                            data-screen-id={data.screenId}
-                            style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                width: '100%',
-                                height: '100%',
-                                border: 'none',
-                                display: 'block',
-                                overflow: 'hidden',
-                                borderRadius: contentClipRadius,
-                                clipPath: `inset(0 round ${contentClipRadius})`,
-                                pointerEvents: isEditingScreen ? 'auto' : 'none',
-                                opacity: 1,
-                            }}
-                            sandbox="allow-scripts"
-                        />
+                        {shouldUseBufferedStreamingPreview ? (
+                            <>
+                                {[0, 1].map((frameIndex) => {
+                                    const typedIndex = frameIndex as 0 | 1;
+                                    const docToRender = bufferedSrcDocs[typedIndex];
+                                    const isActiveFrame = activeBufferedFrame === typedIndex;
+                                    return (
+                                        <iframe
+                                            key={`preview-buffered-${typedIndex}`}
+                                            srcDoc={docToRender}
+                                            title={`Preview ${typedIndex + 1}`}
+                                            data-screen-id={data.screenId}
+                                            onLoad={() => handleBufferedFrameLoad(typedIndex)}
+                                            style={{
+                                                position: 'absolute',
+                                                top: 0,
+                                                left: 0,
+                                                right: 0,
+                                                width: '100%',
+                                                height: '100%',
+                                                border: 'none',
+                                                display: 'block',
+                                                overflow: 'hidden',
+                                                borderRadius: contentClipRadius,
+                                                clipPath: `inset(0 round ${contentClipRadius})`,
+                                                pointerEvents: isActiveFrame && isEditingScreen ? 'auto' : 'none',
+                                                opacity: isActiveFrame ? 1 : 0,
+                                                transition: 'opacity 120ms linear',
+                                                zIndex: isActiveFrame ? 2 : 1,
+                                            }}
+                                            sandbox="allow-scripts allow-same-origin"
+                                        />
+                                    );
+                                })}
+                            </>
+                        ) : (
+                            <iframe
+                                srcDoc={stableSrcDoc}
+                                title="Preview"
+                                data-screen-id={data.screenId}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    width: '100%',
+                                    height: '100%',
+                                    border: 'none',
+                                    display: 'block',
+                                    overflow: 'hidden',
+                                    borderRadius: contentClipRadius,
+                                    clipPath: `inset(0 round ${contentClipRadius})`,
+                                    pointerEvents: isEditingScreen ? 'auto' : 'none',
+                                    opacity: 1,
+                                }}
+                                sandbox="allow-scripts allow-same-origin"
+                            />
+                        )}
                     </div>
 
                     {SHOW_STREAMING_OVERLAY && (
