@@ -44,6 +44,8 @@ type StoredScreenDoc = {
   htmlSnippet?: string;
   htmlStorage?: "full" | "snippet";
   htmlPath?: string;
+  htmlHash?: string;
+  persistSignature?: string;
 };
 type WorkspaceSnapshot = {
   designSpec: HtmlDesignSpec;
@@ -89,6 +91,7 @@ type ProjectMetaData = {
   coverImageUrls?: string[];
   coverImageDataUrls?: string[];
   coverScreenIds?: string[];
+  coverSignature?: string;
   coverVersion?: number;
   createdAt: string;
   updatedAt: string;
@@ -531,6 +534,15 @@ function makeId() {
   return `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function hashString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => stripUndefinedDeep(item)) as T;
@@ -703,9 +715,7 @@ function buildFallbackCoverDataUrl(params: { screenName: string; width: number; 
 async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Promise<string[]> {
   const targets = (screens || []).slice(0, 2);
   if (targets.length === 0) return [];
-  const rendered: string[] = [];
-  for (let index = 0; index < targets.length; index += 1) {
-    const screen = targets[index];
+  return Promise.all(targets.map(async (screen, index) => {
     const width = Math.max(280, Math.min(420, screen.width || 402));
     const height = Math.max(560, Math.min(920, screen.height || 874));
     let base64 = await renderScreenImageBase64({
@@ -730,17 +740,15 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
       });
     }
     if (base64) {
-      rendered.push(`data:image/png;base64,${base64}`);
-      continue;
+      return `data:image/png;base64,${base64}`;
     }
-    rendered.push(buildFallbackCoverDataUrl({
+    return buildFallbackCoverDataUrl({
       screenName: String(screen.name || "Screen"),
       width: Number(screen.width || 402),
       height: Number(screen.height || 874),
       index,
-    }));
-  }
-  return rendered;
+    });
+  }));
 }
 
 function resolveProjectCoverTargetScreens(
@@ -783,6 +791,16 @@ function resolveProjectCoverTargetScreens(
   });
 
   return orderedTargets.slice(0, 2);
+}
+
+function buildProjectCoverSignature(screens: HtmlDesignSpec["screens"]): string {
+  const signatureSource = (screens || []).slice(0, 2).map((screen) => ({
+    screenId: screen.screenId,
+    width: screen.width,
+    height: screen.height,
+    htmlHash: hashString(String(screen.html || "")),
+  }));
+  return hashString(JSON.stringify(signatureSource));
 }
 
 function resolveStorageRefFromImageValue(value: string) {
@@ -935,6 +953,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   const createdAt = existing.exists() ? (existing.data().createdAt as string) || now : now;
   const coverTargetScreens = resolveProjectCoverTargetScreens(safeDesignSpec.screens || [], safeCanvasDoc);
   const nextCoverScreenIds = coverTargetScreens.map((screen) => screen.screenId);
+  const nextCoverSignature = buildProjectCoverSignature(coverTargetScreens);
   const existingCoverScreenIds = Array.isArray(existingData?.coverScreenIds) ? existingData!.coverScreenIds! : [];
   const existingCoverImagePaths = Array.isArray(existingData?.coverImagePaths)
     ? existingData!.coverImagePaths!.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 2)
@@ -949,14 +968,11 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   let resolvedCoverImageUrls: string[] = existingCoverImageUrls;
   let resolvedCoverImageDataUrls: string[] = existingCoverImageDataUrls;
   let regeneratedCover = false;
-  const forceCoverRefreshOnManualSave = !isAutosave;
   const shouldRefreshCover = nextCoverScreenIds.length > 0 && (
-    forceCoverRefreshOnManualSave
-    || (
     (resolvedCoverImageUrls.length === 0 && resolvedCoverImageDataUrls.length === 0 && !existingData?.coverImageUrl && !existingData?.coverImageDataUrl)
     || existingCoverScreenIds.join("|") !== nextCoverScreenIds.join("|")
+    || String(existingData?.coverSignature || "") !== nextCoverSignature
     || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
-    )
   );
 
   if (shouldRefreshCover) {
@@ -968,19 +984,21 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       resolvedCoverImageUrls = [];
       if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
         try {
-          const uploadedPaths: string[] = [];
-          const uploadedUrls: string[] = [];
-          for (let index = 0; index < coverDataUrls.length; index += 1) {
+          const uploaded = await Promise.all(coverDataUrls.map(async (coverDataUrl, index) => {
             const coverPath = `previews/cover-${index}.jpg`;
             const coverRef = ref(storage, `users/${uid}/projects/${id}/${coverPath}`);
             await withTimeout(
-              uploadString(coverRef, coverDataUrls[index], "data_url"),
+              uploadString(coverRef, coverDataUrl, "data_url"),
               STORAGE_UPLOAD_TIMEOUT_MS,
               `Project cover upload (${index + 1})`
             );
-            uploadedPaths.push(coverPath);
-            uploadedUrls.push(await getDownloadURL(coverRef));
-          }
+            return {
+              path: coverPath,
+              url: await getDownloadURL(coverRef),
+            };
+          }));
+          const uploadedPaths = uploaded.map((item) => item.path);
+          const uploadedUrls = uploaded.map((item) => item.url);
           resolvedCoverImagePaths = uploadedPaths;
           resolvedCoverImageUrls = uploadedUrls;
           resolvedCoverImageDataUrls = [];
@@ -1010,10 +1028,17 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     );
   }
 
+  let existingScreensById = new Map<string, StoredScreenDoc>();
   // Save screen snapshots separately for future collaboration granularity.
   if (!isAutosave) {
     const currentScreenIds = new Set((safeDesignSpec.screens || []).map((screen) => screen.screenId));
     const existingScreensSnap = await getDocs(collection(db, "users", uid, "projects", id, "screens"));
+    existingScreensById = new Map(
+      existingScreensSnap.docs.map((screenDoc) => {
+        const persisted = screenDoc.data() as StoredScreenDoc;
+        return [screenDoc.id, { ...persisted, screenId: persisted.screenId || screenDoc.id }] as const;
+      })
+    );
     const staleScreenBatch = writeBatch(db);
     const staleScreenHtmlPaths: string[] = [];
     let staleScreenCount = 0;
@@ -1044,9 +1069,21 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   const screenPayloads = await Promise.all(
     (safeDesignSpec.screens || []).map(async (screen) => {
       const fullHtml = typeof screen.html === "string" ? screen.html : "";
+      const htmlHash = hashString(fullHtml);
+      const persistSignature = hashString(JSON.stringify({
+        name: screen.name,
+        width: screen.width,
+        height: screen.height,
+        status: screen.status || "complete",
+        htmlHash,
+      }));
       const canStoreFullHtml = fullHtml.length > 0 && fullHtml.length <= 800_000;
+      const existingScreen = existingScreensById.get(screen.screenId);
+      const screenUnchanged = !isAutosave && existingScreen?.persistSignature === persistSignature;
       let htmlPath: string | undefined;
-      if (!isAutosave && fullHtml.length > 0 && ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
+      if (screenUnchanged) {
+        htmlPath = existingScreen?.htmlPath;
+      } else if (!isAutosave && fullHtml.length > 0 && ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
         htmlPath = `screens/${screen.screenId}.html`;
         try {
           await withTimeout(
@@ -1065,6 +1102,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
           }
         }
       }
+      if (screenUnchanged) {
+        return null;
+      }
       return {
         screenId: screen.screenId,
         payload: stripUndefinedDeep({
@@ -1077,16 +1117,24 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
           htmlSnippet: fullHtml.slice(0, 4000),
           htmlStorage: canStoreFullHtml ? "full" : "snippet",
           htmlPath,
+          htmlHash,
+          persistSignature,
           updatedAt: now,
         }),
       };
     })
   );
-  screenPayloads.forEach(({ screenId, payload }) => {
+  let changedScreenCount = 0;
+  screenPayloads.forEach((entry) => {
+    if (!entry) return;
+    const { screenId, payload } = entry;
     const screenRef = doc(db, "users", uid, "projects", id, "screens", screenId);
     screensBatch.set(screenRef, payload);
+    changedScreenCount += 1;
   });
-  await screensBatch.commit();
+  if (changedScreenCount > 0) {
+    await screensBatch.commit();
+  }
 
   // Persist chat messages in a subcollection for scalable querying.
   const messages = (safeChatState as { messages?: Array<Record<string, unknown>> } | undefined)?.messages || [];
@@ -1226,6 +1274,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     coverImageUrls: resolvedCoverImageUrls,
     coverImageDataUrls: resolvedCoverImageDataUrls,
     coverScreenIds: nextCoverScreenIds,
+    coverSignature: nextCoverSignature,
     coverVersion: PROJECT_COVER_VERSION,
     screenCount: (safeDesignSpec.screens || []).length,
     designSpecMeta: {
@@ -1263,6 +1312,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       coverImageUrls: resolvedCoverImageUrls,
       coverImageDataUrls: [],
       coverScreenIds: nextCoverScreenIds,
+      coverSignature: nextCoverSignature,
       coverVersion: PROJECT_COVER_VERSION,
       screenCount: (safeDesignSpec.screens || []).length,
       designSpecMeta: {
