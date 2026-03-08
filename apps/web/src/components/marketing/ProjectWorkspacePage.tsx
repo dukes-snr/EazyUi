@@ -650,8 +650,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                           </div>
                         );
                       }
-                      const hasMultipleScreens = (project.screenCount ?? 0) > 1;
-                      const secondaryImage = persistedImages[1] || (hasMultipleScreens ? primaryImage : undefined);
+                      const secondaryImage = persistedImages[1];
                       const frameImages = secondaryImage ? [primaryImage, secondaryImage] : [primaryImage];
                       return (
                         <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden r px-3 py-4">

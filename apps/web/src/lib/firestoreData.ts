@@ -587,7 +587,7 @@ function compactProjectMetaPayloadForFirestore(payload: Record<string, unknown>)
   } else {
     coverDataUrls = coverDataUrls
       .filter((value) => value.length <= FIRESTORE_COVER_DATA_URL_MAX_LENGTH)
-      .slice(0, 1);
+      .slice(0, 2);
   }
   next.coverImageDataUrls = coverDataUrls;
   next.coverImageDataUrl = coverDataUrls[0] || null;
@@ -616,8 +616,8 @@ function compactProjectMetaPayloadForFirestore(payload: Record<string, unknown>)
   if (fits()) return stripUndefinedDeep(next) as Record<string, unknown>;
 
   next.projectMemory = null;
-  next.coverImageDataUrls = [];
-  next.coverImageDataUrl = null;
+  next.coverImageDataUrls = coverDataUrls.slice(0, 1);
+  next.coverImageDataUrl = coverDataUrls[0] || null;
   if (meta) {
     meta.description = "";
     meta.designSystem = null;
@@ -741,6 +741,48 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
     }));
   }
   return rendered;
+}
+
+function resolveProjectCoverTargetScreens(
+  screens: HtmlDesignSpec["screens"],
+  canvasDoc: unknown
+): HtmlDesignSpec["screens"] {
+  const sourceScreens = Array.isArray(screens) ? screens : [];
+  if (sourceScreens.length <= 1) return sourceScreens.slice(0, 2);
+
+  const screensById = new Map(sourceScreens.map((screen) => [screen.screenId, screen]));
+  const seen = new Set<string>();
+  const orderedTargets: HtmlDesignSpec["screens"] = [];
+  const rawBoards = (
+    canvasDoc
+    && typeof canvasDoc === "object"
+    && Array.isArray((canvasDoc as { boards?: unknown[] }).boards)
+  ) ? (canvasDoc as { boards: Array<{ screenId?: unknown; x?: unknown; y?: unknown; visible?: unknown }> }).boards : [];
+
+  const sortedBoards = rawBoards
+    .filter((board) => board && board.visible !== false && typeof board.screenId === "string" && board.screenId.trim().length > 0)
+    .sort((left, right) => {
+      const topDiff = Number(left.y || 0) - Number(right.y || 0);
+      if (Math.abs(topDiff) > 24) return topDiff;
+      return Number(left.x || 0) - Number(right.x || 0);
+    });
+
+  sortedBoards.forEach((board) => {
+    const screenId = String(board.screenId || "");
+    if (!screenId || seen.has(screenId)) return;
+    const match = screensById.get(screenId);
+    if (!match) return;
+    seen.add(screenId);
+    orderedTargets.push(match);
+  });
+
+  sourceScreens.forEach((screen) => {
+    if (!screen?.screenId || seen.has(screen.screenId)) return;
+    seen.add(screen.screenId);
+    orderedTargets.push(screen);
+  });
+
+  return orderedTargets.slice(0, 2);
 }
 
 function resolveStorageRefFromImageValue(value: string) {
@@ -891,7 +933,8 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     resolvedSnapshotPath = existingData.snapshotPath;
   }
   const createdAt = existing.exists() ? (existing.data().createdAt as string) || now : now;
-  const nextCoverScreenIds = (safeDesignSpec.screens || []).slice(0, 2).map((screen) => screen.screenId);
+  const coverTargetScreens = resolveProjectCoverTargetScreens(safeDesignSpec.screens || [], safeCanvasDoc);
+  const nextCoverScreenIds = coverTargetScreens.map((screen) => screen.screenId);
   const existingCoverScreenIds = Array.isArray(existingData?.coverScreenIds) ? existingData!.coverScreenIds! : [];
   const existingCoverImagePaths = Array.isArray(existingData?.coverImagePaths)
     ? existingData!.coverImagePaths!.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 2)
@@ -917,7 +960,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   );
 
   if (shouldRefreshCover) {
-    const coverDataUrls = await buildProjectCoverDataUrls(safeDesignSpec.screens || []);
+    const coverDataUrls = await buildProjectCoverDataUrls(coverTargetScreens);
     if (coverDataUrls.length > 0) {
       regeneratedCover = true;
       resolvedCoverImageDataUrls = coverDataUrls;
