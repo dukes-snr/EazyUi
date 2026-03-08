@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, BarChart3, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
+import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import {
-    extractLedgerDeductedCredits,
-    extractLedgerModelName,
-    extractLedgerRequestPreview,
-    extractLedgerTotalTokens,
+    buildBillingUsageActivityRows,
 } from '../../utils/billingUsage';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
@@ -127,6 +124,13 @@ export function ProjectSettingsPage({
         void refreshBillingData();
         void refreshMcpApiKeys();
     }, []);
+
+    useEffect(() => {
+        if (!authUser) return;
+        return subscribeToBillingUpdates(() => {
+            void refreshBillingData();
+        });
+    }, [authUser]);
 
     const copyText = async (value: string, successTitle = 'Copied') => {
         try {
@@ -259,7 +263,7 @@ export function ProjectSettingsPage({
         onNavigate('/app/projects/new');
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 100;
     const monthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const usedCredits = Math.max(0, planCreditCap - monthlyCredits);
     const usagePct = Math.max(0, Math.min(100, Math.round((usedCredits / Math.max(planCreditCap, 1)) * 100)));
@@ -319,29 +323,7 @@ export function ProjectSettingsPage({
         return start;
     }, [usageDaysFilter]);
     const usageActivityRows = useMemo(() => {
-        const startTs = usageFilterStart.getTime();
-        return [...billingLedger]
-            .filter((item) => item.creditsDelta < 0 && new Date(item.createdAt).getTime() >= startTs)
-            .map((item) => {
-                const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
-                const metadataReason = typeof item.metadata?.reason === 'string' ? item.metadata.reason : '';
-                const requestPreview = extractLedgerRequestPreview(item.metadata);
-                const deductedCredits = extractLedgerDeductedCredits(item);
-                const tokensUsed = extractLedgerTotalTokens(item.metadata);
-                const modelName = extractLedgerModelName(item.metadata) || 'Default model';
-                const requestIdentifier = item.requestId || item.reservationId || '-';
-                return {
-                    item,
-                    actionLabel,
-                    metadataReason,
-                    requestPreview,
-                    deductedCredits,
-                    tokensUsed,
-                    modelName,
-                    requestIdentifier,
-                };
-            })
-            .sort((a, b) => new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime());
+        return buildBillingUsageActivityRows(billingLedger, usageFilterStart.getTime());
     }, [billingLedger, usageFilterStart]);
     const usageCreditsInWindow = useMemo(
         () => usageActivityRows.reduce((sum, row) => sum + row.deductedCredits, 0),

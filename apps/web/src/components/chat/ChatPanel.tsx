@@ -3445,6 +3445,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             : platformToUse === 'tablet'
                 ? { width: 768, height: 1024 }
                 : { width: 402, height: 874 };
+        const requestedScreenCount = incomingTargetScreens && incomingTargetScreens.length > 0
+            ? incomingTargetScreens.length
+            : undefined;
         let startTime = Date.now();
         let tokenUsageTotal = 0;
         const captureBillingTokens = (billing: unknown) => {
@@ -3673,6 +3676,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
@@ -3796,6 +3800,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
+                expectedScreenCount: requestedScreenCount,
                 preferredModel,
                 projectDesignSystem: activeProjectDesignSystem,
                 bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
@@ -3863,6 +3868,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,

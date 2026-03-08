@@ -188,27 +188,27 @@ type DeductBreakdown = {
 };
 
 const PLAN_DEFINITIONS: Record<BillingPlanId, PlanDefinition> = {
-    free: { id: 'free', label: 'Free', monthlyCredits: 300, paid: false },
+    free: { id: 'free', label: 'Free', monthlyCredits: 100, paid: false },
     pro: { id: 'pro', label: 'Pro', monthlyCredits: 3000, paid: true },
     team: { id: 'team', label: 'Team', monthlyCredits: 15000, paid: true },
 };
 
 const COST_TABLE = {
-    design_system: 8,
+    design_system: 20,
     generate_base: 20,
-    generate_per_screen: 8,
-    edit: 14,
-    complete_screen: 4,
-    generate_image: 18,
-    synthesize_base: 10,
-    synthesize_per_image: 6,
-    transcribe_per_minute: 4,
+    generate_per_screen: 10,
+    edit: 20,
+    complete_screen: 15,
+    generate_image: 30,
+    synthesize_base: 20,
+    synthesize_per_image: 10,
+    transcribe_per_minute: 5,
 } as const;
 
 const MODEL_MULTIPLIER: Record<CreditModelProfile, number> = {
-    fast: 0.8,
+    fast: 1,
     quality: 1,
-    premium: 1.4,
+    premium: 1,
 };
 
 const USAGE_BILLING_CREDITS_PER_USD = Number(process.env.BILLING_CREDITS_PER_USD || '100');

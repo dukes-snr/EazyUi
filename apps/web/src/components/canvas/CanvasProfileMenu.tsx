@@ -27,9 +27,9 @@ import {
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
-import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
+import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
-import { extractLedgerDeductedCredits, extractLedgerModelName, extractLedgerRequestPreview, extractLedgerTotalTokens } from '../../utils/billingUsage';
+import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
@@ -181,6 +181,13 @@ export function CanvasProfileMenu() {
         };
     }, [authUser]);
 
+    useEffect(() => {
+        if (!authUser) return;
+        return subscribeToBillingUpdates(() => {
+            void refreshBillingData({ silent: true });
+        });
+    }, [authUser]);
+
     const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
         try {
             setBillingActionBusy(productKey);
@@ -328,7 +335,7 @@ export function CanvasProfileMenu() {
         usage: { title: 'Usage', subtitle: 'Track credit consumption and recent billing events.' },
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 100;
     const currentMonthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const consumedThisCycle = Math.max(0, planCreditCap - currentMonthlyCredits);
     const cycleUsagePct = Math.max(0, Math.min(100, Math.round((consumedThisCycle / Math.max(planCreditCap, 1)) * 100)));
@@ -355,6 +362,7 @@ export function CanvasProfileMenu() {
     const usageEvents = billingLedger
         .filter((item) => Boolean(item.operation) || Boolean(item.requestId))
         .slice(0, 50);
+    const usageActivityRows = useMemo(() => buildBillingUsageActivityRows(billingLedger), [billingLedger]);
     const aiCodeAccepted = billingLedger.filter((item) => (item.operation || '').includes('generate') || (item.operation || '').includes('edit')).length;
     const chatCount = billingLedger.filter((item) => (item.operation || '').includes('plan') || (item.operation || '').includes('generate')).length;
     const modelHistogram = usageEvents
@@ -725,7 +733,7 @@ export function CanvasProfileMenu() {
                                             <div className="overflow-x-auto">
                                                 <table className="min-w-full text-left">
                                                     <thead><tr className="text-xs uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]"><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Name</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Credits</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Date</th><th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Operation</th></tr></thead>
-                                                    <tbody>{usageEvents.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No billing rows yet.</td></tr> : usageEvents.map((item) => <tr key={item.id} className="text-sm text-[var(--ui-text)]"><td className="border-b border-[var(--ui-border)] px-4 py-3">{(item.operation || item.type).replace(/_/g, ' ')}</td><td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{new Date(item.createdAt).toLocaleString()}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{item.type}</td></tr>)}</tbody>
+                                                    <tbody>{usageActivityRows.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No billing rows yet.</td></tr> : usageActivityRows.map((row) => <tr key={row.key} className="text-sm text-[var(--ui-text)]"><td className="border-b border-[var(--ui-border)] px-4 py-3">{row.actionLabel}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 font-semibold text-rose-300">-{row.deductedCredits}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{new Date(row.item.createdAt).toLocaleString()}</td><td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{row.item.type}</td></tr>)}</tbody>
                                                 </table>
                                             </div>
                                         </SectionCard>
@@ -757,38 +765,32 @@ export function CanvasProfileMenu() {
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {usageEvents.length === 0 ? (
+                                                        {usageActivityRows.length === 0 ? (
                                                             <tr>
                                                                 <td colSpan={7} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td>
                                                             </tr>
-                                                        ) : usageEvents.map((item) => {
-                                                            const requestPreview = extractLedgerRequestPreview(item.metadata);
-                                                            const deductedCredits = extractLedgerDeductedCredits(item);
-                                                            const tokensUsed = extractLedgerTotalTokens(item.metadata);
-                                                            const modelName = extractLedgerModelName(item.metadata) || 'Default model';
-                                                            const requestIdentifier = item.requestId || item.reservationId || '-';
-                                                            const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
+                                                        ) : usageActivityRows.map((row) => {
                                                             return (
-                                                                <tr key={`usage-${item.id}`} className="text-sm text-[var(--ui-text)]">
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(item.createdAt).toLocaleString()}</td>
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{modelName}</td>
+                                                                <tr key={`usage-${row.key}`} className="text-sm text-[var(--ui-text)]">
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(row.item.createdAt).toLocaleString()}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{row.modelName}</td>
                                                                     <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">
-                                                                        {requestPreview ? (
-                                                                            <span className="block max-w-[320px] truncate whitespace-nowrap" title={requestPreview}>
-                                                                                {requestPreview}
+                                                                        {row.requestPreview ? (
+                                                                            <span className="block max-w-[320px] truncate whitespace-nowrap" title={row.requestPreview}>
+                                                                                {row.requestPreview}
                                                                             </span>
                                                                         ) : (
                                                                             <span>-</span>
                                                                         )}
                                                                     </td>
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{actionLabel}</td>
-                                                                    <td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${deductedCredits > 0 ? 'text-rose-300' : 'text-[var(--ui-text-subtle)]'}`}>
-                                                                        {deductedCredits > 0 ? `-${deductedCredits}` : '0'}
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{row.actionLabel}</td>
+                                                                    <td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${row.deductedCredits > 0 ? 'text-rose-300' : 'text-[var(--ui-text-subtle)]'}`}>
+                                                                        {row.deductedCredits > 0 ? `-${row.deductedCredits}` : '0'}
                                                                     </td>
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{tokensUsed !== null ? tokensUsed.toLocaleString() : '-'}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{row.tokensUsed !== null ? row.tokensUsed.toLocaleString() : '-'}</td>
                                                                     <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">
-                                                                        <span className="block max-w-[200px] truncate whitespace-nowrap" title={requestIdentifier}>
-                                                                            {requestIdentifier}
+                                                                        <span className="block max-w-[200px] truncate whitespace-nowrap" title={row.requestIdentifier}>
+                                                                            {row.requestIdentifier}
                                                                         </span>
                                                                     </td>
                                                                 </tr>

@@ -39,6 +39,67 @@ const MATERIAL_ICON_HIDDEN_SELECTORS = MATERIAL_ICON_VISIBILITY_SELECTORS
     .map((selector) => `html[data-eazyui-icons-ready="0"] ${selector}`)
     .join(',\n  ');
 
+function hasExplicitDarkThemeSignal(html: string): boolean {
+    const source = String(html || '');
+    return /<(html|body)\b[^>]*\bclass\s*=\s*["'][^"']*\bdark\b/i.test(source)
+        || /<(html|body)\b[^>]*\bdata-theme\s*=\s*["']dark["']/i.test(source)
+        || /<(html|body)\b[^>]*\bdata-color-scheme\s*=\s*["']dark["']/i.test(source)
+        || /<(html|body)\b[^>]*\bstyle\s*=\s*["'][^"']*color-scheme\s*:\s*dark/i.test(source);
+}
+
+function normalizePreviewColorScheme(html: string): string {
+    const source = String(html || '');
+    if (!source.trim() || hasExplicitDarkThemeSignal(source)) {
+        return source;
+    }
+
+    const colorSchemeStyle = `
+<style id="eazyui-preview-color-scheme">
+  :root { color-scheme: light !important; }
+</style>`;
+    const matchMediaPatch = `
+<script>
+  (function () {
+    const original = window.matchMedia ? window.matchMedia.bind(window) : null;
+    if (!original) return;
+    window.matchMedia = function (query) {
+      const normalized = String(query || '');
+      if (/prefers-color-scheme\\s*:\\s*dark/i.test(normalized)) {
+        return {
+          matches: false,
+          media: normalized,
+          onchange: null,
+          addListener: function () {},
+          removeListener: function () {},
+          addEventListener: function () {},
+          removeEventListener: function () {},
+          dispatchEvent: function () { return false; }
+        };
+      }
+      if (/prefers-color-scheme\\s*:\\s*light/i.test(normalized)) {
+        return {
+          matches: true,
+          media: normalized,
+          onchange: null,
+          addListener: function () {},
+          removeListener: function () {},
+          addEventListener: function () {},
+          removeEventListener: function () {},
+          dispatchEvent: function () { return false; }
+        };
+      }
+      return original(query);
+    };
+  })();
+</script>`;
+
+    const patchedMedia = source.replace(/prefers-color-scheme\s*:\s*dark/gi, 'max-width: 0px');
+    if (/<head\b[^>]*>/i.test(patchedMedia)) {
+        return patchedMedia.replace(/<head\b([^>]*)>/i, `<head$1>${colorSchemeStyle}${matchMediaPatch}`);
+    }
+    return `${colorSchemeStyle}${matchMediaPatch}${patchedMedia}`;
+}
+
 function injectHeightScript(html: string, screenId: string) {
     const script = `
 <script>
@@ -246,8 +307,9 @@ function injectScrollbarHide(html: string) {
         const attrText = String(attrs).toLowerCase();
         const bodyText = String(body).toLowerCase();
         const hasTailwindSrc = /src\s*=\s*["'][^"']*cdn\.tailwindcss\.com[^"']*["']/.test(attrText);
+        const hasIconifySrc = /src\s*=\s*["'][^"']*code\.iconify\.design\/iconify-icon\/[^"']*["']/.test(attrText);
         const isTailwindConfig = bodyText.includes('tailwind.config');
-        return (hasTailwindSrc || isTailwindConfig) ? full : '';
+        return (hasTailwindSrc || hasIconifySrc || isTailwindConfig) ? full : '';
     });
 
     const warningFilterScript = `
@@ -1593,7 +1655,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     }, [data.html, isStreaming]);
 
     const injectedHtmlWithNonce = useMemo(() => {
-        const noScrollbarHtml = injectScrollbarHide(htmlString);
+        const normalizedThemeHtml = normalizePreviewColorScheme(htmlString);
+        const noScrollbarHtml = injectScrollbarHide(normalizedThemeHtml);
         const paddedHtml = injectBodyTopPadding(noScrollbarHtml, 30);
         const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
         const baseHtml = isDesktop

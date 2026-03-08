@@ -271,7 +271,7 @@ function resolveUsageCharge(params: {
         usage: params.usage!,
     });
     return {
-        finalCredits: usageQuote.credits,
+        finalCredits: params.fallbackEstimatedCredits,
         usageQuote,
     };
 }
@@ -424,6 +424,39 @@ async function getRenderBrowser() {
         })();
     }
     return renderBrowserPromise;
+}
+
+function hasExplicitDarkThemeSignal(html: string): boolean {
+    const source = String(html || '');
+    return /<(html|body)\b[^>]*\bclass\s*=\s*["'][^"']*\bdark\b/i.test(source)
+        || /<(html|body)\b[^>]*\bdata-theme\s*=\s*["']dark["']/i.test(source)
+        || /<(html|body)\b[^>]*\bdata-color-scheme\s*=\s*["']dark["']/i.test(source)
+        || /<(html|body)\b[^>]*\bstyle\s*=\s*["'][^"']*color-scheme\s*:\s*dark/i.test(source);
+}
+
+function normalizeRenderColorSchemeHtml(html: string): { html: string; colorScheme: 'light' | 'dark' } {
+    const source = String(html || '');
+    if (!source.trim()) {
+        return { html: source, colorScheme: 'light' };
+    }
+
+    if (hasExplicitDarkThemeSignal(source)) {
+        return { html: source, colorScheme: 'dark' };
+    }
+
+    const colorSchemeStyle = `
+<style id="eazyui-render-color-scheme">
+  :root { color-scheme: light !important; }
+</style>`;
+    const patchedMedia = source.replace(/prefers-color-scheme\s*:\s*dark/gi, 'max-width: 0px');
+    const nextHtml = /<head\b[^>]*>/i.test(patchedMedia)
+        ? patchedMedia.replace(/<head\b([^>]*)>/i, `<head$1>${colorSchemeStyle}`)
+        : `${colorSchemeStyle}${patchedMedia}`;
+
+    return {
+        html: nextHtml,
+        colorScheme: 'light',
+    };
 }
 
 function isBlockedProxyHost(hostname: string): boolean {
@@ -1194,6 +1227,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -1201,7 +1235,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1217,7 +1251,7 @@ fastify.post<{
     const reservationEstimate = estimateCredits({
         operation: 'generate',
         modelProfile: toCreditModelProfile(preferredModel),
-        expectedScreenCount: 4,
+        expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
     if (!ensureBillingEntitlementOrReply({
@@ -1240,6 +1274,7 @@ fastify.post<{
             metadata: {
                 route: '/api/generate',
                 modelProfile: reservationEstimate.modelProfile,
+                expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || undefined,
                 bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
                 requestPreview,
             },
@@ -2045,14 +2080,7 @@ fastify.post<{
         operation: plannerOperation,
         modelProfile: toCreditModelProfile(preferredModel),
     });
-    const plannerEstimate = {
-        ...rawPlannerEstimate,
-        estimatedCredits: Math.max(1, rawPlannerEstimate.estimatedCredits),
-        breakdown: {
-            ...rawPlannerEstimate.breakdown,
-            base: Math.max(1, rawPlannerEstimate.breakdown.base),
-        },
-    };
+    const plannerEstimate = rawPlannerEstimate;
     if (!ensureBillingEntitlementOrReply({
         reply,
         traceId,
@@ -2277,24 +2305,26 @@ fastify.post<{
         scale?: number;
     };
 }>('/api/render-screen-image', async (request, reply) => {
-    const html = String(request.body?.html || '');
+    const rawHtml = String(request.body?.html || '');
     const width = Math.max(240, Math.min(2400, Number(request.body?.width || 402)));
     const height = Math.max(240, Math.min(3200, Number(request.body?.height || 874)));
     const scale = Math.max(1, Math.min(3, Number(request.body?.scale || 2)));
 
-    if (!html.trim()) {
+    if (!rawHtml.trim()) {
         return reply.status(400).send({ error: 'html is required' });
     }
 
     try {
+        const normalizedRender = normalizeRenderColorSchemeHtml(rawHtml);
         const browser = await getRenderBrowser();
         const context = await browser.newContext({
             viewport: { width, height },
             deviceScaleFactor: scale,
+            colorScheme: normalizedRender.colorScheme,
         });
         const page = await context.newPage();
         try {
-            await page.setContent(html, {
+            await page.setContent(normalizedRender.html, {
                 waitUntil: 'domcontentloaded',
                 timeout: 20000,
             });
@@ -2333,6 +2363,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -2345,6 +2376,7 @@ fastify.post<{
         stylePreset,
         platform,
         images,
+        expectedScreenCount,
         preferredModel,
         temperature,
         projectDesignSystem,
@@ -2365,7 +2397,7 @@ fastify.post<{
     const estimate = estimateCredits({
         operation: 'generate_stream',
         modelProfile: toCreditModelProfile(preferredModel),
-        expectedScreenCount: 4,
+        expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
     if (!ensureBillingEntitlementOrReply({
@@ -2406,6 +2438,7 @@ fastify.post<{
             projectId,
             metadata: {
                 route: '/api/generate-stream',
+                expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || undefined,
                 bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
                 requestPreview,
             },
@@ -2470,12 +2503,16 @@ fastify.post<{
         }
         if (reservation) {
             const usage = await usagePromise;
+            const estimateCharge = estimateCredits({
+                operation: 'generate_stream',
+                modelProfile: toCreditModelProfile(preferredModel),
+                expectedScreenCount: completedScreens > 0 ? completedScreens : 4,
+                bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+            });
             const usageCharge = resolveUsageCharge({
                 operation: 'generate_stream',
                 usage,
-                // Stream generation should be billed from measured token usage, not the legacy flat estimate.
-                // If usage is unavailable, avoid falling back to the old fixed-screen estimate.
-                fallbackEstimatedCredits: 0,
+                fallbackEstimatedCredits: estimateCharge.estimatedCredits,
             });
             const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/generate-stream',

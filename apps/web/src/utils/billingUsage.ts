@@ -1,5 +1,17 @@
 import type { BillingLedgerItem } from '@/api/client';
 
+export type BillingUsageActivityRow = {
+    key: string;
+    item: BillingLedgerItem;
+    actionLabel: string;
+    metadataReason: string;
+    requestPreview: string | null;
+    deductedCredits: number;
+    tokensUsed: number | null;
+    modelName: string;
+    requestIdentifier: string;
+};
+
 export function toSingleLinePreview(value: unknown, max = 140): string | null {
     const normalized = String(value || '').replace(/\s+/g, ' ').trim();
     if (!normalized) return null;
@@ -83,6 +95,10 @@ export function extractLedgerModelName(metadata?: Record<string, unknown> | null
 }
 
 export function extractLedgerDeductedCredits(item: BillingLedgerItem): number {
+    if (item.creditsDelta < 0) {
+        return Math.abs(Math.round(item.creditsDelta));
+    }
+
     const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : null;
     const finalChargedDirect = toSafeNumber((metadata as any)?.finalChargedCredits);
     if (finalChargedDirect !== null && finalChargedDirect >= 0) return Math.max(0, Math.round(finalChargedDirect));
@@ -98,6 +114,68 @@ export function extractLedgerDeductedCredits(item: BillingLedgerItem): number {
         return Math.max(0, Math.round(reservedCredits));
     }
 
-    if (item.creditsDelta < 0) return Math.abs(Math.round(item.creditsDelta));
     return 0;
+}
+
+function toLedgerTimestamp(item: BillingLedgerItem): number {
+    return new Date(item.createdAt).getTime();
+}
+
+function firstDefined<T>(values: Array<T | null | undefined>): T | null {
+    for (const value of values) {
+        if (value !== null && value !== undefined && value !== '') return value as T;
+    }
+    return null;
+}
+
+export function buildBillingUsageActivityRows(
+    items: BillingLedgerItem[],
+    startTs = 0
+): BillingUsageActivityRow[] {
+    const groups = new Map<string, BillingLedgerItem[]>();
+
+    for (const item of items) {
+        const createdAt = toLedgerTimestamp(item);
+        if (!Number.isFinite(createdAt) || createdAt < startTs) continue;
+        if (item.type !== 'reserve' && item.type !== 'refund' && item.type !== 'settle') continue;
+        if (!item.operation && !item.requestId && !item.reservationId) continue;
+
+        const key = item.reservationId || item.requestId || item.id;
+        const existing = groups.get(key);
+        if (existing) existing.push(item);
+        else groups.set(key, [item]);
+    }
+
+    return Array.from(groups.entries())
+        .map(([key, group]) => {
+            const ordered = [...group].sort((a, b) => toLedgerTimestamp(a) - toLedgerTimestamp(b));
+            const newestFirst = [...ordered].reverse();
+            const representative = newestFirst[0];
+            const actionItem = firstDefined(newestFirst.filter((item) => Boolean(item.operation))) || representative;
+            const metadataReason = firstDefined(
+                newestFirst.map((item) => (typeof item.metadata?.reason === 'string' ? item.metadata.reason : null))
+            ) || '';
+            const requestPreview = firstDefined(newestFirst.map((item) => extractLedgerRequestPreview(item.metadata)));
+            const tokensUsed = firstDefined(newestFirst.map((item) => extractLedgerTotalTokens(item.metadata)));
+            const modelName = firstDefined(newestFirst.map((item) => extractLedgerModelName(item.metadata))) || 'Default model';
+            const requestIdentifier = representative.requestId || representative.reservationId || key;
+            const deductedCredits = Math.max(
+                0,
+                Math.round(-ordered.reduce((sum, item) => sum + Number(item.creditsDelta || 0), 0))
+            );
+
+            return {
+                key,
+                item: representative,
+                actionLabel: String(actionItem.operation || representative.type).replace(/_/g, ' '),
+                metadataReason,
+                requestPreview,
+                deductedCredits,
+                tokensUsed,
+                modelName,
+                requestIdentifier,
+            } satisfies BillingUsageActivityRow;
+        })
+        .filter((row) => row.deductedCredits > 0)
+        .sort((a, b) => toLedgerTimestamp(b.item) - toLedgerTimestamp(a.item));
 }

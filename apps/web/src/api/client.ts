@@ -148,6 +148,7 @@ export interface GenerateRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[]; // Base64 encoded images
+    expectedScreenCount?: number;
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
     bundleIncludesDesignSystem?: boolean;
@@ -568,6 +569,19 @@ export interface ProjectResponse {
 const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const STREAM_BILLING_SAFE_TAIL = Math.max(16, STREAM_BILLING_MARKER_PREFIX.length - 1);
+const BILLING_UPDATED_EVENT = 'eazyui:billing-updated';
+
+function notifyBillingUpdated(billing?: BillingUsageMeta): void {
+    if (!billing || typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(BILLING_UPDATED_EVENT, { detail: billing }));
+}
+
+export function subscribeToBillingUpdates(listener: () => void): () => void {
+    if (typeof window === 'undefined') return () => {};
+    const handler = () => listener();
+    window.addEventListener(BILLING_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(BILLING_UPDATED_EVENT, handler);
+}
 
 function decodeBase64Utf8(input: string): string {
     const decodedBinary = atob(input);
@@ -672,11 +686,13 @@ class ApiClient {
 
     async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<GenerateResponse>('/generate', {
+        const response = await this.request<GenerateResponse>('/generate', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async generateDesignSystem(
@@ -684,11 +700,13 @@ class ApiClient {
         signal?: AbortSignal
     ): Promise<GenerateDesignSystemResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<GenerateDesignSystemResponse>('/design-system', {
+        const response = await this.request<GenerateDesignSystemResponse>('/design-system', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async generateStream(
@@ -781,53 +799,64 @@ class ApiClient {
             flushText(pending);
         }
 
+        notifyBillingUpdated(billing);
         return { billing };
     }
 
 
     async edit(request: EditRequest, signal?: AbortSignal): Promise<EditResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<EditResponse>('/edit', {
+        const response = await this.request<EditResponse>('/edit', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async generateImage(request: GenerateImageRequest, signal?: AbortSignal): Promise<GenerateImageResponse> {
-        return this.request<GenerateImageResponse>('/generate-image', {
+        const response = await this.request<GenerateImageResponse>('/generate-image', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async synthesizeScreenImages(
         request: SynthesizeScreenImagesRequest,
         signal?: AbortSignal
     ): Promise<SynthesizeScreenImagesResponse> {
-        return this.request<SynthesizeScreenImagesResponse>('/synthesize-screen-images', {
+        const response = await this.request<SynthesizeScreenImagesResponse>('/synthesize-screen-images', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<CompleteScreenResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<CompleteScreenResponse>('/complete-screen', {
+        const response = await this.request<CompleteScreenResponse>('/complete-screen', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async transcribeAudio(request: TranscribeAudioRequest, signal?: AbortSignal): Promise<TranscribeAudioResponse> {
-        return this.request<TranscribeAudioResponse>('/transcribe-audio', {
+        const response = await this.request<TranscribeAudioResponse>('/transcribe-audio', {
             method: 'POST',
             body: JSON.stringify(request),
             signal,
         });
+        notifyBillingUpdated(response.billing);
+        return response;
     }
 
     async save(request: SaveRequest): Promise<SaveResponse> {
@@ -844,11 +873,13 @@ class ApiClient {
 
     async plan(request: PlannerRequest, signal?: AbortSignal): Promise<PlannerResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<PlannerResponse>('/plan', {
+        const response = await this.request<PlannerResponse>('/plan', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,
         });
+        notifyBillingUpdated((response as any)?.billing);
+        return response;
     }
 
     async renderScreenImage(request: RenderScreenImageRequest, signal?: AbortSignal): Promise<RenderScreenImageResponse> {
