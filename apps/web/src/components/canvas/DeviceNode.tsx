@@ -145,6 +145,73 @@ function extractDocumentHeadHtml(html: string): string | null {
     }
 }
 
+function clonePreviewNode(source: Node, targetDocument: Document): Node {
+    return targetDocument.importNode(source, true);
+}
+
+function isPreservedPreviewRuntimeNode(node: Node | null): boolean {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    const element = node as Element;
+    return element.id === 'eazyui-statusbar-overlay';
+}
+
+function arePreviewNodesCompatible(target: Node | null, source: Node | null): boolean {
+    if (!target || !source) return false;
+    if (target.nodeType !== source.nodeType) return false;
+    if (target.nodeType !== Node.ELEMENT_NODE) return true;
+    return (target as Element).tagName === (source as Element).tagName;
+}
+
+function morphPreviewNode(target: Node, source: Node, targetDocument: Document) {
+    if (target.nodeType === Node.TEXT_NODE || target.nodeType === Node.COMMENT_NODE) {
+        if (target.textContent !== source.textContent) {
+            target.textContent = source.textContent;
+        }
+        return;
+    }
+
+    if (target.nodeType !== Node.ELEMENT_NODE || source.nodeType !== Node.ELEMENT_NODE) {
+        return;
+    }
+
+    const targetElement = target as Element;
+    const sourceElement = source as Element;
+    syncPreviewAttributes(targetElement, sourceElement);
+
+    let childIndex = 0;
+    while (true) {
+        const targetChild = targetElement.childNodes[childIndex] || null;
+        const sourceChild = sourceElement.childNodes[childIndex] || null;
+
+        if (!sourceChild && !targetChild) break;
+
+        if (isPreservedPreviewRuntimeNode(targetChild)) {
+            childIndex += 1;
+            continue;
+        }
+
+        if (!sourceChild && targetChild) {
+            targetElement.removeChild(targetChild);
+            continue;
+        }
+
+        if (sourceChild && !targetChild) {
+            targetElement.appendChild(clonePreviewNode(sourceChild, targetDocument));
+            childIndex += 1;
+            continue;
+        }
+
+        if (!arePreviewNodesCompatible(targetChild, sourceChild)) {
+            targetElement.replaceChild(clonePreviewNode(sourceChild as Node, targetDocument), targetChild as Node);
+            childIndex += 1;
+            continue;
+        }
+
+        morphPreviewNode(targetChild as Node, sourceChild as Node, targetDocument);
+        childIndex += 1;
+    }
+}
+
 function applyInPlacePreviewHtml(iframe: HTMLIFrameElement | null, nextHtml: string) {
     const frameWindow = iframe?.contentWindow;
     const frameDoc = iframe?.contentDocument;
@@ -161,9 +228,8 @@ function applyInPlacePreviewHtml(iframe: HTMLIFrameElement | null, nextHtml: str
             frameDoc.title = parsed.title || frameDoc.title;
         }
 
-        const nextBodyHtml = parsed.body.innerHTML;
-        if (frameDoc.body.innerHTML !== nextBodyHtml) {
-            frameDoc.body.innerHTML = nextBodyHtml;
+        if (frameDoc.body.innerHTML !== parsed.body.innerHTML) {
+            morphPreviewNode(frameDoc.body, parsed.body, frameDoc);
         }
 
         frameWindow.requestAnimationFrame(() => {
@@ -1565,23 +1631,24 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const previewIframeReadyRef = useRef(false);
     const queuedInPlacePreviewDocRef = useRef<string | null>(null);
     const wasStreamingRef = useRef(isStreaming);
+    const lastPreviewHeadSignatureRef = useRef<string>(extractDocumentHeadHtml(injectedHtmlWithNonce) || '');
 
     const hardReloadPreview = useCallback((nextDoc: string) => {
         previewIframeReadyRef.current = false;
         queuedInPlacePreviewDocRef.current = null;
+        lastPreviewHeadSignatureRef.current = extractDocumentHeadHtml(nextDoc) || '';
         setStableSrcDoc(nextDoc);
     }, []);
 
     const patchPreviewInPlace = useCallback((nextDoc: string) => {
+        const nextHeadSignature = extractDocumentHeadHtml(nextDoc) || '';
+        if (lastPreviewHeadSignatureRef.current && nextHeadSignature !== lastPreviewHeadSignatureRef.current) {
+            return 'reload' as const;
+        }
+
         if (!previewIframeReadyRef.current) {
             queuedInPlacePreviewDocRef.current = nextDoc;
             return 'queued' as const;
-        }
-
-        const currentHead = previewIframeRef.current?.contentDocument?.head?.innerHTML?.trim() || '';
-        const nextHead = extractDocumentHeadHtml(nextDoc);
-        if (nextHead !== null && nextHead !== currentHead) {
-            return 'reload' as const;
         }
 
         const applied = applyInPlacePreviewHtml(previewIframeRef.current, nextDoc);
@@ -1590,6 +1657,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             return 'reload' as const;
         }
 
+        lastPreviewHeadSignatureRef.current = nextHeadSignature;
         queuedInPlacePreviewDocRef.current = null;
         return 'applied' as const;
     }, []);
@@ -1598,12 +1666,14 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         previewIframeReadyRef.current = true;
         const queuedDoc = queuedInPlacePreviewDocRef.current;
         if (queuedDoc) {
-            const applied = applyInPlacePreviewHtml(previewIframeRef.current, queuedDoc);
-            if (applied) {
+            const result = patchPreviewInPlace(queuedDoc);
+            if (result === 'applied') {
                 queuedInPlacePreviewDocRef.current = null;
+            } else if (result === 'reload') {
+                hardReloadPreview(queuedDoc);
             }
         }
-    }, []);
+    }, [hardReloadPreview, patchPreviewInPlace]);
 
     useEffect(() => {
         return () => {
