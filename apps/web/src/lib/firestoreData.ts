@@ -22,6 +22,7 @@ const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "
 const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1"
   || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_UPLOADS !== "0");
 let storageUploadsTemporarilyDisabled = false;
+const backgroundCoverRefreshByProject = new Map<string, Promise<void>>();
 const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
 const PROJECT_COVER_VERSION = 3;
 
@@ -803,6 +804,92 @@ function buildProjectCoverSignature(screens: HtmlDesignSpec["screens"]): string 
   return hashString(JSON.stringify(signatureSource));
 }
 
+async function refreshProjectCoverMetadataInBackground(params: {
+  uid: string;
+  projectId: string;
+  coverTargetScreens: HtmlDesignSpec["screens"];
+  coverScreenIds: string[];
+  coverSignature: string;
+  existingCoverImagePaths: string[];
+}): Promise<void> {
+  const { uid, projectId, coverTargetScreens, coverScreenIds, coverSignature, existingCoverImagePaths } = params;
+  if (coverTargetScreens.length === 0) return;
+
+  const taskKey = `${uid}:${projectId}`;
+  if (backgroundCoverRefreshByProject.has(taskKey)) return;
+
+  const task = (async () => {
+    try {
+      const coverDataUrls = await buildProjectCoverDataUrls(coverTargetScreens);
+      if (coverDataUrls.length === 0) return;
+
+      let resolvedCoverImagePaths: string[] = [];
+      let resolvedCoverImageUrls: string[] = [];
+      let resolvedCoverImageDataUrls: string[] = coverDataUrls;
+
+      if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled) {
+        try {
+          const uploaded = await Promise.all(coverDataUrls.map(async (coverDataUrl, index) => {
+            const coverPath = `previews/cover-${index}.jpg`;
+            const coverRef = ref(storage, `users/${uid}/projects/${projectId}/${coverPath}`);
+            await withTimeout(
+              uploadString(coverRef, coverDataUrl, "data_url"),
+              STORAGE_UPLOAD_TIMEOUT_MS,
+              `Project cover upload (${index + 1})`
+            );
+            return {
+              path: coverPath,
+              url: await getDownloadURL(coverRef),
+            };
+          }));
+          resolvedCoverImagePaths = uploaded.map((item) => item.path);
+          resolvedCoverImageUrls = uploaded.map((item) => item.url);
+          resolvedCoverImageDataUrls = [];
+        } catch (error) {
+          if (isStorageCorsOrNetworkError(error)) {
+            storageUploadsTemporarilyDisabled = true;
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled && resolvedCoverImagePaths.length > 0) {
+        const staleCoverPaths = existingCoverImagePaths.filter((path) => !resolvedCoverImagePaths.includes(path));
+        await Promise.all(
+          staleCoverPaths.map(async (path) => {
+            try {
+              await deleteObject(ref(storage, `users/${uid}/projects/${projectId}/${path}`));
+            } catch {
+              // ignore missing cover cleanup errors
+            }
+          })
+        );
+      }
+
+      const projectRef = doc(db, "users", uid, "projects", projectId);
+      const coverPayload = compactProjectMetaPayloadForFirestore(stripUndefinedDeep({
+        coverImagePath: resolvedCoverImagePaths[0] || null,
+        coverImageUrl: resolvedCoverImageUrls[0] || null,
+        coverImageDataUrl: resolvedCoverImageDataUrls[0] || null,
+        coverImagePaths: resolvedCoverImagePaths,
+        coverImageUrls: resolvedCoverImageUrls,
+        coverImageDataUrls: resolvedCoverImageDataUrls,
+        coverScreenIds,
+        coverSignature,
+        coverVersion: PROJECT_COVER_VERSION,
+      }) as Record<string, unknown>);
+      await setDoc(projectRef, coverPayload, { merge: true });
+    } catch (error) {
+      console.warn("[saveProjectFirestore] background cover refresh failed", error);
+    }
+  })().finally(() => {
+    backgroundCoverRefreshByProject.delete(taskKey);
+  });
+
+  backgroundCoverRefreshByProject.set(taskKey, task);
+}
+
 function resolveStorageRefFromImageValue(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -974,8 +1061,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     || String(existingData?.coverSignature || "") !== nextCoverSignature
     || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
   );
+  const shouldRefreshCoverInBackground = shouldRefreshCover && !isAutosave;
 
-  if (shouldRefreshCover) {
+  if (shouldRefreshCover && !shouldRefreshCoverInBackground) {
     const coverDataUrls = await buildProjectCoverDataUrls(coverTargetScreens);
     if (coverDataUrls.length > 0) {
       regeneratedCover = true;
@@ -1273,9 +1361,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     coverImagePaths: resolvedCoverImagePaths,
     coverImageUrls: resolvedCoverImageUrls,
     coverImageDataUrls: resolvedCoverImageDataUrls,
-    coverScreenIds: nextCoverScreenIds,
-    coverSignature: nextCoverSignature,
-    coverVersion: PROJECT_COVER_VERSION,
+    coverScreenIds: shouldRefreshCoverInBackground ? existingCoverScreenIds : nextCoverScreenIds,
+    coverSignature: shouldRefreshCoverInBackground ? existingData?.coverSignature || null : nextCoverSignature,
+    coverVersion: shouldRefreshCoverInBackground ? existingData?.coverVersion || null : PROJECT_COVER_VERSION,
     screenCount: (safeDesignSpec.screens || []).length,
     designSpecMeta: {
       id: safeDesignSpec.id,
@@ -1311,9 +1399,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       coverImagePaths: resolvedCoverImagePaths,
       coverImageUrls: resolvedCoverImageUrls,
       coverImageDataUrls: [],
-      coverScreenIds: nextCoverScreenIds,
-      coverSignature: nextCoverSignature,
-      coverVersion: PROJECT_COVER_VERSION,
+      coverScreenIds: shouldRefreshCoverInBackground ? existingCoverScreenIds : nextCoverScreenIds,
+      coverSignature: shouldRefreshCoverInBackground ? existingData?.coverSignature || null : nextCoverSignature,
+      coverVersion: shouldRefreshCoverInBackground ? existingData?.coverVersion || null : PROJECT_COVER_VERSION,
       screenCount: (safeDesignSpec.screens || []).length,
       designSpecMeta: {
         id: safeDesignSpec.id,
@@ -1326,6 +1414,17 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       updatedAt: now,
     });
     await setDoc(projectRef, emergencyProjectMetaPayload, { merge: true });
+  }
+
+  if (shouldRefreshCoverInBackground) {
+    void refreshProjectCoverMetadataInBackground({
+      uid,
+      projectId: id,
+      coverTargetScreens,
+      coverScreenIds: nextCoverScreenIds,
+      coverSignature: nextCoverSignature,
+      existingCoverImagePaths,
+    });
   }
 
   return { projectId: id, savedAt: now };
