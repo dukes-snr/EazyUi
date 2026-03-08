@@ -62,6 +62,18 @@ function injectThumbScrollbarHide(html: string) {
             return (hasTailwindSrc || isTailwindConfig) ? full : '';
         })
         .replace(/\son[a-z]+\s*=\s*(['"]).*?\1/gi, '');
+    const warningFilterScript = `
+<script>
+  (function () {
+    const blocked = 'cdn.tailwindcss.com should not be used in production';
+    const originalWarn = console.warn;
+    console.warn = function (...args) {
+      const first = String(args && args.length ? args[0] : '');
+      if (first.includes(blocked)) return;
+      return originalWarn.apply(console, args);
+    };
+  })();
+</script>`;
     const styleTag = `
 <style>
   ::-webkit-scrollbar { width: 0; height: 0; }
@@ -69,14 +81,28 @@ function injectThumbScrollbarHide(html: string) {
   html, body { -ms-overflow-style: none; scrollbar-width: none; overflow: hidden; }
 </style>`;
 
-    if (sanitizedHtml.includes('</head>')) {
-        return sanitizedHtml.replace('</head>', `${styleTag}\n</head>`);
+    if (/<head[^>]*>/i.test(sanitizedHtml)) {
+        return sanitizedHtml.replace(/<head([^>]*)>/i, `<head$1>${warningFilterScript}\n${styleTag}`);
     }
-    return `${styleTag}\n${sanitizedHtml}`;
+    if (sanitizedHtml.includes('</head>')) {
+        return sanitizedHtml.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
+    }
+    return `${warningFilterScript}\n${styleTag}\n${sanitizedHtml}`;
+}
+
+function normalizeEscapedHtmlAttributes(html: string): string {
+    const raw = String(html || '');
+    if (!raw.includes('\\"') && !raw.includes("\\'")) return raw;
+    const looksLikeEscapedMarkup = /<[^>]*\\\"[^>]*>/.test(raw)
+        || /viewBox=\\\"/i.test(raw)
+        || /\\\"M[0-9]/.test(raw);
+    if (!looksLikeEscapedMarkup) return raw;
+    return raw.replace(/\\\"/g, '"').replace(/\\'/g, "'");
 }
 
 function normalizePlaceholderCatalogInHtml(html: string): string {
-    if (!html || !/<img\b/i.test(html)) return html;
+    const normalizedHtml = normalizeEscapedHtmlAttributes(html);
+    if (!normalizedHtml || !/<img\b/i.test(normalizedHtml)) return normalizedHtml;
     const map = [
         'https://placehold.net/map-1200x600.png',
         'https://placehold.net/map-600x400.png',
@@ -86,7 +112,7 @@ function normalizePlaceholderCatalogInHtml(html: string): string {
     ];
     let m = 0;
 
-    return html.replace(/<img\b[^>]*>/gi, (tag) => {
+    return normalizedHtml.replace(/<img\b[^>]*>/gi, (tag) => {
         const srcMatch = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i);
         const currentSrc = (srcMatch?.[2] || '').trim();
         const context = `${tag} ${currentSrc}`.toLowerCase();
@@ -1269,6 +1295,38 @@ function getThinkingSeconds(message: any): number | null {
     return null;
 }
 
+function toTokenInt(value: unknown): number | null {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return null;
+    return Math.round(numeric);
+}
+
+function getBillingTotalTokens(billing: unknown): number | null {
+    if (!billing || typeof billing !== 'object') return null;
+    const bill = billing as {
+        usage?: { totalTokens?: unknown };
+        usageQuote?: { totals?: { totalTokens?: unknown } };
+    };
+    const fromUsage = toTokenInt(bill.usage?.totalTokens);
+    if (fromUsage !== null) return fromUsage;
+    const fromQuote = toTokenInt(bill.usageQuote?.totals?.totalTokens);
+    if (fromQuote !== null) return fromQuote;
+    return null;
+}
+
+function getMessageTokenUsageTotal(message: any): number | null {
+    const direct = toTokenInt(message?.meta?.tokenUsageTotal);
+    if (direct !== null) return direct;
+    const nested = toTokenInt(message?.meta?.tokenUsage?.totalTokens);
+    if (nested !== null) return nested;
+    return null;
+}
+
+function formatTokenUsageLabel(totalTokens: number | null): string {
+    if (totalTokens === null) return 'Tokens used: —';
+    return `Tokens used: ${totalTokens.toLocaleString()}`;
+}
+
 type ProcessStepLabel = {
     present: string;
     past: string;
@@ -1391,7 +1449,7 @@ function ScreenReferenceThumb({
                             <iframe
                                 srcDoc={injectThumbScrollbarHide(preview.html)}
                                 title={`preview-${screenId}`}
-                                sandbox="allow-scripts allow-same-origin"
+                                sandbox="allow-scripts"
                                 scrolling="no"
                                 className="pointer-events-none absolute"
                                 style={{
@@ -2017,19 +2075,26 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
     };
 
-    const notifySuccess = (title: string, message: string) => {
-        pushToast({ kind: 'success', title, message });
-        notifyWhenInBackground(title, message);
+    const toTokenToastMessage = (message: string, totalTokens?: number | null) => {
+        return `${message} • ${formatTokenUsageLabel(totalTokens ?? null)}`;
     };
 
-    const notifyInfo = (title: string, message: string) => {
-        pushToast({ kind: 'info', title, message });
-        notifyWhenInBackground(title, message);
+    const notifySuccess = (title: string, message: string, totalTokens?: number | null) => {
+        const composed = toTokenToastMessage(message, totalTokens);
+        pushToast({ kind: 'success', title, message: composed });
+        notifyWhenInBackground(title, composed);
     };
 
-    const notifyError = (title: string, message: string) => {
-        pushToast({ kind: 'error', title, message });
-        notifyWhenInBackground(title, message);
+    const notifyInfo = (title: string, message: string, totalTokens?: number | null) => {
+        const composed = toTokenToastMessage(message, totalTokens);
+        pushToast({ kind: 'info', title, message: composed });
+        notifyWhenInBackground(title, composed);
+    };
+
+    const notifyError = (title: string, message: string, totalTokens?: number | null) => {
+        const composed = toTokenToastMessage(message, totalTokens);
+        pushToast({ kind: 'error', title, message: composed });
+        notifyWhenInBackground(title, composed);
     };
 
     const applyProjectName = (projectName: string) => {
@@ -3120,6 +3185,12 @@ Return a polished, consistent screen without introducing a new navigation patter
         );
 
         const startTime = Date.now();
+        let tokenUsageTotal = 0;
+        const captureBillingTokens = (billing: unknown) => {
+            const tokens = getBillingTotalTokens(billing);
+            if (tokens !== null) tokenUsageTotal += tokens;
+            return tokens;
+        };
         const hasScreens = Boolean(spec?.screens?.length);
 
         try {
@@ -3133,6 +3204,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
             }, routeReferenceScreens));
+            captureBillingTokens((route as any)?.billing);
 
             if (route.phase === 'route' && route.intent === 'chat_assist') {
                 const routeSuggestions = buildRouteChatSuggestionPayload(route);
@@ -3142,12 +3214,19 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         plannerPrompt: requestPrompt,
                         plannerRoute: route,
                         plannerPostgen: routeSuggestions,
                     }
                 });
-                notifySuccess('Assistant response ready', 'Planner answered directly based on your request.');
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
+                notifySuccess('Assistant response ready', 'Planner answered directly based on your request.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
                 return;
             }
 
@@ -3161,6 +3240,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 referenceImages: plannerReferenceImages,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
             }));
+            captureBillingTokens((response as any)?.billing);
 
             if (response.phase === 'postgen') {
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
@@ -3170,6 +3250,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         plannerPrompt: requestPrompt,
                         plannerPostgen: response,
                         plannerContext: {
@@ -3204,6 +3285,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         plannerPrompt: requestPrompt,
                         plannerPostgen: { callToAction: cta, nextScreenSuggestions: planExtras } as PlannerCtaPayload,
                         plannerPlan: response,
@@ -3221,7 +3303,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                 throw new Error('Unexpected planner response for plan mode.');
             }
 
-            notifySuccess('Plan ready', 'Review suggested screens and generate from the CTA buttons.');
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
+            notifySuccess('Plan ready', 'Review suggested screens and generate from the CTA buttons.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
         } catch (error) {
             const friendly = getUserFacingError(error);
             updateMessage(assistantMsgId, {
@@ -3230,9 +3318,16 @@ Return a polished, consistent screen without introducing a new navigation patter
                 meta: {
                     ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
+                    tokenUsageTotal: tokenUsageTotal > 0 ? tokenUsageTotal : undefined,
                 }
             });
-            notifyError(friendly.title, friendly.summary);
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
+            notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
         } finally {
             setGenerating(false);
             clearLoadingToast(generationLoadingToastRef);
@@ -3334,6 +3429,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ? { width: 768, height: 1024 }
                 : { width: 402, height: 874 };
         let startTime = Date.now();
+        let tokenUsageTotal = 0;
+        const captureBillingTokens = (billing: unknown) => {
+            const tokens = getBillingTotalTokens(billing);
+            if (tokens !== null) tokenUsageTotal += tokens;
+            return tokens;
+        };
         let plannerPlan: PlannerPlanResponse | null = null;
         let plannerSuggestedProjectName = '';
         let generationPromptFromPlanner = requestPromptWithReferences;
@@ -3360,6 +3461,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         bundleWithFirstGeneration: shouldBundleDesignSystemWithFirstGeneration,
                         projectId: projectId || undefined,
                     });
+                    captureBillingTokens(designSystemResponse.billing);
                     activeProjectDesignSystem = designSystemResponse.designSystem;
                     applyProjectDesignSystem(activeProjectDesignSystem);
                     if (shouldNameProjectOnFirstRequest && isGenericProjectName(useDesignStore.getState().spec?.name)) {
@@ -3393,6 +3495,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         typedComplete: true,
                         designSystemProposal: activeProjectDesignSystem,
                         designSystemProposalContext: {
@@ -3410,6 +3513,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } as DesignSystemProposalContext,
                     }
                 });
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
                 try {
                     setSaving(true);
                     const saved = await apiClient.save({
@@ -3424,7 +3533,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     setSaving(false);
                     console.warn('[UI] could not persist design-system proposal message immediately', persistError);
                 }
-                notifyInfo('Design system drafted', 'Review or edit it, then click Proceed to generate screens.');
+                notifyInfo('Design system drafted', 'Review or edit it, then click Proceed to generate screens.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
                 return;
             }
 
@@ -3441,6 +3550,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         referenceImages: plannerReferenceImages,
                         preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
                     }));
+                    captureBillingTokens((discoveryPlan as any)?.billing);
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
                         if (!firstRequestProjectNameLocked) {
@@ -3549,6 +3659,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
                     projectId: projectId || undefined,
                 }, controller.signal);
+                captureBillingTokens(regen.billing);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
                 for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
@@ -3604,6 +3715,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             referenceImages: plannerReferenceImages,
                             preferredModel: 'llama-3.3-70b-versatile',
                         }));
+                        captureBillingTokens((postgen as any)?.billing);
                         if (postgen.phase === 'postgen') {
                             postgenData = postgen;
                             postgenSummary = formatPostgenSuggestionText(postgen);
@@ -3624,6 +3736,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         ...(usePlanner ? {
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
@@ -3638,6 +3751,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } : {}),
                     }
                 });
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
                 if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                     applyProjectName(plannerSuggestedProjectName);
                 }
@@ -3646,13 +3765,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }
                 notifySuccess(
                     'Generation complete',
-                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`
+                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`,
+                    tokenUsageTotal > 0 ? tokenUsageTotal : null
                 );
                 console.info('[UI] generate: complete (fast model)', { screens: regen.designSpec.screens.length });
                 return;
             }
 
-            await apiClient.generateStream({
+            const streamResult = await apiClient.generateStream({
                 prompt: generationPromptFromPlanner,
                 stylePreset: styleToUse,
                 platform: platformToUse,
@@ -3684,6 +3804,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     }
                 }
             }, controller.signal);
+            captureBillingTokens(streamResult.billing);
 
             const finalizeEvents = finalizeStream(parserState);
             for (const event of finalizeEvents) {
@@ -3706,6 +3827,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             preferredModel,
                             projectId: projectId || undefined,
                         }, controller.signal);
+                            captureBillingTokens(repaired.billing);
                             finalHtml = repaired.html;
                         } catch (repairError) {
                             console.warn('[UI] stream finalize: complete-screen failed, using best effort HTML', repairError);
@@ -3727,6 +3849,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
                     projectId: projectId || undefined,
                 }, controller.signal);
+                captureBillingTokens(regen.billing);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
                 for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
@@ -3802,6 +3925,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             referenceImages: plannerReferenceImages,
                             preferredModel: 'llama-3.3-70b-versatile',
                         }));
+                        captureBillingTokens((postgen as any)?.billing);
                         if (postgen.phase === 'postgen') {
                             postgenData = postgen;
                             postgenSummary = formatPostgenSuggestionText(postgen);
@@ -3822,6 +3946,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         ...(usePlanner ? {
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
@@ -3836,6 +3961,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } : {}),
                     }
                 });
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
                 if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                     applyProjectName(plannerSuggestedProjectName);
                 }
@@ -3847,7 +3978,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }
                 notifySuccess(
                     'Generation complete',
-                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`
+                    `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`,
+                    tokenUsageTotal > 0 ? tokenUsageTotal : null
                 );
                 console.info('[UI] generate: complete (fallback json)', { screens: regen.designSpec.screens.length });
                 return;
@@ -3898,6 +4030,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             .filter(Boolean) as Array<{ name: string }>,
                         preferredModel: 'llama-3.3-70b-versatile',
                     }));
+                    captureBillingTokens((postgen as any)?.billing);
                     if (postgen.phase === 'postgen') {
                         postgenData = postgen;
                         postgenSummary = formatPostgenSuggestionText(postgen);
@@ -3922,6 +4055,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 meta: {
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     ...(usePlanner ? {
                         plannerPrompt: appPromptForPlanning,
                         plannerPostgen: postgenData || undefined,
@@ -3936,6 +4070,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                     } : {}),
                 }
             });
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
             if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                 applyProjectName(plannerSuggestedProjectName);
             }
@@ -3947,7 +4087,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             }
             notifySuccess(
                 'Generation complete',
-                `Created ${completedCount} screen${completedCount === 1 ? '' : 's'}.`
+                `Created ${completedCount} screen${completedCount === 1 ? '' : 's'}.`,
+                tokenUsageTotal > 0 ? tokenUsageTotal : null
             );
             console.info('[UI] generate: complete (stream)', { screens: completedCount });
         } catch (error) {
@@ -3958,9 +4099,16 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     }
                 });
-                notifyInfo('Generation stopped', 'The request was cancelled.');
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
+                notifyInfo('Generation stopped', 'The request was cancelled.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
                 return;
             }
             updateMessage(assistantMsgId, {
@@ -3969,10 +4117,17 @@ Return a polished, consistent screen without introducing a new navigation patter
                 meta: {
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                 }
             });
             const friendly = getUserFacingError(error);
-            notifyError(friendly.title, friendly.summary);
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
+            notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             console.error('[UI] generate: error', error);
         } finally {
             setAbortController(null);
@@ -4022,6 +4177,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         description: string;
         errorMessage?: string;
         thinkingMs: number;
+        tokenUsageTotal: number;
     };
 
     const handleEditForScreen = async (
@@ -4040,6 +4196,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 description: '',
                 errorMessage: 'Edit skipped.',
                 thinkingMs: 0,
+                tokenUsageTotal: 0,
             };
         }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -4053,6 +4210,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 description: '',
                 errorMessage: 'No internet connection.',
                 thinkingMs: 0,
+                tokenUsageTotal: 0,
             };
         }
         void ensureNotificationPermission();
@@ -4089,6 +4247,12 @@ Return a polished, consistent screen without introducing a new navigation patter
         setPrompt((prev) => (prev.trim() === instruction.trim() ? '' : prev));
         setGenerating(true);
         const startTime = Date.now();
+        let tokenUsageTotal = 0;
+        const captureBillingTokens = (billing: unknown) => {
+            const tokens = getBillingTotalTokens(billing);
+            if (tokens !== null) tokenUsageTotal += tokens;
+            return tokens;
+        };
         updateMessage(assistantMsgId, {
             meta: {
                 ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
@@ -4128,6 +4292,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     html: screen.html,
                 })),
             }, controller.signal);
+            captureBillingTokens(response.billing);
             const repairedHtml = await runConsistencyRepairIfNeeded(
                 targetScreen,
                 response.html,
@@ -4156,6 +4321,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         referenceImages: plannerReferenceImages,
                         preferredModel: 'llama-3.3-70b-versatile',
                     }));
+                    captureBillingTokens((postgen as any)?.billing);
                     if (postgen.phase === 'postgen') {
                         postgenData = postgen;
                         postgenSummary = formatPostgenSuggestionText(postgen);
@@ -4179,6 +4345,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                         ...(planMode ? {
                             plannerPrompt: currentPrompt,
                             plannerPostgen: postgenData || undefined,
@@ -4193,9 +4360,15 @@ Return a polished, consistent screen without introducing a new navigation patter
                         } : {}),
                     }
                 });
+                updateMessage(userMsgId, {
+                    meta: {
+                        ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                    }
+                });
             }
             if (!options?.suppressToasts) {
-                notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`);
+                notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             }
             return {
                 screenId: targetScreen.screenId,
@@ -4203,6 +4376,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ok: true,
                 description: baseDescription,
                 thinkingMs: Date.now() - startTime,
+                tokenUsageTotal,
             };
         } catch (error) {
             const friendly = getUserFacingError(error);
@@ -4214,11 +4388,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                     meta: {
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
+                        ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     }
                 });
             }
+            updateMessage(userMsgId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
             if (!options?.suppressToasts) {
-                notifyError(friendly.title, friendly.summary);
+                notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             }
             return {
                 screenId: targetScreen.screenId,
@@ -4227,6 +4408,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 description: '',
                 errorMessage: friendly.summary || (error as Error)?.message || 'Unable to update this screen.',
                 thinkingMs: Date.now() - startTime,
+                tokenUsageTotal,
             };
         } finally {
             setAbortController(null);
@@ -4278,6 +4460,12 @@ Return a polished, consistent screen without introducing a new navigation patter
         const controller = new AbortController();
         setAbortController(controller);
         setGenerating(true);
+        let tokenUsageTotal = 0;
+        const captureBillingTokens = (billing: unknown) => {
+            const tokens = getBillingTotalTokens(billing);
+            if (tokens !== null) tokenUsageTotal += tokens;
+            return tokens;
+        };
         startLoadingToast(
             generationLoadingToastRef,
             'Updating design system',
@@ -4293,6 +4481,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 projectDesignSystem: currentDesignSystem,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
             }, controller.signal);
+            captureBillingTokens(response.billing);
             const normalizedDraft = normalizeProjectDesignSystemModes(response.designSystem);
             const previousDesignSystem = normalizeProjectDesignSystemModes(currentDesignSystem);
             const tokenPatches = buildDesignTokenColorPatches(previousDesignSystem, normalizedDraft);
@@ -4358,19 +4547,36 @@ Return a polished, consistent screen without introducing a new navigation patter
                 status: 'complete',
                 meta: {
                     ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     typedComplete: true,
                     livePreview: false,
                 },
             });
-            notifySuccess('Design system updated', summary);
+            updateMessage(userMessageId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMessageId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
+            notifySuccess('Design system updated', summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             return true;
         } catch (error) {
             const friendly = getUserFacingError(error);
             updateMessage(assistantMsgId, {
                 content: `[h2]${friendly.title}[/h2]\n[p]${friendly.summary}[/p]`,
                 status: 'error',
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                },
             });
-            notifyError(friendly.title, friendly.summary);
+            updateMessage(userMessageId, {
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === userMessageId)?.meta || {}),
+                    ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                }
+            });
+            notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             return true;
         } finally {
             clearLoadingToast(generationLoadingToastRef);
@@ -4466,6 +4672,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 throw new Error('Planner route phase mismatch');
             }
             const route = routeResponse;
+            const routeTokenUsage = getBillingTotalTokens((route as any)?.billing);
 
             updateMessage(userMsgId, {
                 meta: {
@@ -4476,6 +4683,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             ? 'edit'
                             : 'generate',
                     plannerRoute: route,
+                    ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
                     ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
                 },
             });
@@ -4488,6 +4696,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
                         parentUserId: userMsgId,
                         plannerRoute: route,
+                        ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
                     },
                 });
                 setActiveBranchForUser(userMsgId, assistantMsgId);
@@ -4589,6 +4798,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                     const succeeded = results.filter((item) => item.ok);
                     const failed = results.filter((item) => !item.ok);
+                    const totalTokenUsage = results.reduce((sum, item) => sum + (Number.isFinite(item.tokenUsageTotal) ? item.tokenUsageTotal : 0), 0);
                     const successLines = succeeded
                         .map((item) => `[li][b]${item.screenName}[/b]: ${item.description || 'Updated successfully.'}[/li]`)
                         .join('\n');
@@ -4609,6 +4819,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
                             ...combinedReferenceMeta,
                             thinkingMs: Date.now() - batchStart,
+                            ...(totalTokenUsage > 0 ? { tokenUsageTotal: totalTokenUsage } : {}),
                             typedComplete: true,
                             livePreview: false,
                         },
@@ -4616,13 +4827,15 @@ Return a polished, consistent screen without introducing a new navigation patter
                     if (succeeded.length > 0) {
                         notifySuccess(
                             'Multi-screen edit complete',
-                            `Updated ${succeeded.length} screen${succeeded.length === 1 ? '' : 's'}.`
+                            `Updated ${succeeded.length} screen${succeeded.length === 1 ? '' : 's'}.`,
+                            totalTokenUsage > 0 ? totalTokenUsage : null
                         );
                     }
                     if (failed.length > 0) {
                         notifyError(
                             'Some edits failed',
-                            `Could not update ${failed.length} screen${failed.length === 1 ? '' : 's'}.`
+                            `Could not update ${failed.length} screen${failed.length === 1 ? '' : 's'}.`,
+                            totalTokenUsage > 0 ? totalTokenUsage : null
                         );
                     }
                     return;
@@ -4986,6 +5199,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     }
                                 }
                             }
+                            const messageTokenUsageTotal = getMessageTokenUsageTotal(message);
                             return (
                             <div
                                 key={message.id}
@@ -5069,6 +5283,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     ? <Check size={14} className="text-emerald-400" />
                                                     : <Copy size={14} />}
                                             </button>
+                                        </div>
+                                        <div className="w-full px-1 text-right text-[10px] text-[var(--ui-text-subtle)]">
+                                            {formatTokenUsageLabel(messageTokenUsageTotal)}
                                         </div>
                                     </div>
                                 ) : (
@@ -5289,6 +5506,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                             </button>
                                                         </>
                                                     )}
+                                            </div>
+                                            <div className="px-2 text-[10px] text-[var(--ui-text-subtle)]">
+                                                {formatTokenUsageLabel(messageTokenUsageTotal)}
                                             </div>
                                             {message.status === 'complete' && ((((message.meta as any)?.typedComplete === true) || typedDoneByMessageId[message.id]) && (() => {
                                                 const postgen = message.meta?.plannerPostgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined);

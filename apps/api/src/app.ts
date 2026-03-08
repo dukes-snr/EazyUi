@@ -14,7 +14,7 @@ import { synthesizeImagesForScreens } from './services/imagePipeline.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
-import { getPlannerModels, runDesignPlanner, type PlannerPhase } from './services/designPlanner.js';
+import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
 import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import {
     buildBillingSummaryForApi,
@@ -23,6 +23,7 @@ import {
     inferCreditModelProfile,
     InsufficientCreditsError,
     listBillingLedgerForApi,
+    quoteCreditsFromTokenUsage,
     recordStripeWebhookEvent,
     reserveCredits,
     resolvePlanFromStripePriceId,
@@ -39,8 +40,10 @@ import {
     type BillingSummary,
     type CreditModelProfile,
     type ReservationOutcome,
+    type UsageCreditQuote,
     upsertBillingPurchase,
 } from './services/billing.js';
+import type { TokenUsageSummary } from './services/tokenUsage.js';
 import {
     createStripeBillingPortalSession,
     createStripeCheckoutSession,
@@ -84,6 +87,8 @@ let renderBrowserPromise: Promise<any> | null = null;
 type PlatformKind = 'mobile' | 'tablet' | 'desktop';
 type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
 const LOG_PREVIEW_MAX = 220;
+const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
+const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 
 function normalizePlatform(input?: string): PlatformKind | undefined {
     if (input === 'mobile' || input === 'tablet' || input === 'desktop') return input;
@@ -237,6 +242,38 @@ function settleForOutcome(
         finalCredits,
         metadata,
     });
+}
+
+function encodeStreamBillingMarker(payload: Record<string, unknown>): string {
+    const base64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    return `${STREAM_BILLING_MARKER_PREFIX}${base64}${STREAM_BILLING_MARKER_SUFFIX}`;
+}
+
+function resolveUsageCharge(params: {
+    operation: BillingOperation;
+    usage?: TokenUsageSummary;
+    fallbackEstimatedCredits: number;
+}): { finalCredits: number; usageQuote?: UsageCreditQuote } {
+    const hasUsage = Boolean(
+        params.usage
+        && (
+            (params.usage.entries?.length || 0) > 0
+            || Number(params.usage.totalTokens || 0) > 0
+            || Number(params.usage.inputTokens || 0) > 0
+            || Number(params.usage.outputTokens || 0) > 0
+        )
+    );
+    if (!hasUsage) {
+        return { finalCredits: params.fallbackEstimatedCredits };
+    }
+    const usageQuote = quoteCreditsFromTokenUsage({
+        operation: params.operation,
+        usage: params.usage!,
+    });
+    return {
+        finalCredits: usageQuote.credits,
+        usageQuote,
+    };
 }
 
 function sendInsufficientCredits(
@@ -1220,17 +1257,25 @@ fastify.post<{
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             promptPreview: previewText(prompt),
         }, 'generate: start');
-        const designSpec = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
+        const generated = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
+        const { designSpec, usage } = generated;
         const versionId = uuidv4();
-        const charge = estimateCredits({
+        const estimateCharge = estimateCredits({
             operation: 'generate',
             modelProfile: toCreditModelProfile(preferredModel),
             expectedScreenCount: designSpec.screens.length,
             bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', charge.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'generate',
+            usage,
+            fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/generate',
             screenCount: designSpec.screens.length,
+            usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             traceId,
@@ -1243,6 +1288,7 @@ fastify.post<{
             descriptionPreview: previewText(designSpec.description),
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: usage ? usage.totalTokens : 0,
         }, 'generate: complete');
 
         return {
@@ -1252,6 +1298,8 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {
@@ -1342,7 +1390,7 @@ fastify.post<{
             bundledWithFirstGeneration: bundled,
             promptPreview: previewText(prompt),
         }, 'design-system: start');
-        const designSystem = await generateProjectDesignSystem({
+        const generated = await generateProjectDesignSystem({
             prompt,
             stylePreset,
             platform,
@@ -1351,26 +1399,43 @@ fastify.post<{
             temperature,
             projectDesignSystem,
         });
-        let billingMeta: { creditsCharged: number; creditsRemaining: number; reservationId?: string } | undefined;
+        const { designSystem, usage } = generated;
+        let billingMeta: {
+            creditsCharged: number;
+            creditsRemaining: number;
+            reservationId?: string;
+            usage?: TokenUsageSummary;
+            usageQuote?: UsageCreditQuote;
+        } | undefined;
         if (reservation) {
-            const charge = estimateCredits({
+            const estimateCharge = estimateCredits({
                 operation: 'design_system',
                 modelProfile: toCreditModelProfile(preferredModel),
             });
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', charge.estimatedCredits, {
+            const usageCharge = resolveUsageCharge({
+                operation: 'design_system',
+                usage,
+                fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+            });
+            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/design-system',
                 bundledWithFirstGeneration: bundled,
+                usage,
+                usageQuote: usageCharge.usageQuote,
             });
             billingMeta = {
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                ...(usage ? { usage } : {}),
+                ...(usageCharge.usageQuote ? { usageQuote: usageCharge.usageQuote } : {}),
             };
         } else {
             const summary = buildBillingSummaryForApi(user.uid);
             billingMeta = {
                 creditsCharged: 0,
                 creditsRemaining: summary.balanceCredits,
+                ...(usage ? { usage } : {}),
             };
         }
         fastify.log.info({
@@ -1385,6 +1450,7 @@ fastify.post<{
             themeMode: designSystem.themeMode,
             creditsCharged: billingMeta.creditsCharged,
             creditsRemaining: billingMeta.creditsRemaining,
+            usageTotals: usage ? usage.totalTokens : 0,
         }, 'design-system: complete');
         return { designSystem, billing: billingMeta };
     } catch (error) {
@@ -1499,13 +1565,20 @@ fastify.post<{
             referenceScreens,
         });
         const versionId = uuidv4();
-        const charge = estimateCredits({
+        const estimateCharge = estimateCredits({
             operation: 'edit',
             modelProfile: toCreditModelProfile(preferredModel),
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', charge.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'edit',
+            usage: edited.usage,
+            fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/edit',
             screenId,
+            usage: edited.usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             traceId,
@@ -1518,6 +1591,7 @@ fastify.post<{
             descriptionPreview: previewText(edited.description),
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: edited.usage ? edited.usage.totalTokens : 0,
         }, 'edit: complete');
 
         return {
@@ -1528,6 +1602,8 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage: edited.usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {
@@ -1631,14 +1707,21 @@ fastify.post<{
             maxImages,
         });
         const generatedCount = result.stats.generated || 0;
-        const charge = estimateCredits({
+        const estimateCharge = estimateCredits({
             operation: 'synthesize_screen_images',
             modelProfile: toCreditModelProfile(preferredModel),
             expectedImageCount: generatedCount,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', charge.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'synthesize_screen_images',
+            usage: result.usage,
+            fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/synthesize-screen-images',
             generatedCount,
+            usage: result.usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             traceId,
@@ -1649,6 +1732,7 @@ fastify.post<{
             stats: result.stats,
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: result.usage ? result.usage.totalTokens : 0,
         }, 'synthesize-screen-images: complete');
         return {
             ...result,
@@ -1656,6 +1740,8 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage: result.usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {
@@ -1732,13 +1818,20 @@ fastify.post<{
             instructionPreview: previewText(instruction),
         }, 'generate-image: start');
         const result = await generateImageAsset({ prompt, instruction, preferredModel });
-        const charge = estimateCredits({
+        const estimateCharge = estimateCredits({
             operation: 'generate_image',
             modelProfile: toCreditModelProfile(preferredModel),
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', charge.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'generate_image',
+            usage: result.usage,
+            fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/generate-image',
             modelUsed: result.modelUsed,
+            usage: result.usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             traceId,
@@ -1750,6 +1843,7 @@ fastify.post<{
             srcPreview: previewText(result.src, 120),
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: result.usage ? result.usage.totalTokens : 0,
         }, 'generate-image: complete');
         return {
             ...result,
@@ -1757,6 +1851,8 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage: result.usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {
@@ -1837,9 +1933,22 @@ fastify.post<{
             audioBytesApprox: approxBytes,
         }, 'transcribe-audio: start');
         const result = await groqWhisperTranscription({ audioBase64, mimeType, language, model });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', estimate.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'transcribe_audio',
+            usage: result.usage ? {
+                inputTokens: result.usage.inputTokens,
+                outputTokens: result.usage.outputTokens,
+                totalTokens: result.usage.totalTokens,
+                cachedInputTokens: result.usage.cachedInputTokens || 0,
+                entries: [result.usage],
+            } : undefined,
+            fallbackEstimatedCredits: estimate.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/transcribe-audio',
             textLength: result.text.length,
+            usage: result.usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             modelUsed: result.modelUsed,
@@ -1848,6 +1957,7 @@ fastify.post<{
             uid: user.uid,
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: result.usage?.totalTokens || 0,
         }, 'transcribe-audio: complete');
         return {
             ...result,
@@ -1855,6 +1965,8 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage: result.usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {
@@ -1921,7 +2033,6 @@ fastify.post<{
     const billingRequestId = resolveBillingRequestId(request);
     const requestPreview = previewText(appPrompt, 180);
     const sourceTag = resolveHeaderString(request.headers, 'x-eazyui-source') || 'web';
-    const isMcpSource = sourceTag === 'mcp';
 
     if (!appPrompt?.trim()) {
         return reply.status(400).send({ error: 'appPrompt is required' });
@@ -1934,16 +2045,14 @@ fastify.post<{
         operation: plannerOperation,
         modelProfile: toCreditModelProfile(preferredModel),
     });
-    const plannerEstimate = isMcpSource
-        ? {
-            ...rawPlannerEstimate,
-            estimatedCredits: Math.max(1, rawPlannerEstimate.estimatedCredits),
-            breakdown: {
-                ...rawPlannerEstimate.breakdown,
-                base: Math.max(1, rawPlannerEstimate.breakdown.base),
-            },
-        }
-        : rawPlannerEstimate;
+    const plannerEstimate = {
+        ...rawPlannerEstimate,
+        estimatedCredits: Math.max(1, rawPlannerEstimate.estimatedCredits),
+        breakdown: {
+            ...rawPlannerEstimate.breakdown,
+            base: Math.max(1, rawPlannerEstimate.breakdown.base),
+        },
+    };
     if (!ensureBillingEntitlementOrReply({
         reply,
         traceId,
@@ -1955,20 +2064,18 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        if (plannerEstimate.estimatedCredits > 0) {
-            reservation = reserveCredits({
-                uid: user.uid,
-                requestId: billingRequestId,
-                operation: plannerOperation,
-                reservedCredits: plannerEstimate.estimatedCredits,
-                metadata: {
-                    route: '/api/plan',
-                    phase,
-                    source: sourceTag,
-                    requestPreview,
-                },
-            });
-        }
+        reservation = reserveCredits({
+            uid: user.uid,
+            requestId: billingRequestId,
+            operation: plannerOperation,
+            reservedCredits: plannerEstimate.estimatedCredits,
+            metadata: {
+                route: '/api/plan',
+                phase,
+                source: sourceTag,
+                requestPreview,
+            },
+        });
         fastify.log.info({
             traceId,
             route: '/api/plan',
@@ -1989,7 +2096,7 @@ fastify.post<{
             source: sourceTag,
             appPromptPreview: previewText(appPrompt),
         }, 'plan: start');
-        const plan = await runDesignPlanner({
+        const plannerResult = await runDesignPlannerWithUsage({
             phase,
             appPrompt: appPrompt.trim(),
             platform,
@@ -2004,6 +2111,7 @@ fastify.post<{
             preferredModel,
             temperature,
         });
+        const { plan, usage } = plannerResult;
         if (plan.phase === 'route') {
             fastify.log.info({
                 traceId,
@@ -2036,24 +2144,39 @@ fastify.post<{
                     ? `nextSuggestions=${plan.nextScreenSuggestions.length}`
                     : `recommendedScreens=${plan.recommendedScreens.length}`,
         }, 'plan: complete');
-        if (reservation) {
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', plannerEstimate.estimatedCredits, {
-                route: '/api/plan',
-                phase,
-                source: sourceTag,
-            });
-            fastify.log.info({
-                traceId,
-                route: '/api/plan',
-                stage: 'billing',
-                uid: user.uid,
-                source: sourceTag,
+        const usageCharge = resolveUsageCharge({
+            operation: plannerOperation,
+            usage,
+            fallbackEstimatedCredits: plannerEstimate.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+            route: '/api/plan',
+            phase,
+            source: sourceTag,
+            usage,
+            usageQuote: usageCharge.usageQuote,
+        });
+        fastify.log.info({
+            traceId,
+            route: '/api/plan',
+            stage: 'billing',
+            uid: user.uid,
+            source: sourceTag,
+            creditsCharged: settled.finalChargedCredits,
+            creditsRemaining: settled.summary.balanceCredits,
+            reservationId: reservation.reservationId,
+            usageTotals: usage ? usage.totalTokens : 0,
+        }, 'plan: settled');
+        return {
+            ...plan,
+            billing: {
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
-            }, 'plan: settled');
-        }
-        return plan;
+                usage,
+                usageQuote: usageCharge.usageQuote,
+            },
+        };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
             return sendInsufficientCredits(reply, error);
@@ -2258,6 +2381,13 @@ fastify.post<{
     let charCount = 0;
     let completedScreens = 0;
     let clientAborted = false;
+    let streamBillingMeta: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+        usage?: TokenUsageSummary;
+        usageQuote?: UsageCreditQuote;
+    } | null = null;
     request.raw.once('aborted', () => {
         clientAborted = true;
     });
@@ -2295,7 +2425,7 @@ fastify.post<{
     reply.raw.setHeader('Transfer-Encoding', 'chunked');
 
     try {
-        const { generateDesignStream } = await import('./services/gemini.js');
+        const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
             route: '/api/generate-stream',
@@ -2310,7 +2440,15 @@ fastify.post<{
             bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
             promptPreview: previewText(prompt),
         }, 'generate-stream: start');
-        const stream = generateDesignStream({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
+        const { stream, usagePromise } = generateDesignStreamWithUsage({
+            prompt,
+            stylePreset,
+            platform,
+            images,
+            preferredModel,
+            temperature,
+            projectDesignSystem,
+        });
 
         for await (const chunk of stream) {
             chunkCount += 1;
@@ -2331,18 +2469,29 @@ fastify.post<{
             reply.raw.write(chunk);
         }
         if (reservation) {
-            const finalCharge = estimateCredits({
+            const usage = await usagePromise;
+            const usageCharge = resolveUsageCharge({
                 operation: 'generate_stream',
-                modelProfile: toCreditModelProfile(preferredModel),
-                expectedScreenCount: Math.max(1, completedScreens),
-                bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+                usage,
+                // Stream generation should be billed from measured token usage, not the legacy flat estimate.
+                // If usage is unavailable, avoid falling back to the old fixed-screen estimate.
+                fallbackEstimatedCredits: 0,
             });
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', finalCharge.estimatedCredits, {
+            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/generate-stream',
                 chunkCount,
                 charCount,
                 completedScreens,
+                usage,
+                usageQuote: usageCharge.usageQuote,
             });
+            streamBillingMeta = {
+                creditsCharged: settled.finalChargedCredits,
+                creditsRemaining: settled.summary.balanceCredits,
+                reservationId: reservation.reservationId,
+                usage,
+                usageQuote: usageCharge.usageQuote,
+            };
             fastify.log.info({
                 traceId,
                 route: '/api/generate-stream',
@@ -2351,7 +2500,11 @@ fastify.post<{
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usageTotals: usage ? usage.totalTokens : 0,
             }, 'generate-stream: settled');
+        }
+        if (streamBillingMeta) {
+            reply.raw.write(encodeStreamBillingMarker(streamBillingMeta));
         }
         fastify.log.info({
             traceId,
@@ -2457,7 +2610,7 @@ fastify.post<{
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             promptPreview: previewText(prompt),
         }, 'complete-screen: start');
-        const html = await completePartialScreen({
+        const completed = await completePartialScreen({
             screenName,
             partialHtml,
             prompt,
@@ -2466,10 +2619,17 @@ fastify.post<{
             temperature,
             projectDesignSystem,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', estimate.estimatedCredits, {
+        const usageCharge = resolveUsageCharge({
+            operation: 'complete_screen',
+            usage: completed.usage,
+            fallbackEstimatedCredits: estimate.estimatedCredits,
+        });
+        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/complete-screen',
             screenName,
-            htmlChars: html.length,
+            htmlChars: completed.html.length,
+            usage: completed.usage,
+            usageQuote: usageCharge.usageQuote,
         });
         fastify.log.info({
             traceId,
@@ -2478,16 +2638,19 @@ fastify.post<{
             uid: user.uid,
             durationMs: Date.now() - startedAt,
             screenName,
-            htmlChars: html.length,
+            htmlChars: completed.html.length,
             creditsCharged: settled.finalChargedCredits,
             creditsRemaining: settled.summary.balanceCredits,
+            usageTotals: completed.usage ? completed.usage.totalTokens : 0,
         }, 'complete-screen: complete');
         return {
-            html,
+            html: completed.html,
             billing: {
                 creditsCharged: settled.finalChargedCredits,
                 creditsRemaining: settled.summary.balanceCredits,
                 reservationId: reservation.reservationId,
+                usage: completed.usage,
+                usageQuote: usageCharge.usageQuote,
             },
         };
     } catch (error) {

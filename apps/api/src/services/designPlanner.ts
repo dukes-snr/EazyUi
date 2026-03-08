@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GROQ_MODELS, groqChatCompletion, isGroqModel, type GroqModelId } from './groq.provider.js';
+import { summarizeTokenUsage, type TokenUsageEntry, type TokenUsageSummary } from './tokenUsage.js';
 
 export type PlannerPhase = 'discovery' | 'plan' | 'postgen' | 'route';
 
@@ -90,6 +91,10 @@ export type PlannerPlanResponse = z.infer<typeof PlannerPlanResponseSchema>;
 export type PlannerPostgenResponse = z.infer<typeof PlannerPostgenResponseSchema>;
 export type PlannerRouteResponse = z.infer<typeof PlannerRouteResponseSchema>;
 export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
+export type PlannerResponseWithUsage = {
+    plan: PlannerResponse;
+    usage?: TokenUsageSummary;
+};
 
 export type PlannerInput = {
     phase: PlannerPhase;
@@ -560,7 +565,7 @@ function enforceRouteDecision(input: PlannerInput, route: PlannerRouteResponse):
     return next;
 }
 
-async function generateAssistFallbackResponse(input: PlannerInput, model: GroqModelId): Promise<string> {
+async function generateAssistFallbackResponse(input: PlannerInput, model: GroqModelId): Promise<{ text: string; usage?: TokenUsageEntry }> {
     const referenceImages = (input.referenceImages || []).filter(Boolean).slice(0, 3);
     const assistInstruction = `You are a senior UI/UX designer assisting in-product.
 Respond conversationally and directly to the user's request.
@@ -613,10 +618,13 @@ ${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n')
         temperature: assistTemperature,
         topP: 0.9,
     });
-    return (completion.text || '').trim();
+    return {
+        text: (completion.text || '').trim(),
+        usage: completion.usage,
+    };
 }
 
-export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResponse> {
+export async function runDesignPlannerWithUsage(input: PlannerInput): Promise<PlannerResponseWithUsage> {
     const traceId = `pln-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const hasReferenceImages = (input.referenceImages || []).filter(Boolean).length > 0;
     const forcedRouteVisionModel: GroqModelId | null =
@@ -647,6 +655,7 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
     });
     let completion: Awaited<ReturnType<typeof groqChatCompletion>> | null = null;
     let lastError: unknown = null;
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
     for (const model of modelsToTry) {
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -714,6 +723,7 @@ Return JSON only.`,
                     finishReason: completion.finishReason || null,
                     preview: previewForLog(completion.text),
                 });
+                usageEntries.push(completion.usage);
                 break;
             } catch (error) {
                 lastError = error;
@@ -773,57 +783,80 @@ Return JSON only.`,
             if (!routed.assistantResponse?.trim()) {
                 try {
                     const assistText = await generateAssistFallbackResponse(input, primaryModel);
-                    console.info('[Planner] route-assist-fallback', { traceId, used: true, hasText: Boolean(assistText?.trim()) });
+                    usageEntries.push(assistText.usage);
+                    console.info('[Planner] route-assist-fallback', { traceId, used: true, hasText: Boolean(assistText.text?.trim()) });
                     return {
-                        ...routed,
-                        assistantResponse: assistText || 'Here is a direct response based on your request.',
+                        plan: {
+                            ...routed,
+                            assistantResponse: assistText.text || 'Here is a direct response based on your request.',
+                        },
+                        usage: summarizeTokenUsage(usageEntries),
                     };
                 } catch {
                     console.warn('[Planner] route-assist-fallback', { traceId, used: true, hasText: false });
                     return {
-                        ...routed,
-                        assistantResponse: 'Here is a direct response based on your request.',
+                        plan: {
+                            ...routed,
+                            assistantResponse: 'Here is a direct response based on your request.',
+                        },
+                        usage: summarizeTokenUsage(usageEntries),
                     };
                 }
             }
             if (!isNextScreenRequest(input.appPrompt)) {
                 console.info('[Planner] route-next-screens-disabled', { traceId, reason: 'no explicit next-screen request' });
                 return {
-                    ...routed,
-                    recommendNextScreens: false,
-                    nextScreenSuggestions: [],
+                    plan: {
+                        ...routed,
+                        recommendNextScreens: false,
+                        nextScreenSuggestions: [],
+                    },
+                    usage: summarizeTokenUsage(usageEntries),
                 };
             }
-            return routed;
+            return {
+                plan: routed,
+                usage: summarizeTokenUsage(usageEntries),
+            };
         }
         if (isAssistLikeRequest(input.appPrompt)) {
             try {
                 const assistText = await generateAssistFallbackResponse(input, primaryModel);
+                usageEntries.push(assistText.usage);
                 console.info('[Planner] assist-like-override', { traceId, usedFallbackAssist: true });
                 return {
-                    ...routed,
-                    intent: 'chat_assist',
-                    action: 'assist',
-                    reason: parsedRoute.reason || 'assist-like request',
-                    assistantResponse: assistText || parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
-                    recommendNextScreens: isNextScreenRequest(input.appPrompt),
-                    nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                    plan: {
+                        ...routed,
+                        intent: 'chat_assist',
+                        action: 'assist',
+                        reason: parsedRoute.reason || 'assist-like request',
+                        assistantResponse: assistText.text || parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
+                        recommendNextScreens: isNextScreenRequest(input.appPrompt),
+                        nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                    },
+                    usage: summarizeTokenUsage(usageEntries),
                 };
             } catch {
                 console.warn('[Planner] assist-like-override', { traceId, usedFallbackAssist: false });
                 return {
-                    ...routed,
-                    intent: 'chat_assist',
-                    action: 'assist',
-                    reason: parsedRoute.reason || 'assist-like request',
-                    assistantResponse: parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
-                    recommendNextScreens: isNextScreenRequest(input.appPrompt),
-                    nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                    plan: {
+                        ...routed,
+                        intent: 'chat_assist',
+                        action: 'assist',
+                        reason: parsedRoute.reason || 'assist-like request',
+                        assistantResponse: parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
+                        recommendNextScreens: isNextScreenRequest(input.appPrompt),
+                        nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                    },
+                    usage: summarizeTokenUsage(usageEntries),
                 };
             }
         }
         console.info('[Planner] complete', { traceId, phase: 'route', summary: `${routed.intent}:${routed.action || 'n/a'}` });
-        return routed;
+        return {
+            plan: routed,
+            usage: summarizeTokenUsage(usageEntries),
+        };
     }
     if (input.phase === 'postgen') {
         const parsed = PlannerPostgenResponseSchema.parse({
@@ -836,7 +869,10 @@ Return JSON only.`,
             gapsDetected: parsed.gapsDetected.length,
             nextSuggestions: parsed.nextScreenSuggestions.length,
         });
-        return parsed;
+        return {
+            plan: parsed,
+            usage: summarizeTokenUsage(usageEntries),
+        };
     }
 
     const parsed = PlannerPlanResponseSchema.parse({
@@ -850,7 +886,15 @@ Return JSON only.`,
         recommendedScreens: parsed.recommendedScreens.length,
         questions: parsed.questions.length,
     });
-    return parsed;
+    return {
+        plan: parsed,
+        usage: summarizeTokenUsage(usageEntries),
+    };
+}
+
+export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResponse> {
+    const { plan } = await runDesignPlannerWithUsage(input);
+    return plan;
 }
 
 export function getPlannerModels() {
@@ -922,8 +966,10 @@ ${intents || 'none'}
 Return prompts that are production-ready for image generation and consistent across screens.`;
 }
 
-export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<Map<string, string>> {
-    if (!input.intents.length) return new Map();
+export async function planImagePromptsWithUsage(input: ImagePromptPlannerInput): Promise<{ prompts: Map<string, string>; usage?: TokenUsageSummary }> {
+    if (!input.intents.length) {
+        return { prompts: new Map() };
+    }
 
     const primaryModel = (isGroqModel(input.preferredModel) ? input.preferredModel : 'llama-3.3-70b-versatile') as GroqModelId;
     const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
@@ -933,6 +979,7 @@ export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<
     const modelsToTry: GroqModelId[] = [primaryModel, fallbackModel];
     let completion: Awaited<ReturnType<typeof groqChatCompletion>> | null = null;
     let lastError: unknown = null;
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
     for (const model of modelsToTry) {
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -946,6 +993,7 @@ export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<
                     topP: 0.9,
                     responseFormat: 'json_object',
                 });
+                usageEntries.push(completion.usage);
                 break;
             } catch (error) {
                 lastError = error;
@@ -971,5 +1019,13 @@ export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<
         const prompt = (entry.prompt || '').trim();
         if (key && prompt) mapping.set(key, prompt);
     });
-    return mapping;
+    return {
+        prompts: mapping,
+        usage: summarizeTokenUsage(usageEntries),
+    };
+}
+
+export async function planImagePrompts(input: ImagePromptPlannerInput): Promise<Map<string, string>> {
+    const { prompts } = await planImagePromptsWithUsage(input);
+    return prompts;
 }

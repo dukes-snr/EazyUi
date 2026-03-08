@@ -16,8 +16,11 @@ import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "fireb
 import type { HtmlDesignSpec, ProjectMemory } from "@/api/client";
 import { db, storage } from "./firebase";
 
-const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0";
-const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS !== "0";
+const IS_LOCAL_DEV_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1"
+  || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0");
+const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1"
+  || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_UPLOADS !== "0");
 let storageUploadsTemporarilyDisabled = false;
 const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
 const PROJECT_COVER_VERSION = 3;
@@ -545,12 +548,17 @@ function isStorageCorsOrNetworkError(error: unknown): boolean {
   const code = String((error as { code?: string })?.code || "").toLowerCase();
   return (
     message.includes("cors") ||
+    message.includes("blocked by cors policy") ||
+    message.includes("access control check") ||
+    message.includes("http status") ||
+    message.includes("failed to fetch") ||
     message.includes("preflight") ||
     message.includes("xmlhttprequest") ||
     message.includes("network") ||
     message.includes("err_failed") ||
     message.includes("timed out") ||
-    code.includes("storage/unknown")
+    code.includes("storage/unknown") ||
+    code.includes("storage/unauthorized")
   );
 }
 
@@ -700,6 +708,9 @@ async function persistChatImageRefs(params: {
       );
       out.push(await getDownloadURL(storageRef));
     } catch (error) {
+      if (isStorageCorsOrNetworkError(error)) {
+        storageUploadsTemporarilyDisabled = true;
+      }
       // Skip failed attachment upload so one bad file doesn't block project save.
     }
   }
@@ -767,7 +778,7 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   };
   const snapshotPath = `snapshots/latest.json`;
   let resolvedSnapshotPath: string | null = null;
-  const canAttemptSnapshotUpload = ENABLE_STORAGE_UPLOADS && (!storageUploadsTemporarilyDisabled || !isAutosave);
+  const canAttemptSnapshotUpload = ENABLE_STORAGE_UPLOADS && !storageUploadsTemporarilyDisabled;
   if (canAttemptSnapshotUpload) {
     try {
       const snapshotRef = ref(storage, `users/${uid}/projects/${id}/${snapshotPath}`);
@@ -872,41 +883,6 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       })
     );
   }
-
-  await setDoc(
-    projectRef,
-    {
-      id,
-      ownerId: uid,
-      name: safeDesignSpec.name || "Untitled project",
-      snapshotPath: resolvedSnapshotPath,
-      coverImagePath: resolvedCoverImagePaths[0] || null,
-      coverImageUrl: resolvedCoverImageUrls[0] || null,
-      coverImageDataUrl: resolvedCoverImageDataUrls[0] || null,
-      coverImagePaths: resolvedCoverImagePaths,
-      coverImageUrls: resolvedCoverImageUrls,
-      coverImageDataUrls: resolvedCoverImageDataUrls,
-      coverScreenIds: nextCoverScreenIds,
-      coverVersion: PROJECT_COVER_VERSION,
-      designSpecMeta: {
-        id: safeDesignSpec.id,
-        name: safeDesignSpec.name,
-        description: safeDesignSpec.description || "",
-        designSystem: safeDesignSpec.designSystem,
-        screens: (safeDesignSpec.screens || []).map((s) => ({
-          screenId: s.screenId,
-          name: s.name,
-          width: s.width,
-          height: s.height,
-          status: s.status || "complete",
-        })),
-      },
-      projectMemory,
-      createdAt,
-      updatedAt: now,
-    },
-    { merge: true }
-  );
 
   // Save screen snapshots separately for future collaboration granularity.
   if (!isAutosave) {
@@ -1015,57 +991,29 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       await messageBatch.commit();
     }
   } else {
-    const existingMessagesSnap = await getDocs(collection(db, "users", uid, "projects", id, "chats", "default", "messages"));
-    const staleAttachmentRefs = new Map<string, ReturnType<typeof ref>>();
-    existingMessagesSnap.forEach((docSnap) => {
-      const persisted = docSnap.data() as { images?: unknown };
-      if (!Array.isArray(persisted.images)) return;
-      for (const image of persisted.images) {
-        if (typeof image !== "string") continue;
-        if (!image.includes("/chat-attachments/")) continue;
-        const storageRef = resolveStorageRefFromImageValue(image);
-        if (!storageRef) continue;
-        staleAttachmentRefs.set(storageRef.fullPath, storageRef);
-      }
-    });
-    if (!existingMessagesSnap.empty) {
-      const oldMessagesBatch = writeBatch(db);
-      existingMessagesSnap.forEach((docSnap) => oldMessagesBatch.delete(docSnap.ref));
-      await oldMessagesBatch.commit();
-    }
-    if (staleAttachmentRefs.size > 0) {
-      await Promise.all(
-        Array.from(staleAttachmentRefs.values()).map(async (attachmentRef) => {
-          try {
-            await deleteObject(attachmentRef);
-          } catch {
-            // ignore missing attachment cleanup errors
-          }
-        })
-      );
-    }
-    if (messages.length > 0) {
+    const sourceMessages = messages.slice(-250);
+    const persistedImageMatrix = await Promise.all(
+      sourceMessages.map(async (msg, index) => {
+        const msgId = String(msg.id || makeId());
+        const directUrls = sanitizeChatImagesForPersistence(msg.images);
+        const uploadedUrls = await persistChatImageRefs({
+          uid,
+          projectId: id,
+          messageId: msgId,
+          images: msg.images,
+        });
+        const mergedImages = Array.from(new Set([...directUrls, ...uploadedUrls]));
+        return {
+          msgId,
+          orderIndex: index,
+          images: mergedImages.slice(0, MAX_PERSISTED_IMAGE_COUNT),
+          msg,
+        };
+      })
+    );
+
+    if (persistedImageMatrix.length > 0) {
       const messageBatch = writeBatch(db);
-      const sourceMessages = messages.slice(-250);
-      const persistedImageMatrix = await Promise.all(
-        sourceMessages.map(async (msg, index) => {
-          const msgId = String(msg.id || makeId());
-          const directUrls = sanitizeChatImagesForPersistence(msg.images);
-          const uploadedUrls = await persistChatImageRefs({
-            uid,
-            projectId: id,
-            messageId: msgId,
-            images: msg.images,
-          });
-          const mergedImages = Array.from(new Set([...directUrls, ...uploadedUrls]));
-          return {
-            msgId,
-            orderIndex: index,
-            images: mergedImages.slice(0, MAX_PERSISTED_IMAGE_COUNT),
-            msg,
-          };
-        })
-      );
       persistedImageMatrix.forEach(({ msgId, orderIndex, images, msg }) => {
         const msgRef = doc(db, "users", uid, "projects", id, "chats", "default", "messages", msgId);
         const persistedMeta = sanitizePersistedMeta(msg.meta);
@@ -1084,6 +1032,45 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       });
       await messageBatch.commit();
     }
+
+    const currentMessageIds = new Set(persistedImageMatrix.map((entry) => entry.msgId));
+    const existingMessagesSnap = await getDocs(collection(db, "users", uid, "projects", id, "chats", "default", "messages"));
+    const staleDocRefs: Array<(typeof existingMessagesSnap.docs)[number]["ref"]> = [];
+    const staleAttachmentRefs = new Map<string, ReturnType<typeof ref>>();
+    existingMessagesSnap.forEach((docSnap) => {
+      if (currentMessageIds.has(docSnap.id)) return;
+      staleDocRefs.push(docSnap.ref);
+      const persisted = docSnap.data() as { images?: unknown };
+      if (!Array.isArray(persisted.images)) return;
+      for (const image of persisted.images) {
+        if (typeof image !== "string") continue;
+        if (!image.includes("/chat-attachments/")) continue;
+        const storageRef = resolveStorageRefFromImageValue(image);
+        if (!storageRef) continue;
+        staleAttachmentRefs.set(storageRef.fullPath, storageRef);
+      }
+    });
+
+    if (staleDocRefs.length > 0) {
+      const CHUNK_SIZE = 400;
+      for (let offset = 0; offset < staleDocRefs.length; offset += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        staleDocRefs.slice(offset, offset + CHUNK_SIZE).forEach((refToDelete) => batch.delete(refToDelete));
+        await batch.commit();
+      }
+    }
+
+    if (staleAttachmentRefs.size > 0) {
+      await Promise.all(
+        Array.from(staleAttachmentRefs.values()).map(async (attachmentRef) => {
+          try {
+            await deleteObject(attachmentRef);
+          } catch {
+            // ignore missing attachment cleanup errors
+          }
+        })
+      );
+    }
   }
 
   // Track the latest workspace session metadata.
@@ -1096,6 +1083,42 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
       updatedAt: now,
       screenCount: designSpec.screens?.length || 0,
       canvasDoc: safeCanvasDoc,
+    },
+    { merge: true }
+  );
+
+  // Publish project metadata LAST so realtime consumers see a coherent save boundary.
+  await setDoc(
+    projectRef,
+    {
+      id,
+      ownerId: uid,
+      name: safeDesignSpec.name || "Untitled project",
+      snapshotPath: resolvedSnapshotPath,
+      coverImagePath: resolvedCoverImagePaths[0] || null,
+      coverImageUrl: resolvedCoverImageUrls[0] || null,
+      coverImageDataUrl: resolvedCoverImageDataUrls[0] || null,
+      coverImagePaths: resolvedCoverImagePaths,
+      coverImageUrls: resolvedCoverImageUrls,
+      coverImageDataUrls: resolvedCoverImageDataUrls,
+      coverScreenIds: nextCoverScreenIds,
+      coverVersion: PROJECT_COVER_VERSION,
+      designSpecMeta: {
+        id: safeDesignSpec.id,
+        name: safeDesignSpec.name,
+        description: safeDesignSpec.description || "",
+        designSystem: safeDesignSpec.designSystem,
+        screens: (safeDesignSpec.screens || []).map((s) => ({
+          screenId: s.screenId,
+          name: s.name,
+          width: s.width,
+          height: s.height,
+          status: s.status || "complete",
+        })),
+      },
+      projectMemory,
+      createdAt,
+      updatedAt: now,
     },
     { merge: true }
   );
@@ -1321,10 +1344,38 @@ export function subscribeProjectRealtime(input: {
   };
 
   const unsubs: Unsubscribe[] = [
-    onSnapshot(doc(db, "users", uid, "projects", projectId), () => scheduleRefresh(), (error) => reportError(error)),
-    onSnapshot(collection(db, "users", uid, "projects", projectId, "screens"), () => scheduleRefresh(), (error) => reportError(error)),
-    onSnapshot(collection(db, "users", uid, "projects", projectId, "chats", "default", "messages"), () => scheduleRefresh(), (error) => reportError(error)),
-    onSnapshot(doc(db, "users", uid, "projects", projectId, "sessions", "latest"), () => scheduleRefresh(), (error) => reportError(error)),
+    onSnapshot(
+      doc(db, "users", uid, "projects", projectId),
+      (snap) => {
+        if (snap.metadata.hasPendingWrites) return;
+        scheduleRefresh();
+      },
+      (error) => reportError(error)
+    ),
+    onSnapshot(
+      collection(db, "users", uid, "projects", projectId, "screens"),
+      (snap) => {
+        if (snap.metadata.hasPendingWrites) return;
+        scheduleRefresh();
+      },
+      (error) => reportError(error)
+    ),
+    onSnapshot(
+      collection(db, "users", uid, "projects", projectId, "chats", "default", "messages"),
+      (snap) => {
+        if (snap.metadata.hasPendingWrites) return;
+        scheduleRefresh();
+      },
+      (error) => reportError(error)
+    ),
+    onSnapshot(
+      doc(db, "users", uid, "projects", projectId, "sessions", "latest"),
+      (snap) => {
+        if (snap.metadata.hasPendingWrites) return;
+        scheduleRefresh();
+      },
+      (error) => reportError(error)
+    ),
   ];
 
   scheduleRefresh();

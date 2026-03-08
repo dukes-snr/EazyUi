@@ -158,11 +158,7 @@ export interface GenerateRequest {
 export interface GenerateResponse {
     designSpec: HtmlDesignSpec;
     versionId: string;
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
-    };
+    billing?: BillingUsageMeta;
 }
 
 export interface EditRequest {
@@ -190,11 +186,7 @@ export interface EditResponse {
     html: string;
     description?: string;
     versionId: string;
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
-    };
+    billing?: BillingUsageMeta;
 }
 
 export interface GenerateImageRequest {
@@ -208,11 +200,7 @@ export interface GenerateImageResponse {
     src: string;
     modelUsed: string;
     description?: string;
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
-    };
+    billing?: BillingUsageMeta;
 }
 
 export interface SynthesizeScreenImagesRequest {
@@ -247,11 +235,7 @@ export interface SynthesizeScreenImagesResponse {
         reusedWithinRun: number;
         skipped: number;
     };
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
-    };
+    billing?: BillingUsageMeta;
 }
 
 export interface CompleteScreenRequest {
@@ -280,11 +264,7 @@ export interface GenerateDesignSystemRequest {
 
 export interface GenerateDesignSystemResponse {
     designSystem: ProjectDesignSystem;
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
-    };
+    billing?: BillingUsageMeta;
 }
 
 export interface TranscribeAudioRequest {
@@ -297,11 +277,45 @@ export interface TranscribeAudioRequest {
 export interface TranscribeAudioResponse {
     text: string;
     modelUsed: string;
-    billing?: {
-        creditsCharged: number;
-        creditsRemaining: number;
-        reservationId?: string;
+    billing?: BillingUsageMeta;
+}
+
+export interface TokenUsageEntry {
+    provider?: string;
+    model?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    cachedInputTokens?: number;
+    [key: string]: unknown;
+}
+
+export interface TokenUsageSummary {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    cachedInputTokens?: number;
+    entries?: TokenUsageEntry[];
+    [key: string]: unknown;
+}
+
+export interface UsageCreditQuote {
+    credits?: number;
+    totals?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        cachedInputTokens?: number;
     };
+    [key: string]: unknown;
+}
+
+export interface BillingUsageMeta {
+    creditsCharged: number;
+    creditsRemaining: number;
+    reservationId?: string;
+    usage?: TokenUsageSummary;
+    usageQuote?: UsageCreditQuote;
 }
 
 export interface BillingSummary {
@@ -465,6 +479,7 @@ export interface PlannerPlanResponse {
         why?: string;
     };
     generatorPrompt: string;
+    billing?: BillingUsageMeta;
 }
 
 export interface PlannerPostgenResponse {
@@ -476,6 +491,7 @@ export interface PlannerPostgenResponse {
         primary?: { label: string; screenNames: string[] };
         secondary?: { label: string; screenNames: string[] };
     };
+    billing?: BillingUsageMeta;
 }
 
 export interface PlannerRouteResponse {
@@ -495,6 +511,7 @@ export interface PlannerRouteResponse {
     assistantResponse?: string;
     recommendNextScreens?: boolean;
     nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number }>;
+    billing?: BillingUsageMeta;
 }
 
 export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
@@ -529,6 +546,15 @@ export interface RenderScreenImageResponse {
     scale: number;
 }
 
+export interface CompleteScreenResponse {
+    html: string;
+    billing?: BillingUsageMeta;
+}
+
+export interface GenerateStreamResponse {
+    billing?: BillingUsageMeta;
+}
+
 export interface ProjectResponse {
     projectId: string;
     designSpec: HtmlDesignSpec;
@@ -537,6 +563,27 @@ export interface ProjectResponse {
     projectMemory?: ProjectMemory;
     createdAt: string;
     updatedAt: string;
+}
+
+const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
+const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
+const STREAM_BILLING_SAFE_TAIL = Math.max(16, STREAM_BILLING_MARKER_PREFIX.length - 1);
+
+function decodeBase64Utf8(input: string): string {
+    const decodedBinary = atob(input);
+    const bytes = Uint8Array.from(decodedBinary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+}
+
+function tryParseStreamBillingPayload(payload: string): BillingUsageMeta | undefined {
+    try {
+        const decoded = decodeBase64Utf8(payload.trim());
+        const parsed = JSON.parse(decoded);
+        if (!parsed || typeof parsed !== 'object') return undefined;
+        return parsed as BillingUsageMeta;
+    } catch {
+        return undefined;
+    }
 }
 
 class ApiClient {
@@ -648,7 +695,7 @@ class ApiClient {
         request: GenerateRequest,
         onChunk: (chunk: string) => void,
         signal?: AbortSignal
-    ): Promise<void> {
+    ): Promise<GenerateStreamResponse> {
         const payload = this.withComposerTemperature(request);
         const authHeader = await this.getAuthHeaderValue();
         const response = await fetch(`${API_BASE}/generate-stream`, {
@@ -669,13 +716,72 @@ class ApiClient {
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let pending = '';
+        let billing: BillingUsageMeta | undefined;
+        const flushText = (text: string) => {
+            if (text) onChunk(text);
+        };
+
+        const extractCompleteMarkers = () => {
+            while (true) {
+                const markerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+                if (markerStart < 0) break;
+                const markerEnd = pending.indexOf(
+                    STREAM_BILLING_MARKER_SUFFIX,
+                    markerStart + STREAM_BILLING_MARKER_PREFIX.length
+                );
+                if (markerEnd < 0) break;
+
+                const beforeMarker = pending.slice(0, markerStart);
+                flushText(beforeMarker);
+
+                const payloadBase64 = pending.slice(
+                    markerStart + STREAM_BILLING_MARKER_PREFIX.length,
+                    markerEnd
+                );
+                const parsedBilling = tryParseStreamBillingPayload(payloadBase64);
+                if (parsedBilling) {
+                    billing = parsedBilling;
+                }
+
+                pending = pending.slice(markerEnd + STREAM_BILLING_MARKER_SUFFIX.length);
+            }
+        };
+
+        const flushSafeText = () => {
+            const markerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+            if (markerStart > 0) {
+                flushText(pending.slice(0, markerStart));
+                pending = pending.slice(markerStart);
+                return;
+            }
+            if (markerStart === 0) return;
+            if (pending.length <= STREAM_BILLING_SAFE_TAIL) return;
+            const flushUntil = pending.length - STREAM_BILLING_SAFE_TAIL;
+            flushText(pending.slice(0, flushUntil));
+            pending = pending.slice(flushUntil);
+        };
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             const text = decoder.decode(value, { stream: true });
-            onChunk(text);
+            pending += text;
+            extractCompleteMarkers();
+            flushSafeText();
         }
+
+        pending += decoder.decode();
+        extractCompleteMarkers();
+
+        const trailingMarkerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+        if (trailingMarkerStart >= 0) {
+            flushText(pending.slice(0, trailingMarkerStart));
+        } else {
+            flushText(pending);
+        }
+
+        return { billing };
     }
 
 
@@ -707,9 +813,9 @@ class ApiClient {
         });
     }
 
-    async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<{ html: string }> {
+    async completeScreen(request: CompleteScreenRequest, signal?: AbortSignal): Promise<CompleteScreenResponse> {
         const payload = this.withComposerTemperature(request);
-        return this.request<{ html: string }>('/complete-screen', {
+        return this.request<CompleteScreenResponse>('/complete-screen', {
             method: 'POST',
             body: JSON.stringify(payload),
             signal,

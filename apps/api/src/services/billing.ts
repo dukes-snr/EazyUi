@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import type { TokenUsageEntry, TokenUsageSummary } from './tokenUsage.js';
 
 export type BillingPlanId = 'free' | 'pro' | 'team';
 export type BillingOperation =
@@ -139,6 +140,47 @@ export type BillingEstimate = {
     };
 };
 
+type TokenPricingRate = {
+    inputUsdPer1M: number;
+    outputUsdPer1M: number;
+    cachedInputUsdPer1M?: number;
+};
+
+export type UsageCreditLineItem = {
+    provider: string;
+    model: string;
+    modelKeyMatched: string;
+    pricingSource: 'catalog' | 'fallback';
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cachedInputTokens: number;
+    inputUsdPer1M: number;
+    outputUsdPer1M: number;
+    cachedInputUsdPer1M: number;
+    inputCostUsd: number;
+    outputCostUsd: number;
+    cachedInputCostUsd: number;
+    totalCostUsd: number;
+};
+
+export type UsageCreditQuote = {
+    operation: BillingOperation;
+    credits: number;
+    costUsdRaw: number;
+    costUsdWithMarkup: number;
+    creditsPerUsd: number;
+    markupMultiplier: number;
+    minimumCreditsApplied: number;
+    totals: {
+        inputTokens: number;
+        outputTokens: number;
+        totalTokens: number;
+        cachedInputTokens: number;
+    };
+    lineItems: UsageCreditLineItem[];
+};
+
 type DeductBreakdown = {
     monthly: number;
     rollover: number;
@@ -167,6 +209,30 @@ const MODEL_MULTIPLIER: Record<CreditModelProfile, number> = {
     fast: 0.8,
     quality: 1,
     premium: 1.4,
+};
+
+const USAGE_BILLING_CREDITS_PER_USD = Number(process.env.BILLING_CREDITS_PER_USD || '100');
+const USAGE_BILLING_MARKUP_MULTIPLIER = Number(process.env.BILLING_USAGE_MARKUP_MULTIPLIER || '1.3');
+const USAGE_BILLING_MIN_CREDITS = Number(process.env.BILLING_USAGE_MIN_CREDITS || '1');
+const USAGE_BILLING_FALLBACK_INPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_INPUT_USD_PER_1M || '0.8');
+const USAGE_BILLING_FALLBACK_OUTPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_OUTPUT_USD_PER_1M || '2.4');
+
+const TOKEN_PRICING_CATALOG_USD_PER_1M: Record<string, TokenPricingRate> = {
+    'gemini-2.5-pro': { inputUsdPer1M: 1.25, outputUsdPer1M: 10 },
+    'gemini-2.5-flash': { inputUsdPer1M: 0.3, outputUsdPer1M: 2.5 },
+    'gemini-2.5-flash-lite': { inputUsdPer1M: 0.1, outputUsdPer1M: 0.4 },
+    'gemini-1.5-pro': { inputUsdPer1M: 1.25, outputUsdPer1M: 5 },
+    'gemini-1.5-flash': { inputUsdPer1M: 0.35, outputUsdPer1M: 0.53 },
+    'llama-3.1-8b-instant': { inputUsdPer1M: 0.05, outputUsdPer1M: 0.08 },
+    'llama-3.3-70b-versatile': { inputUsdPer1M: 0.59, outputUsdPer1M: 0.79 },
+    'meta-llama/llama-4-scout-17b-16e-instruct': { inputUsdPer1M: 0.45, outputUsdPer1M: 0.75 },
+    'meta-llama/llama-4-maverick-17b-128e-instruct': { inputUsdPer1M: 0.45, outputUsdPer1M: 0.75 },
+    'moonshotai/kimi-k2-instruct': { inputUsdPer1M: 0.6, outputUsdPer1M: 2.5 },
+    'moonshotai/kimi-k2-instruct-0905': { inputUsdPer1M: 0.6, outputUsdPer1M: 2.5 },
+    'moonshotai/kimi-k2.5': { inputUsdPer1M: 1.0, outputUsdPer1M: 3.0 },
+    'qwen/qwen3-32b': { inputUsdPer1M: 0.3, outputUsdPer1M: 0.6 },
+    'qwen/qwen2.5-coder-32b-instruct': { inputUsdPer1M: 0.3, outputUsdPer1M: 0.6 },
+    'openai/gpt-oss-120b': { inputUsdPer1M: 0.8, outputUsdPer1M: 1.2 },
 };
 
 const LOW_CREDIT_THRESHOLD = 40;
@@ -646,6 +712,149 @@ function inferModelProfile(model?: string): CreditModelProfile {
 
 export function inferCreditModelProfile(preferredModel?: string | null): CreditModelProfile {
     return inferModelProfile(preferredModel || '');
+}
+
+function sanitizeRate(value: number, fallback: number): number {
+    if (!Number.isFinite(value) || value <= 0) return fallback;
+    return value;
+}
+
+function toTokenInt(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.floor(numeric));
+}
+
+function modelLookupCandidates(model: string): string[] {
+    const normalized = String(model || '').trim().toLowerCase();
+    if (!normalized) return [];
+    const slashIndex = normalized.indexOf('/');
+    if (slashIndex <= 0 || slashIndex >= normalized.length - 1) {
+        return [normalized];
+    }
+    const tail = normalized.slice(slashIndex + 1);
+    return [normalized, tail];
+}
+
+function resolveTokenPricingRate(model: string): { key: string; rate: TokenPricingRate; source: 'catalog' | 'fallback' } {
+    const candidates = modelLookupCandidates(model);
+    for (const key of candidates) {
+        const matched = TOKEN_PRICING_CATALOG_USD_PER_1M[key];
+        if (matched) {
+            return { key, rate: matched, source: 'catalog' };
+        }
+    }
+    return {
+        key: 'fallback',
+        rate: {
+            inputUsdPer1M: sanitizeRate(USAGE_BILLING_FALLBACK_INPUT_USD_PER_1M, 0.8),
+            outputUsdPer1M: sanitizeRate(USAGE_BILLING_FALLBACK_OUTPUT_USD_PER_1M, 2.4),
+        },
+        source: 'fallback',
+    };
+}
+
+export function quoteCreditsFromTokenUsage(input: {
+    operation: BillingOperation;
+    usage: TokenUsageSummary | TokenUsageEntry[];
+    minimumCredits?: number;
+}): UsageCreditQuote {
+    const usageSummary: TokenUsageSummary = Array.isArray(input.usage)
+        ? {
+            inputTokens: input.usage.reduce((acc, item) => acc + toTokenInt(item?.inputTokens), 0),
+            outputTokens: input.usage.reduce((acc, item) => acc + toTokenInt(item?.outputTokens), 0),
+            totalTokens: input.usage.reduce((acc, item) => acc + toTokenInt(item?.totalTokens), 0),
+            cachedInputTokens: input.usage.reduce((acc, item) => acc + toTokenInt(item?.cachedInputTokens), 0),
+            entries: input.usage.filter(Boolean),
+        }
+        : input.usage;
+
+    const creditsPerUsd = sanitizeRate(USAGE_BILLING_CREDITS_PER_USD, 100);
+    const markupMultiplier = sanitizeRate(USAGE_BILLING_MARKUP_MULTIPLIER, 1.3);
+    const minimumCredits = Math.max(0, Math.floor(
+        Number.isFinite(input.minimumCredits || NaN)
+            ? Number(input.minimumCredits)
+            : sanitizeRate(USAGE_BILLING_MIN_CREDITS, 1)
+    ));
+
+    const normalizedEntries = (usageSummary.entries || []).filter(Boolean);
+    const hasEntryRows = normalizedEntries.length > 0;
+    const syntheticEntries: TokenUsageEntry[] = !hasEntryRows && (
+        toTokenInt(usageSummary.totalTokens) > 0 ||
+        toTokenInt(usageSummary.inputTokens) > 0 ||
+        toTokenInt(usageSummary.outputTokens) > 0
+    )
+        ? [{
+            provider: 'unknown',
+            model: 'unknown',
+            inputTokens: toTokenInt(usageSummary.inputTokens),
+            outputTokens: toTokenInt(usageSummary.outputTokens),
+            totalTokens: Math.max(
+                toTokenInt(usageSummary.totalTokens),
+                toTokenInt(usageSummary.inputTokens) + toTokenInt(usageSummary.outputTokens)
+            ),
+            ...(toTokenInt(usageSummary.cachedInputTokens) > 0
+                ? { cachedInputTokens: toTokenInt(usageSummary.cachedInputTokens) }
+                : {}),
+        }]
+        : [];
+
+    const pricedEntries = hasEntryRows ? normalizedEntries : syntheticEntries;
+
+    const lineItems: UsageCreditLineItem[] = pricedEntries.map((entry) => {
+        const inputTokens = toTokenInt(entry.inputTokens);
+        const outputTokens = toTokenInt(entry.outputTokens);
+        const totalTokens = Math.max(toTokenInt(entry.totalTokens), inputTokens + outputTokens);
+        const cachedInputTokens = toTokenInt(entry.cachedInputTokens || 0);
+        const pricing = resolveTokenPricingRate(entry.model);
+        const inputUsdPer1M = sanitizeRate(pricing.rate.inputUsdPer1M, 0.8);
+        const outputUsdPer1M = sanitizeRate(pricing.rate.outputUsdPer1M, 2.4);
+        const cachedInputUsdPer1M = sanitizeRate(pricing.rate.cachedInputUsdPer1M || inputUsdPer1M, inputUsdPer1M);
+        const inputCostUsd = (inputTokens / 1_000_000) * inputUsdPer1M;
+        const outputCostUsd = (outputTokens / 1_000_000) * outputUsdPer1M;
+        const cachedInputCostUsd = (cachedInputTokens / 1_000_000) * cachedInputUsdPer1M;
+        const totalCostUsd = inputCostUsd + outputCostUsd + cachedInputCostUsd;
+        return {
+            provider: String(entry.provider || 'unknown'),
+            model: String(entry.model || ''),
+            modelKeyMatched: pricing.key,
+            pricingSource: pricing.source,
+            inputTokens,
+            outputTokens,
+            totalTokens,
+            cachedInputTokens,
+            inputUsdPer1M,
+            outputUsdPer1M,
+            cachedInputUsdPer1M,
+            inputCostUsd,
+            outputCostUsd,
+            cachedInputCostUsd,
+            totalCostUsd,
+        };
+    });
+
+    const costUsdRaw = lineItems.reduce((acc, item) => acc + item.totalCostUsd, 0);
+    const costUsdWithMarkup = costUsdRaw * markupMultiplier;
+    const rawCredits = Math.ceil(costUsdWithMarkup * creditsPerUsd);
+    const hasBillableUsage = usageSummary.totalTokens > 0 || usageSummary.inputTokens > 0 || usageSummary.outputTokens > 0;
+    const credits = hasBillableUsage ? Math.max(minimumCredits, Math.max(0, rawCredits)) : 0;
+
+    return {
+        operation: input.operation,
+        credits,
+        costUsdRaw,
+        costUsdWithMarkup,
+        creditsPerUsd,
+        markupMultiplier,
+        minimumCreditsApplied: hasBillableUsage ? minimumCredits : 0,
+        totals: {
+            inputTokens: toTokenInt(usageSummary.inputTokens),
+            outputTokens: toTokenInt(usageSummary.outputTokens),
+            totalTokens: toTokenInt(usageSummary.totalTokens),
+            cachedInputTokens: toTokenInt(usageSummary.cachedInputTokens),
+        },
+        lineItems,
+    };
 }
 
 export function estimateCredits(input: BillingEstimateInput): BillingEstimate {

@@ -4,7 +4,12 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { apiClient, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
-import { extractLedgerRequestPreview } from '../../utils/billingUsage';
+import {
+    extractLedgerDeductedCredits,
+    extractLedgerModelName,
+    extractLedgerRequestPreview,
+    extractLedgerTotalTokens,
+} from '../../utils/billingUsage';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
 
@@ -93,7 +98,7 @@ export function ProjectSettingsPage({
             setBillingLoading(true);
             const [summaryRes, ledgerRes, purchasesRes] = await Promise.all([
                 apiClient.getBillingSummary(),
-                apiClient.getBillingLedger(40),
+                apiClient.getBillingLedger(100),
                 apiClient.getBillingPurchases(60),
             ]);
             setBillingSummary(summaryRes.summary);
@@ -317,10 +322,29 @@ export function ProjectSettingsPage({
         const startTs = usageFilterStart.getTime();
         return [...billingLedger]
             .filter((item) => item.creditsDelta < 0 && new Date(item.createdAt).getTime() >= startTs)
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            .map((item) => {
+                const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
+                const metadataReason = typeof item.metadata?.reason === 'string' ? item.metadata.reason : '';
+                const requestPreview = extractLedgerRequestPreview(item.metadata);
+                const deductedCredits = extractLedgerDeductedCredits(item);
+                const tokensUsed = extractLedgerTotalTokens(item.metadata);
+                const modelName = extractLedgerModelName(item.metadata) || 'Default model';
+                const requestIdentifier = item.requestId || item.reservationId || '-';
+                return {
+                    item,
+                    actionLabel,
+                    metadataReason,
+                    requestPreview,
+                    deductedCredits,
+                    tokensUsed,
+                    modelName,
+                    requestIdentifier,
+                };
+            })
+            .sort((a, b) => new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime());
     }, [billingLedger, usageFilterStart]);
     const usageCreditsInWindow = useMemo(
-        () => usageActivityRows.reduce((sum, item) => sum + Math.abs(item.creditsDelta), 0),
+        () => usageActivityRows.reduce((sum, row) => sum + row.deductedCredits, 0),
         [usageActivityRows]
     );
     const usageFilterLabel = usageDaysFilter === 1 ? 'today' : `last ${usageDaysFilter} days`;
@@ -477,7 +501,7 @@ export function ProjectSettingsPage({
                 </aside>
 
                 <main className="flex-1 overflow-y-auto bg-[var(--ui-surface-1)] p-6">
-                    <div className={`mx-auto w-full ${settingsTab === 'profile' ? 'max-w-[980px]' : 'max-w-[920px]'}`}>
+                    <div className={`mx-auto w-full ${settingsTab === 'profile' ? 'max-w-[980px]' : 'max-w-[980px]'}`}>
                         <div className="mb-6 flex items-start justify-between gap-4">
                             <div><h1 className="text-4xl font-semibold tracking-tight">{tabTitle}</h1><p className="mt-1 text-sm text-[var(--ui-text-subtle)]">{tabSubtitle}</p></div>
                             <button type="button" onClick={() => void handleSignOut()} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm hover:bg-[var(--ui-surface-3)]"><LogOut size={14} />Log out</button>
@@ -947,7 +971,7 @@ export function ProjectSettingsPage({
                                         ))}
                                     </div>
                                     <p className="mt-3 text-sm text-[var(--ui-text-subtle)]">
-                                        {usageCreditsInWindow.toLocaleString()} credits consumed in {usageFilterLabel} across {usageActivityRows.length} events.
+                                        {usageCreditsInWindow.toLocaleString()} credits deducted in {usageFilterLabel} across {usageActivityRows.length} events.
                                     </p>
                                     <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--ui-border)]">
                                         <table className="min-w-full text-left text-sm">
@@ -956,13 +980,16 @@ export function ProjectSettingsPage({
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2">Time</th>
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2">Action</th>
                                                     <th className="border-b border-[var(--ui-border)] px-3 py-2">Request</th>
-                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Credits</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Model</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Tokens</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2">Request ID</th>
+                                                    <th className="border-b border-[var(--ui-border)] px-3 py-2 text-right">Deducted</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {billingLoading ? (
                                                     <tr>
-                                                        <td colSpan={4} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                        <td colSpan={7} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
                                                             <span className="inline-flex items-center gap-2">
                                                                 <Loader2 size={14} className="animate-spin" />
                                                                 Loading usage activity...
@@ -971,36 +998,44 @@ export function ProjectSettingsPage({
                                                     </tr>
                                                 ) : usageActivityRows.length === 0 ? (
                                                     <tr>
-                                                        <td colSpan={4} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
+                                                        <td colSpan={7} className="px-3 py-6 text-center text-[var(--ui-text-subtle)]">
                                                             No usage activity in this period.
                                                         </td>
                                                     </tr>
-                                                ) : usageActivityRows.map((item) => {
-                                                    const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
-                                                    const metadataReason = typeof item.metadata?.reason === 'string' ? item.metadata.reason : '';
-                                                    const requestPreview = extractLedgerRequestPreview(item.metadata);
+                                                ) : usageActivityRows.map((row) => {
                                                     return (
-                                                        <tr key={item.id}>
+                                                        <tr key={row.item.id}>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
-                                                                {new Date(item.createdAt).toLocaleString()}
+                                                                {new Date(row.item.createdAt).toLocaleString()}
                                                             </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2">
-                                                                <div className="font-medium text-[var(--ui-text)]">{actionLabel}</div>
+                                                                <div className="font-medium text-[var(--ui-text)]">{row.actionLabel}</div>
                                                                 <div className="text-xs text-[var(--ui-text-subtle)]">
-                                                                    {metadataReason || item.projectId || 'Usage event'}
+                                                                    {row.metadataReason || row.item.projectId || 'Usage event'}
                                                                 </div>
                                                             </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
-                                                                {requestPreview ? (
-                                                                    <span className="block max-w-[320px] truncate whitespace-nowrap" title={requestPreview}>
-                                                                        {requestPreview}
+                                                                {row.requestPreview ? (
+                                                                    <span className="block max-w-[320px] truncate whitespace-nowrap" title={row.requestPreview}>
+                                                                        {row.requestPreview}
                                                                     </span>
                                                                 ) : (
                                                                     <span className="text-[var(--ui-text-subtle)]">-</span>
                                                                 )}
                                                             </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                                {row.modelName}
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                                {row.tokensUsed !== null ? row.tokensUsed.toLocaleString() : '-'}
+                                                            </td>
+                                                            <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
+                                                                <span className="block max-w-[220px] truncate whitespace-nowrap" title={row.requestIdentifier}>
+                                                                    {row.requestIdentifier}
+                                                                </span>
+                                                            </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right font-semibold text-rose-300">
-                                                                -{Math.abs(item.creditsDelta).toLocaleString()}
+                                                                -{row.deductedCredits.toLocaleString()}
                                                             </td>
                                                         </tr>
                                                     );

@@ -1,3 +1,5 @@
+import type { TokenUsageEntry } from './tokenUsage.js';
+
 // ============================================================================
 // Groq Provider - OpenAI-compatible endpoints (chat + whisper transcription)
 // ============================================================================
@@ -104,6 +106,34 @@ function parseJsonSafe(text: string): any {
     }
 }
 
+function toNonNegativeInt(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.floor(numeric));
+}
+
+function parseOpenAiUsage(data: any, provider: TokenUsageEntry['provider'], model: string): TokenUsageEntry | undefined {
+    const usage = data?.usage || data?.x_groq?.usage;
+    if (!usage || typeof usage !== 'object') return undefined;
+    const inputTokens = toNonNegativeInt(usage?.prompt_tokens ?? usage?.input_tokens);
+    const outputTokens = toNonNegativeInt(usage?.completion_tokens ?? usage?.output_tokens);
+    const totalFromPayload = toNonNegativeInt(usage?.total_tokens);
+    const totalTokens = totalFromPayload > 0 ? totalFromPayload : inputTokens + outputTokens;
+    const cachedInputTokens = toNonNegativeInt(
+        usage?.prompt_tokens_details?.cached_tokens
+        ?? usage?.input_tokens_details?.cached_tokens
+    );
+    if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0) return undefined;
+    return {
+        provider,
+        model: String(data?.model || model || '').trim(),
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+    };
+}
+
 function supportsReasoningEffort(model: string): boolean {
     // Kimi rejects reasoning_effort in Groq API.
     if (model.startsWith('moonshotai/')) return false;
@@ -130,7 +160,7 @@ export async function groqChatCompletion(input: {
     maxCompletionTokens?: number;
     reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
     stop?: string[] | null;
-}): Promise<{ text: string; modelUsed: string; finishReason?: string }> {
+}): Promise<{ text: string; modelUsed: string; finishReason?: string; usage?: TokenUsageEntry }> {
     const apiKey = requireGroqKey();
     const model = isGroqModel(input.model) ? input.model : (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
     const baseMaxTokens = input.maxTokens ?? 4096;
@@ -234,6 +264,7 @@ export async function groqChatCompletion(input: {
                     text,
                     modelUsed: data?.model || model,
                     finishReason: data?.choices?.[0]?.finish_reason,
+                    usage: parseOpenAiUsage(data, 'groq', model),
                 };
             }
             if (attempt === 0) {
@@ -253,7 +284,7 @@ export async function groqWhisperTranscription(input: {
     mimeType: string;
     language?: string;
     model?: string;
-}): Promise<{ text: string; modelUsed: string }> {
+}): Promise<{ text: string; modelUsed: string; usage?: TokenUsageEntry }> {
     const apiKey = requireGroqKey();
     const model = (input.model || process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo').trim();
     const bytes = Buffer.from(input.audioBase64, 'base64');
@@ -281,5 +312,9 @@ export async function groqWhisperTranscription(input: {
     const data = await response.json();
     const text = (data?.text || '').trim();
     if (!text) throw new Error('Groq transcription returned empty text');
-    return { text, modelUsed: model };
+    return {
+        text,
+        modelUsed: model,
+        usage: parseOpenAiUsage(data, 'groq', model),
+    };
 }

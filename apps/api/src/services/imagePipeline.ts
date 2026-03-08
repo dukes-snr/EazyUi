@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { generateImageAsset } from './gemini.js';
-import { planImagePrompts } from './designPlanner.js';
+import { planImagePromptsWithUsage } from './designPlanner.js';
+import { summarizeTokenUsage, type TokenUsageEntry, type TokenUsageSummary } from './tokenUsage.js';
 
 export interface ImageSynthesisInputScreen {
   screenId?: string;
@@ -23,6 +24,7 @@ export interface ImageSynthesisOptions {
 
 export interface ImageSynthesisResult {
   screens: ImageSynthesisInputScreen[];
+  usage?: TokenUsageSummary;
   stats: {
     totalSlots: number;
     uniqueIntents: number;
@@ -280,6 +282,7 @@ export async function synthesizeImagesForScreens(
   });
 
   const cache = loadCache();
+  const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
   const intentToSrc = new Map<string, string>();
   let generated = 0;
   let reusedFromCache = 0;
@@ -313,15 +316,16 @@ export async function synthesizeImagesForScreens(
     const plannerModel = options.preferredModel && options.preferredModel !== 'image'
       ? options.preferredModel
       : 'llama-3.3-70b-versatile';
-    const planned = await planImagePrompts({
+    const planned = await planImagePromptsWithUsage({
       appPrompt: options.appPrompt,
       platform,
       stylePreset,
       intents: plannerInputIntents,
       preferredModel: plannerModel,
     });
+    usageEntries.push(...(planned.usage?.entries || []));
     uniqueIntents.forEach((intent) => {
-      const plannedPrompt = planned.get(intent.intentKey);
+      const plannedPrompt = planned.prompts.get(intent.intentKey);
       if (plannedPrompt) intent.prompt = plannedPrompt;
     });
   } catch {
@@ -350,6 +354,7 @@ export async function synthesizeImagesForScreens(
         prompt: intent.prompt,
         preferredModel: options.preferredModel || 'image',
       });
+      usageEntries.push(...(generatedImage.usage?.entries || []));
 
       intentToSrc.set(intent.intentKey, generatedImage.src);
       cache.items[intent.intentKey] = {
@@ -407,6 +412,7 @@ export async function synthesizeImagesForScreens(
 
   return {
     screens: nextScreens,
+    usage: summarizeTokenUsage(usageEntries),
     stats: {
       totalSlots: slots.length,
       uniqueIntents: uniqueIntents.length,

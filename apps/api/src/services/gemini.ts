@@ -9,6 +9,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
 import { groqChatCompletion, isGroqModel } from './groq.provider.js';
 import { isNvidiaModel, nvidiaChatCompletion } from './nvidia.provider.js';
+import { summarizeTokenUsage, type TokenUsageEntry, type TokenUsageSummary } from './tokenUsage.js';
 
 const envCandidates = [
     path.resolve(process.cwd(), '.env'),
@@ -66,6 +67,57 @@ function resolvePreferredModel(preferredModel?: string): string | undefined {
     if (!requested) return undefined;
     if (requested === 'image') return IMAGE_PRIMARY_MODEL;
     return requested;
+}
+
+function toNonNegativeInt(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.floor(numeric));
+}
+
+function parseGeminiUsageMetadata(
+    usageMetadata: any,
+    modelUsed: string,
+): TokenUsageEntry | undefined {
+    if (!usageMetadata || typeof usageMetadata !== 'object') return undefined;
+    const inputTokens = toNonNegativeInt(
+        usageMetadata.promptTokenCount
+        ?? usageMetadata.inputTokenCount
+        ?? usageMetadata.inputTokens
+    );
+    const outputTokens = toNonNegativeInt(
+        usageMetadata.candidatesTokenCount
+        ?? usageMetadata.outputTokenCount
+        ?? usageMetadata.outputTokens
+    );
+    const totalFromPayload = toNonNegativeInt(
+        usageMetadata.totalTokenCount
+        ?? usageMetadata.totalTokens
+    );
+    const totalTokens = totalFromPayload > 0 ? totalFromPayload : inputTokens + outputTokens;
+    const cachedInputTokens = toNonNegativeInt(
+        usageMetadata.cachedContentTokenCount
+        ?? usageMetadata.cachedInputTokenCount
+        ?? usageMetadata.cachedTokens
+    );
+    if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0) return undefined;
+    return {
+        provider: 'gemini',
+        model: String(modelUsed || modelName).trim(),
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+    };
+}
+
+function parseGeminiUsageFromResponse(response: any, modelUsed: string): TokenUsageEntry | undefined {
+    return parseGeminiUsageMetadata(
+        response?.usageMetadata
+        ?? response?.response?.usageMetadata
+        ?? response?.candidates?.[0]?.usageMetadata,
+        modelUsed,
+    );
 }
 
 
@@ -371,6 +423,10 @@ SAFE TOP LAYOUT (MANDATORY):
 - Mark that container with: data-eazyui-safe-top="force"
 - If an element must never be shifted by runtime safe-top handling, mark it with: data-eazyui-safe-top="off"
 - Do NOT hardcode brittle fixed top offsets that fight runtime safe-area handling.
+- If you use a fixed or sticky top header/nav/app-bar, the main content MUST start below it.
+- Add top offset on the first content wrapper using padding or margin at least equal to header height
+  (e.g., header h-14/h-16 => content pt-28/pt-32 or mt-28/mt-32).
+- Never let first visible content render under a fixed header.
 `;
 
 const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
@@ -567,6 +623,7 @@ RULES:
    - no OS status bar row
    - no fake top strip background
    - top controls container should use data-eazyui-safe-top="force" when present.
+   - if using fixed/sticky top header/nav, first content block must start below it (use pt/mt offset ~= header height).
 `;
 
 const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
@@ -582,6 +639,7 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
 8. Do NOT use markdown fences.
 9. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
 10. Safe-top behavior: assume transparent status-bar overlay; keep hero/media full-bleed and mark top controls wrappers with data-eazyui-safe-top="force". Use data-eazyui-safe-top="off" only where shifting must be disabled.
+11. If using fixed/sticky top header/nav, ensure first content section has top padding/margin at least the header height so content is not hidden behind the header.
 
 Current HTML:
 `;
@@ -610,6 +668,7 @@ Rules:
 - Do NOT include mobile OS status bar rows (time/signal/wifi/battery); runtime provides this chrome.
 - Assume transparent status-bar overlay; do not add fake top strip backgrounds.
 - Put top controls/header action wrappers in a container with data-eazyui-safe-top="force".
+- If header/nav is fixed or sticky at top, offset first content container with matching top spacing (e.g., pt-14/pt-16 or mt-14/mt-16).
 - Do not include reasoning, analysis, notes, or planning text.
 - No markdown fences.
 `;
@@ -628,6 +687,7 @@ Rules:
 - Keep markup concise and visually rich; avoid long repeated sections.
 - Do NOT include a mobile OS status bar row (time/signal/wifi/battery).
 - Assume transparent status-bar overlay; keep hero/media full-bleed and use data-eazyui-safe-top="force" for top controls container.
+- If header/nav is fixed or sticky at top, offset first content container with matching top spacing so content starts below the header.
 - No reasoning or markdown.
 `;
 const FAST_EDIT_HTML_PROMPT = `Edit the HTML to match the user instruction.
@@ -1413,7 +1473,10 @@ ${dontRules}
 `;
 }
 
-export async function generateProjectDesignSystem(options: GenerateProjectDesignSystemOptions): Promise<ProjectDesignSystem> {
+export async function generateProjectDesignSystem(options: GenerateProjectDesignSystemOptions): Promise<{
+    designSystem: ProjectDesignSystem;
+    usage?: TokenUsageSummary;
+}> {
     const prompt = safeString(options.prompt, 'Untitled app request', 800);
     const stylePreset = safeString(options.stylePreset, 'modern', 32).toLowerCase();
     const platform = safeString(options.platform, 'mobile', 32).toLowerCase();
@@ -1435,7 +1498,7 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
             systemName: normalized.systemName,
             themeMode: normalized.themeMode,
         });
-        return normalized;
+        return { designSystem: normalized };
     }
 
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
@@ -1492,6 +1555,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
     try {
         const preferredModel = options.preferredModel;
         let raw: unknown = null;
+        const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
         if (isNvidiaModel(preferredModel)) {
             const completion = await nvidiaChatCompletion({
@@ -1504,6 +1568,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                 responseFormat: 'json_object',
                 thinking: false,
             });
+            usageEntries.push(completion.usage);
             raw = parseJsonSafe(cleanJsonResponse(completion.text));
         } else if (isGroqModel(preferredModel)) {
             const completion = await groqChatCompletion({
@@ -1516,10 +1581,12 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                 responseFormat: 'json_object',
                 reasoningEffort: 'low',
             });
+            usageEntries.push(completion.usage);
             raw = parseJsonSafe(cleanJsonResponse(completion.text));
         } else {
             const preferredGeminiModel = resolvePreferredModel(preferredModel);
             const designSystemModel = preferredGeminiModel ? getGenerativeModel(preferredGeminiModel).model : model;
+            const designSystemModelName = preferredGeminiModel || modelName;
             const imageParts = extractInlineImageParts(images).slice(0, 3);
             const result = await designSystemModel.generateContent({
                 contents: [{
@@ -1532,6 +1599,7 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
                     maxOutputTokens: 2600,
                 },
             });
+            usageEntries.push(parseGeminiUsageFromResponse(result.response, designSystemModelName));
             raw = parseJsonSafe(cleanJsonResponse(result.response.text()));
         }
 
@@ -1542,14 +1610,20 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
             stylePreset: normalized.stylePreset,
             platform: normalized.platform,
         });
-        return normalized;
+        return {
+            designSystem: normalized,
+            usage: summarizeTokenUsage(usageEntries),
+        };
     } catch (error) {
         console.warn('[Gemini] generateProjectDesignSystem failed; using fallback design system', error);
-        return fallback;
+        return { designSystem: fallback };
     }
 }
 
-export async function generateDesign(options: GenerateOptions): Promise<HtmlDesignSpec> {
+export async function generateDesign(options: GenerateOptions): Promise<{
+    designSpec: HtmlDesignSpec;
+    usage?: TokenUsageSummary;
+}> {
     const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] generateDesign:start', {
@@ -1564,7 +1638,8 @@ export async function generateDesign(options: GenerateOptions): Promise<HtmlDesi
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
     const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
     const imageAnalysis = await analyzeReferenceImages(images);
-    const projectDesignSystem = await generateProjectDesignSystem({
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
+    const designSystemResult = await generateProjectDesignSystem({
         prompt,
         stylePreset,
         platform,
@@ -1573,6 +1648,8 @@ export async function generateDesign(options: GenerateOptions): Promise<HtmlDesi
         temperature: modelTemperature,
         projectDesignSystem: options.projectDesignSystem,
     });
+    const projectDesignSystem = designSystemResult.designSystem;
+    usageEntries.push(...(designSystemResult.usage?.entries || []));
     const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
     const imageGuidance = images.length > 0
@@ -1612,11 +1689,12 @@ ${designSystemGuidance}
 
     const resolvedPreferredModel = resolvePreferredModel(preferredModel);
 
-    const generateOnce = async (promptText: string): Promise<ParsedDesign> => {
+    const generateOnce = async (promptText: string): Promise<ParsedDesign & { usage?: TokenUsageSummary }> => {
         if (isFastTextProviderModel) {
             try {
                 const isNvidia = isNvidiaModel(preferredModel);
                 const maxCompletionTokens = isNvidia ? 3400 : 2200;
+                const fastUsageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
                 const runFast = async (promptPrefix: string) => (isNvidia
                     ? await nvidiaChatCompletion({
@@ -1641,9 +1719,11 @@ ${designSystemGuidance}
                     }));
 
                 let completion = await runFast(FAST_GENERATE_HTML_PROMPT);
+                fastUsageEntries.push(completion.usage);
                 const { text, finishReason } = completion;
                 if (finishReason === 'length') {
                     completion = await runFast(FAST_GENERATE_HTML_PROMPT_COMPACT);
+                    fastUsageEntries.push(completion.usage);
                 }
                 if (completion.finishReason === 'length') {
                     throw new Error('Fast model output was truncated. Please retry with a shorter design request.');
@@ -1651,7 +1731,12 @@ ${designSystemGuidance}
                 try {
                     const cleanedJson = cleanJsonResponse(completion.text);
                     const parsed = parseJsonSafe(cleanedJson) as { description?: string; screens: RawScreen[] };
-                    return { description: parsed.description, screens: parsed.screens || [], parsedOk: true };
+                    return {
+                        description: parsed.description,
+                        screens: parsed.screens || [],
+                        parsedOk: true,
+                        usage: summarizeTokenUsage(fastUsageEntries),
+                    };
                 } catch {
                     throw new Error('Fast model returned invalid structured output. Please retry.');
                 }
@@ -1666,10 +1751,12 @@ ${designSystemGuidance}
     };
 
     let initialResponse = await generateOnce(isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt);
+    usageEntries.push(...(initialResponse.usage?.entries || []));
     if (!initialResponse.parsedOk || initialResponse.screens.length === 0) {
         const activeBasePrompt = isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt;
         const retryPrompt = `${activeBasePrompt}\nReturn STRICT JSON only. No markdown, no code fences, no trailing commas.`;
         initialResponse = await generateOnce(retryPrompt);
+        usageEntries.push(...(initialResponse.usage?.entries || []));
     }
 
     const designId = uuidv4();
@@ -1703,61 +1790,110 @@ ${designSystemGuidance}
         screenNames: output.screens.map((screen) => screen.name).slice(0, 8),
         descriptionPreview: String(output.description || '').slice(0, 180),
     });
-    return output;
+    return {
+        designSpec: output,
+        usage: summarizeTokenUsage(usageEntries),
+    };
 }
 
-export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
-    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
-    const modelTemperature = resolveModelTemperature(options.temperature, 1);
-    console.info('[Gemini] generateDesignStream:start', {
-        stylePreset,
-        platform,
-        imagesCount: images.length,
-        preferredModel: preferredModel || null,
-        temperature: modelTemperature,
-        hasProjectDesignSystem: Boolean(options.projectDesignSystem),
-        promptPreview: String(prompt || '').slice(0, 180),
+export function generateDesignStreamWithUsage(options: GenerateOptions): {
+    stream: AsyncGenerator<string, void, unknown>;
+    usagePromise: Promise<TokenUsageSummary | undefined>;
+} {
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
+    let streamUsageCandidate: TokenUsageEntry | undefined;
+    let resolveUsage: (usage: TokenUsageSummary | undefined) => void = () => { };
+    const usagePromise = new Promise<TokenUsageSummary | undefined>((resolve) => {
+        resolveUsage = resolve;
     });
-    const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
-    const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
-    const imageAnalysis = await analyzeReferenceImages(images);
-    const projectDesignSystem = await generateProjectDesignSystem({
-        prompt,
-        stylePreset,
-        platform,
-        images,
-        preferredModel,
-        temperature: modelTemperature,
-        projectDesignSystem: options.projectDesignSystem,
-    });
-    const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
-    const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
+    const stream = (async function* () {
+        try {
+            const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+            const modelTemperature = resolveModelTemperature(options.temperature, 1);
+            console.info('[Gemini] generateDesignStream:start', {
+                stylePreset,
+                platform,
+                imagesCount: images.length,
+                preferredModel: preferredModel || null,
+                temperature: modelTemperature,
+                hasProjectDesignSystem: Boolean(options.projectDesignSystem),
+                promptPreview: String(prompt || '').slice(0, 180),
+            });
+            const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
+            const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
+            const imageAnalysis = await analyzeReferenceImages(images);
+            const designSystemResult = await generateProjectDesignSystem({
+                prompt,
+                stylePreset,
+                platform,
+                images,
+                preferredModel,
+                temperature: modelTemperature,
+                projectDesignSystem: options.projectDesignSystem,
+            });
+            usageEntries.push(...(designSystemResult.usage?.entries || []));
+            const projectDesignSystem = designSystemResult.designSystem;
+            const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
+
+            const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
 ${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
 ${imageAnalysis}
 ${designSystemGuidance}`;
-    const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
+            const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
 
-    parts.push(...extractInlineImageParts(images));
+            parts.push(...extractInlineImageParts(images));
 
-    const result = await model.generateContentStream({
-        contents: [{ role: 'user', parts }],
-        generationConfig,
-    });
+            const preferredGeminiModel = (!isGroqModel(preferredModel) && !isNvidiaModel(preferredModel))
+                ? resolvePreferredModel(preferredModel)
+                : undefined;
+            const streamModelName = preferredGeminiModel || modelName;
+            const streamModel = preferredGeminiModel ? getGenerativeModel(preferredGeminiModel).model : model;
 
-    let totalChars = 0;
-    for await (const chunk of result.stream) {
-        const text = chunk.text();
-        totalChars += text.length;
-        yield text;
-    }
+            const result = await streamModel.generateContentStream({
+                contents: [{ role: 'user', parts }],
+                generationConfig,
+            });
 
-    try {
-        const finalResponse = await result.response;
-        const finishReason = finalResponse?.candidates?.[0]?.finishReason || 'UNKNOWN';
-        console.info('[Gemini] generateDesignStream: finish', { finishReason, totalChars });
-    } catch (err) {
-        console.warn('[Gemini] generateDesignStream: failed to read final response metadata', err);
+            let totalChars = 0;
+            for await (const chunk of result.stream) {
+                const text = chunk.text();
+                totalChars += text.length;
+                const parsedChunkUsage = parseGeminiUsageFromResponse(chunk, streamModelName);
+                if (parsedChunkUsage) {
+                    const currentTotal = Number(streamUsageCandidate?.totalTokens || 0);
+                    const nextTotal = Number(parsedChunkUsage.totalTokens || 0);
+                    if (!streamUsageCandidate || nextTotal >= currentTotal) {
+                        streamUsageCandidate = parsedChunkUsage;
+                    }
+                }
+                yield text;
+            }
+
+            try {
+                const finalResponse = await result.response;
+                const parsedFinalUsage = parseGeminiUsageFromResponse(finalResponse, streamModelName);
+                if (parsedFinalUsage) {
+                    streamUsageCandidate = parsedFinalUsage;
+                }
+                const finishReason = finalResponse?.candidates?.[0]?.finishReason || 'UNKNOWN';
+                console.info('[Gemini] generateDesignStream: finish', { finishReason, totalChars });
+            } catch (err) {
+                console.warn('[Gemini] generateDesignStream: failed to read final response metadata', err);
+            }
+            usageEntries.push(streamUsageCandidate);
+        } finally {
+            resolveUsage(summarizeTokenUsage(usageEntries));
+        }
+    })();
+
+    return { stream, usagePromise };
+}
+
+export async function* generateDesignStream(options: GenerateOptions): AsyncGenerator<string, void, unknown> {
+    const { stream } = generateDesignStreamWithUsage(options);
+    for await (const chunk of stream) {
+        yield chunk;
     }
 }
 
@@ -1818,7 +1954,12 @@ function extractImageSrcFromResponse(response: any): string | null {
     return null;
 }
 
-export async function generateImageAsset(options: GenerateImageOptions): Promise<{ src: string; modelUsed: string; description?: string }> {
+export async function generateImageAsset(options: GenerateImageOptions): Promise<{
+    src: string;
+    modelUsed: string;
+    description?: string;
+    usage?: TokenUsageSummary;
+}> {
     const prompt = (options.prompt || '').trim();
     if (!prompt) throw new Error('Prompt is required');
 
@@ -1841,7 +1982,11 @@ export async function generateImageAsset(options: GenerateImageOptions): Promise
         });
         const src = extractImageSrcFromResponse(result.response);
         if (!src) throw new Error('Image model did not return a usable image payload.');
-        return { src, modelUsed: selectedModel.name };
+        return {
+            src,
+            modelUsed: selectedModel.name,
+            usage: summarizeTokenUsage([parseGeminiUsageFromResponse(result.response, selectedModel.name)]),
+        };
     } catch (error) {
         const shouldFallback =
             Boolean(resolvedPreferredModel) &&
@@ -1866,12 +2011,18 @@ export async function generateImageAsset(options: GenerateImageOptions): Promise
             src: fallbackSrc,
             modelUsed: IMAGE_FALLBACK_MODEL,
             description: `(Primary image model unavailable; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`,
+            usage: summarizeTokenUsage([parseGeminiUsageFromResponse(fallbackResult.response, IMAGE_FALLBACK_MODEL)]),
         };
     }
 }
 
-export async function editDesign(options: EditOptions): Promise<{ html: string; description?: string }> {
+export async function editDesign(options: EditOptions): Promise<{
+    html: string;
+    description?: string;
+    usage?: TokenUsageSummary;
+}> {
     const { instruction, html, images = [], preferredModel } = options;
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] editDesign:start', {
         screenId: options.screenId,
@@ -1963,6 +2114,7 @@ ${designSystemGuidance}`.trim();
                     temperature: modelTemperature,
                 });
             const { text, modelUsed } = completion;
+            usageEntries.push(completion.usage);
             const parsed = parseEditResponse(text);
             const note = `(Model: ${modelUsed})`;
             console.info('[Gemini] editDesign:complete-fast-provider', {
@@ -1974,6 +2126,7 @@ ${designSystemGuidance}`.trim();
             return {
                 html: parsed.html,
                 description: parsed.description ? `${parsed.description} ${note}` : note,
+                usage: summarizeTokenUsage(usageEntries),
             };
         } catch (error) {
             if (isQuotaOrRateLimitError(error)) {
@@ -1996,13 +2149,17 @@ ${designSystemGuidance}`.trim();
             },
         });
         const parsed = parseEditResponse(result.response.text());
+        usageEntries.push(parseGeminiUsageFromResponse(result.response, selectedModel.name));
         console.info('[Gemini] editDesign:complete-gemini', {
             screenId: options.screenId,
             modelUsed: selectedModel.name,
             htmlChars: parsed.html.length,
             descriptionPreview: String(parsed.description || '').slice(0, 180),
         });
-        return parsed;
+        return {
+            ...parsed,
+            usage: summarizeTokenUsage(usageEntries),
+        };
     } catch (error) {
         const shouldFallback =
             Boolean(resolvedPreferredModel) &&
@@ -2025,6 +2182,7 @@ ${designSystemGuidance}`.trim();
             },
         });
         const parsed = parseEditResponse(fallbackResult.response.text());
+        usageEntries.push(parseGeminiUsageFromResponse(fallbackResult.response, IMAGE_FALLBACK_MODEL));
         const fallbackNote = `(Image model quota exceeded; used fallback model: ${IMAGE_FALLBACK_MODEL}.)`;
         console.info('[Gemini] editDesign:complete-fallback', {
             screenId: options.screenId,
@@ -2035,11 +2193,15 @@ ${designSystemGuidance}`.trim();
         return {
             html: parsed.html,
             description: parsed.description ? `${parsed.description} ${fallbackNote}` : fallbackNote,
+            usage: summarizeTokenUsage(usageEntries),
         };
     }
 }
 
-export async function completePartialScreen(options: CompleteScreenOptions): Promise<string> {
+export async function completePartialScreen(options: CompleteScreenOptions): Promise<{
+    html: string;
+    usage?: TokenUsageSummary;
+}> {
     const { screenName, partialHtml, prompt, platform, stylePreset } = options;
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     const projectDesignSystem = options.projectDesignSystem
@@ -2074,10 +2236,13 @@ ${partialHtml}
     if (!completedHtml.includes('<!DOCTYPE html>') || !completedHtml.match(/<\/html>/i)) {
         throw new Error('Gemini failed to return a complete HTML document for partial screen completion.');
     }
-    return enforceThemeAwareTokenUsage(
-        enforcePlaceholderCatalogUrls(completedHtml),
-        projectDesignSystem
-    );
+    return {
+        html: enforceThemeAwareTokenUsage(
+            enforcePlaceholderCatalogUrls(completedHtml),
+            projectDesignSystem
+        ),
+        usage: summarizeTokenUsage([parseGeminiUsageFromResponse(result.response, modelName)]),
+    };
 }
 
 // ============================================================================
@@ -2411,8 +2576,9 @@ async function generateDesignOnce(
     parts: any[],
     preferredModelName?: string,
     generationConfig = GENERATION_CONFIG
-): Promise<ParsedDesign> {
+): Promise<ParsedDesign & { usage?: TokenUsageSummary }> {
     console.info('[Gemini] generateDesignOnce: start');
+    const activeModelName = preferredModelName || modelName;
     const activeModel = preferredModelName ? getGenerativeModel(preferredModelName).model : model;
     const result = await activeModel.generateContent({
         contents: [{ role: 'user', parts }],
@@ -2450,6 +2616,7 @@ async function generateDesignOnce(
             };
         }),
         parsedOk: parsedResponse.parsedOk,
+        usage: summarizeTokenUsage([parseGeminiUsageFromResponse(result.response, activeModelName)]),
     };
 }
 

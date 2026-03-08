@@ -125,7 +125,7 @@ function createProjectId() {
 function App() {
     const { spec } = useDesignStore();
     const { doc } = useCanvasStore();
-    const { messages } = useChatStore();
+    const { messages, isGenerating } = useChatStore();
     const { isEditMode } = useEditStore();
     const { theme, pushToast, showInspector } = useUiStore();
     const {
@@ -275,10 +275,37 @@ function App() {
             onUpdate: (project) => {
                 if (useProjectStore.getState().projectId !== targetProjectId) return;
                 if (hydrationRunRef.current !== 0 || useProjectStore.getState().isHydrating) return;
+                const localLastSavedAt = useProjectStore.getState().lastSavedAt;
+                const remoteUpdatedMs = Date.parse(String(project.updatedAt || ''));
+                const localSavedMs = Date.parse(String(localLastSavedAt || ''));
+                // Ignore intermediate/replayed realtime states that are not newer than what this tab already accepted.
+                if (
+                    Number.isFinite(remoteUpdatedMs)
+                    && Number.isFinite(localSavedMs)
+                    && remoteUpdatedMs <= localSavedMs
+                ) {
+                    return;
+                }
                 const resolvedDoc = ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any);
                 const remoteMessages = Array.isArray((project.chatState as any)?.messages) ? (project.chatState as any).messages : [];
                 const remoteFingerprint = getProjectFingerprint(project.designSpec as any, resolvedDoc, remoteMessages);
-                if (!remoteFingerprint || remoteFingerprint === lastSavedFingerprintRef.current) return;
+                if (!remoteFingerprint) return;
+
+                const localSpec = useDesignStore.getState().spec;
+                const localDoc = useCanvasStore.getState().doc;
+                const localMessages = useChatStore.getState().messages;
+                const localFingerprint = getProjectFingerprint(localSpec as any, localDoc as any, localMessages as any);
+
+                // Ignore realtime echoes that are effectively the same state this tab already has.
+                // This prevents local autosave races from being misclassified as external/MCP updates.
+                if (remoteFingerprint === localFingerprint) {
+                    lastSavedFingerprintRef.current = remoteFingerprint;
+                    hydratedProjectIdRef.current = project.projectId;
+                    markSaved(project.projectId, project.updatedAt);
+                    return;
+                }
+
+                if (remoteFingerprint === lastSavedFingerprintRef.current) return;
 
                 const wasDirty = useProjectStore.getState().dirty;
                 unstable_batchedUpdates(() => {
@@ -296,7 +323,7 @@ function App() {
                     pushToast({
                         kind: 'info',
                         title: 'Synced from external update',
-                        message: 'Project was updated from another client (MCP/web) and reloaded live.',
+                        message: 'Project changed in another session and was reloaded live.',
                     });
                 }
             },
@@ -317,7 +344,7 @@ function App() {
 
     useEffect(() => {
         if (!isCanvasRoute) return;
-        if (!autosaveEnabled || !dirty || !spec || isHydrating || isSaving) return;
+        if (!autosaveEnabled || !dirty || !spec || isHydrating || isSaving || isGenerating) return;
         if (Date.now() < autosavePausedUntilRef.current) return;
 
         const timer = window.setTimeout(async () => {
@@ -362,7 +389,7 @@ function App() {
         return () => {
             window.clearTimeout(timer);
         };
-    }, [isCanvasRoute, autosaveEnabled, dirty, spec, isHydrating, isSaving, projectId, doc, messages, markSaved, setSaving, pushToast]);
+    }, [isCanvasRoute, autosaveEnabled, dirty, spec, isHydrating, isSaving, isGenerating, projectId, doc, messages, markSaved, setSaving, pushToast]);
 
     useEffect(() => {
         const onPopState = () => setRoute(getRouteFromPath());

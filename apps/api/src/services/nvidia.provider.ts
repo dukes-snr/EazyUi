@@ -3,6 +3,7 @@
 // ============================================================================
 
 import OpenAI from 'openai';
+import type { TokenUsageEntry } from './tokenUsage.js';
 
 export const NVIDIA_MODELS = {
     'moonshotai/kimi-k2.5': { name: 'Kimi K2.5', contextWindow: 262144 },
@@ -86,6 +87,34 @@ function extractRetryDelayMs(message: string, retryAfterHeader: string | null): 
     return 2000;
 }
 
+function toNonNegativeInt(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.floor(numeric));
+}
+
+function parseOpenAiUsage(data: any, model: string): TokenUsageEntry | undefined {
+    const usage = data?.usage;
+    if (!usage || typeof usage !== 'object') return undefined;
+    const inputTokens = toNonNegativeInt(usage?.prompt_tokens ?? usage?.input_tokens);
+    const outputTokens = toNonNegativeInt(usage?.completion_tokens ?? usage?.output_tokens);
+    const totalFromPayload = toNonNegativeInt(usage?.total_tokens);
+    const totalTokens = totalFromPayload > 0 ? totalFromPayload : inputTokens + outputTokens;
+    const cachedInputTokens = toNonNegativeInt(
+        usage?.prompt_tokens_details?.cached_tokens
+        ?? usage?.input_tokens_details?.cached_tokens
+    );
+    if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0) return undefined;
+    return {
+        provider: 'nvidia',
+        model: String(data?.model || model || '').trim(),
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+    };
+}
+
 export async function nvidiaChatCompletion(input: {
     prompt: string;
     systemPrompt?: string;
@@ -98,7 +127,7 @@ export async function nvidiaChatCompletion(input: {
     maxCompletionTokens?: number;
     stop?: string[] | null;
     thinking?: boolean;
-}): Promise<{ text: string; modelUsed: string; finishReason?: string }> {
+}): Promise<{ text: string; modelUsed: string; finishReason?: string; usage?: TokenUsageEntry }> {
     const apiKey = requireNvidiaKey();
     const model = isNvidiaModel(input.model) ? input.model : (process.env.NVIDIA_MODEL || 'moonshotai/kimi-k2.5');
     const baseMaxTokens = input.maxTokens ?? 4096;
@@ -147,6 +176,7 @@ export async function nvidiaChatCompletion(input: {
                 text,
                 modelUsed: data?.model || model,
                 finishReason: data?.choices?.[0]?.finish_reason,
+                usage: parseOpenAiUsage(data, model),
             };
         } catch (error: any) {
             const status = Number(error?.status || error?.response?.status || 500);

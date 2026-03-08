@@ -115,10 +115,121 @@ function injectScrollbarHide(html: string) {
   body { -ms-overflow-style: none; scrollbar-width: none; }
 </style>`;
 
+    if (/<head[^>]*>/i.test(html)) {
+        return html.replace(/<head([^>]*)>/i, `<head$1>${warningFilterScript}\n${styleTag}`);
+    }
     if (html.includes('</head>')) {
         return html.replace('</head>', `${warningFilterScript}\n${styleTag}\n</head>`);
     }
     return `${warningFilterScript}\n${styleTag}\n${html}`;
+}
+
+function injectBodyTopPadding(html: string, paddingTopPx = 30) {
+    const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
+    if (!safePadding) return html;
+
+    if (/<body[^>]*>/i.test(html)) {
+        return html.replace(/<body([^>]*)>/i, (_fullMatch, rawAttrs: string) => {
+            const attrs = rawAttrs || '';
+            const styleAttrMatch = attrs.match(/\sstyle=(["'])([\s\S]*?)\1/i);
+
+            if (styleAttrMatch) {
+                const quote = styleAttrMatch[1];
+                const existingStyle = (styleAttrMatch[2] || '').trim();
+                const cleanedStyle = existingStyle
+                    .replace(/(^|;)\s*padding-top\s*:[^;]*;?/gi, '$1')
+                    .replace(/;;+/g, ';')
+                    .trim();
+                const normalized = cleanedStyle
+                    ? `${cleanedStyle.replace(/\s*;?\s*$/, ';')} `
+                    : '';
+                const nextStyle = `${normalized}padding-top: ${safePadding}px;`;
+                const nextAttrs = attrs.replace(styleAttrMatch[0], ` style=${quote}${nextStyle}${quote}`);
+                return `<body${nextAttrs}>`;
+            }
+
+            return `<body${attrs} style="padding-top: ${safePadding}px;">`;
+        });
+    }
+
+    const styleTag = `<style id="eazyui-body-top-padding-style">body{padding-top:${safePadding}px !important;}</style>`;
+    if (/<head[^>]*>/i.test(html)) {
+        return html.replace(/<head([^>]*)>/i, `<head$1>${styleTag}`);
+    }
+    if (html.includes('</head>')) {
+        return html.replace('</head>', `${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${html}`;
+}
+
+function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, important = false) {
+    const attrs = rawAttrs || '';
+    const importantSuffix = important ? ' !important' : '';
+    const styleAttrMatch = attrs.match(/\sstyle=(["'])([\s\S]*?)\1/i);
+
+    if (styleAttrMatch) {
+        const quote = styleAttrMatch[1];
+        const existingStyle = (styleAttrMatch[2] || '').trim();
+        const cleanedStyle = existingStyle
+            .replace(/(^|;)\s*padding-top\s*:[^;]*;?/gi, '$1')
+            .replace(/;;+/g, ';')
+            .trim();
+        const normalized = cleanedStyle
+            ? `${cleanedStyle.replace(/\s*;?\s*$/, ';')} `
+            : '';
+        const nextStyle = `${normalized}padding-top: ${paddingTopPx}px${importantSuffix};`;
+        return attrs.replace(styleAttrMatch[0], ` style=${quote}${nextStyle}${quote}`);
+    }
+
+    return `${attrs} style="padding-top: ${paddingTopPx}px${importantSuffix};"`;
+}
+
+function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50) {
+    const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
+    const safeForcePadding = Math.max(0, Math.round(forcePaddingTopPx || 0));
+    if (!safePadding && !safeForcePadding) return html;
+
+    let nextHtml = html;
+    nextHtml = nextHtml.replace(/<header([^>]*)>/gi, (_fullMatch, rawAttrs: string) => {
+        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safePadding);
+        return `<header${nextAttrs}>`;
+    });
+
+    nextHtml = nextHtml.replace(/<([a-zA-Z][\w:-]*)([^>]*\sdata-eazyui-safe-top=(["'])force\3[^>]*)>/gi, (_fullMatch, tagName: string, rawAttrs: string) => {
+        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safeForcePadding, true);
+        return `<${tagName}${nextAttrs}>`;
+    });
+
+    nextHtml = nextHtml.replace(
+        /<([a-zA-Z][\w:-]*)([^>]*\sclass=(["'])(?=[^"']*\btop-0\b)(?=[^"']*\b(?:absolute|fixed|sticky)\b)(?=[^"']*\b(?:left-0|right-0|inset-x-0|inset-0)\b)[^"']*\3[^>]*)>/gi,
+        (_fullMatch, tagName: string, rawAttrs: string) => {
+            const isForceSafeTop = /\sdata-eazyui-safe-top=(["'])force\1/i.test(rawAttrs);
+            const nextAttrs = upsertPaddingTopInAttributes(
+                rawAttrs,
+                isForceSafeTop ? safeForcePadding : safePadding,
+                isForceSafeTop
+            );
+            return `<${tagName}${nextAttrs}>`;
+        }
+    );
+
+    const styleTag = `<style id="eazyui-header-top-padding-style">
+header:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="absolute"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="fixed"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="sticky"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]){padding-top:${safePadding}px !important;}
+[data-eazyui-safe-top="force"]{padding-top:${safeForcePadding}px !important;}
+</style>`;
+    if (/<head[^>]*>/i.test(nextHtml)) {
+        return nextHtml.replace(/<head([^>]*)>/i, `<head$1>${styleTag}`);
+    }
+    if (nextHtml.includes('</head>')) {
+        return nextHtml.replace('</head>', `${styleTag}\n</head>`);
+    }
+    return `${styleTag}\n${nextHtml}`;
 }
 
 function injectStatusBarOverlay(html: string, options: {
@@ -151,7 +262,7 @@ function injectStatusBarOverlay(html: string, options: {
     --eazyui-statusbar-font-weight: ${Math.max(400, Math.round(options.fontWeight))};
   }
   #eazyui-statusbar-overlay {
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
     right: 0;
@@ -168,16 +279,6 @@ function injectStatusBarOverlay(html: string, options: {
     z-index: 2147483000;
     box-sizing: border-box;
     background: transparent !important;
-  }
-  #eazyui-safe-top-occluder {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: var(--eazyui-safe-top);
-    pointer-events: none;
-    z-index: 2147482990;
-    background: var(--eazyui-safe-top-bg, transparent);
   }
   #eazyui-statusbar-overlay > * {
     position: relative;
@@ -226,194 +327,17 @@ function injectStatusBarOverlay(html: string, options: {
     if (window.__eazyuiSafeTopInstalled) return;
     window.__eazyuiSafeTopInstalled = true;
 
-    var SAFE_TOP = ${safeInset};
-    var SHIFT_ATTR = 'data-eazyui-safe-shifted';
-    var TOP_ATTR = 'data-eazyui-orig-top';
-    var MARGIN_ATTR = 'data-eazyui-orig-margin-top';
-    var PADDING_ATTR = 'data-eazyui-orig-padding-top';
-    var ticking = false;
-    var rafId = 0;
     var timeoutId = 0;
-
-    function toPx(value) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-      return String(Math.round(value)) + 'px';
-    }
-
-    function parsePx(value) {
-      if (!value || value === 'auto') return null;
-      var parsed = parseFloat(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-
-    function markOriginal(el, attr, value) {
-      if (!el.hasAttribute(attr)) el.setAttribute(attr, value || '');
-    }
-
-    function restoreElement(el) {
-      var origTop = el.getAttribute(TOP_ATTR);
-      var origMargin = el.getAttribute(MARGIN_ATTR);
-      var origPadding = el.getAttribute(PADDING_ATTR);
-      if (origTop !== null) {
-        if (origTop) el.style.top = origTop;
-        else el.style.removeProperty('top');
-      }
-      if (origMargin !== null) {
-        if (origMargin) el.style.marginTop = origMargin;
-        else el.style.removeProperty('margin-top');
-      }
-      if (origPadding !== null) {
-        if (origPadding) el.style.paddingTop = origPadding;
-        else el.style.removeProperty('padding-top');
-      }
-      el.removeAttribute(SHIFT_ATTR);
-      el.removeAttribute(TOP_ATTR);
-      el.removeAttribute(MARGIN_ATTR);
-      el.removeAttribute(PADDING_ATTR);
-    }
-
-    function clearShifts() {
-      var shifted = document.querySelectorAll('[' + SHIFT_ATTR + ']');
-      shifted.forEach(function (el) {
-        restoreElement(el);
-      });
-    }
-
-    function isLikelyMediaContainer(el) {
-      var cs = window.getComputedStyle(el);
-      var hasBgImage = cs.backgroundImage && cs.backgroundImage !== 'none';
-      var hasMediaChild = !!el.querySelector('img,video,picture,canvas,svg');
-      var rect = el.getBoundingClientRect();
-      var isLarge = rect.height > Math.max(220, window.innerHeight * 0.38);
-      return isLarge && (hasBgImage || hasMediaChild);
-    }
-
-    function isInteractiveContainer(el) {
-      var idClass = ((el.id || '') + ' ' + (el.className || '')).toLowerCase();
-      if (/header|nav|topbar|toolbar|actions|controls|appbar/.test(idClass)) return true;
-      return !!el.querySelector('button,a,input,textarea,select,[role="button"],[aria-label],[data-action]');
-    }
-
-    function shiftElement(el) {
-      if (!(el instanceof HTMLElement)) return false;
-      if (el.id === 'eazyui-statusbar-overlay') return false;
-      if (el.closest('#eazyui-statusbar-overlay')) return false;
-      if (el.getAttribute('data-eazyui-safe-top') === 'off') return false;
-      if (el.closest('[data-eazyui-safe-top="off"]')) return false;
-      if (el.closest('[' + SHIFT_ATTR + ']')) return false;
-
-      var rect = el.getBoundingClientRect();
-      if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height)) return false;
-      if (rect.bottom <= 0) return false;
-      var nearTop = rect.top <= SAFE_TOP + 14;
-      if (!nearTop) return false;
-
-      var force = el.getAttribute('data-eazyui-safe-top') === 'force';
-      var pos = window.getComputedStyle(el).position;
-      var isPositioned = pos === 'fixed' || pos === 'sticky' || pos === 'absolute' || pos === 'relative';
-      if (!isPositioned && !force) return false;
-      if (isLikelyMediaContainer(el) && !force) return false;
-
-      var interactive = isInteractiveContainer(el);
-      if (!interactive && !force) return false;
-
-      if (pos === 'fixed' || pos === 'sticky' || pos === 'absolute') {
-        var topValue = window.getComputedStyle(el).top;
-        markOriginal(el, TOP_ATTR, topValue);
-        var topPx = parsePx(topValue);
-        el.style.top = toPx((topPx === null ? 0 : topPx) + SAFE_TOP) || '';
-      } else {
-        var marginTop = window.getComputedStyle(el).marginTop;
-        markOriginal(el, MARGIN_ATTR, marginTop);
-        var marginPx = parsePx(marginTop);
-        el.style.marginTop = toPx((marginPx === null ? 0 : marginPx) + SAFE_TOP) || '';
-      }
-      el.setAttribute(SHIFT_ATTR, '1');
-      return true;
-    }
-
-    function applySafeTop() {
-      if (!document.body) return;
-      clearShifts();
-
-      var all = Array.from(document.body.querySelectorAll('*'));
-      for (var i = 0; i < all.length; i += 1) {
-        var el = all[i];
-        if (!(el instanceof HTMLElement)) continue;
-        shiftElement(el);
-      }
-    }
-
-    function hasVisibleColor(value) {
-      if (!value) return false;
-      var color = String(value).trim().toLowerCase();
-      if (!color || color === 'transparent') return false;
-      if (color === 'rgba(0, 0, 0, 0)' || color === 'rgba(0,0,0,0)') return false;
-      if (color === 'hsla(0, 0%, 0%, 0)' || color === 'hsla(0,0%,0%,0)') return false;
-      return true;
-    }
-
-    function getBestSafeTopBg() {
-      var selectors = [
-        '[data-eazyui-safe-top="force"]',
-        'header',
-        '[role="banner"]',
-        'nav'
-      ];
-      for (var i = 0; i < selectors.length; i += 1) {
-        var list = Array.from(document.querySelectorAll(selectors[i]));
-        for (var j = 0; j < list.length; j += 1) {
-          var el = list[j];
-          if (!(el instanceof HTMLElement)) continue;
-          if (el.id === 'eazyui-statusbar-overlay' || el.id === 'eazyui-safe-top-occluder') continue;
-          var rect = el.getBoundingClientRect();
-          if (rect.bottom < 0 || rect.top > SAFE_TOP + 24) continue;
-          var cs = window.getComputedStyle(el);
-          if (hasVisibleColor(cs.backgroundColor)) return cs.backgroundColor;
-        }
-      }
-
-      if (document.body) {
-        var bodyColor = window.getComputedStyle(document.body).backgroundColor;
-        if (hasVisibleColor(bodyColor)) return bodyColor;
-      }
-      if (document.documentElement) {
-        var htmlColor = window.getComputedStyle(document.documentElement).backgroundColor;
-        if (hasVisibleColor(htmlColor)) return htmlColor;
-      }
-      return '#000000';
-    }
-
-    function updateSafeTopOccluderBg() {
-      var bg = getBestSafeTopBg();
-      document.documentElement.style.setProperty('--eazyui-safe-top-bg', bg);
-    }
-
     function scheduleApply() {
-      if (ticking) return;
-      ticking = true;
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(function () {
-        ticking = false;
-        applySafeTop();
-        updateSafeTopOccluderBg();
-      });
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(installOverlay, 0);
     }
 
     function installOverlay() {
       if (!document.body) return;
-      if (!document.getElementById('eazyui-safe-top-occluder')) {
-        var occluder = document.createElement('div');
-        occluder.id = 'eazyui-safe-top-occluder';
-        occluder.setAttribute('data-editable', 'false');
-        occluder.setAttribute('data-eazyui-safe-top', 'off');
-        occluder.setAttribute('aria-hidden', 'true');
-        document.body.insertAdjacentElement('afterbegin', occluder);
-      }
       if (!document.getElementById('eazyui-statusbar-overlay')) {
         document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(statusMarkup)});
       }
-      scheduleApply();
     }
 
     window.addEventListener('load', installOverlay, { once: true });
@@ -434,8 +358,6 @@ function injectStatusBarOverlay(html: string, options: {
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: false });
       installOverlay();
       window.setTimeout(scheduleApply, 60);
-      window.setTimeout(scheduleApply, 180);
-      window.setTimeout(scheduleApply, 520);
     }
 
     observe();
@@ -1396,9 +1318,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     // Inject height-reporting script into the HTML
     // We only do this for Desktop to allow "infinite" scroll height
     const noScrollbarHtml = injectScrollbarHide(data.html as string);
+    const paddedHtml = injectBodyTopPadding(noScrollbarHtml, 30);
+    const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
     const baseHtml = isDesktop
-        ? noScrollbarHtml
-        : injectStatusBarOverlay(noScrollbarHtml, {
+        ? headerPaddedHtml
+        : injectStatusBarOverlay(headerPaddedHtml, {
             insetPx: statusBarInset,
             textColor: statusBarColor,
             paddingTop: statusBarStyle.paddingTop,
@@ -1600,7 +1524,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                                 pointerEvents: isEditingScreen ? 'auto' : 'none',
                                 opacity: 1,
                             }}
-                            sandbox="allow-scripts allow-same-origin"
+                            sandbox="allow-scripts"
                         />
                     </div>
 

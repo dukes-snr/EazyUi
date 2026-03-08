@@ -29,7 +29,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
-import { extractLedgerRequestPreview } from '../../utils/billingUsage';
+import { extractLedgerDeductedCredits, extractLedgerModelName, extractLedgerRequestPreview, extractLedgerTotalTokens } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
@@ -137,7 +137,7 @@ export function CanvasProfileMenu() {
         const silent = Boolean(options?.silent);
         try {
             setBillingLoading(true);
-            const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(40)]);
+            const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(100)]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
         } catch (error) {
@@ -352,11 +352,13 @@ export function CanvasProfileMenu() {
         date.setMonth(date.getMonth() - (11 - idx));
         return date.toLocaleDateString(undefined, { month: 'short' });
     }), []);
-    const usageEvents = billingLedger.slice(0, 20);
+    const usageEvents = billingLedger
+        .filter((item) => Boolean(item.operation) || Boolean(item.requestId))
+        .slice(0, 50);
     const aiCodeAccepted = billingLedger.filter((item) => (item.operation || '').includes('generate') || (item.operation || '').includes('edit')).length;
     const chatCount = billingLedger.filter((item) => (item.operation || '').includes('plan') || (item.operation || '').includes('generate')).length;
     const modelHistogram = usageEvents
-        .map((item) => typeof item.metadata?.model === 'string' ? item.metadata.model : null)
+        .map((item) => extractLedgerModelName(item.metadata))
         .filter((value): value is string => Boolean(value))
         .reduce<Record<string, number>>((acc, model) => {
             acc[model] = (acc[model] || 0) + 1;
@@ -748,21 +750,28 @@ export function CanvasProfileMenu() {
                                                             <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Time</th>
                                                             <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Model</th>
                                                             <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Request</th>
-                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Cost</th>
-                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Source</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Action</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Deducted</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Tokens</th>
+                                                            <th className="border-b border-[var(--ui-border)] px-4 py-3 font-medium">Request ID</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         {usageEvents.length === 0 ? (
                                                             <tr>
-                                                                <td colSpan={5} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td>
+                                                                <td colSpan={7} className="px-4 py-8 text-center text-sm text-[var(--ui-text-subtle)]">No Rows To Show</td>
                                                             </tr>
                                                         ) : usageEvents.map((item) => {
                                                             const requestPreview = extractLedgerRequestPreview(item.metadata);
+                                                            const deductedCredits = extractLedgerDeductedCredits(item);
+                                                            const tokensUsed = extractLedgerTotalTokens(item.metadata);
+                                                            const modelName = extractLedgerModelName(item.metadata) || 'Default model';
+                                                            const requestIdentifier = item.requestId || item.reservationId || '-';
+                                                            const actionLabel = (item.operation || item.type).replace(/_/g, ' ');
                                                             return (
                                                                 <tr key={`usage-${item.id}`} className="text-sm text-[var(--ui-text)]">
                                                                     <td className="border-b border-[var(--ui-border)] px-4 py-3">{new Date(item.createdAt).toLocaleString()}</td>
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{typeof item.metadata?.model === 'string' ? item.metadata.model : 'Default model'}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3">{modelName}</td>
                                                                     <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">
                                                                         {requestPreview ? (
                                                                             <span className="block max-w-[320px] truncate whitespace-nowrap" title={requestPreview}>
@@ -772,8 +781,16 @@ export function CanvasProfileMenu() {
                                                                             <span>-</span>
                                                                         )}
                                                                     </td>
-                                                                    <td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${item.creditsDelta < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{item.creditsDelta > 0 ? '+' : ''}{item.creditsDelta}</td>
-                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{(item.operation || item.type).replace(/_/g, ' ')}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{actionLabel}</td>
+                                                                    <td className={`border-b border-[var(--ui-border)] px-4 py-3 font-semibold ${deductedCredits > 0 ? 'text-rose-300' : 'text-[var(--ui-text-subtle)]'}`}>
+                                                                        {deductedCredits > 0 ? `-${deductedCredits}` : '0'}
+                                                                    </td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">{tokensUsed !== null ? tokensUsed.toLocaleString() : '-'}</td>
+                                                                    <td className="border-b border-[var(--ui-border)] px-4 py-3 text-[var(--ui-text-subtle)]">
+                                                                        <span className="block max-w-[200px] truncate whitespace-nowrap" title={requestIdentifier}>
+                                                                            {requestIdentifier}
+                                                                        </span>
+                                                                    </td>
                                                                 </tr>
                                                             );
                                                         })}
