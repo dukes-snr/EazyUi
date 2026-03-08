@@ -106,6 +106,9 @@ const MAX_PROJECT_MEMORY_SCREEN_NAME_LENGTH = 88;
 const MAX_PROJECT_MEMORY_USER_REQUESTS = 16;
 const MAX_PROJECT_MEMORY_USER_REQUEST_LENGTH = 220;
 const MAX_PROJECT_MEMORY_NAV_LABELS = 8;
+const FIRESTORE_PROJECT_DOC_SOFT_LIMIT_BYTES = 920_000;
+const FIRESTORE_COVER_DATA_URL_MAX_LENGTH = 120_000;
+const FIRESTORE_DESCRIPTION_MAX_LENGTH = 6_000;
 
 function isValidDesignSpec(value: unknown): value is HtmlDesignSpec {
   if (!value || typeof value !== "object") return false;
@@ -541,6 +544,86 @@ function stripUndefinedDeep<T>(value: T): T {
     return out as T;
   }
   return value;
+}
+
+function estimateJsonSizeBytes(value: unknown): number {
+  try {
+    const json = JSON.stringify(value ?? null);
+    if (typeof TextEncoder !== "undefined") {
+      return new TextEncoder().encode(json).length;
+    }
+    return json.length;
+  } catch {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+function isFirestoreDocSizeError(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message || "").toLowerCase();
+  return message.includes("maximum allowed size") || message.includes("exceeds the maximum allowed size");
+}
+
+function compactProjectMetaPayloadForFirestore(payload: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...payload };
+  const meta = (next.designSpecMeta && typeof next.designSpecMeta === "object")
+    ? { ...(next.designSpecMeta as Record<string, unknown>) }
+    : null;
+  if (meta) {
+    next.designSpecMeta = meta;
+    const description = typeof meta.description === "string" ? meta.description : "";
+    if (description.length > FIRESTORE_DESCRIPTION_MAX_LENGTH) {
+      meta.description = description.slice(0, FIRESTORE_DESCRIPTION_MAX_LENGTH);
+    }
+  }
+
+  const coverUrls = Array.isArray(next.coverImageUrls)
+    ? next.coverImageUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  let coverDataUrls = Array.isArray(next.coverImageDataUrls)
+    ? next.coverImageDataUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  if (coverUrls.length > 0) {
+    coverDataUrls = [];
+  } else {
+    coverDataUrls = coverDataUrls
+      .filter((value) => value.length <= FIRESTORE_COVER_DATA_URL_MAX_LENGTH)
+      .slice(0, 1);
+  }
+  next.coverImageDataUrls = coverDataUrls;
+  next.coverImageDataUrl = coverDataUrls[0] || null;
+
+  const fits = () => estimateJsonSizeBytes(stripUndefinedDeep(next)) <= FIRESTORE_PROJECT_DOC_SOFT_LIMIT_BYTES;
+  if (fits()) return stripUndefinedDeep(next) as Record<string, unknown>;
+
+  if (meta) {
+    meta.designSystem = null;
+  }
+  if (fits()) return stripUndefinedDeep(next) as Record<string, unknown>;
+
+  const memory = (next.projectMemory && typeof next.projectMemory === "object")
+    ? { ...(next.projectMemory as Record<string, unknown>) }
+    : null;
+  if (memory) {
+    const summary = (memory.summary && typeof memory.summary === "object")
+      ? { ...(memory.summary as Record<string, unknown>) }
+      : null;
+    if (summary) {
+      summary.lastUserRequests = [];
+      memory.summary = summary;
+      next.projectMemory = memory;
+    }
+  }
+  if (fits()) return stripUndefinedDeep(next) as Record<string, unknown>;
+
+  next.projectMemory = null;
+  next.coverImageDataUrls = [];
+  next.coverImageDataUrl = null;
+  if (meta) {
+    meta.description = "";
+    meta.designSystem = null;
+  }
+
+  return stripUndefinedDeep(next) as Record<string, unknown>;
 }
 
 function isStorageCorsOrNetworkError(error: unknown): boolean {
@@ -1088,40 +1171,69 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
   );
 
   // Publish project metadata LAST so realtime consumers see a coherent save boundary.
-  await setDoc(
-    projectRef,
-    {
+  const fullProjectMetaPayload = stripUndefinedDeep({
+    id,
+    ownerId: uid,
+    name: safeDesignSpec.name || "Untitled project",
+    snapshotPath: resolvedSnapshotPath,
+    coverImagePath: resolvedCoverImagePaths[0] || null,
+    coverImageUrl: resolvedCoverImageUrls[0] || null,
+    coverImageDataUrl: resolvedCoverImageDataUrls[0] || null,
+    coverImagePaths: resolvedCoverImagePaths,
+    coverImageUrls: resolvedCoverImageUrls,
+    coverImageDataUrls: resolvedCoverImageDataUrls,
+    coverScreenIds: nextCoverScreenIds,
+    coverVersion: PROJECT_COVER_VERSION,
+    screenCount: (safeDesignSpec.screens || []).length,
+    designSpecMeta: {
+      id: safeDesignSpec.id,
+      name: safeDesignSpec.name,
+      description: safeDesignSpec.description || "",
+      designSystem: safeDesignSpec.designSystem,
+      screens: (safeDesignSpec.screens || []).map((s) => ({
+        screenId: s.screenId,
+        name: s.name,
+        width: s.width,
+        height: s.height,
+        status: s.status || "complete",
+      })),
+    },
+    projectMemory,
+    createdAt,
+    updatedAt: now,
+  }) as Record<string, unknown>;
+
+  const compactProjectMetaPayload = compactProjectMetaPayloadForFirestore(fullProjectMetaPayload);
+  try {
+    await setDoc(projectRef, compactProjectMetaPayload, { merge: true });
+  } catch (error) {
+    if (!isFirestoreDocSizeError(error)) throw error;
+    const emergencyProjectMetaPayload = stripUndefinedDeep({
       id,
       ownerId: uid,
       name: safeDesignSpec.name || "Untitled project",
       snapshotPath: resolvedSnapshotPath,
       coverImagePath: resolvedCoverImagePaths[0] || null,
       coverImageUrl: resolvedCoverImageUrls[0] || null,
-      coverImageDataUrl: resolvedCoverImageDataUrls[0] || null,
+      coverImageDataUrl: null,
       coverImagePaths: resolvedCoverImagePaths,
       coverImageUrls: resolvedCoverImageUrls,
-      coverImageDataUrls: resolvedCoverImageDataUrls,
+      coverImageDataUrls: [],
       coverScreenIds: nextCoverScreenIds,
       coverVersion: PROJECT_COVER_VERSION,
+      screenCount: (safeDesignSpec.screens || []).length,
       designSpecMeta: {
         id: safeDesignSpec.id,
         name: safeDesignSpec.name,
-        description: safeDesignSpec.description || "",
-        designSystem: safeDesignSpec.designSystem,
-        screens: (safeDesignSpec.screens || []).map((s) => ({
-          screenId: s.screenId,
-          name: s.name,
-          width: s.width,
-          height: s.height,
-          status: s.status || "complete",
-        })),
+        description: "",
+        designSystem: null,
       },
-      projectMemory,
+      projectMemory: null,
       createdAt,
       updatedAt: now,
-    },
-    { merge: true }
-  );
+    });
+    await setDoc(projectRef, emergencyProjectMetaPayload, { merge: true });
+  }
 
   return { projectId: id, savedAt: now };
 }
@@ -1408,6 +1520,7 @@ export async function listProjectsFirestore(uid: string): Promise<{ id: string; 
       coverImageDataUrl?: string;
       coverImageUrls?: string[];
       coverImageDataUrls?: string[];
+      screenCount?: number;
       designSpecMeta?: { screens?: Array<unknown> };
     };
     const persistedCoverUrls = Array.isArray(data.coverImageUrls)
@@ -1422,7 +1535,9 @@ export async function listProjectsFirestore(uid: string): Promise<{ id: string; 
       id: d.id,
       name: data.name || "Untitled project",
       updatedAt: data.updatedAt || "",
-      screenCount: Array.isArray(data.designSpecMeta?.screens) ? data.designSpecMeta!.screens!.length : 0,
+      screenCount: typeof data.screenCount === "number"
+        ? data.screenCount
+        : (Array.isArray(data.designSpecMeta?.screens) ? data.designSpecMeta!.screens!.length : 0),
       hasSnapshot: Boolean(data.snapshotPath),
       coverImageUrl: coverImageUrls[0] || fallbackCover,
       coverImageUrls: coverImageUrls.length > 0 ? coverImageUrls : (fallbackCover ? [fallbackCover] : undefined),

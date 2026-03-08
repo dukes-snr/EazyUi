@@ -184,44 +184,47 @@ function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, im
     return `${attrs} style="padding-top: ${paddingTopPx}px${importantSuffix};"`;
 }
 
-function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50) {
+function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50, headerPaddingTopPx = 20) {
     const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
     const safeForcePadding = Math.max(0, Math.round(forcePaddingTopPx || 0));
-    if (!safePadding && !safeForcePadding) return html;
+    const safeHeaderPadding = Math.max(0, Math.round(headerPaddingTopPx || 0));
+    if (!safePadding && !safeForcePadding && !safeHeaderPadding) return html;
 
     let nextHtml = html;
     nextHtml = nextHtml.replace(/<header([^>]*)>/gi, (_fullMatch, rawAttrs: string) => {
-        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safePadding);
+        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safeHeaderPadding, true);
         return `<header${nextAttrs}>`;
     });
 
     nextHtml = nextHtml.replace(/<([a-zA-Z][\w:-]*)([^>]*\sdata-eazyui-safe-top=(["'])force\3[^>]*)>/gi, (_fullMatch, tagName: string, rawAttrs: string) => {
-        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safeForcePadding, true);
+        const isHeaderTag = String(tagName || '').toLowerCase() === 'header';
+        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, isHeaderTag ? safeHeaderPadding : safeForcePadding, true);
         return `<${tagName}${nextAttrs}>`;
     });
 
     nextHtml = nextHtml.replace(
         /<([a-zA-Z][\w:-]*)([^>]*\sclass=(["'])(?=[^"']*\btop-0\b)(?=[^"']*\b(?:absolute|fixed|sticky)\b)(?=[^"']*\b(?:left-0|right-0|inset-x-0|inset-0)\b)[^"']*\3[^>]*)>/gi,
         (_fullMatch, tagName: string, rawAttrs: string) => {
+            const isHeaderTag = String(tagName || '').toLowerCase() === 'header';
             const isForceSafeTop = /\sdata-eazyui-safe-top=(["'])force\1/i.test(rawAttrs);
             const nextAttrs = upsertPaddingTopInAttributes(
                 rawAttrs,
-                isForceSafeTop ? safeForcePadding : safePadding,
-                isForceSafeTop
+                isHeaderTag ? safeHeaderPadding : (isForceSafeTop ? safeForcePadding : safePadding),
+                isHeaderTag || isForceSafeTop
             );
             return `<${tagName}${nextAttrs}>`;
         }
     );
 
     const styleTag = `<style id="eazyui-header-top-padding-style">
-header:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"]:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="absolute"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="fixed"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]),
-[class~="top-0"][class~="sticky"][class~="inset-x-0"]:not([data-eazyui-safe-top="force"]){padding-top:${safePadding}px !important;}
-[data-eazyui-safe-top="force"]{padding-top:${safeForcePadding}px !important;}
+header{padding-top:${safeHeaderPadding}px !important;}
+[class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="absolute"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="fixed"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]),
+[class~="top-0"][class~="sticky"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]){padding-top:${safePadding}px !important;}
+[data-eazyui-safe-top="force"]:not(header){padding-top:${safeForcePadding}px !important;}
 </style>`;
     if (/<head[^>]*>/i.test(nextHtml)) {
         return nextHtml.replace(/<head([^>]*)>/i, `<head$1>${styleTag}`);

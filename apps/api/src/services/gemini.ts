@@ -371,6 +371,30 @@ ANTI-GENERIC DESIGN RULES (MANDATORY):
 - Avoid "header + list + grid" templates. Use a focal hero with layered depth on each main screen.
 `;
 
+const COMPONENT_CRAFT_RULES = `
+COMPONENT CRAFTSMANSHIP (MANDATORY):
+- Build each screen with a deliberate 4-zone scaffold:
+  1) top utility/header zone
+  2) primary focal module (hero/stat/media)
+  3) supporting modules (cards/list/chips)
+  4) persistent action zone (CTA/nav/sheet) when applicable
+- Use mixed module scales (hero + standard + compact), not a uniform stack of equal cards.
+- Reuse a consistent component anatomy across modules (meta/eyebrow, title/value, support text, utility affordance).
+- Keep a clear 3-second scan path: headline -> primary metric/CTA -> supporting context.
+- Keep accent use restrained and meaningful: one main accent + one secondary accent max for emphasis.
+- Header-like top overlays must be marked with data-eazyui-safe-top="force" even when the element is a div.
+- Major wrappers should be purpose-labeled (id/data-uid names like "top-controls", "hero-card", "primary-cta"), not anonymous repeated containers.
+`;
+
+const NO_IMAGE_REFERENCE_QUALITY_RULES = `
+NO-REFERENCE MODE QUALITY BAR (MANDATORY WHEN NO IMAGES ARE ATTACHED):
+- Even without reference images, produce reference-grade craft comparable to top portfolio/mobile design showcases.
+- Choose one strong visual direction and execute it consistently; avoid safe/generic defaults.
+- Prioritize component architecture quality over decoration: focal module, supporting modules, and clear action hierarchy.
+- Do not fall back to generic "header + equal cards + bottom nav" templates.
+- Ensure each screen has one memorable focal moment (hero metric/media/feature card) plus clean supporting structure.
+`;
+
 const EDIT_TAGGING_RULES = `
 EDIT MODE TAGGING (MANDATORY):
 - Add data-editable="true" and data-uid="unique_id" to ALL major UI elements.
@@ -517,6 +541,7 @@ ${TOKEN_CONTRACT}
 ${THEME_AWARENESS_RULES}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${COMPONENT_CRAFT_RULES}
 ${ICON_POLICY_RULES}
 ${DEVICE_CHROME_RULES}
 ${SAFE_TOP_LAYOUT_RULES}
@@ -596,6 +621,7 @@ ${TOKEN_CONTRACT}
 ${THEME_AWARENESS_RULES}
 ${IMAGE_WHITELIST}
 ${ANTI_GENERIC_RULES}
+${COMPONENT_CRAFT_RULES}
 ${ICON_POLICY_RULES}
 ${DEVICE_CHROME_RULES}
 ${SAFE_TOP_LAYOUT_RULES}
@@ -658,6 +684,9 @@ Rules:
 - Keep HTML compact but premium (no comments/long paragraphs).
 - Build a premium mobile composition with: hero/header, search or filter controls, one featured card, one secondary recommendations module, and sticky CTA.
 - Use clear hierarchy with a display heading + supporting text + metadata + emphasized CTA.
+- Compose screen structure with explicit zones: top utility, focal hero, supporting modules, persistent action.
+- Use mixed module scales (hero + standard + compact). Avoid same-sized card stacks.
+- Use reusable component anatomy (meta/title/value/action) and purpose labels for major wrappers.
 - Add depth with at least 2 of: gradient background, glass/blur panel, soft shadow, layered overlap.
 - Use prompt-specific labels; no filler copy (no "Lorem ipsum", "Item 1", "Product Name").
 - Define tailwind.config theme.extend.colors with semantic tokens: bg, surface, text, muted, accent.
@@ -684,6 +713,8 @@ Rules:
 - Include: <script src="https://cdn.tailwindcss.com"></script>
 - Include Plus Jakarta Sans + one display font + Material Symbols Rounded.
 - Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
+- Keep explicit zone hierarchy: top utility, focal hero, supporting modules, persistent action.
+- Mix module scales; avoid equal-height repeated cards.
 - Keep markup concise and visually rich; avoid long repeated sections.
 - Do NOT include a mobile OS status bar row (time/signal/wifi/battery).
 - Assume transparent status-bar overlay; keep hero/media full-bleed and use data-eazyui-safe-top="force" for top controls container.
@@ -791,6 +822,12 @@ Return concise JSON only with fields:
   "palette": { "primary": "#hex", "secondary": "#hex", "background": "#hex", "surface": "#hex", "text": "#hex", "accent": "#hex" },
   "layoutStructure": ["hero + cards", "sidebar + content", "..."],
   "componentPatterns": ["rounded cards", "pill chips", "minimal nav", "..."],
+  "componentArchitecture": {
+    "topZone": "how top utility/header is built",
+    "focalModule": "hero/featured module pattern",
+    "supportingModules": "supporting card/list structure",
+    "actionZone": "persistent CTA/nav/bottom-sheet behavior"
+  },
   "typographyNotes": "short notes",
   "spacingDensity": "compact|balanced|airy",
   "mustKeepCues": ["list of strongest visual cues to preserve"]
@@ -811,7 +848,7 @@ Return concise JSON only with fields:
         const raw = (result.response.text() || '').trim();
         if (!raw) return '';
         const compact = raw.replace(/```json|```/gi, '').trim();
-        return `IMAGE REFERENCE ANALYSIS (HARD GUIDANCE):\n${compact}\nUse this analysis to match palette, layout structure, spacing rhythm, and component style from the reference image(s).`;
+        return `IMAGE REFERENCE ANALYSIS (HARD GUIDANCE):\n${compact}\nUse this analysis to match palette, layout structure, spacing rhythm, component architecture, and visual hierarchy from the reference image(s).`;
     } catch (error) {
         console.warn('[Gemini] analyzeReferenceImages failed; continuing without structured image analysis', error);
         return 'Attached image(s) are reference-first. Prioritize matching their palette, layout structure, component style, and visual hierarchy over generic patterns.';
@@ -1243,11 +1280,11 @@ function buildFallbackProjectDesignSystem(
             glow: '0 20px 60px rgba(0,0,0,.22)',
         },
         componentLanguage: {
-            button: 'High-contrast primary CTA, soft rounded control, clear pressed/disabled states.',
-            card: 'Layered card with subtle gradient and clear heading/body separation.',
-            input: 'Comfortable input with strong focus ring and muted placeholder.',
-            nav: 'Context-aware nav with a strong active state and restrained iconography.',
-            chips: 'Rounded chips with compact spacing and icon + label pairing.',
+            button: 'Primary actions use high-contrast filled controls; secondary actions use subtle surface pills with icon+label and clear active/disabled states.',
+            card: 'Use a card family with hero, standard, and compact variants; keep shared radius/elevation and consistent internal anatomy (meta/title/value/action).',
+            input: 'Inputs should use icon-leading structure, clear labels/helpers, and stable vertical rhythm for quick scanning.',
+            nav: 'Navigation should be contextual: top utility actions for detail views, persistent bottom nav only when it supports the core loop.',
+            chips: 'Semantic chips should encode state/time/type with concise icon+label pairs and restrained accent fills.',
         },
         motion: {
             style: 'Short ease-out transitions with low-bounce emphasis.',
@@ -1259,11 +1296,17 @@ function buildFallbackProjectDesignSystem(
                 'Reuse the same tokens and typography pair on every screen.',
                 'Keep spacing rhythm consistent across sections and cards.',
                 'Reserve accent colors for CTA, active states, and key highlights.',
+                'Build each screen with a clear focal module plus supporting modules of different scales.',
+                'Use repeatable component anatomy so cards/rows feel system-designed, not random.',
+                'Mark header-like top overlays with data-eazyui-safe-top="force".',
             ],
             dont: [
                 'Do not introduce a new theme direction mid-project.',
                 'Do not switch font pairing between screens.',
                 'Do not overuse accent color on neutral surfaces.',
+                'Do not render uniform stacks of same-size cards without a dominant focal module.',
+                'Do not rely on anonymous container stacks where component purpose is unclear.',
+                'Do not hide key content hierarchy behind decorative effects.',
             ],
         },
     };
@@ -1461,6 +1504,13 @@ Component language:
 - nav: ${system.componentLanguage.nav}
 - chips: ${system.componentLanguage.chips}
 
+Component craft targets (MANDATORY):
+- Screen scaffold: top utility/header -> focal module -> supporting modules -> persistent action area.
+- Module scale: mix hero, standard, and compact modules; avoid flat uniform grids/stacks.
+- Component anatomy: use repeatable structure (meta/title/value/action) for cards and rows.
+- Visual emphasis: one dominant focal point per screen with restrained accent usage.
+- Header-like overlays near the top should be tagged data-eazyui-safe-top="force".
+
 Motion:
 - style: ${system.motion.style}
 - fast/base durations: ${system.motion.durationFastMs}ms / ${system.motion.durationBaseMs}ms
@@ -1543,6 +1593,8 @@ Rules:
 - Set "tokens" to the active mode palette (matching themeMode), not a third unrelated set.
 - Ensure theme-aware contrast decisions for controls/icons in both modes (avoid unreadable white-on-white or black-on-black states).
 - Keep rules concrete and short.
+- componentLanguage entries must describe concrete component anatomy/variants, not vague style adjectives.
+- The rules.do/rules.dont arrays should reinforce non-generic structure: focal module, mixed card scales, and consistent component grammar.
 - Prefer semantic colors over arbitrary color names.`;
 
     const userPrompt = `App request: "${prompt}"
@@ -1656,6 +1708,7 @@ export async function generateDesign(options: GenerateOptions): Promise<{
         ? `Use the attached image(s) as PRIMARY reference. Match palette, typography mood, spacing density, component shapes, and layout hierarchy. Do not ignore reference cues.
 If the text request is ambiguous (e.g., "as seen", "like this"), preserve the same app domain and information architecture as the reference image(s).`
         : '';
+    const noImageGuidance = images.length === 0 ? NO_IMAGE_REFERENCE_QUALITY_RULES : '';
 
     const baseUserPrompt = `
 Design a UI for: "${prompt}"
@@ -1663,6 +1716,7 @@ Platform: ${platform} (${dimensions.width}x${dimensions.height})
 Style: ${stylePreset}
 Generate a maximum of 4 complete screens.
 ${imageGuidance}
+${noImageGuidance}
 ${imageAnalysis}
 ${designSystemGuidance}
 `;
@@ -1673,6 +1727,7 @@ Platform: ${platform} (${dimensions.width}x${dimensions.height})
 Style: ${stylePreset}
 Generate exactly 1 complete main screen.
 ${imageGuidance}
+${noImageGuidance}
 ${imageAnalysis}
 ${designSystemGuidance}
 `;
@@ -1838,6 +1893,7 @@ export function generateDesignStreamWithUsage(options: GenerateOptions): {
 
             const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
 ${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
+${images.length ? '' : NO_IMAGE_REFERENCE_QUALITY_RULES}
 ${imageAnalysis}
 ${designSystemGuidance}`;
             const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
