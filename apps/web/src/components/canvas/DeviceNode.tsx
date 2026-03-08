@@ -117,6 +117,64 @@ function injectHeightScript(html: string, screenId: string) {
     return `${html}\n${script}`;
 }
 
+function syncPreviewAttributes(target: Element, source: Element) {
+    const preservedNames = new Set(['data-eazyui-icons-ready']);
+    const sourceNames = new Set(source.getAttributeNames());
+
+    target.getAttributeNames().forEach((name) => {
+        if (preservedNames.has(name)) return;
+        if (!sourceNames.has(name)) target.removeAttribute(name);
+    });
+
+    source.getAttributeNames().forEach((name) => {
+        if (preservedNames.has(name)) return;
+        const value = source.getAttribute(name);
+        if (target.getAttribute(name) !== value) {
+            if (value === null) target.removeAttribute(name);
+            else target.setAttribute(name, value);
+        }
+    });
+}
+
+function extractDocumentHeadHtml(html: string): string | null {
+    try {
+        const parsed = new DOMParser().parseFromString(String(html || ''), 'text/html');
+        return parsed.head ? parsed.head.innerHTML.trim() : null;
+    } catch {
+        return null;
+    }
+}
+
+function applyInPlacePreviewHtml(iframe: HTMLIFrameElement | null, nextHtml: string) {
+    const frameWindow = iframe?.contentWindow;
+    const frameDoc = iframe?.contentDocument;
+    if (!frameWindow || !frameDoc || !frameDoc.documentElement || !frameDoc.body) return false;
+
+    try {
+        const parsed = new DOMParser().parseFromString(String(nextHtml || ''), 'text/html');
+        if (!parsed.documentElement || !parsed.body) return false;
+
+        syncPreviewAttributes(frameDoc.documentElement, parsed.documentElement);
+        syncPreviewAttributes(frameDoc.body, parsed.body);
+
+        if (frameDoc.title !== parsed.title) {
+            frameDoc.title = parsed.title || frameDoc.title;
+        }
+
+        const nextBodyHtml = parsed.body.innerHTML;
+        if (frameDoc.body.innerHTML !== nextBodyHtml) {
+            frameDoc.body.innerHTML = nextBodyHtml;
+        }
+
+        frameWindow.requestAnimationFrame(() => {
+            frameWindow.dispatchEvent(new Event('resize'));
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function injectScrollbarHide(html: string) {
     const sanitizedHtml = String(html || '').replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs = '', body = '') => {
         const attrText = String(attrs).toLowerCase();
@@ -303,7 +361,7 @@ function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, im
     return `${attrs} style="padding-top: ${paddingTopPx}px${importantSuffix};"`;
 }
 
-function injectHeaderTopPadding(html: string, paddingTopPx = 30, forcePaddingTopPx = 50, headerPaddingTopPx = 30) {
+function injectHeaderTopPadding(html: string, paddingTopPx = 0, forcePaddingTopPx = 50, headerPaddingTopPx = 30) {
     const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
     const safeForcePadding = Math.max(0, Math.round(forcePaddingTopPx || 0));
     const safeHeaderPadding = Math.max(0, Math.round(headerPaddingTopPx || 0));
@@ -1503,6 +1561,49 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const queuedBufferedDocRef = useRef<string | null>(null);
     const activeBufferedFrameRef = useRef<0 | 1>(0);
     const bufferedSrcDocsRef = useRef<[string, string]>([injectedHtmlWithNonce, injectedHtmlWithNonce]);
+    const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+    const previewIframeReadyRef = useRef(false);
+    const queuedInPlacePreviewDocRef = useRef<string | null>(null);
+    const wasStreamingRef = useRef(isStreaming);
+
+    const hardReloadPreview = useCallback((nextDoc: string) => {
+        previewIframeReadyRef.current = false;
+        queuedInPlacePreviewDocRef.current = null;
+        setStableSrcDoc(nextDoc);
+    }, []);
+
+    const patchPreviewInPlace = useCallback((nextDoc: string) => {
+        if (!previewIframeReadyRef.current) {
+            queuedInPlacePreviewDocRef.current = nextDoc;
+            return 'queued' as const;
+        }
+
+        const currentHead = previewIframeRef.current?.contentDocument?.head?.innerHTML?.trim() || '';
+        const nextHead = extractDocumentHeadHtml(nextDoc);
+        if (nextHead !== null && nextHead !== currentHead) {
+            return 'reload' as const;
+        }
+
+        const applied = applyInPlacePreviewHtml(previewIframeRef.current, nextDoc);
+        if (!applied) {
+            queuedInPlacePreviewDocRef.current = nextDoc;
+            return 'reload' as const;
+        }
+
+        queuedInPlacePreviewDocRef.current = null;
+        return 'applied' as const;
+    }, []);
+
+    const handlePreviewFrameLoad = useCallback(() => {
+        previewIframeReadyRef.current = true;
+        const queuedDoc = queuedInPlacePreviewDocRef.current;
+        if (queuedDoc) {
+            const applied = applyInPlacePreviewHtml(previewIframeRef.current, queuedDoc);
+            if (applied) {
+                queuedInPlacePreviewDocRef.current = null;
+            }
+        }
+    }, []);
 
     useEffect(() => {
         return () => {
@@ -1515,7 +1616,16 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
     useEffect(() => {
         const flushStreamDoc = () => {
-            setStableSrcDoc(pendingStreamDocRef.current);
+            const nextDoc = pendingStreamDocRef.current;
+            const shouldPatchInPlace = wasStreamingRef.current && !isEditingScreen;
+            if (shouldPatchInPlace) {
+                const result = patchPreviewInPlace(nextDoc);
+                if (result === 'reload') {
+                    hardReloadPreview(nextDoc);
+                }
+            } else {
+                hardReloadPreview(nextDoc);
+            }
             if (streamFlushTimerRef.current !== null) {
                 window.clearTimeout(streamFlushTimerRef.current);
                 streamFlushTimerRef.current = null;
@@ -1525,7 +1635,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         if (isEditingScreen) {
             const reloadRequested = lastReloadTickRef.current !== reloadTick;
             if (!wasEditingRef.current || reloadRequested) {
-                setStableSrcDoc(injectedHtmlWithNonce);
+                hardReloadPreview(injectedHtmlWithNonce);
             }
             if (streamFlushTimerRef.current !== null) {
                 window.clearTimeout(streamFlushTimerRef.current);
@@ -1541,12 +1651,24 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
             } else {
                 pendingStreamDocRef.current = injectedHtmlWithNonce;
-                flushStreamDoc();
+                if (wasStreamingRef.current && !isEditingScreen) {
+                    const result = patchPreviewInPlace(injectedHtmlWithNonce);
+                    if (result === 'reload') {
+                        hardReloadPreview(injectedHtmlWithNonce);
+                    }
+                } else {
+                    hardReloadPreview(injectedHtmlWithNonce);
+                }
+                if (streamFlushTimerRef.current !== null) {
+                    window.clearTimeout(streamFlushTimerRef.current);
+                    streamFlushTimerRef.current = null;
+                }
             }
         }
         wasEditingRef.current = isEditingScreen;
         lastReloadTickRef.current = reloadTick;
-    }, [injectedHtmlWithNonce, isEditingScreen, reloadTick, isStreaming]);
+        wasStreamingRef.current = isStreaming;
+    }, [hardReloadPreview, injectedHtmlWithNonce, isEditingScreen, patchPreviewInPlace, reloadTick, isStreaming]);
 
     const shouldUseBufferedStreamingPreview = BUFFERED_STREAMING_PREVIEW
         && SMOOTH_STREAMING_PREVIEW
@@ -1761,9 +1883,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                             </>
                         ) : (
                             <iframe
+                                ref={previewIframeRef}
                                 srcDoc={stableSrcDoc}
                                 title="Preview"
                                 data-screen-id={data.screenId}
+                                onLoad={handlePreviewFrameLoad}
                                 style={{
                                     position: 'absolute',
                                     top: 0,

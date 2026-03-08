@@ -1786,6 +1786,17 @@ function sanitizeStreamingHtml(input: string): string {
     return html;
 }
 
+function isStreamingPreviewRenderable(content: string): boolean {
+    const source = sanitizeStreamingHtml(extractLikelyHtml(content));
+    if (!source) return false;
+    if (!/<head[\s>]/i.test(source) || !/<\/head>/i.test(source)) return false;
+    if (!/<body[\s>]/i.test(source)) return false;
+
+    const hasTailwindCdn = /<script\b[^>]*src=(["'])[^"']*cdn\.tailwindcss\.com[^"']*\1[^>]*><\/script>/i.test(source);
+    const hasInlineStyles = /<style\b[^>]*>[\s\S]*<\/style>/i.test(source);
+    return hasTailwindCdn || hasInlineStyles;
+}
+
 function bestEffortCompleteHtml(content: string): string {
     let html = sanitizeStreamingHtml(extractLikelyHtml(content));
     if (!html) return '';
@@ -1881,6 +1892,12 @@ function parseStreamChunk(state: StreamParserState, chunk: string): StreamParseE
 
         const endIdx = state.buffer.indexOf('</screen>');
         if (endIdx < 0) {
+            if (!isStreamingPreviewRenderable(state.buffer)) {
+                if (state.buffer.length > 200000) {
+                    state.buffer = state.buffer.slice(-200000);
+                }
+                break;
+            }
             const previewHtml = bestEffortCompleteHtml(state.buffer);
             if (previewHtml) {
                 events.push({
@@ -3647,7 +3664,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             const controller = new AbortController();
             setAbortController(controller);
 
-            if (preferredModel) {
+            const shouldUseNonStreamingPath = Boolean(preferredModel && !String(preferredModel).toLowerCase().startsWith('gemini-'));
+
+            if (shouldUseNonStreamingPath) {
                 const generatedIds: string[] = [];
                 const regen = await apiClient.generate({
                     prompt: generationPromptFromPlanner,
