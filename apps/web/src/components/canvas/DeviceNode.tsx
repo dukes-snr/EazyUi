@@ -427,7 +427,7 @@ function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, im
     return `${attrs} style="padding-top: ${paddingTopPx}px${importantSuffix};"`;
 }
 
-function injectHeaderTopPadding(html: string, paddingTopPx = 0, forcePaddingTopPx = 50, headerPaddingTopPx = 30) {
+function injectHeaderTopPadding(html: string, paddingTopPx = 20, forcePaddingTopPx = 50, headerPaddingTopPx = 50) {
     const safePadding = Math.max(0, Math.round(paddingTopPx || 0));
     const safeForcePadding = Math.max(0, Math.round(forcePaddingTopPx || 0));
     const safeHeaderPadding = Math.max(0, Math.round(headerPaddingTopPx || 0));
