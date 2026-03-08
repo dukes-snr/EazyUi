@@ -1,5 +1,5 @@
 import { Handle, Position, NodeProps, NodeToolbar } from '@xyflow/react';
-import { memo, useState, useEffect, useCallback, useRef } from 'react';
+import { memo, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDesignStore, useChatStore, useCanvasStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { apiClient } from '../../api/client';
 import { ImagePlus } from 'lucide-react';
@@ -16,6 +16,28 @@ const SHOW_STREAMING_OVERLAY = false;
 const SMOOTH_STREAMING_PREVIEW = true;
 const STREAMING_PREVIEW_THROTTLE_MS = 320;
 const BUFFERED_STREAMING_PREVIEW = false;
+const MATERIAL_SYMBOLS_STYLESHEET_HREF = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@24,400,0,0&display=block';
+const MATERIAL_ICON_STYLESHEET_HREFS = [
+    'https://fonts.googleapis.com/icon?family=Material+Icons',
+    'https://fonts.googleapis.com/icon?family=Material+Icons+Outlined',
+    'https://fonts.googleapis.com/icon?family=Material+Icons+Round',
+    'https://fonts.googleapis.com/icon?family=Material+Icons+Sharp',
+    'https://fonts.googleapis.com/icon?family=Material+Icons+Two+Tone',
+];
+const MATERIAL_ICON_VISIBILITY_SELECTORS = [
+    '.material-symbols-outlined',
+    '.material-symbols-rounded',
+    '.material-symbols-sharp',
+    '.material-icons',
+    '.material-icons-outlined',
+    '.material-icons-round',
+    '.material-icons-sharp',
+    '.material-icons-two-tone',
+].join(',\n  ');
+const MATERIAL_ICON_HIDDEN_SELECTORS = MATERIAL_ICON_VISIBILITY_SELECTORS
+    .split(',\n  ')
+    .map((selector) => `html[data-eazyui-icons-ready="0"] ${selector}`)
+    .join(',\n  ');
 
 function injectHeightScript(html: string, screenId: string) {
     const script = `
@@ -122,7 +144,9 @@ function injectScrollbarHide(html: string) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="dns-prefetch" href="//fonts.googleapis.com">
 <link rel="dns-prefetch" href="//fonts.gstatic.com">
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0">
+<link rel="preload" as="style" href="${MATERIAL_SYMBOLS_STYLESHEET_HREF}">
+<link rel="stylesheet" href="${MATERIAL_SYMBOLS_STYLESHEET_HREF}">
+${MATERIAL_ICON_STYLESHEET_HREFS.map((href) => `<link rel="stylesheet" href="${href}">`).join('\n')}
 <script>
   (function () {
     if (!document.documentElement) return;
@@ -133,8 +157,18 @@ function injectScrollbarHide(html: string) {
     try {
       var fonts = document.fonts;
       if (fonts && typeof fonts.load === 'function') {
-        Promise.race([
+        var loads = [
+          fonts.load('400 24px "Material Symbols Outlined"'),
           fonts.load('400 24px "Material Symbols Rounded"'),
+          fonts.load('400 24px "Material Symbols Sharp"'),
+          fonts.load('400 24px "Material Icons"'),
+          fonts.load('400 24px "Material Icons Outlined"'),
+          fonts.load('400 24px "Material Icons Round"'),
+          fonts.load('400 24px "Material Icons Sharp"'),
+          fonts.load('400 24px "Material Icons Two Tone"')
+        ];
+        Promise.race([
+          Promise.all(loads),
           new Promise(function (resolve) { setTimeout(resolve, 1400); })
         ]).then(done).catch(done);
       } else {
@@ -151,8 +185,9 @@ function injectScrollbarHide(html: string) {
   ::-webkit-scrollbar { width: 0; height: 0; }
   ::-webkit-scrollbar-thumb { background: transparent; }
   body { -ms-overflow-style: none; scrollbar-width: none; }
-  .material-symbols-rounded {
-    font-family: 'Material Symbols Rounded';
+  .material-symbols-outlined,
+  .material-symbols-rounded,
+  .material-symbols-sharp {
     font-weight: 400;
     font-style: normal;
     font-size: 24px;
@@ -164,10 +199,38 @@ function injectScrollbarHide(html: string) {
     word-wrap: normal;
     direction: ltr;
     -webkit-font-feature-settings: 'liga';
+    font-feature-settings: 'liga';
     -webkit-font-smoothing: antialiased;
   }
-  html[data-eazyui-icons-ready="0"] .material-symbols-rounded {
-    color: transparent !important;
+  .material-symbols-outlined { font-family: 'Material Symbols Outlined'; }
+  .material-symbols-rounded { font-family: 'Material Symbols Rounded'; }
+  .material-symbols-sharp { font-family: 'Material Symbols Sharp'; }
+  .material-icons,
+  .material-icons-outlined,
+  .material-icons-round,
+  .material-icons-sharp,
+  .material-icons-two-tone {
+    font-weight: 400;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+  }
+  .material-icons { font-family: 'Material Icons'; }
+  .material-icons-outlined { font-family: 'Material Icons Outlined'; }
+  .material-icons-round { font-family: 'Material Icons Round'; }
+  .material-icons-sharp { font-family: 'Material Icons Sharp'; }
+  .material-icons-two-tone { font-family: 'Material Icons Two Tone'; }
+  ${MATERIAL_ICON_HIDDEN_SELECTORS} {
+    visibility: hidden !important;
   }
 </style>`;
 
@@ -1041,16 +1104,35 @@ function injectEditorScript(html: string, screenId: string) {
 
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
-    const { updateScreen, removeScreen, spec, selectedPlatform } = useDesignStore();
-    const { addMessage, updateMessage, setGenerating, setAbortController } = useChatStore();
-    const { removeBoard, doc, setFocusNodeId, setFocusNodeIds } = useCanvasStore();
-    const { isEditMode, screenId: editScreenId, enterEdit, setActiveScreen, rebuildHtml, reloadTick, refreshAllTick } = useEditStore();
-    const { projectId, markSaved, setSaving } = useProjectStore();
-    const { modelProfile, pushToast, removeToast, requestConfirmation } = useUiStore();
-    const selectedCount = doc.selection.selectedNodeIds.length;
+    const updateScreen = useDesignStore((state) => state.updateScreen);
+    const removeScreen = useDesignStore((state) => state.removeScreen);
+    const selectedPlatform = useDesignStore((state) => state.selectedPlatform);
+    const addMessage = useChatStore((state) => state.addMessage);
+    const updateMessage = useChatStore((state) => state.updateMessage);
+    const setGenerating = useChatStore((state) => state.setGenerating);
+    const setAbortController = useChatStore((state) => state.setAbortController);
+    const removeBoard = useCanvasStore((state) => state.removeBoard);
+    const setFocusNodeId = useCanvasStore((state) => state.setFocusNodeId);
+    const setFocusNodeIds = useCanvasStore((state) => state.setFocusNodeIds);
+    const selectedNodeIds = useCanvasStore((state) => state.doc.selection.selectedNodeIds);
+    const isEditMode = useEditStore((state) => state.isEditMode);
+    const editScreenId = useEditStore((state) => state.screenId);
+    const enterEdit = useEditStore((state) => state.enterEdit);
+    const setActiveScreen = useEditStore((state) => state.setActiveScreen);
+    const rebuildHtml = useEditStore((state) => state.rebuildHtml);
+    const reloadTick = useEditStore((state) => state.reloadTick);
+    const refreshAllTick = useEditStore((state) => state.refreshAllTick);
+    const markSaved = useProjectStore((state) => state.markSaved);
+    const setSaving = useProjectStore((state) => state.setSaving);
+    const modelProfile = useUiStore((state) => state.modelProfile);
+    const pushToast = useUiStore((state) => state.pushToast);
+    const removeToast = useUiStore((state) => state.removeToast);
+    const requestConfirmation = useUiStore((state) => state.requestConfirmation);
+    const selectedCount = selectedNodeIds.length;
     const width = (data.width as number) || 402;
     const initialHeight = (data.height as number) || 874;
-    const statusBarColor = extractTokenColor(String(data.html || ''), 'text') || '#111111';
+    const htmlString = String(data.html || '');
+    const statusBarColor = useMemo(() => extractTokenColor(htmlString, 'text') || '#111111', [htmlString]);
     const statusBarStyle = {
         paddingTop: 16,
         paddingBottom: 8,
@@ -1063,6 +1145,13 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const statusBarInset = statusBarStyle.paddingTop + statusBarStyle.paddingBottom + statusBarStyle.fontSize;
     const [contentHeight, setContentHeight] = useState(initialHeight);
     const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+    const persistedHeightRef = useRef(initialHeight);
+
+    useEffect(() => {
+        persistedHeightRef.current = initialHeight;
+        setContentHeight(initialHeight);
+    }, [data.screenId, initialHeight]);
+
     const handleAction = useCallback(async (action: string, payload?: any) => {
         if (!data.screenId) return;
 
@@ -1125,7 +1214,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         screenId: data.screenId as string,
                         images,
                         preferredModel: getPreferredTextModel(modelProfile),
-                        projectDesignSystem: spec?.designSystem,
+                        projectDesignSystem: useDesignStore.getState().spec?.designSystem,
                     }, controller.signal);
 
                     // Update with new content
@@ -1191,7 +1280,8 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 setFocusNodeId(data.screenId as string);
                 break;
             case 'save':
-                if (!spec) {
+                const currentSpec = useDesignStore.getState().spec;
+                if (!currentSpec) {
                     pushToast({
                         kind: 'error',
                         title: 'Nothing to save',
@@ -1207,10 +1297,12 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 });
                 try {
                     setSaving(true);
+                    const currentProjectId = useProjectStore.getState().projectId;
+                    const canvasDoc = useCanvasStore.getState().doc;
                     const saved = await apiClient.save({
-                        projectId: projectId || undefined,
-                        designSpec: spec as any,
-                        canvasDoc: doc,
+                        projectId: currentProjectId || undefined,
+                        designSpec: currentSpec as any,
+                        canvasDoc,
                         chatState: { messages: useChatStore.getState().messages },
                     });
                     markSaved(saved.projectId, saved.savedAt);
@@ -1247,20 +1339,21 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 }
                 break;
         }
-    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, spec, projectId, doc, markSaved, setSaving, pushToast, removeToast, requestConfirmation]);
+    }, [data.screenId, data.html, updateScreen, addMessage, updateMessage, data.label, enterEdit, setActiveScreen, rebuildHtml, isEditMode, editScreenId, data.status, width, initialHeight, setFocusNodeId, setFocusNodeIds, setGenerating, setAbortController, modelProfile, markSaved, setSaving, pushToast, removeToast, requestConfirmation]);
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
-    const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(String(data.html || ''));
+    const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(htmlString);
 
     const handleGenerateScreenImages = useCallback(async () => {
         if (!data.screenId || isGeneratingImages) return;
 
         const selectedIds = (selected && selectedCount > 1)
-            ? (doc.selection.selectedNodeIds || [])
+            ? selectedNodeIds
             : [data.screenId as string];
 
         const targetIds = Array.from(new Set(selectedIds.filter(Boolean)));
-        const sourceScreens = (spec?.screens || [])
+        const currentSpec = useDesignStore.getState().spec;
+        const sourceScreens = (currentSpec?.screens || [])
             .filter((screen) => targetIds.includes(screen.screenId) && hasPlaceholderImages(screen.html));
 
         if (!sourceScreens.length) {
@@ -1282,7 +1375,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
         try {
             const response = await apiClient.synthesizeScreenImages({
-                appPrompt: spec?.name || String(data.label || 'Generated UI'),
+                appPrompt: currentSpec?.name || String(data.label || 'Generated UI'),
                 platform: selectedPlatform,
                 screens: sourceScreens.map((screen) => ({
                     screenId: screen.screenId,
@@ -1326,7 +1419,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
             removeToast(loadingToastId);
             setIsGeneratingImages(false);
         }
-    }, [data.screenId, data.label, selected, selectedCount, doc.selection.selectedNodeIds, spec?.screens, spec?.name, selectedPlatform, pushToast, removeToast, isGeneratingImages, updateScreen, isEditMode, editScreenId, setActiveScreen]);
+    }, [data.screenId, data.label, selected, selectedCount, selectedNodeIds, selectedPlatform, pushToast, removeToast, isGeneratingImages, updateScreen, isEditMode, editScreenId, setActiveScreen]);
 
     // Determine device type based on width
     const isDesktop = width >= 1024;
@@ -1344,8 +1437,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 const newHeight = event.data.height;
                 if (newHeight && newHeight > 100) {
                     const normalized = Math.max(320, Math.min(12000, Math.round(newHeight)));
-                    setContentHeight(normalized);
-                    if (Math.abs(normalized - initialHeight) >= 24) {
+                    setContentHeight((previous) => previous === normalized ? previous : normalized);
+                    if (Math.abs(normalized - persistedHeightRef.current) >= 24) {
+                        persistedHeightRef.current = normalized;
                         updateScreen(
                             data.screenId as string,
                             data.html as string,
@@ -1374,29 +1468,29 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         }
     }, [data.html, isStreaming]);
 
-    // Inject height-reporting script into the HTML
-    // We only do this for Desktop to allow "infinite" scroll height
-    const noScrollbarHtml = injectScrollbarHide(data.html as string);
-    const paddedHtml = injectBodyTopPadding(noScrollbarHtml, 30);
-    const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
-    const baseHtml = isDesktop
-        ? headerPaddedHtml
-        : injectStatusBarOverlay(headerPaddedHtml, {
-            insetPx: statusBarInset,
-            textColor: statusBarColor,
-            paddingTop: statusBarStyle.paddingTop,
-            paddingBottom: statusBarStyle.paddingBottom,
-            paddingX: statusBarStyle.paddingX,
-            iconGap: statusBarStyle.iconGap,
-            iconSize: statusBarStyle.iconSize,
-            fontSize: statusBarStyle.fontSize,
-            fontWeight: statusBarStyle.fontWeight,
-        });
-    const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
-    const injectedHtml = isDesktop && data.screenId
-        ? injectHeightScript(withEditor, data.screenId as string)
-        : withEditor;
-    const injectedHtmlWithNonce = `${injectedHtml}\n<!--eazyui-render:${isEditMode ? 'edit' : 'view'}:${refreshAllTick}-->`;
+    const injectedHtmlWithNonce = useMemo(() => {
+        const noScrollbarHtml = injectScrollbarHide(htmlString);
+        const paddedHtml = injectBodyTopPadding(noScrollbarHtml, 30);
+        const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
+        const baseHtml = isDesktop
+            ? headerPaddedHtml
+            : injectStatusBarOverlay(headerPaddedHtml, {
+                insetPx: statusBarInset,
+                textColor: statusBarColor,
+                paddingTop: statusBarStyle.paddingTop,
+                paddingBottom: statusBarStyle.paddingBottom,
+                paddingX: statusBarStyle.paddingX,
+                iconGap: statusBarStyle.iconGap,
+                iconSize: statusBarStyle.iconSize,
+                fontSize: statusBarStyle.fontSize,
+                fontWeight: statusBarStyle.fontWeight,
+            });
+        const withEditor = isEditingScreen && data.screenId ? injectEditorScript(baseHtml, data.screenId as string) : baseHtml;
+        const injectedHtml = isDesktop && data.screenId
+            ? injectHeightScript(withEditor, data.screenId as string)
+            : withEditor;
+        return `${injectedHtml}\n<!--eazyui-render:${isEditMode ? 'edit' : 'view'}:${refreshAllTick}-->`;
+    }, [htmlString, isDesktop, statusBarInset, statusBarColor, isEditingScreen, data.screenId, isEditMode, refreshAllTick]);
 
     const [stableSrcDoc, setStableSrcDoc] = useState(injectedHtmlWithNonce);
     const [bufferedSrcDocs, setBufferedSrcDocs] = useState<[string, string]>([injectedHtmlWithNonce, injectedHtmlWithNonce]);

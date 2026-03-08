@@ -333,21 +333,33 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     // But avoid resetting positions while users are interacting via React Flow
     // Sync selection state separately to avoid full node resets
     useEffect(() => {
-        setNodes(nds => nds.map(n => ({
-            ...n,
-            selected: doc.selection.selectedNodeIds.includes(n.id) || doc.selection.selectedBoardId === n.id
-        })));
+        setNodes((nds) => nds.map((n) => {
+            const nextSelected = doc.selection.selectedNodeIds.includes(n.id) || doc.selection.selectedBoardId === n.id;
+            return n.selected === nextSelected ? n : { ...n, selected: nextSelected };
+        }));
     }, [doc.selection.selectedNodeIds, doc.selection.selectedBoardId, setNodes]);
 
     // Sync node data when spec content changes without resetting positions
     useEffect(() => {
         if (!spec) return;
-        setNodes(nds => nds.map(n => {
+        setNodes((nds) => nds.map((n) => {
             const screen = screensById.get(n.id);
             if (!screen) return n;
 
+            const currentData = (n.data || {}) as Record<string, unknown>;
+            if (
+                currentData.screenId === screen.screenId
+                && currentData.html === screen.html
+                && currentData.label === screen.name
+                && currentData.width === screen.width
+                && currentData.height === screen.height
+                && currentData.status === screen.status
+            ) {
+                return n;
+            }
+
             const nextData = {
-                ...(n.data || {}),
+                ...currentData,
                 screenId: screen.screenId,
                 html: screen.html,
                 label: screen.name,
