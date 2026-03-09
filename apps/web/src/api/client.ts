@@ -439,6 +439,12 @@ export interface BillingEstimateResponse {
     summary: BillingSummary;
 }
 
+export interface BillingCheckoutStatusResponse {
+    status: string;
+    applied: boolean;
+    summary: BillingSummary;
+}
+
 export interface BillingCheckoutSessionRequest {
     productKey: 'pro' | 'team' | 'topup_1000';
     successUrl: string;
@@ -977,6 +983,14 @@ class ApiClient {
         return this.request<BillingEstimateResponse>('/billing/estimate', {
             method: 'POST',
             body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async getBillingCheckoutStatus(sessionId: string, signal?: AbortSignal): Promise<BillingCheckoutStatusResponse> {
+        const safeSessionId = encodeURIComponent(String(sessionId || '').trim());
+        return this.request<BillingCheckoutStatusResponse>(`/billing/checkout-status?sessionId=${safeSessionId}`, {
+            method: 'GET',
             signal,
         });
     }

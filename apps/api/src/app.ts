@@ -37,6 +37,7 @@ import {
     attachStripeCustomer,
     findUidByStripeCustomerId,
     listBillingPurchases,
+    getBillingPurchaseBySource,
     type BillingOperation,
     type BillingSummary,
     type CreditModelProfile,
@@ -391,6 +392,97 @@ function sendInsufficientCredits(
             ...(details || {}),
         },
     });
+}
+
+async function reconcileCompletedCheckoutSession(session: any, eventId?: string | null): Promise<{ uid: string | null; applied: boolean; summary?: BillingSummary }> {
+    const customerId = typeof session.customer === 'string'
+        ? session.customer
+        : session.customer?.id;
+    const uid = String(session.metadata?.uid || '').trim() || (customerId ? findUidByStripeCustomerId(customerId) : null);
+    if (!uid) return { uid: null, applied: false };
+
+    if (customerId) {
+        attachStripeCustomer(uid, customerId);
+    }
+
+    const linePrice = session.line_items?.data?.[0]?.price?.id || null;
+    const planId = resolvePlanFromStripePriceId(linePrice);
+    const topupCredits = resolveTopupCreditsForPriceId(linePrice);
+    const lineItem = session.line_items?.data?.[0];
+    const quantity = Number(lineItem?.quantity || 1);
+    const invoiceRef = typeof session.invoice === 'string'
+        ? session.invoice
+        : session.invoice?.id || '';
+    const sourceType: 'checkout' | 'invoice' = invoiceRef ? 'invoice' : 'checkout';
+    const sourceId = invoiceRef || session.id;
+    const sourceInvoice = typeof session.invoice === 'object' ? session.invoice : null;
+    const productKey = String(session.metadata?.productKey || '').trim();
+    const purchaseKind: 'subscription' | 'topup' | 'other' = planId
+        ? 'subscription'
+        : topupCredits > 0
+            ? 'topup'
+            : 'other';
+    const existingPurchase = getBillingPurchaseBySource(sourceType, sourceId);
+
+    upsertBillingPurchase({
+        uid,
+        sourceType,
+        sourceId,
+        purchaseKind,
+        productKey: productKey || undefined,
+        planId: planId || undefined,
+        stripeCustomerId: customerId || undefined,
+        stripeSubscriptionId: (typeof session.subscription === 'string'
+            ? session.subscription
+            : session.subscription?.id) || undefined,
+        stripeInvoiceId: invoiceRef || undefined,
+        stripePaymentIntentId: (typeof session.payment_intent === 'string'
+            ? session.payment_intent
+            : session.payment_intent?.id) || undefined,
+        stripePriceId: linePrice || undefined,
+        amountTotal: Number(session.amount_total || session.amount_subtotal || 0),
+        currency: String(session.currency || 'usd'),
+        quantity,
+        status: String(session.payment_status || session.status || 'paid'),
+        description: String(lineItem?.description || lineItem?.price?.nickname || productKey || 'Checkout purchase'),
+        invoiceNumber: sourceInvoice?.number || undefined,
+        invoiceUrl: sourceInvoice?.hosted_invoice_url || undefined,
+        invoicePdfUrl: sourceInvoice?.invoice_pdf || undefined,
+        metadata: {
+            ...(eventId ? { stripeEventId: eventId } : {}),
+            checkoutSessionId: session.id,
+        },
+        createdAt: new Date((Number(session.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    });
+
+    if (planId) {
+        const summary = setUserPlan({
+            uid,
+            planId,
+            reason: eventId ? 'stripe_checkout_completed' : 'stripe_checkout_return',
+            stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : session.subscription?.id,
+            stripePriceId: linePrice,
+        });
+        return { uid, applied: !existingPurchase, summary };
+    }
+
+    if (topupCredits > 0) {
+        if (existingPurchase) {
+            return { uid, applied: false, summary: buildBillingSummaryForApi(uid) };
+        }
+        const summary = grantTopupCredits({
+            uid,
+            credits: topupCredits,
+            reason: eventId ? 'stripe_topup_purchase' : 'stripe_topup_return',
+            metadata: {
+                sessionId: session.id,
+                priceId: linePrice,
+            },
+        });
+        return { uid, applied: true, summary };
+    }
+
+    return { uid, applied: !existingPurchase, summary: buildBillingSummaryForApi(uid) };
 }
 
 const KNOWN_BILLING_OPERATIONS: BillingOperation[] = [
@@ -1228,6 +1320,61 @@ fastify.post<{
     }
 });
 
+fastify.get<{
+    Querystring: {
+        sessionId?: string;
+    };
+}>('/api/billing/checkout-status', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/billing/checkout-status');
+    if (!user) return;
+
+    try {
+        const sessionId = String(request.query?.sessionId || '').trim();
+        if (!sessionId) {
+            return reply.status(400).send({
+                error: 'sessionId is required',
+                message: 'Provide the Stripe checkout session id returned by Stripe.',
+            });
+        }
+
+        const session = await retrieveCheckoutSessionWithLineItems(sessionId);
+        const customerId = typeof session.customer === 'string'
+            ? session.customer
+            : session.customer?.id;
+        const sessionUid = String(session.metadata?.uid || '').trim() || (customerId ? findUidByStripeCustomerId(customerId) : null);
+        if (!sessionUid || sessionUid !== user.uid) {
+            return reply.status(403).send({
+                error: 'Forbidden',
+                message: 'This checkout session does not belong to the current user.',
+            });
+        }
+
+        const paid = session.payment_status === 'paid'
+            || session.status === 'complete'
+            || (typeof session.mode === 'string' && session.mode === 'subscription');
+        if (paid) {
+            const result = await reconcileCompletedCheckoutSession(session, null);
+            return {
+                status: 'completed',
+                applied: result.applied,
+                summary: result.summary || buildBillingSummaryForApi(user.uid),
+            };
+        }
+
+        return {
+            status: String(session.status || session.payment_status || 'open'),
+            applied: false,
+            summary: buildBillingSummaryForApi(user.uid),
+        };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/billing/checkout-status', err: error }, 'checkout status failed');
+        return reply.status(500).send({
+            error: 'Failed to confirm checkout session',
+            message: (error as Error).message,
+        });
+    }
+});
+
 fastify.get('/api/mcp/api-keys', async (request, reply) => {
     const user = await requireAuthenticatedUser(request, reply, '/api/mcp/api-keys');
     if (!user) return;
@@ -1355,82 +1502,7 @@ fastify.post<{
         if (event.type === 'checkout.session.completed') {
             const checkout = event.data.object as any;
             const session = await retrieveCheckoutSessionWithLineItems(checkout.id);
-            const customerId = typeof session.customer === 'string'
-                ? session.customer
-                : session.customer?.id;
-            const uid = String(session.metadata?.uid || '').trim() || (customerId ? findUidByStripeCustomerId(customerId) : null);
-            if (uid) {
-                if (customerId) {
-                    attachStripeCustomer(uid, customerId);
-                }
-                const linePrice = session.line_items?.data?.[0]?.price?.id || null;
-                const planId = resolvePlanFromStripePriceId(linePrice);
-                const topupCredits = resolveTopupCreditsForPriceId(linePrice);
-                const lineItem = session.line_items?.data?.[0];
-                const quantity = Number(lineItem?.quantity || 1);
-                const invoiceRef = typeof session.invoice === 'string'
-                    ? session.invoice
-                    : session.invoice?.id || '';
-                const sourceType = invoiceRef ? 'invoice' : 'checkout';
-                const sourceId = invoiceRef || session.id;
-                const sourceInvoice = typeof session.invoice === 'object' ? session.invoice : null;
-                const productKey = String(session.metadata?.productKey || '').trim();
-                const purchaseKind: 'subscription' | 'topup' | 'other' = planId
-                    ? 'subscription'
-                    : topupCredits > 0
-                        ? 'topup'
-                        : 'other';
-
-                upsertBillingPurchase({
-                    uid,
-                    sourceType,
-                    sourceId,
-                    purchaseKind,
-                    productKey: productKey || undefined,
-                    planId: planId || undefined,
-                    stripeCustomerId: customerId || undefined,
-                    stripeSubscriptionId: (typeof session.subscription === 'string'
-                        ? session.subscription
-                        : session.subscription?.id) || undefined,
-                    stripeInvoiceId: invoiceRef || undefined,
-                    stripePaymentIntentId: (typeof session.payment_intent === 'string'
-                        ? session.payment_intent
-                        : session.payment_intent?.id) || undefined,
-                    stripePriceId: linePrice || undefined,
-                    amountTotal: Number(session.amount_total || session.amount_subtotal || 0),
-                    currency: String(session.currency || 'usd'),
-                    quantity,
-                    status: String(session.payment_status || session.status || 'paid'),
-                    description: String(lineItem?.description || lineItem?.price?.nickname || productKey || 'Checkout purchase'),
-                    invoiceNumber: sourceInvoice?.number || undefined,
-                    invoiceUrl: sourceInvoice?.hosted_invoice_url || undefined,
-                    invoicePdfUrl: sourceInvoice?.invoice_pdf || undefined,
-                    metadata: {
-                        stripeEventId: event.id,
-                        checkoutSessionId: session.id,
-                    },
-                    createdAt: new Date((Number(session.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
-                });
-                if (planId) {
-                    setUserPlan({
-                        uid,
-                        planId,
-                        reason: 'stripe_checkout_completed',
-                        stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : session.subscription?.id,
-                        stripePriceId: linePrice,
-                    });
-                } else if (topupCredits > 0) {
-                    grantTopupCredits({
-                        uid,
-                        credits: topupCredits,
-                        reason: 'stripe_topup_purchase',
-                        metadata: {
-                            sessionId: session.id,
-                            priceId: linePrice,
-                        },
-                    });
-                }
-            }
+            await reconcileCompletedCheckoutSession(session, event.id);
         } else if (event.type === 'invoice.paid') {
             const invoice = event.data.object as any;
             const customerId = String(invoice.customer || '').trim();

@@ -1488,6 +1488,53 @@ function ScreenReferenceThumb({
     );
 }
 
+function DesignSystemReferenceStrip({
+    screenIds,
+    designSystem,
+    onFocus,
+}: {
+    screenIds: string[];
+    designSystem?: ProjectDesignSystem | null;
+    onFocus: (id: string) => void;
+}) {
+    const palette = [
+        designSystem?.tokens.bg,
+        designSystem?.tokens.surface,
+        designSystem?.tokens.surface2,
+        designSystem?.tokens.accent,
+        designSystem?.tokens.accent2,
+        designSystem?.tokens.text,
+    ].filter(Boolean) as string[];
+    const uniquePalette = [...new Set(palette)];
+    const swatches = (uniquePalette.length > 0 ? uniquePalette : ['#111827', '#1F2937', '#374151', '#6366F1', '#14B8A6']).slice(0, 6);
+    const targetId = screenIds[0] || '';
+
+    return (
+        <button
+            type="button"
+            onClick={() => {
+                if (targetId) onFocus(targetId);
+            }}
+            className="inline-flex items-center gap-2 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-2 shadow-sm transition-all hover:bg-[var(--ui-surface-3)] hover:border-[var(--ui-border-light)]"
+            title="Using project style context from the canvas"
+        >
+            <div className="flex overflow-hidden rounded-xl border border-[var(--ui-border)]">
+                {swatches.map((color, index) => (
+                    <span
+                        key={`reference-strip-${index}-${color}`}
+                        className="h-7 w-7"
+                        style={{ background: color }}
+                    />
+                ))}
+            </div>
+            <div className="text-right leading-tight">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Style Context</p>
+                <p className="text-[11px] text-[var(--ui-text-muted)]">Project palette</p>
+            </div>
+        </button>
+    );
+}
+
 function renderInlineRichText(text: string): ReactNode[] {
     const nodes: ReactNode[] = [];
     const pattern = /\[(b|i)\]([\s\S]*?)\[\/\1\]/gi;
@@ -2179,10 +2226,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             );
 
             clearFastFallbackTimers();
-            let countdown = 5;
+            let countdown = 10;
             const confirmationPromise = requestConfirmation({
                 title: 'Use fast model instead?',
-                message: `You have ${availableCredits} credits. This request needs ${currentRequired} on ${params.currentModelProfile}, but ${fastRequired} on fast. Results may not look as good.`,
+                message: `You have ${availableCredits} credits. This request needs ${currentRequired} on ${params.currentModelProfile}, but ${fastRequired} on fast. Results may not look as good. Fast will start automatically in 10 seconds unless you cancel.`,
                 confirmLabel: `Go on (${countdown}s)`,
                 cancelLabel: 'Cancel',
             });
@@ -3574,7 +3621,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         existingUserMessageId?: string,
         incomingReferenceScreens?: HtmlScreen[],
         allowPlannerFlow?: boolean,
-        skipDesignSystemStep?: boolean
+        skipDesignSystemStep?: boolean,
+        incomingReferencePreviewMode?: 'screen' | 'palette'
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
         setIsAwaitingAssistantDecision(false);
@@ -3638,6 +3686,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
                 livePreview: false,
                 requestKind: 'generate',
+                ...(incomingReferencePreviewMode ? { referencePreviewMode: incomingReferencePreviewMode } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             }
         });
@@ -4869,6 +4918,11 @@ Return a polished, consistent screen without introducing a new navigation patter
             referenceScreens
         );
         const generationReferenceScreens = mergeReferenceScreens(referenceScreens, routeReferenceScreens, 2);
+        const routedReferencePreviewMode = referenceScreens.length > 0
+            ? 'screen'
+            : generationReferenceScreens.length > 0
+                ? 'palette'
+                : undefined;
         const routingPrompt = referenceScreens.length > 0
             ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
             : requestPrompt;
@@ -4878,6 +4932,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             meta: {
                 ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
                 requestKind: 'route',
+                ...(routedReferencePreviewMode ? { referencePreviewMode: routedReferencePreviewMode } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             },
         });
@@ -4920,7 +4975,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 undefined,
                 userMsgId,
                 generationReferenceScreens,
-                false
+                false,
+                undefined,
+                routedReferencePreviewMode
             );
         };
 
@@ -4950,6 +5007,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             ? 'edit'
                             : 'generate',
                     plannerRoute: route,
+                    ...(routedReferencePreviewMode ? { referencePreviewMode: routedReferencePreviewMode } : {}),
                     ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
                     ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
                 },
@@ -5017,6 +5075,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         meta: {
                             ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
                             requestKind: 'edit',
+                            referencePreviewMode: 'screen',
                             ...combinedReferenceMeta,
                         },
                     });
@@ -5126,6 +5185,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                     return;
                 }
                 for (const target of targets) {
+                    updateMessage(userMsgId, {
+                        meta: {
+                            ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
+                            requestKind: 'edit',
+                            referencePreviewMode: 'screen',
+                        },
+                    });
                     const perTargetReferences = mergeReferenceScreens(
                         generationReferenceScreens.filter((screen) => screen.screenId !== target.screenId),
                         targets.filter((screen) => screen.screenId !== target.screenId),
@@ -5157,7 +5223,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 undefined,
                 userMsgId,
                 generationReferenceScreens,
-                false
+                false,
+                undefined,
+                routedReferencePreviewMode
             );
         } catch (routeError) {
             console.warn('[UI] route planner failed; using deterministic fallback', routeError);
@@ -5518,9 +5586,22 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                                 {message.role === 'user' ? (
                                     <div className="flex flex-col items-end gap-2 max-w-[90%]">
-                                        {(((message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || [])).length > 0) || (message.images && message.images.length > 0)) && (
+                                        {(() => {
+                                            const userReferenceIds = message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []);
+                                            const referencePreviewMode = String((message.meta as any)?.referencePreviewMode || 'screen');
+                                            const hasReferenceStrip = userReferenceIds.length > 0 && referencePreviewMode === 'palette';
+                                            const hasReferenceThumbs = userReferenceIds.length > 0 && referencePreviewMode !== 'palette';
+                                            if (!hasReferenceStrip && !hasReferenceThumbs && !(message.images && message.images.length > 0)) return null;
+                                            return (
                                             <div className="flex flex-wrap items-end gap-2 justify-end mb-1 w-full">
-                                                {(message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []))
+                                                {hasReferenceStrip && (
+                                                    <DesignSystemReferenceStrip
+                                                        screenIds={userReferenceIds}
+                                                        designSystem={spec?.designSystem}
+                                                        onFocus={setFocusNodeId}
+                                                    />
+                                                )}
+                                                {hasReferenceThumbs && userReferenceIds
                                                     .slice(0, 4)
                                                     .map((screenId) => {
                                                         const snapshotPreview = (message.meta?.screenSnapshots as Record<string, any> | undefined)?.[screenId] || null;
@@ -5549,7 +5630,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     </button>
                                                 ))}
                                             </div>
-                                        )}
+                                            );
+                                        })()}
                                         <div className="bg-[var(--ui-surface-3)] px-5 py-3 rounded-[24px]  text-[15px] text-[var(--ui-text)] shadow-sm ring-1 ring-[var(--ui-border)]">
                                             {message.content}
                                         </div>

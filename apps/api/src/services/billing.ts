@@ -1477,6 +1477,13 @@ export function upsertBillingPurchase(input: {
     return tx(input);
 }
 
+export function getBillingPurchaseBySource(sourceType: 'checkout' | 'invoice', sourceId: string): BillingPurchase | null {
+    const key = `${sourceType}:${String(sourceId || '').trim()}`;
+    if (!key || key.endsWith(':')) return null;
+    const row = selectPurchaseBySourceKeyStmt.get(key);
+    return row ? mapPurchaseRow(row) : null;
+}
+
 export function listBillingPurchases(uid: string, limit = 40): BillingPurchase[] {
     const size = Math.max(1, Math.min(200, Math.floor(limit)));
     const rows = listPurchasesStmt.all(uid, size) as BillingPurchaseRow[];

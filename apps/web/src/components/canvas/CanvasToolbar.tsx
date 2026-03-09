@@ -34,7 +34,7 @@ export function CanvasToolbar() {
     };
 
     return (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-[var(--ui-surface-2)]/95 backdrop-blur-xl border border-[var(--ui-border)] rounded-full shadow-2xl z-50">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-[var(--ui-surface-2)]/95 backdrop-blur-xl border border-[var(--ui-border)] rounded-full shadow-2xl z-50">
             {/* History Group */}
             <div className="flex items-center gap-1 pr-2 border-r border-[var(--ui-border)]">
                 <button

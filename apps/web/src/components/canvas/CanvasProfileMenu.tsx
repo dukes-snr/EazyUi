@@ -191,8 +191,18 @@ export function CanvasProfileMenu() {
     const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
         try {
             setBillingActionBusy(productKey);
-            const returnUrl = window.location.href;
-            const session = await apiClient.createBillingCheckoutSession({ productKey, successUrl: returnUrl, cancelUrl: returnUrl });
+            const successUrl = new URL(window.location.href);
+            successUrl.searchParams.set('billing_checkout', 'success');
+            successUrl.searchParams.set('billing_product', productKey);
+            successUrl.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+            const cancelUrl = new URL(window.location.href);
+            cancelUrl.searchParams.set('billing_checkout', 'cancel');
+            cancelUrl.searchParams.set('billing_product', productKey);
+            const session = await apiClient.createBillingCheckoutSession({
+                productKey,
+                successUrl: successUrl.toString(),
+                cancelUrl: cancelUrl.toString(),
+            });
             if (session.url) {
                 window.location.href = session.url;
                 return;

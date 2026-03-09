@@ -32,6 +32,7 @@ import logo from './assets/Ui-logo.png';
 import './styles/App.css';
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
+const BILLING_UPDATED_EVENT = 'eazyui:billing-updated';
 type RouteInfo =
     | { kind: 'landing' }
     | { kind: 'login' }
@@ -151,6 +152,7 @@ function App() {
     const autosavePausedUntilRef = useRef(0);
     const autosaveToastSuppressUntilRef = useRef(0);
     const realtimeSyncToastAtRef = useRef(0);
+    const handledBillingReturnRef = useRef<string>('');
     const [initialRequest, setInitialRequest] = useState<{
         id: string;
         prompt: string;
@@ -604,6 +606,80 @@ function App() {
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
     }, [theme]);
+
+    useEffect(() => {
+        if (!authReady || !authUser) return;
+        const currentUrl = new URL(window.location.href);
+        const checkoutState = currentUrl.searchParams.get('billing_checkout');
+        const productKey = currentUrl.searchParams.get('billing_product') || '';
+        const sessionId = currentUrl.searchParams.get('session_id') || '';
+        const handledKey = `${checkoutState}:${productKey}:${sessionId}`;
+        if (!checkoutState || handledBillingReturnRef.current === handledKey) return;
+        handledBillingReturnRef.current = handledKey;
+
+        const clearCheckoutParams = () => {
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.delete('billing_checkout');
+            nextUrl.searchParams.delete('billing_product');
+            nextUrl.searchParams.delete('session_id');
+            window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+        };
+
+        if (checkoutState === 'cancel') {
+            pushToast({
+                kind: 'info',
+                title: 'Checkout canceled',
+                message: productKey ? `No changes were made for ${productKey.replace(/_/g, ' ')}.` : 'No billing changes were made.',
+            });
+            clearCheckoutParams();
+            return;
+        }
+
+        if (checkoutState !== 'success' || !sessionId) {
+            clearCheckoutParams();
+            return;
+        }
+
+        let cancelled = false;
+        const run = async () => {
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+                if (cancelled) return;
+                try {
+                    const status = await apiClient.getBillingCheckoutStatus(sessionId);
+                    if (status.status === 'completed') {
+                        window.dispatchEvent(new CustomEvent(BILLING_UPDATED_EVENT));
+                        pushToast({
+                            kind: 'success',
+                            title: productKey === 'topup_1000' ? 'Top-up applied' : 'Billing updated',
+                            message: productKey === 'topup_1000'
+                                ? `Your credits were updated. Balance is now ${status.summary.balanceCredits}.`
+                                : `Your billing update is now active on the account.`,
+                        });
+                        clearCheckoutParams();
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('[UI] checkout return confirmation attempt failed', error);
+                }
+                await new Promise((resolve) => window.setTimeout(resolve, 1500));
+            }
+
+            if (!cancelled) {
+                pushToast({
+                    kind: 'info',
+                    title: 'Payment received, awaiting confirmation',
+                    message: 'Your purchase is still syncing. Refresh billing in a moment if it does not appear automatically.',
+                    durationMs: 7000,
+                });
+                clearCheckoutParams();
+            }
+        };
+
+        void run();
+        return () => {
+            cancelled = true;
+        };
+    }, [authReady, authUser, pushToast]);
 
     useEffect(() => {
         const handleOffline = () => {
