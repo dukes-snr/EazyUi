@@ -59,6 +59,7 @@ type UiState = {
     removeToast: (id: string) => void;
     clearToasts: () => void;
     requestConfirmation: (request: ConfirmDialogRequest) => Promise<boolean>;
+    updateConfirmationDialog: (updates: Partial<Omit<ConfirmDialogState, 'id'>>) => void;
     resolveConfirmation: (accepted: boolean) => void;
 };
 
@@ -281,6 +282,16 @@ export const useUiStore = create<UiState>((set, get) => ({
         set({ confirmDialog: dialog });
         return new Promise<boolean>((resolve) => {
             pendingConfirmationResolver = resolve;
+        });
+    },
+    updateConfirmationDialog: (updates) => {
+        const current = get().confirmDialog;
+        if (!current) return;
+        set({
+            confirmDialog: {
+                ...current,
+                ...updates,
+            },
         });
     },
     resolveConfirmation: (accepted) => {

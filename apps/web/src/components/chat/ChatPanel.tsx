@@ -744,6 +744,8 @@ type ComposerSuggestion = {
     details?: string;
 };
 
+type CreditAwareOperation = 'design_system' | 'generate' | 'generate_stream' | 'edit';
+
 function buildComposerSuggestionKey(screenNames: string[]): string {
     return screenNames.map((name) => name.trim().toLowerCase()).filter(Boolean).join('|');
 }
@@ -2028,6 +2030,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const copyResetTimersRef = useRef<Record<string, number>>({});
     const hydrationPinTimersRef = useRef<number[]>([]);
     const initialLoadAutoScrollTimersRef = useRef<number[]>([]);
+    const fastFallbackTimersRef = useRef<number[]>([]);
     const autoScrollAfterLoadArmedRef = useRef(true);
     const initialRequestSubmittedRef = useRef<string | null>(null);
     const previousMessageLengthRef = useRef(0);
@@ -2049,7 +2052,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
     const { setBoards, setFocusNodeId, setFocusNodeIds, removeBoard, doc } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, setActiveScreen } = useEditStore();
-    const { modelProfile, setModelProfile, pushToast, removeToast } = useUiStore();
+    const { modelProfile, setModelProfile, pushToast, removeToast, requestConfirmation, updateConfirmationDialog, resolveConfirmation } = useUiStore();
     const { projectId, markSaved, setSaving } = useProjectStore();
     const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
     const assistantMsgIdRef = useRef<string>('');
@@ -2134,6 +2137,85 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const composed = toTokenToastMessage(message, totalTokens);
         pushToast({ kind: 'error', title, message: composed });
         notifyWhenInBackground(title, composed);
+    };
+
+    const clearFastFallbackTimers = () => {
+        fastFallbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+        fastFallbackTimersRef.current = [];
+    };
+
+    const maybeSwitchToFastForLowCredits = async (params: {
+        operation: CreditAwareOperation;
+        currentModelProfile: DesignModelProfile;
+        expectedScreenCount?: number;
+        bundleIncludesDesignSystem?: boolean;
+    }): Promise<DesignModelProfile | null> => {
+        if (params.currentModelProfile === 'fast') return params.currentModelProfile;
+
+        try {
+            const currentPreferredModel = getPreferredTextModel(params.currentModelProfile);
+            const fastPreferredModel = getPreferredTextModel('fast');
+            const estimateRequest = {
+                operation: params.operation,
+                preferredModel: currentPreferredModel,
+                ...(typeof params.expectedScreenCount === 'number' ? { expectedScreenCount: params.expectedScreenCount } : {}),
+                ...(typeof params.bundleIncludesDesignSystem === 'boolean' ? { bundleIncludesDesignSystem: params.bundleIncludesDesignSystem } : {}),
+            } as const;
+            const currentEstimate = await apiClient.estimateBilling(estimateRequest);
+            const availableCredits = currentEstimate.summary.balanceCredits;
+            const currentRequired = currentEstimate.estimate.estimatedCredits;
+            if (availableCredits >= currentRequired) return params.currentModelProfile;
+
+            const fastEstimate = await apiClient.estimateBilling({
+                ...estimateRequest,
+                preferredModel: fastPreferredModel,
+            });
+            const fastRequired = fastEstimate.estimate.estimatedCredits;
+            if (availableCredits < fastRequired) return params.currentModelProfile;
+
+            notifyInfo(
+                'Switching to fast is available',
+                `This request needs ${currentRequired} credits on ${params.currentModelProfile}, but only ${fastRequired} on fast. Fast may look less polished.`
+            );
+
+            clearFastFallbackTimers();
+            let countdown = 5;
+            const confirmationPromise = requestConfirmation({
+                title: 'Use fast model instead?',
+                message: `You have ${availableCredits} credits. This request needs ${currentRequired} on ${params.currentModelProfile}, but ${fastRequired} on fast. Results may not look as good.`,
+                confirmLabel: `Go on (${countdown}s)`,
+                cancelLabel: 'Cancel',
+            });
+
+            const tick = () => {
+                countdown -= 1;
+                if (countdown <= 0) {
+                    resolveConfirmation(true);
+                    return;
+                }
+                updateConfirmationDialog({
+                    confirmLabel: `Go on (${countdown}s)`,
+                });
+                const timerId = window.setTimeout(tick, 1000);
+                fastFallbackTimersRef.current.push(timerId);
+            };
+            const firstTimerId = window.setTimeout(tick, 1000);
+            fastFallbackTimersRef.current.push(firstTimerId);
+
+            const accepted = await confirmationPromise;
+            clearFastFallbackTimers();
+            if (!accepted) {
+                notifyInfo('Request canceled', 'Kept the current model selection.');
+                return null;
+            }
+
+            setModelProfile('fast');
+            notifyInfo('Using fast model', 'Proceeding on the fast model. Results may be less polished.');
+            return 'fast';
+        } catch (error) {
+            console.warn('[UI] low-credit fast fallback preflight skipped', error);
+            return params.currentModelProfile;
+        }
     };
 
     const applyProjectName = (projectName: string) => {
@@ -2787,6 +2869,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             Object.values(copyResetTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
             hydrationPinTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
             initialLoadAutoScrollTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+            fastFallbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
             if (mediaStreamRef.current) {
                 mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             }
@@ -3524,7 +3607,18 @@ Return a polished, consistent screen without introducing a new navigation patter
         const imagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
         const platformToUse = incomingPlatform || selectedPlatform;
         const styleToUse = incomingStylePreset || stylePreset;
-        const modelProfileToUse = incomingModelProfile || modelProfile;
+        const initialModelProfileToUse = incomingModelProfile || modelProfile;
+        const requestedScreenCount = incomingTargetScreens && incomingTargetScreens.length > 0
+            ? incomingTargetScreens.length
+            : undefined;
+        const resolvedModelProfile = await maybeSwitchToFastForLowCredits({
+            operation: 'generate_stream',
+            currentModelProfile: initialModelProfileToUse,
+            expectedScreenCount: requestedScreenCount || 1,
+            bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
+        });
+        if (!resolvedModelProfile) return;
+        const modelProfileToUse = resolvedModelProfile;
         const preferredModel = getPreferredTextModel(modelProfileToUse);
         const shouldLockToImageReference = imagesToSend.length > 0
             && /(as seen|this image|this screenshot|match this|based on (the )?image|like this|same as this)/i.test(requestPrompt);
@@ -3573,9 +3667,6 @@ Return a polished, consistent screen without introducing a new navigation patter
             : platformToUse === 'tablet'
                 ? { width: 768, height: 1024 }
                 : { width: 402, height: 874 };
-        const requestedScreenCount = incomingTargetScreens && incomingTargetScreens.length > 0
-            ? incomingTargetScreens.length
-            : undefined;
         let startTime = Date.now();
         let tokenUsageTotal = 0;
         const captureBillingTokens = (billing: unknown) => {
@@ -4353,6 +4444,21 @@ Return a polished, consistent screen without introducing a new navigation patter
                 tokenUsageTotal: 0,
             };
         }
+        const resolvedModelProfile = await maybeSwitchToFastForLowCredits({
+            operation: 'edit',
+            currentModelProfile: modelProfile,
+        });
+        if (!resolvedModelProfile) {
+            return {
+                screenId: targetScreen.screenId,
+                screenName: targetScreen.name,
+                ok: false,
+                description: '',
+                errorMessage: 'Edit canceled.',
+                thinkingMs: 0,
+                tokenUsageTotal: 0,
+            };
+        }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             if (!options?.suppressToasts) {
                 notifyError('No internet connection', 'Reconnect and try editing again.');
@@ -4432,7 +4538,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
                 images: editImages,
-                preferredModel: getPreferredTextModel(modelProfile),
+                preferredModel: getPreferredTextModel(resolvedModelProfile),
                 projectDesignSystem: useDesignStore.getState().spec?.designSystem,
                 projectId: projectId || undefined,
                 consistencyProfile: {
@@ -4507,7 +4613,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 appPrompt: currentPrompt,
                                 platform: selectedPlatform,
                                 stylePreset,
-                                modelProfile,
+                                modelProfile: resolvedModelProfile,
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
                             } as PlannerSuggestionContext,
@@ -4592,6 +4698,11 @@ Return a polished, consistent screen without introducing a new navigation patter
         const currentSpec = useDesignStore.getState().spec;
         const currentDesignSystem = currentSpec?.designSystem;
         if (!currentDesignSystem) return false;
+        const resolvedModelProfile = await maybeSwitchToFastForLowCredits({
+            operation: 'design_system',
+            currentModelProfile: modelProfile,
+        });
+        if (!resolvedModelProfile) return true;
 
         const assistantMsgId = addMessage('assistant', 'Updating your design system from this prompt...');
         updateMessage(userMessageId, {
@@ -4634,7 +4745,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 images: attachedImages,
                 projectId: projectId || undefined,
                 projectDesignSystem: currentDesignSystem,
-                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
+                preferredModel: resolvedModelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
             }, controller.signal);
             captureBillingTokens(response.billing);
             const normalizedDraft = normalizeProjectDesignSystemModes(response.designSystem);
