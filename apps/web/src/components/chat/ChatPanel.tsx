@@ -707,7 +707,7 @@ type PlannerCtaPayload = {
         primary?: { label: string; screenNames: string[] };
         secondary?: { label: string; screenNames: string[] };
     };
-    nextScreenSuggestions?: Array<{ name: string; why: string; priority: number }>;
+    nextScreenSuggestions?: Array<{ name: string; why: string; priority: number; details?: string }>;
 };
 
 type PlannerSuggestionContext = {
@@ -741,6 +741,7 @@ type ComposerSuggestion = {
     label: string;
     screenNames: string[];
     tone: 'primary' | 'secondary';
+    details?: string;
 };
 
 function buildComposerSuggestionKey(screenNames: string[]): string {
@@ -757,7 +758,7 @@ function deriveMessageSuggestions(
     const next: ComposerSuggestion[] = [];
     const seen = new Set<string>();
 
-    const pushSuggestion = (label: string, screenNames: string[], tone: 'primary' | 'secondary') => {
+    const pushSuggestion = (label: string, screenNames: string[], tone: 'primary' | 'secondary', details?: string) => {
         if (!screenNames.length) return;
         const key = buildComposerSuggestionKey(screenNames);
         if (!key || seen.has(key) || usedKeys.has(key)) return;
@@ -768,29 +769,39 @@ function deriveMessageSuggestions(
             label,
             screenNames,
             tone,
+            ...(details ? { details } : {}),
         });
     };
 
+    const extra = (postgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined))?.nextScreenSuggestions || [];
+    const detailByName = new Map(
+        extra.map((item) => [item.name.trim().toLowerCase(), item.details || item.why || ''])
+    );
+
     if (postgen?.callToAction?.primary) {
-        pushSuggestion(postgen.callToAction.primary.label, postgen.callToAction.primary.screenNames, 'primary');
+        const primaryDetails = postgen.callToAction.primary.screenNames.length === 1
+            ? detailByName.get(postgen.callToAction.primary.screenNames[0].trim().toLowerCase())
+            : '';
+        pushSuggestion(postgen.callToAction.primary.label, postgen.callToAction.primary.screenNames, 'primary', primaryDetails);
         if (postgen.callToAction.primary.screenNames.length > 1) {
             postgen.callToAction.primary.screenNames.forEach((name) => {
-                pushSuggestion(`Generate ${name}`, [name], 'secondary');
+                pushSuggestion(`Generate ${name}`, [name], 'secondary', detailByName.get(name.trim().toLowerCase()));
             });
         }
     }
     if (postgen?.callToAction?.secondary) {
-        pushSuggestion(postgen.callToAction.secondary.label, postgen.callToAction.secondary.screenNames, 'secondary');
+        const secondaryDetails = postgen.callToAction.secondary.screenNames.length === 1
+            ? detailByName.get(postgen.callToAction.secondary.screenNames[0].trim().toLowerCase())
+            : '';
+        pushSuggestion(postgen.callToAction.secondary.label, postgen.callToAction.secondary.screenNames, 'secondary', secondaryDetails);
         if (postgen.callToAction.secondary.screenNames.length > 1) {
             postgen.callToAction.secondary.screenNames.forEach((name) => {
-                pushSuggestion(`Generate ${name}`, [name], 'secondary');
+                pushSuggestion(`Generate ${name}`, [name], 'secondary', detailByName.get(name.trim().toLowerCase()));
             });
         }
     }
-
-    const extra = (postgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined))?.nextScreenSuggestions || [];
     extra.forEach((item) => {
-        pushSuggestion(`Generate ${item.name}`, [item.name], 'secondary');
+        pushSuggestion(`Generate ${item.name}`, [item.name], 'secondary', item.details || item.why);
     });
 
     return next.slice(0, 8);
@@ -943,15 +954,15 @@ function isGenericProjectName(value: string | undefined): boolean {
 
 function buildRouteChatSuggestionPayload(route: {
     recommendNextScreens?: boolean;
-    nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number }>;
+    nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number; details?: string }>;
 }): PlannerCtaPayload | undefined {
-    if (!route.recommendNextScreens) return undefined;
     const next = (route.nextScreenSuggestions || [])
         .slice(0, 6)
         .map((item, index) => ({
             name: item.name,
             why: item.why || 'Recommended next step.',
             priority: item.priority || index + 1,
+            details: item.details || item.why || 'Recommended next step.',
         }))
         .filter((item) => item.name);
     if (next.length === 0) return undefined;
@@ -1990,6 +2001,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [copiedMessageIds, setCopiedMessageIds] = useState<Record<string, boolean>>({});
     const [typedDoneByMessageId, setTypedDoneByMessageId] = useState<Record<string, boolean>>({});
+    const [isAwaitingAssistantDecision, setIsAwaitingAssistantDecision] = useState(false);
     const [usedSuggestionKeysByMessage, setUsedSuggestionKeysByMessage] = useState<Record<string, string[]>>({});
     const [activeAssistantByUser, setActiveAssistantByUser] = useState<Record<string, string>>({});
     const [viewerImage, setViewerImage] = useState<{ src: string; alt?: string } | null>(null);
@@ -2014,10 +2026,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [, setClockTick] = useState(0);
     const autoCollapsedRef = useRef(false);
     const copyResetTimersRef = useRef<Record<string, number>>({});
+    const hydrationPinTimersRef = useRef<number[]>([]);
+    const initialLoadAutoScrollTimersRef = useRef<number[]>([]);
+    const autoScrollAfterLoadArmedRef = useRef(true);
     const initialRequestSubmittedRef = useRef<string | null>(null);
     const previousMessageLengthRef = useRef(0);
     const previousScrollMessageLengthRef = useRef(0);
     const shouldStickToLatestRef = useRef(true);
+    const forceStickToLatestUntilHydratedRef = useRef(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2077,6 +2093,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         window.requestAnimationFrame(() => {
             scrollToLatest(behavior);
         });
+    };
+
+    const triggerScrollToLatestFab = (behavior: ScrollBehavior = 'smooth') => {
+        shouldStickToLatestRef.current = true;
+        scrollToLatest(behavior);
+        setShowScrollToLatest(false);
     };
 
     const ensureNotificationPermission = async () => {
@@ -2579,13 +2601,26 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     }, [messages]);
 
     useEffect(() => {
+        autoScrollAfterLoadArmedRef.current = true;
+        initialLoadAutoScrollTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+        initialLoadAutoScrollTimersRef.current = [];
+    }, [projectId]);
+
+    useEffect(() => {
         const previousLength = previousMessageLengthRef.current;
         const nextLength = messages.length;
         previousMessageLengthRef.current = nextLength;
 
         if (nextLength === 0) {
+            autoScrollAfterLoadArmedRef.current = true;
+            forceStickToLatestUntilHydratedRef.current = false;
             setRenderedMessageCount(INITIAL_MESSAGE_RENDER_COUNT);
             return;
+        }
+
+        if (previousLength === 0) {
+            shouldStickToLatestRef.current = true;
+            forceStickToLatestUntilHydratedRef.current = nextLength > INITIAL_MESSAGE_RENDER_COUNT;
         }
 
         // During normal chat usage, keep newly appended messages visible immediately.
@@ -2610,6 +2645,33 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             setRenderedMessageCount((current) => Math.min(messages.length, current + MESSAGE_RENDER_STEP));
         }, 80);
         return () => window.clearTimeout(timer);
+    }, [renderedMessageCount, messages.length]);
+
+    useEffect(() => {
+        if (!forceStickToLatestUntilHydratedRef.current) return;
+        if (renderedMessageCount < messages.length) return;
+        hydrationPinTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+        hydrationPinTimersRef.current = [];
+
+        const frame = window.requestAnimationFrame(() => {
+            pinToLatest('auto');
+            [80, 220, 480, 900, 1500, 2200].forEach((delay) => {
+                const timerId = window.setTimeout(() => {
+                    pinToLatest('auto');
+                }, delay);
+                hydrationPinTimersRef.current.push(timerId);
+            });
+            const finalizeTimerId = window.setTimeout(() => {
+                forceStickToLatestUntilHydratedRef.current = false;
+                hydrationPinTimersRef.current = hydrationPinTimersRef.current.filter((id) => id !== finalizeTimerId);
+            }, 2600);
+            hydrationPinTimersRef.current.push(finalizeTimerId);
+        });
+        return () => {
+            window.cancelAnimationFrame(frame);
+            hydrationPinTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+            hydrationPinTimersRef.current = [];
+        };
     }, [renderedMessageCount, messages.length]);
 
     const visibleMessages = useMemo(() => {
@@ -2637,7 +2699,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const largeJump = messages.length - previousLength > 12;
         const appended = messages.length > previousLength;
         previousScrollMessageLengthRef.current = messages.length;
-        if (!shouldStickToLatestRef.current && !appended) return;
+        if (!shouldStickToLatestRef.current && !forceStickToLatestUntilHydratedRef.current && !appended) return;
         scrollToLatest(largeJump ? 'auto' : 'smooth');
         setShowScrollToLatest(false);
     }, [messages.length, chatPanelView]);
@@ -2645,20 +2707,66 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     useEffect(() => {
         if (chatPanelView !== 'chat') return;
         if (!messagesContainerRef.current) return;
-        if (!shouldStickToLatestRef.current) return;
+        if (!shouldStickToLatestRef.current && !forceStickToLatestUntilHydratedRef.current) return;
         const frame = window.requestAnimationFrame(() => {
-            const el = messagesContainerRef.current;
-            if (!el) return;
-            el.scrollTop = el.scrollHeight;
+            scrollToLatest('auto');
             setShowScrollToLatest(false);
         });
         return () => window.cancelAnimationFrame(frame);
-    }, [lastMessageActivitySignature, isGenerating, renderedMessageCount, chatPanelView]);
+    }, [lastMessageActivitySignature, isGenerating, isAwaitingAssistantDecision, renderedMessageCount, chatPanelView]);
+
+    useEffect(() => {
+        if (chatPanelView !== 'chat') return;
+        const container = messagesContainerRef.current;
+        const contentRoot = messagesEndRef.current?.parentElement;
+        if (!container || !contentRoot || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => {
+            if (!shouldStickToLatestRef.current && !forceStickToLatestUntilHydratedRef.current) return;
+            pinToLatest('auto');
+            setShowScrollToLatest(false);
+        });
+        observer.observe(contentRoot);
+        return () => observer.disconnect();
+    }, [chatPanelView, renderedMessageCount, isAwaitingAssistantDecision]);
+
+    useEffect(() => {
+        if (chatPanelView !== 'chat') return;
+        if (!autoScrollAfterLoadArmedRef.current) return;
+        if (messages.length === 0) return;
+        if (renderedMessageCount < messages.length) return;
+        if (isGenerating || isAwaitingAssistantDecision) return;
+        if (typeof document === 'undefined') return;
+
+        const scheduleFabAutoScroll = () => {
+            initialLoadAutoScrollTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+            initialLoadAutoScrollTimersRef.current = [];
+            autoScrollAfterLoadArmedRef.current = false;
+            [0, 120, 320, 700, 1200].forEach((delay) => {
+                const timerId = window.setTimeout(() => {
+                    triggerScrollToLatestFab('auto');
+                }, delay);
+                initialLoadAutoScrollTimersRef.current.push(timerId);
+            });
+        };
+
+        if (document.readyState === 'complete') {
+            scheduleFabAutoScroll();
+            return;
+        }
+
+        const onLoad = () => scheduleFabAutoScroll();
+        window.addEventListener('load', onLoad, { once: true });
+        return () => window.removeEventListener('load', onLoad);
+    }, [chatPanelView, messages.length, renderedMessageCount, isGenerating, isAwaitingAssistantDecision, projectId]);
 
     useEffect(() => {
         const el = messagesContainerRef.current;
         if (!el) return;
         const onScroll = () => {
+            if (forceStickToLatestUntilHydratedRef.current) {
+                setShowScrollToLatest(false);
+                return;
+            }
             const nearBottom = isNearBottom();
             shouldStickToLatestRef.current = nearBottom;
             setShowScrollToLatest(!nearBottom);
@@ -2677,6 +2785,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     useEffect(() => {
         return () => {
             Object.values(copyResetTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+            hydrationPinTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+            initialLoadAutoScrollTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
             if (mediaStreamRef.current) {
                 mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             }
@@ -2978,34 +3088,34 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     };
 
-    const handlePlannerCta = (messageId: string, screenNames: string[], label?: string) => {
-        if (!Array.isArray(screenNames) || screenNames.length === 0 || isGenerating) return;
+    const handlePlannerCta = (suggestion: ComposerSuggestion) => {
+        if (!Array.isArray(suggestion.screenNames) || suggestion.screenNames.length === 0 || isGenerating) return;
         pinToLatest('smooth');
-        const source = useChatStore.getState().messages.find((item) => item.id === messageId);
+        const source = useChatStore.getState().messages.find((item) => item.id === suggestion.messageId);
         const suggestionContext = (source?.meta?.plannerContext || null) as PlannerSuggestionContext | null;
         const basePrompt = String(suggestionContext?.appPrompt || source?.meta?.plannerPrompt || '').trim();
         if (!basePrompt) return;
-        const suggestionKey = buildComposerSuggestionKey(screenNames);
+        const suggestionKey = buildComposerSuggestionKey(suggestion.screenNames);
         if (suggestionKey) {
             setUsedSuggestionKeysByMessage((prev) => {
-                const existing = prev[messageId] || [];
+                const existing = prev[suggestion.messageId] || [];
                 if (existing.includes(suggestionKey)) return prev;
                 return {
                     ...prev,
-                    [messageId]: [...existing, suggestionKey],
+                    [suggestion.messageId]: [...existing, suggestionKey],
                 };
             });
         }
 
-        updateMessage(messageId, {
+        updateMessage(suggestion.messageId, {
             meta: {
                 ...(source?.meta || {}),
                 plannerActionAt: Date.now(),
-                plannerActionScreens: screenNames,
+                plannerActionScreens: suggestion.screenNames,
             }
         });
 
-        const visiblePrompt = (label || `Generate ${screenNames.join(' + ')}`).trim();
+        const visiblePrompt = (suggestion.label || `Generate ${suggestion.screenNames.join(' + ')}`).trim();
         const targetPlatform = suggestionContext?.platform || selectedPlatform;
         const targetStyle = suggestionContext?.stylePreset || stylePreset;
         const targetModel = suggestionContext?.modelProfile || modelProfile;
@@ -3013,6 +3123,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             ? suggestionContext!.existingScreenNames
             : [];
         const targetStyleReference = String(suggestionContext?.styleReference || '').trim();
+        const basePromptWithDetails = suggestion.details?.trim()
+            ? `${basePrompt}\n\nSpecific follow-up screen guidance:\n${suggestion.details.trim()}`
+            : basePrompt;
 
         void handleGenerate(
             visiblePrompt,
@@ -3020,8 +3133,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             targetPlatform,
             targetStyle,
             targetModel,
-            screenNames,
-            basePrompt,
+            suggestion.screenNames,
+            basePromptWithDetails,
             targetExistingScreens,
             targetStyleReference
         );
@@ -3151,6 +3264,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         incomingReferenceScreens?: HtmlScreen[]
     ) => {
         const requestPrompt = (overridePrompt ?? prompt).trim();
+        setIsAwaitingAssistantDecision(false);
         if (!requestPrompt || isGenerating) return;
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
             notifyError('No internet connection', 'Reconnect and try planning again.');
@@ -3225,6 +3339,10 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             if (route.phase === 'route' && route.intent === 'chat_assist') {
                 const routeSuggestions = buildRouteChatSuggestionPayload(route);
+                const snapshotScreens = spec?.screens || [];
+                const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
+                const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
+                setIsAwaitingAssistantDecision(false);
                 updateMessage(assistantMsgId, {
                     content: (route.assistantResponse || 'Here is a quick take:'),
                     status: 'complete',
@@ -3232,9 +3350,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
+                        typedComplete: true,
                         plannerPrompt: requestPrompt,
                         plannerRoute: route,
                         plannerPostgen: routeSuggestions,
+                        plannerContext: {
+                            appPrompt: requestPrompt,
+                            platform: selectedPlatform,
+                            stylePreset,
+                            modelProfile,
+                            existingScreenNames: snapshotScreenNames,
+                            styleReference: snapshotStyleReference,
+                        } as PlannerSuggestionContext,
                     }
                 });
                 updateMessage(userMsgId, {
@@ -3367,6 +3494,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         skipDesignSystemStep?: boolean
     ) => {
         const requestPrompt = (incomingPrompt ?? prompt).trim();
+        setIsAwaitingAssistantDecision(false);
         if (!requestPrompt || isGenerating) return;
         const usePlanner = allowPlannerFlow ?? planMode;
         const hasPriorScreens = (spec?.screens?.length || 0) > 0;
@@ -3727,7 +3855,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
-                if (usePlanner) {
+                {
                     try {
                         const postgen = await apiClient.plan(withProjectPlannerContext({
                             phase: 'postgen',
@@ -3760,7 +3888,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
-                        ...(usePlanner ? {
+                        ...{
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
                             plannerContext: {
@@ -3771,7 +3899,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
                             } as PlannerSuggestionContext,
-                        } : {}),
+                        },
                     }
                 });
                 updateMessage(userMsgId, {
@@ -3939,7 +4067,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                 let postgenSummary = '';
                 let postgenData: PlannerPostgenResponse | null = null;
-                if (usePlanner) {
+                {
                     try {
                         const postgen = await apiClient.plan(withProjectPlannerContext({
                             phase: 'postgen',
@@ -3972,7 +4100,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
-                        ...(usePlanner ? {
+                        ...{
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
                             plannerContext: {
@@ -3983,7 +4111,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
                             } as PlannerSuggestionContext,
-                        } : {}),
+                        },
                     }
                 });
                 updateMessage(userMsgId, {
@@ -4038,7 +4166,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
-            if (usePlanner) {
+            {
                 try {
                     const postgen = await apiClient.plan(withProjectPlannerContext({
                         phase: 'postgen',
@@ -4081,7 +4209,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     thinkingMs: Date.now() - startTime,
                     ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
-                    ...(usePlanner ? {
+                    ...{
                         plannerPrompt: appPromptForPlanning,
                         plannerPostgen: postgenData || undefined,
                         plannerContext: {
@@ -4092,7 +4220,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             existingScreenNames: snapshotScreenNames,
                             styleReference: snapshotStyleReference,
                         } as PlannerSuggestionContext,
-                    } : {}),
+                    },
                 }
             });
             updateMessage(userMsgId, {
@@ -4213,6 +4341,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         incomingReferenceScreens?: HtmlScreen[],
         options?: EditExecutionOptions
     ): Promise<EditExecutionResult> => {
+        setIsAwaitingAssistantDecision(false);
         if (!instruction.trim() || isGenerating) {
             return {
                 screenId: targetScreen.screenId,
@@ -4334,7 +4463,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
-            if (planMode && !options?.skipFinalMessageUpdate) {
+            if (!options?.skipFinalMessageUpdate) {
                 try {
                     const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, editImages);
                     const postgen = await apiClient.plan(withProjectPlannerContext({
@@ -4371,7 +4500,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                         thinkingMs: Date.now() - startTime,
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
-                        ...(planMode ? {
+                        ...{
                             plannerPrompt: currentPrompt,
                             plannerPostgen: postgenData || undefined,
                             plannerContext: {
@@ -4382,7 +4511,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
                             } as PlannerSuggestionContext,
-                        } : {}),
+                        },
                     }
                 });
                 updateMessage(userMsgId, {
@@ -4458,6 +4587,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         attachedImages: string[];
         referenceMeta: ReturnType<typeof buildScreenReferenceMeta>;
     }) => {
+        setIsAwaitingAssistantDecision(false);
         const { userMessageId, requestPrompt, attachedImages, referenceMeta } = params;
         const currentSpec = useDesignStore.getState().spec;
         const currentDesignSystem = currentSpec?.designSystem;
@@ -4617,7 +4747,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         incomingReferenceScreens?: HtmlScreen[]
     ) => {
         const requestPrompt = (overridePrompt ?? prompt).trim();
-        if (!requestPrompt || isGenerating) return;
+        if (!requestPrompt || isGenerating || isAwaitingAssistantDecision) return;
+        setIsAwaitingAssistantDecision(true);
         pinToLatest('smooth');
         const attachedImages = overrideImages ? [...overrideImages] : [...images];
         const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer();
@@ -4714,13 +4845,29 @@ Return a polished, consistent screen without introducing a new navigation patter
             });
 
             if (route.intent === 'chat_assist' || route.action === 'assist') {
+                const snapshotScreens = useDesignStore.getState().spec?.screens || [];
+                const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
+                const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
+                const routeSuggestions = buildRouteChatSuggestionPayload(route);
+                setIsAwaitingAssistantDecision(false);
                 const assistantMsgId = addMessage('assistant', route.assistantResponse || 'Here is a direct response based on your request.');
                 updateMessage(assistantMsgId, {
                     status: 'complete',
                     meta: {
                         ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
                         parentUserId: userMsgId,
+                        typedComplete: true,
                         plannerRoute: route,
+                        plannerPostgen: routeSuggestions,
+                        plannerPrompt: requestPrompt,
+                        plannerContext: {
+                            appPrompt: requestPrompt,
+                            platform: selectedPlatform,
+                            stylePreset,
+                            modelProfile,
+                            existingScreenNames: snapshotScreenNames,
+                            styleReference: snapshotStyleReference,
+                        } as PlannerSuggestionContext,
                         ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
                     },
                 });
@@ -4732,6 +4879,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 const allScreens = useDesignStore.getState().spec?.screens || [];
                 const targets = resolveRoutedScreens(route, allScreens, generationReferenceScreens);
                 if (targets.length === 0) {
+                    setIsAwaitingAssistantDecision(false);
                     const assistantMsgId = addMessage(
                         'assistant',
                         `[h2]Need target screen[/h2]\n[p]I interpreted this as an edit request, but I could not map it to an existing screen. Mention the exact screen name (for example: [b]Profile[/b]) or use @screen reference.</p>`
@@ -4748,6 +4896,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     return;
                 }
                 if (targets.length > 1) {
+                    setIsAwaitingAssistantDecision(false);
                     const names = targets.map((screen) => screen.name).join(', ');
                     const combinedReferenceMeta = buildScreenReferenceMeta([
                         ...targets,
@@ -4902,6 +5051,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         } catch (routeError) {
             console.warn('[UI] route planner failed; using deterministic fallback', routeError);
             await executeFallbackRoute();
+        } finally {
+            setIsAwaitingAssistantDecision(false);
         }
     };
 
@@ -4917,7 +5068,7 @@ Return a polished, consistent screen without introducing a new navigation patter
     };
 
     const handleRetryUserMessage = async (userMessageId: string) => {
-        if (isGenerating) return;
+        if (isGenerating || isAwaitingAssistantDecision) return;
         pinToLatest('smooth');
         const source = messages.find((message) => message.id === userMessageId && message.role === 'user');
         if (!source) return;
@@ -5037,18 +5188,19 @@ Return a polished, consistent screen without introducing a new navigation patter
         syncMentionState(target.value, cursor);
     };
 
+    const requestInFlight = isGenerating || isAwaitingAssistantDecision;
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
     const actionIsStop = isGenerating || isRecording;
-    const actionDisabled = !showSendAction && !isGenerating && isTranscribing;
-    const composerOrbActivity: OrbActivityState = isGenerating
+    const actionDisabled = isAwaitingAssistantDecision || (!showSendAction && !requestInFlight && isTranscribing);
+    const composerOrbActivity: OrbActivityState = requestInFlight
         ? 'thinking'
         : (showSendAction || isRecording || isTranscribing)
             ? 'talking'
             : 'idle';
     const { agentState: composerOrbState, colors: composerOrbColors } = useOrbVisuals(composerOrbActivity);
     const composerOrbInput = isRecording ? 0.92 : isTranscribing ? 0.48 : 0.18;
-    const composerOrbOutput = isGenerating ? 0.88 : (showSendAction || isRecording || isTranscribing) ? 0.44 : 0.2;
+    const composerOrbOutput = requestInFlight ? 0.88 : (showSendAction || isRecording || isTranscribing) ? 0.44 : 0.2;
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
         : stylePreset === 'vibrant'
@@ -5170,7 +5322,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 title={hasDesignSystem ? (isDesignSystemView ? 'Switch to chat view' : 'Show generated design system') : 'Generate a screen first to create a design system'}
                             >
                                 <Palette size={12} />
-                                <span>{isDesignSystemView ? 'Chat' : 'System'}</span>
+                                <span>{isDesignSystemView ? 'Chat' : 'Design System'}</span>
                             </button>
                             {!isEditMode && (
                                 <button
@@ -5535,7 +5687,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             <div className="px-2 text-[10px] text-[var(--ui-text-subtle)]">
                                                 {formatTokenUsageLabel(messageTokenUsageTotal)}
                                             </div>
-                                            {message.status === 'complete' && ((((message.meta as any)?.typedComplete === true) || typedDoneByMessageId[message.id]) && (() => {
+                                            {message.status === 'complete' && ((((message.meta as any)?.typedComplete !== false) || typedDoneByMessageId[message.id]) && (() => {
                                                 const postgen = message.meta?.plannerPostgen as (PlannerPostgenResponse | PlannerCtaPayload | undefined);
                                                 const used = new Set(usedSuggestionKeysByMessage[message.id] || []);
                                                 const suggestions = deriveMessageSuggestions(message.id, postgen, used);
@@ -5546,7 +5698,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                             <button
                                                                 key={`${item.messageId}-${item.key}`}
                                                                 type="button"
-                                                                onClick={() => handlePlannerCta(item.messageId, item.screenNames, item.label)}
+                                                                onClick={() => handlePlannerCta(item)}
                                                                 disabled={isGenerating}
                                                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-sm disabled:opacity-55 disabled:cursor-not-allowed transition-colors ${item.tone === 'primary'
                                                                     ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
@@ -5568,6 +5720,30 @@ Return a polished, consistent screen without introducing a new navigation patter
                             </div>
                         );
                         })}
+                        {isAwaitingAssistantDecision && (
+                            <div className="w-full max-w-[95%] flex items-start gap-2">
+                                <div className="mt-1 h-8 w-8 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-0.5">
+                                    <Orb
+                                        className="h-full w-full"
+                                        colors={['#60A5FA', '#A78BFA']}
+                                        seed={2407}
+                                        agentState="thinking"
+                                        volumeMode="manual"
+                                        manualInput={0.62}
+                                        manualOutput={0.5}
+                                    />
+                                </div>
+                                <div className="inline-flex items-center gap-1.5 rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 shadow-sm">
+                                    {[0, 1, 2].map((idx) => (
+                                        <span
+                                            key={`assistant-decision-dot-${idx}`}
+                                            className="h-2 w-2 rounded-full bg-[var(--ui-text-muted)] animate-pulse"
+                                            style={{ animationDelay: `${idx * 140}ms` }}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         <div ref={messagesEndRef} />
                     </div>
                     ) : (
@@ -5901,11 +6077,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' && showScrollToLatest && (
                         <button
                             type="button"
-                            onClick={() => {
-                                shouldStickToLatestRef.current = true;
-                                scrollToLatest('smooth');
-                                setShowScrollToLatest(false);
-                            }}
+                            onClick={() => triggerScrollToLatestFab('smooth')}
                             className="absolute left-1/2 -translate-x-1/2 bottom-[190px] z-20 h-9 min-w-9 px-2 rounded-full bg-[var(--ui-primary)] text-white ring-1 ring-[var(--ui-primary)] shadow-lg hover:bg-[var(--ui-primary-hover)] transition-colors inline-flex items-center justify-center"
                             title="Scroll to latest"
                         >
@@ -6132,7 +6304,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (isGenerating) {
+                                        if (requestInFlight) {
                                             handleStop();
                                             return;
                                         }
@@ -6143,7 +6315,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         handleMicToggle();
                                     }}
                                     disabled={actionDisabled}
-                                    className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${isGenerating
+                                    className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${requestInFlight
                                         ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border-light)]'
                                         : isRecording
                                             ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
@@ -6151,8 +6323,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                 ? 'bg-indigo-500 text-[var(--ui-text)] hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
                                                 : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
                                         }`}
-                                    title={isGenerating
-                                        ? 'Stop generation'
+                                    title={isAwaitingAssistantDecision
+                                        ? 'Preparing response...'
+                                        : isGenerating
+                                            ? 'Stop generation'
                                         : showSendAction
                                             ? 'Send prompt'
                                             : isRecording
@@ -6161,7 +6335,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     ? 'Transcribing...'
                                                     : 'Record voice'}
                                 >
-                                    {actionIsStop ? (
+                                    {isAwaitingAssistantDecision ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                    ) : actionIsStop ? (
                                         <Square size={14} className="fill-current" />
                                     ) : showSendAction ? (
                                         <ArrowUp size={20} className="text-[var(--ui-text)]" />

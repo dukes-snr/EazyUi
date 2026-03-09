@@ -51,6 +51,7 @@ const PlannerPostgenResponseSchema = z.object({
         name: z.string(),
         why: z.string(),
         priority: z.number().int().positive(),
+        details: z.string().optional(),
     })).default([]),
     callToAction: z.object({
         primary: z.object({
@@ -84,6 +85,7 @@ const PlannerRouteResponseSchema = z.object({
         name: z.string(),
         why: z.string().default(''),
         priority: z.number().int().positive().optional(),
+        details: z.string().optional(),
     })).optional().default([]),
 });
 
@@ -200,7 +202,7 @@ Output schema:
   "editInstruction": "regenerate with cleaner hierarchy",
   "assistantResponse": "conversational answer for critique/idea/help requests",
   "recommendNextScreens": false,
-  "nextScreenSuggestions": [{ "name": "Explore", "why": "why it helps", "priority": 1 }]
+  "nextScreenSuggestions": [{ "name": "Explore", "why": "why it helps", "priority": 1, "details": "hidden generation brief" }]
 }
 
 Rules:
@@ -229,8 +231,9 @@ Rules:
 - For ideation requests (e.g., "pitch this app idea"), provide a product pitch format:
   app concept, audience, key features, visual direction, and why it will work.
 - Avoid generic one-liners; ground feedback in concrete UI details (hierarchy, spacing, contrast, typography, layout, interaction cues).
-- Set recommendNextScreens=true only if the user explicitly asks what to build next / next screens / suggestions for next flow.
-- Do NOT recommend next screens in normal conversation unless explicitly requested.
+- For chat_assist, include 1-3 actionable nextScreenSuggestions whenever you can reasonably infer meaningful next screens from the app context or your own response.
+- Each nextScreenSuggestions item should include a short hidden "details" brief for generation guidance. Keep it concrete and implementation-focused.
+- Use recommendNextScreens=true when the user explicitly asks what to build next. You may still provide nextScreenSuggestions for normal assist replies when helpful.
 - Keep reason very short.
 - generateTheseNow should include 1-3 screen names when intent is add_screen.
 - appContextPrompt should preserve existing app context when app exists.`;
@@ -245,7 +248,7 @@ Output schema:
   "phase": "postgen",
   "whatYouHave": ["Profile"],
   "gapsDetected": ["string"],
-  "nextScreenSuggestions": [{ "name": "Home Feed", "why": "string", "priority": 1 }],
+  "nextScreenSuggestions": [{ "name": "Home Feed", "why": "string", "priority": 1, "details": "hidden generation brief" }],
   "callToAction": {
     "primary": { "label": "Generate Home Feed", "screenNames": ["Home Feed"] },
     "secondary": { "label": "Generate Explore + Messages", "screenNames": ["Explore", "Messages"] }
@@ -256,6 +259,7 @@ Rules:
 - Be concrete and actionable.
 - Prioritize suggestions by core-loop completion first.
 - Limit nextScreenSuggestions to 3 items max.
+- Include a short hidden "details" brief for each suggestion to guide follow-up generation.
 - Keep CTA labels short.
 - Suggestions MUST stay in the same product domain as appPrompt + alreadyGeneratedScreens.
 - Do NOT inject unrelated domains (e.g., habits, fintech, food) unless explicitly present in appPrompt/screens.
@@ -803,17 +807,6 @@ Return JSON only.`,
                     };
                 }
             }
-            if (!isNextScreenRequest(input.appPrompt)) {
-                console.info('[Planner] route-next-screens-disabled', { traceId, reason: 'no explicit next-screen request' });
-                return {
-                    plan: {
-                        ...routed,
-                        recommendNextScreens: false,
-                        nextScreenSuggestions: [],
-                    },
-                    usage: summarizeTokenUsage(usageEntries),
-                };
-            }
             return {
                 plan: routed,
                 usage: summarizeTokenUsage(usageEntries),
@@ -832,7 +825,7 @@ Return JSON only.`,
                         reason: parsedRoute.reason || 'assist-like request',
                         assistantResponse: assistText.text || parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
                         recommendNextScreens: isNextScreenRequest(input.appPrompt),
-                        nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                        nextScreenSuggestions: parsedRoute.nextScreenSuggestions,
                     },
                     usage: summarizeTokenUsage(usageEntries),
                 };
@@ -846,7 +839,7 @@ Return JSON only.`,
                         reason: parsedRoute.reason || 'assist-like request',
                         assistantResponse: parsedRoute.assistantResponse || 'Here is a direct review based on your request.',
                         recommendNextScreens: isNextScreenRequest(input.appPrompt),
-                        nextScreenSuggestions: isNextScreenRequest(input.appPrompt) ? parsedRoute.nextScreenSuggestions : [],
+                        nextScreenSuggestions: parsedRoute.nextScreenSuggestions,
                     },
                     usage: summarizeTokenUsage(usageEntries),
                 };

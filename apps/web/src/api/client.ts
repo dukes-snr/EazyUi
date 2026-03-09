@@ -509,7 +509,7 @@ export interface PlannerPostgenResponse {
     phase: 'postgen';
     whatYouHave: string[];
     gapsDetected: string[];
-    nextScreenSuggestions: Array<{ name: string; why: string; priority: number }>;
+    nextScreenSuggestions: Array<{ name: string; why: string; priority: number; details?: string }>;
     callToAction?: {
         primary?: { label: string; screenNames: string[] };
         secondary?: { label: string; screenNames: string[] };
@@ -533,7 +533,7 @@ export interface PlannerRouteResponse {
     editInstruction?: string;
     assistantResponse?: string;
     recommendNextScreens?: boolean;
-    nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number }>;
+    nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number; details?: string }>;
     billing?: BillingUsageMeta;
 }
 
