@@ -2,7 +2,7 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -2022,6 +2022,29 @@ function finalizeStream(state: StreamParserState): StreamParseEvent[] {
     return events;
 }
 
+type EditStreamParserState = {
+    buffer: string;
+};
+
+function createEditStreamParserState(): EditStreamParserState {
+    return { buffer: '' };
+}
+
+function parseEditStreamChunk(state: EditStreamParserState, chunk: string): string | null {
+    state.buffer += chunk;
+    if (!isStreamingPreviewRenderable(state.buffer)) return null;
+    const html = bestEffortCompleteHtml(state.buffer);
+    return html || null;
+}
+
+function finalizeEditStream(state: EditStreamParserState): { html: string; valid: boolean } {
+    const html = bestEffortCompleteHtml(state.buffer);
+    return {
+        html,
+        valid: isValidHtmlScreen(html),
+    };
+}
+
 type ChatPanelProps = {
     initialRequest?: {
         id: string;
@@ -2106,6 +2129,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const notificationGuideShownRef = useRef(false);
     const generationLoadingToastRef = useRef<string | null>(null);
     const editLoadingToastRef = useRef<string | null>(null);
+    const aiPersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
 
     const startLoadingToast = (targetRef: MutableRefObject<string | null>, title: string, message: string) => {
         if (targetRef.current) {
@@ -2312,6 +2336,37 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             updatedAt: new Date().toISOString(),
         });
     };
+
+    const persistProjectAfterAiChange = useCallback((reason: string) => {
+        const run = async () => {
+            const latestSpec = useDesignStore.getState().spec;
+            if (!latestSpec) return;
+
+            try {
+                setSaving(true);
+                const saved = await apiClient.save({
+                    projectId: useProjectStore.getState().projectId || undefined,
+                    designSpec: latestSpec as any,
+                    canvasDoc: useCanvasStore.getState().doc,
+                    chatState: { messages: useChatStore.getState().messages },
+                    mode: 'manual',
+                });
+                markSaved(saved.projectId, saved.savedAt);
+            } catch (error) {
+                setSaving(false);
+                console.warn(`[UI] auto-save after ${reason} failed`, error);
+                pushToast({
+                    kind: 'error',
+                    title: 'Auto-save failed',
+                    message: (error as Error).message || 'Could not save the latest AI changes.',
+                });
+            }
+        };
+
+        const queued = aiPersistenceQueueRef.current.then(run, run);
+        aiPersistenceQueueRef.current = queued.then(() => undefined, () => undefined);
+        return queued;
+    }, [markSaved, pushToast, setSaving]);
 
     const cloneDesignSystem = (source: ProjectDesignSystem): ProjectDesignSystem => {
         return JSON.parse(JSON.stringify(source)) as ProjectDesignSystem;
@@ -3807,20 +3862,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     }
                 });
-                try {
-                    setSaving(true);
-                    const saved = await apiClient.save({
-                        projectId: projectId || undefined,
-                        designSpec: useDesignStore.getState().spec as any,
-                        canvasDoc: useCanvasStore.getState().doc,
-                        chatState: { messages: useChatStore.getState().messages },
-                        mode: 'manual',
-                    });
-                    markSaved(saved.projectId, saved.savedAt);
-                } catch (persistError) {
-                    setSaving(false);
-                    console.warn('[UI] could not persist design-system proposal message immediately', persistError);
-                }
+                void persistProjectAfterAiChange('design system generation');
                 notifyInfo('Design system drafted', 'Review or edit it, then click Proceed to generate screens.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
                 return;
             }
@@ -4054,6 +4096,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 if (generatedIds.length > 0) {
                     setFocusNodeIds(generatedIds);
                 }
+                void persistProjectAfterAiChange('screen generation');
                 notifySuccess(
                     'Generation complete',
                     `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`,
@@ -4269,6 +4312,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 if (fallbackIds.length > 0) {
                     setFocusNodeIds(fallbackIds);
                 }
+                void persistProjectAfterAiChange('screen generation');
                 notifySuccess(
                     'Generation complete',
                     `Created ${regen.designSpec.screens.length} screen${regen.designSpec.screens.length === 1 ? '' : 's'}.`,
@@ -4378,6 +4422,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             if (generatedIds.length > 0) {
                 setFocusNodeIds(generatedIds);
             }
+            void persistProjectAfterAiChange('screen generation');
             notifySuccess(
                 'Generation complete',
                 `Created ${completedCount} screen${completedCount === 1 ? '' : 's'}.`,
@@ -4582,7 +4627,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             setAbortController(controller);
             const localMemory = useProjectMemoryStore.getState().memory
                 || deriveProjectMemoryFromState(useDesignStore.getState().spec?.screens || [], useChatStore.getState().messages, useDesignStore.getState().spec?.designSystem);
-            const response = await apiClient.edit({
+            const editRequest = {
                 instruction: currentPrompt,
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
@@ -4600,11 +4645,40 @@ Return a polished, consistent screen without introducing a new navigation patter
                     name: screen.name,
                     html: screen.html,
                 })),
-            }, controller.signal);
-            captureBillingTokens(response.billing);
+            };
+            const preferredEditModel = String(editRequest.preferredModel || '').toLowerCase();
+            const shouldUseStreamingEdit = preferredEditModel.startsWith('gemini-');
+
+            let editedHtml = '';
+            let responseDescription = '';
+
+            if (shouldUseStreamingEdit) {
+                const parserState = createEditStreamParserState();
+                const streamResponse = await apiClient.editStream(editRequest, (chunk) => {
+                    const previewHtml = parseEditStreamChunk(parserState, chunk);
+                    if (!previewHtml) return;
+                    const normalizedPreview = normalizePlaceholderCatalogInHtml(previewHtml);
+                    updateScreen(targetScreen.screenId, normalizedPreview, 'streaming', targetScreen.width, targetScreen.height, targetScreen.name);
+                    if (isEditMode && editScreenId === targetScreen.screenId) {
+                        setActiveScreen(targetScreen.screenId, normalizedPreview);
+                    }
+                }, controller.signal);
+                captureBillingTokens(streamResponse.billing);
+                const finalized = finalizeEditStream(parserState);
+                editedHtml = finalized.html;
+            } else {
+                const response = await apiClient.edit(editRequest, controller.signal);
+                captureBillingTokens(response.billing);
+                editedHtml = response.html;
+                responseDescription = response.description?.trim() || '';
+            }
+            if (!editedHtml.trim()) {
+                throw new Error('Edit stream returned no HTML.');
+            }
+
             const repairedHtml = await runConsistencyRepairIfNeeded(
                 targetScreen,
-                response.html,
+                editedHtml,
                 currentPrompt,
                 referenceScreens,
                 editImages
@@ -4642,8 +4716,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             const snapshotScreens = useDesignStore.getState().spec?.screens || [];
             const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
             const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
-            const baseDescription = response.description?.trim()
-                ? response.description.trim()
+            const baseDescription = responseDescription
+                ? responseDescription
                 : `Updated ${targetScreen.name} based on your feedback.`;
             const content = `${baseDescription}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
 
@@ -4679,6 +4753,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             if (!options?.suppressToasts) {
                 notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             }
+            void persistProjectAfterAiChange('screen edit');
             return {
                 screenId: targetScreen.screenId,
                 screenName: targetScreen.name,

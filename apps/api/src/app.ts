@@ -2074,6 +2074,221 @@ fastify.post<{
 
 fastify.post<{
     Body: {
+        instruction: string;
+        html: string;
+        screenId: string;
+        images?: string[];
+        preferredModel?: string;
+        temperature?: number;
+        projectDesignSystem?: ProjectDesignSystem;
+        projectId?: string;
+        consistencyProfile?: {
+            canonicalNavbarLabels?: string[];
+            canonicalNavbarSignature?: string;
+            rules?: string[];
+        };
+        referenceScreens?: Array<{
+            screenId: string;
+            name: string;
+            html: string;
+        }>;
+    };
+}>('/api/edit-stream', async (request, reply) => {
+    const { instruction, html, screenId, images, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const startedAt = Date.now();
+    const traceId = request.id;
+    const billingRequestId = resolveBillingRequestId(request);
+    const requestPreview = previewText(instruction, 180);
+
+    if (!instruction?.trim()) {
+        return reply.status(400).send({ error: 'Instruction is required' });
+    }
+
+    if (!html) {
+        return reply.status(400).send({ error: 'HTML is required' });
+    }
+
+    const user = await requireAuthenticatedUser(request, reply, '/api/edit-stream');
+    if (!user) return;
+    const floorEstimate = estimateCredits({
+        operation: 'edit',
+        modelProfile: toCreditModelProfile(preferredModel),
+    });
+    const estimate = estimateReservationCredits({
+        operation: 'edit',
+        modelProfile: toCreditModelProfile(preferredModel),
+        preferredModel,
+    });
+    if (!ensureBillingEntitlementOrReply({
+        reply,
+        traceId,
+        route: '/api/edit-stream',
+        uid: user.uid,
+        operation: 'edit',
+        estimatedCredits: estimate.estimatedCredits,
+        minimumFloorCredits: floorEstimate.estimatedCredits,
+    })) return;
+
+    let reservation: { reservationId: string } | null = null;
+    let chunkCount = 0;
+    let charCount = 0;
+    let clientAborted = false;
+    let streamBillingMeta: {
+        creditsCharged: number;
+        creditsRemaining: number;
+        reservationId?: string;
+        usage?: TokenUsageSummary;
+        usageQuote?: UsageCreditQuote;
+    } | null = null;
+    request.raw.once('aborted', () => {
+        clientAborted = true;
+    });
+    request.raw.once('close', () => {
+        if (!reply.raw.writableEnded) {
+            clientAborted = true;
+        }
+    });
+
+    try {
+        reservation = reserveCredits({
+            uid: user.uid,
+            requestId: billingRequestId,
+            operation: 'edit',
+            reservedCredits: estimate.estimatedCredits,
+            projectId,
+            metadata: {
+                route: '/api/edit-stream',
+                screenId,
+                requestPreview,
+            },
+        });
+    } catch (error) {
+        if (error instanceof InsufficientCreditsError) {
+            return sendInsufficientCredits(reply, error);
+        }
+        fastify.log.error({ traceId, route: '/api/edit-stream', stage: 'reserve', err: error }, 'edit-stream: reservation failed');
+        return reply.status(500).send({
+            error: 'Failed to reserve credits',
+            message: (error as Error).message,
+        });
+    }
+
+    reply.raw.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    reply.raw.setHeader('Transfer-Encoding', 'chunked');
+
+    try {
+        const { editDesignStreamWithUsage } = await import('./services/gemini.js');
+        fastify.log.info({
+            traceId,
+            route: '/api/edit-stream',
+            stage: 'start',
+            uid: user.uid,
+            screenId,
+            htmlChars: html.length,
+            imagesCount: images?.length || 0,
+            preferredModel,
+            temperature,
+            hasProjectDesignSystem: Boolean(projectDesignSystem),
+            consistencyRuleCount: consistencyProfile?.rules?.length || 0,
+            referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
+            instructionPreview: previewText(instruction),
+        }, 'edit-stream: start');
+
+        const { stream, usagePromise } = editDesignStreamWithUsage({
+            instruction,
+            html,
+            screenId,
+            images,
+            preferredModel,
+            temperature,
+            projectDesignSystem,
+            consistencyProfile,
+            referenceScreens,
+        });
+
+        for await (const chunk of stream) {
+            if (clientAborted) {
+                break;
+            }
+            chunkCount += 1;
+            charCount += chunk.length;
+            reply.raw.write(chunk);
+        }
+
+        if (reservation) {
+            const usage = await usagePromise;
+            const estimateCharge = estimateCredits({
+                operation: 'edit',
+                modelProfile: toCreditModelProfile(preferredModel),
+            });
+            const usageCharge = resolveUsageCharge({
+                operation: 'edit',
+                usage,
+                fallbackEstimatedCredits: estimateCharge.estimatedCredits,
+            });
+            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+                route: '/api/edit-stream',
+                screenId,
+                chunkCount,
+                charCount,
+                usage,
+                usageQuote: usageCharge.usageQuote,
+            });
+            streamBillingMeta = {
+                creditsCharged: settled.finalChargedCredits,
+                creditsRemaining: settled.summary.balanceCredits,
+                reservationId: reservation.reservationId,
+                usage,
+                usageQuote: usageCharge.usageQuote,
+            };
+            annotateServerBillingActivity(traceId, {
+                operation: 'edit',
+                preferredModel,
+                requestPreview,
+                finalCredits: settled.finalChargedCredits,
+                balanceCredits: settled.summary.balanceCredits,
+                tokensUsed: usage ? usage.totalTokens : 0,
+            });
+        }
+        if (streamBillingMeta) {
+            reply.raw.write(encodeStreamBillingMarker(streamBillingMeta));
+        }
+        fastify.log.info({
+            traceId,
+            route: '/api/edit-stream',
+            stage: 'response',
+            uid: user.uid,
+            durationMs: Date.now() - startedAt,
+            screenId,
+            chunkCount,
+            charCount,
+        }, 'edit-stream: complete');
+    } catch (error) {
+        if (reservation) {
+            settleForOutcome(
+                user.uid,
+                reservation.reservationId,
+                clientAborted ? 'cancelled' : 'failed',
+                undefined,
+                {
+                    route: '/api/edit-stream',
+                    error: (error as Error).message,
+                    screenId,
+                    chunkCount,
+                    charCount,
+                    clientAborted,
+                }
+            );
+        }
+        fastify.log.error({ traceId, route: '/api/edit-stream', durationMs: Date.now() - startedAt, screenId, err: error }, 'edit-stream: failed');
+        reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
+    } finally {
+        reply.raw.end();
+    }
+});
+
+fastify.post<{
+    Body: {
         appPrompt: string;
         stylePreset?: string;
         platform?: string;

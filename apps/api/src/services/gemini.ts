@@ -328,6 +328,11 @@ TOKEN USAGE RULES:
 - Accent usage must be restrained: only primary CTAs, key highlights, and active states.
 - Do NOT define nested 'colors.dark = {...}' objects inside tailwind.config colors; this causes broken theme behavior.
 - Prefer semantic token classes with dark variants that map to dark token values; avoid brittle hardcoded dark hex classes.
+- Put critical first-paint theme CSS in a normal <style> tag inside <head>:
+  - define :root token variables there
+  - define .dark overrides there when needed
+  - define body background/text/font defaults there
+- Do NOT rely only on <style type="text/tailwindcss"> for token variables or body base styles.
 `;
 
 const THEME_AWARENESS_RULES = `
@@ -644,8 +649,9 @@ RULES:
 2. Must include <!DOCTYPE html>, <html>, <head>, <body>, and closing tags.
 3. Preserve and continue the existing design direction and content as much as possible.
 4. Keep Tailwind CDN, Google Fonts, Material Symbols, and token contract in <head>.
-5. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
-6. Respect runtime transparent status-bar overlay safe-area behavior:
+5. Keep critical first-paint theme CSS in a normal <style> tag; do not rely only on <style type="text/tailwindcss"> for :root/.dark/body base styles.
+6. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
+7. Respect runtime transparent status-bar overlay safe-area behavior:
    - no OS status bar row
    - no fake top strip background
    - top controls container should use data-eazyui-safe-top="force" when present.
@@ -658,14 +664,15 @@ const EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
    <description>[One to two concise sentences summarizing what changed and why]</description>
    followed by the complete, modified HTML document.
 3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
-4. Preserve data-uid and data-editable attributes on existing elements.
-5. You MAY restructure layout to achieve the instruction.
-6. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
-7. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
-8. Do NOT use markdown fences.
-9. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
-10. Safe-top behavior: assume transparent status-bar overlay; keep hero/media full-bleed and mark top controls wrappers with data-eazyui-safe-top="force". Use data-eazyui-safe-top="off" only where shifting must be disabled.
-11. If using fixed/sticky top header/nav, ensure first content section has top padding/margin at least the header height so content is not hidden behind the header.
+4. Keep critical first-paint theme CSS in a normal <style> tag; do not move :root/.dark/body base styles exclusively into <style type="text/tailwindcss">.
+5. Preserve data-uid and data-editable attributes on existing elements.
+6. You MAY restructure layout to achieve the instruction.
+7. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
+8. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
+9. Do NOT use markdown fences.
+10. Keep all interactive controls theme-aware across light/dark; avoid hardcoded white/black icon-text pairs that can become unreadable.
+11. Safe-top behavior: assume transparent status-bar overlay; keep hero/media full-bleed and mark top controls wrappers with data-eazyui-safe-top="force". Use data-eazyui-safe-top="off" only where shifting must be disabled.
+12. If using fixed/sticky top header/nav, ensure first content section has top padding/margin at least the header height so content is not hidden behind the header.
 
 Current HTML:
 `;
@@ -690,6 +697,8 @@ Rules:
 - Add depth with at least 2 of: gradient background, glass/blur panel, soft shadow, layered overlap.
 - Use prompt-specific labels; no filler copy (no "Lorem ipsum", "Item 1", "Product Name").
 - Define tailwind.config theme.extend.colors with semantic tokens: bg, surface, text, muted, accent.
+- Put :root/.dark token variables and body base background/text/font defaults in a normal <style> tag in <head>.
+- Do NOT rely only on <style type="text/tailwindcss"> for first-paint theme CSS.
 - Use those semantic tokens for major surfaces and CTA.
 - Keep icon/text contrast readable in both light and dark modes; avoid brittle text-white/text-black defaults on controls.
 - Avoid invented class names that are not valid Tailwind utilities.
@@ -712,6 +721,7 @@ Rules:
 - Complete HTML document required.
 - Include: <script src="https://cdn.tailwindcss.com"></script>
 - Include Plus Jakarta Sans + one display font + Material Symbols Rounded.
+- Put :root/.dark token variables and body base background/text/font defaults in a normal <style> tag in <head>.
 - Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
 - Keep explicit zone hierarchy: top utility, focal hero, supporting modules, persistent action.
 - Mix module scales; avoid equal-height repeated cards.
@@ -727,11 +737,30 @@ Return:
 then the complete updated HTML document.
 Rules:
 - Keep full valid HTML document.
+- Keep critical first-paint theme CSS in a normal <style> tag; do not rely only on <style type="text/tailwindcss"> for :root/.dark/body base styles.
 - Keep existing data-uid and data-editable attributes where present.
 - Brand icons must use Iconify + Simple Icons (no placeholder text).
 - Do NOT include mobile OS status bar UI (time/signal/wifi/battery row).
 - Respect transparent status-bar overlay safe-top behavior; top controls wrappers should use data-eazyui-safe-top="force" when appropriate.
 - No markdown fences.
+`;
+
+const STREAM_EDIT_HTML_PROMPT = `You are an expert UI designer. Edit the existing HTML.
+Return ONLY the complete updated HTML document.
+Rules:
+1. Output HTML only. No description, no prose, no markdown.
+2. Keep a full valid HTML document with <!DOCTYPE html>, <html>, <head>, <body>.
+3. Preserve all <head> imports and the token contract (tailwind.config with semantic tokens).
+4. Keep critical first-paint theme CSS in a normal <style> tag; do not move :root/.dark/body base styles exclusively into <style type="text/tailwindcss">.
+5. Preserve data-uid and data-editable attributes on existing elements.
+6. You MAY restructure layout to satisfy the user instruction.
+7. For map/location visuals, use placehold.net map URLs. For non-map visuals, use Unsplash URLs only (https://images.unsplash.com/photo-...).
+8. Do NOT design or include a mobile OS status bar (time/signal/wifi/battery row). Device chrome is provided by runtime.
+9. Keep all interactive controls theme-aware across light/dark.
+10. Safe-top behavior: assume transparent status-bar overlay; keep hero/media full-bleed and mark top controls wrappers with data-eazyui-safe-top="force". Use data-eazyui-safe-top="off" only where shifting must be disabled.
+11. If using fixed/sticky top header/nav, ensure first content section has top padding/margin at least the header height so content is not hidden behind the header.
+
+Current HTML:
 `;
 
 const FAST_UNSPLASH_IMAGE_RULES = `
@@ -2252,6 +2281,105 @@ ${designSystemGuidance}`.trim();
             usage: summarizeTokenUsage(usageEntries),
         };
     }
+}
+
+export function editDesignStreamWithUsage(options: EditOptions): {
+    stream: AsyncGenerator<string, void, unknown>;
+    usagePromise: Promise<TokenUsageSummary | undefined>;
+} {
+    const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
+    let streamUsageCandidate: TokenUsageEntry | undefined;
+    let resolveUsage: (usage: TokenUsageSummary | undefined) => void = () => { };
+    const usagePromise = new Promise<TokenUsageSummary | undefined>((resolve) => {
+        resolveUsage = resolve;
+    });
+
+    const stream = (async function* () {
+        try {
+            const { instruction, html, images = [], preferredModel } = options;
+            const modelTemperature = resolveModelTemperature(options.temperature, 1);
+            const normalizedDesignSystem = options.projectDesignSystem
+                ? normalizeProjectDesignSystem(
+                    options.projectDesignSystem,
+                    instruction || 'Screen edit',
+                    options.projectDesignSystem.stylePreset || 'modern',
+                    options.projectDesignSystem.platform || 'mobile'
+                )
+                : undefined;
+            const designSystemGuidance = normalizedDesignSystem
+                ? buildDesignSystemGuidance(normalizedDesignSystem)
+                : '';
+            const consistencyRules = (options.consistencyProfile?.rules || [])
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .slice(0, 10);
+            const referenceScreens = (options.referenceScreens || [])
+                .filter((screen) => screen && screen.screenId !== options.screenId)
+                .slice(0, 2)
+                .map((screen) => ({
+                    name: String(screen.name || 'Screen').slice(0, 80),
+                    htmlSnippet: String(screen.html || '').slice(0, 1400),
+                }));
+            const consistencyGuidance = `
+Consistency requirements:
+- Keep component language consistent with the existing app.
+- Keep navigation decisions context-aware for each screen instead of forcing one navbar style.
+- If navigation changes, keep it coherent with the screen goal and overall product UX.
+${consistencyRules.length > 0 ? `- Consistency rules:\n${consistencyRules.map((rule) => `  - ${rule}`).join('\n')}` : ''}
+${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((screen) => `  - ${screen.name}\n${screen.htmlSnippet}`).join('\n')}` : ''}
+${designSystemGuidance}`.trim();
+            const streamPrompt = `${STREAM_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
+            const parts: any[] = [{ text: streamPrompt }];
+            parts.push(...extractInlineImageParts(images));
+
+            if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
+                const edited = await editDesign(options);
+                if (edited.usage?.entries?.length) {
+                    usageEntries.push(...edited.usage.entries);
+                }
+                yield edited.html;
+                return;
+            }
+
+            const resolvedPreferredModel = resolvePreferredModel(preferredModel);
+            const selectedModel = getGenerativeModel(resolvedPreferredModel);
+            const result = await selectedModel.model.generateContentStream({
+                contents: [{ role: 'user', parts }],
+                generationConfig: {
+                    ...GENERATION_CONFIG,
+                    temperature: modelTemperature,
+                },
+            });
+
+            for await (const chunk of result.stream) {
+                const text = chunk.text();
+                const parsedChunkUsage = parseGeminiUsageFromResponse(chunk, selectedModel.name);
+                if (parsedChunkUsage) {
+                    const currentTotal = Number(streamUsageCandidate?.totalTokens || 0);
+                    const nextTotal = Number(parsedChunkUsage.totalTokens || 0);
+                    if (!streamUsageCandidate || nextTotal >= currentTotal) {
+                        streamUsageCandidate = parsedChunkUsage;
+                    }
+                }
+                yield text;
+            }
+
+            try {
+                const finalResponse = await result.response;
+                const parsedFinalUsage = parseGeminiUsageFromResponse(finalResponse, selectedModel.name);
+                if (parsedFinalUsage) {
+                    streamUsageCandidate = parsedFinalUsage;
+                }
+            } catch (err) {
+                console.warn('[Gemini] editDesignStream: failed to read final response metadata', err);
+            }
+            usageEntries.push(streamUsageCandidate);
+        } finally {
+            resolveUsage(summarizeTokenUsage(usageEntries));
+        }
+    })();
+
+    return { stream, usagePromise };
 }
 
 export async function completePartialScreen(options: CompleteScreenOptions): Promise<{

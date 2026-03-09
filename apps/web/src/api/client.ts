@@ -584,6 +584,10 @@ export interface GenerateStreamResponse {
     billing?: BillingUsageMeta;
 }
 
+export interface EditStreamResponse {
+    billing?: BillingUsageMeta;
+}
+
 export interface ProjectResponse {
     projectId: string;
     designSpec: HtmlDesignSpec;
@@ -853,6 +857,106 @@ class ApiClient {
         });
         notifyBillingUpdated(response.billing);
         return response;
+    }
+
+    async editStream(
+        request: EditRequest,
+        onChunk: (chunk: string) => void,
+        signal?: AbortSignal
+    ): Promise<EditStreamResponse> {
+        const payload = this.withComposerTemperature(request);
+        const authHeader = await this.getAuthHeaderValue();
+        const response = await fetch(`${API_BASE}/edit-stream`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authHeader,
+            },
+            body: JSON.stringify(payload),
+            signal,
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+            throw new ApiRequestError({
+                message: error.message || `HTTP ${response.status}`,
+                status: response.status,
+                code: typeof error.code === 'string' ? error.code : undefined,
+                paywallCode: typeof error.paywallCode === 'string' ? error.paywallCode : undefined,
+                details: error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : undefined,
+            });
+        }
+        if (!response.body) throw new Error('No response body');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        let billing: BillingUsageMeta | undefined;
+        const flushText = (text: string) => {
+            if (text) onChunk(text);
+        };
+
+        const extractCompleteMarkers = () => {
+            while (true) {
+                const markerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+                if (markerStart < 0) break;
+                const markerEnd = pending.indexOf(
+                    STREAM_BILLING_MARKER_SUFFIX,
+                    markerStart + STREAM_BILLING_MARKER_PREFIX.length
+                );
+                if (markerEnd < 0) break;
+
+                const beforeMarker = pending.slice(0, markerStart);
+                flushText(beforeMarker);
+
+                const payloadBase64 = pending.slice(
+                    markerStart + STREAM_BILLING_MARKER_PREFIX.length,
+                    markerEnd
+                );
+                const parsedBilling = tryParseStreamBillingPayload(payloadBase64);
+                if (parsedBilling) {
+                    billing = parsedBilling;
+                }
+
+                pending = pending.slice(markerEnd + STREAM_BILLING_MARKER_SUFFIX.length);
+            }
+        };
+
+        const flushSafeText = () => {
+            const markerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+            if (markerStart > 0) {
+                flushText(pending.slice(0, markerStart));
+                pending = pending.slice(markerStart);
+                return;
+            }
+            if (markerStart === 0) return;
+            if (pending.length <= STREAM_BILLING_SAFE_TAIL) return;
+            const flushUntil = pending.length - STREAM_BILLING_SAFE_TAIL;
+            flushText(pending.slice(0, flushUntil));
+            pending = pending.slice(flushUntil);
+        };
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            pending += text;
+            extractCompleteMarkers();
+            flushSafeText();
+        }
+
+        pending += decoder.decode();
+        extractCompleteMarkers();
+
+        const trailingMarkerStart = pending.indexOf(STREAM_BILLING_MARKER_PREFIX);
+        if (trailingMarkerStart >= 0) {
+            flushText(pending.slice(0, trailingMarkerStart));
+        } else {
+            flushText(pending);
+        }
+
+        notifyBillingUpdated(billing);
+        return { billing };
     }
 
     async generateImage(request: GenerateImageRequest, signal?: AbortSignal): Promise<GenerateImageResponse> {
