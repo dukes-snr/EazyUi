@@ -198,6 +198,7 @@ const COST_TABLE = {
     design_system: 20,
     generate_base: 20,
     generate_per_screen: 13,
+    plan_assist: 1,
     edit: 20,
     complete_screen: 15,
     generate_image: 30,
@@ -937,7 +938,7 @@ export function estimateCredits(input: BillingEstimateInput): BillingEstimate {
     let variable = 0;
     let bundleDesignSystem = 0;
 
-    if (operation === 'plan_route' || operation === 'plan_assist') {
+    if (operation === 'plan_route') {
         return {
             operation,
             estimatedCredits: 0,
@@ -946,7 +947,9 @@ export function estimateCredits(input: BillingEstimateInput): BillingEstimate {
         };
     }
 
-    if (operation === 'design_system') {
+    if (operation === 'plan_assist') {
+        base = COST_TABLE.plan_assist;
+    } else if (operation === 'design_system') {
         base = COST_TABLE.design_system;
     } else if (operation === 'generate' || operation === 'generate_stream') {
         base = COST_TABLE.generate_base;

@@ -10,6 +10,10 @@ export type BillingUsageActivityRow = {
     tokensUsed: number | null;
     modelName: string;
     requestIdentifier: string;
+    reserveCredits: number | null;
+    minimumFloorCredits: number | null;
+    finalChargedCredits: number | null;
+    pricingMode: string | null;
 };
 
 export function toSingleLinePreview(value: unknown, max = 140): string | null {
@@ -64,6 +68,28 @@ function toSafeNumber(value: unknown): number | null {
     const n = Number(value);
     if (!Number.isFinite(n)) return null;
     return n;
+}
+
+function extractMetadataNumber(metadata: Record<string, unknown> | null | undefined, keys: string[]): number | null {
+    if (!metadata || typeof metadata !== 'object') return null;
+    for (const key of keys) {
+        const direct = toSafeNumber((metadata as any)?.[key]);
+        if (direct !== null && direct >= 0) return Math.max(0, Math.round(direct));
+        const nested = toSafeNumber((metadata as any)?.settlement?.[key]);
+        if (nested !== null && nested >= 0) return Math.max(0, Math.round(nested));
+    }
+    return null;
+}
+
+function extractMetadataString(metadata: Record<string, unknown> | null | undefined, keys: string[]): string | null {
+    if (!metadata || typeof metadata !== 'object') return null;
+    for (const key of keys) {
+        const direct = (metadata as any)?.[key];
+        if (typeof direct === 'string' && direct.trim()) return direct.trim();
+        const nested = (metadata as any)?.settlement?.[key];
+        if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    }
+    return null;
 }
 
 export function extractLedgerTotalTokens(metadata?: Record<string, unknown> | null): number | null {
@@ -163,6 +189,10 @@ export function buildBillingUsageActivityRows(
                 0,
                 Math.round(-ordered.reduce((sum, item) => sum + Number(item.creditsDelta || 0), 0))
             );
+            const reserveCredits = firstDefined(newestFirst.map((item) => extractMetadataNumber(item.metadata, ['reserveEstimatedCredits', 'reservedCredits'])));
+            const minimumFloorCredits = firstDefined(newestFirst.map((item) => extractMetadataNumber(item.metadata, ['minimumFloorCredits'])));
+            const finalChargedCredits = firstDefined(newestFirst.map((item) => extractMetadataNumber(item.metadata, ['finalChargedCredits']))) ?? deductedCredits;
+            const pricingMode = firstDefined(newestFirst.map((item) => extractMetadataString(item.metadata, ['pricingMode'])));
 
             return {
                 key,
@@ -174,6 +204,10 @@ export function buildBillingUsageActivityRows(
                 tokensUsed,
                 modelName,
                 requestIdentifier,
+                reserveCredits,
+                minimumFloorCredits,
+                finalChargedCredits,
+                pricingMode,
             } satisfies BillingUsageActivityRow;
         })
         .filter((row) => row.deductedCredits > 0)

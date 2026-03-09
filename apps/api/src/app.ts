@@ -90,6 +90,81 @@ type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
 const LOG_PREVIEW_MAX = 220;
 const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
+const SERVER_ACTIVITY_LIMIT = 60;
+
+type ServerActivityItem = {
+    id: string;
+    route: string;
+    method: string;
+    status: 'running' | 'success' | 'error';
+    startedAt: string;
+    completedAt?: string;
+    durationMs?: number;
+    ip?: string;
+    operation?: string;
+    requestPreview?: string;
+    preferredModel?: string;
+    expectedScreenCount?: number;
+    expectedImageCount?: number;
+    estimatedCredits?: number;
+    reserveCredits?: number;
+    minimumFloorCredits?: number;
+    finalCredits?: number;
+    balanceCredits?: number;
+    tokensUsed?: number;
+    metadata?: Record<string, unknown>;
+    errorMessage?: string;
+};
+
+const serverActivityById = new Map<string, ServerActivityItem>();
+const serverActivityOrder: string[] = [];
+
+function compactServerActivities() {
+    while (serverActivityOrder.length > SERVER_ACTIVITY_LIMIT) {
+        const staleId = serverActivityOrder.pop();
+        if (staleId) serverActivityById.delete(staleId);
+    }
+}
+
+function upsertServerActivity(id: string, patch: Partial<ServerActivityItem>) {
+    const existing = serverActivityById.get(id);
+    if (existing) {
+        serverActivityById.set(id, { ...existing, ...patch, metadata: { ...(existing.metadata || {}), ...(patch.metadata || {}) } });
+        return;
+    }
+    const next: ServerActivityItem = {
+        id,
+        route: patch.route || '',
+        method: patch.method || 'GET',
+        status: patch.status || 'running',
+        startedAt: patch.startedAt || new Date().toISOString(),
+        ...(patch.completedAt ? { completedAt: patch.completedAt } : {}),
+        ...(typeof patch.durationMs === 'number' ? { durationMs: patch.durationMs } : {}),
+        ...(patch.ip ? { ip: patch.ip } : {}),
+        ...(patch.operation ? { operation: patch.operation } : {}),
+        ...(patch.requestPreview ? { requestPreview: patch.requestPreview } : {}),
+        ...(patch.preferredModel ? { preferredModel: patch.preferredModel } : {}),
+        ...(typeof patch.expectedScreenCount === 'number' ? { expectedScreenCount: patch.expectedScreenCount } : {}),
+        ...(typeof patch.expectedImageCount === 'number' ? { expectedImageCount: patch.expectedImageCount } : {}),
+        ...(typeof patch.estimatedCredits === 'number' ? { estimatedCredits: patch.estimatedCredits } : {}),
+        ...(typeof patch.reserveCredits === 'number' ? { reserveCredits: patch.reserveCredits } : {}),
+        ...(typeof patch.minimumFloorCredits === 'number' ? { minimumFloorCredits: patch.minimumFloorCredits } : {}),
+        ...(typeof patch.finalCredits === 'number' ? { finalCredits: patch.finalCredits } : {}),
+        ...(typeof patch.balanceCredits === 'number' ? { balanceCredits: patch.balanceCredits } : {}),
+        ...(typeof patch.tokensUsed === 'number' ? { tokensUsed: patch.tokensUsed } : {}),
+        ...(patch.errorMessage ? { errorMessage: patch.errorMessage } : {}),
+        ...(patch.metadata ? { metadata: patch.metadata } : {}),
+    };
+    serverActivityById.set(id, next);
+    serverActivityOrder.unshift(id);
+    compactServerActivities();
+}
+
+function listServerActivities(): ServerActivityItem[] {
+    return serverActivityOrder
+        .map((id) => serverActivityById.get(id))
+        .filter((item): item is ServerActivityItem => Boolean(item));
+}
 
 function normalizePlatform(input?: string): PlatformKind | undefined {
     if (input === 'mobile' || input === 'tablet' || input === 'desktop') return input;
@@ -245,6 +320,22 @@ function settleForOutcome(
     });
 }
 
+function annotateServerBillingActivity(traceId: string, patch: {
+    operation?: BillingOperation;
+    preferredModel?: string;
+    estimatedCredits?: number;
+    reserveCredits?: number;
+    minimumFloorCredits?: number;
+    finalCredits?: number;
+    balanceCredits?: number;
+    tokensUsed?: number;
+    requestPreview?: string;
+    metadata?: Record<string, unknown>;
+    errorMessage?: string;
+}) {
+    upsertServerActivity(traceId, patch);
+}
+
 function encodeStreamBillingMarker(payload: Record<string, unknown>): string {
     const base64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
     return `${STREAM_BILLING_MARKER_PREFIX}${base64}${STREAM_BILLING_MARKER_SUFFIX}`;
@@ -255,8 +346,11 @@ function resolveUsageCharge(params: {
     usage?: TokenUsageSummary;
     fallbackEstimatedCredits: number;
 }): { finalCredits: number; usageQuote?: UsageCreditQuote } {
-    if (params.operation === 'plan_route' || params.operation === 'plan_assist') {
+    if (params.operation === 'plan_route') {
         return { finalCredits: 0 };
+    }
+    if (params.operation === 'plan_assist') {
+        return { finalCredits: params.fallbackEstimatedCredits };
     }
     const hasUsage = Boolean(
         params.usage
@@ -362,6 +456,12 @@ function ensureBillingEntitlementOrReply(input: {
     const hasActivePaidPlan = summary.planId !== 'free' && summary.status === 'active';
 
     if (requiresPaidPlan && !hasActivePaidPlan) {
+        annotateServerBillingActivity(input.traceId, {
+            operation: input.operation,
+            estimatedCredits: input.estimatedCredits,
+            minimumFloorCredits: input.minimumFloorCredits,
+            errorMessage: 'Paid plan required',
+        });
         fastify.log.info({
             traceId: input.traceId,
             route: input.route,
@@ -388,6 +488,15 @@ function ensureBillingEntitlementOrReply(input: {
             operation: input.operation,
             requiredCredits: input.estimatedCredits,
             availableCredits: summary.balanceCredits,
+        });
+        annotateServerBillingActivity(input.traceId, {
+            operation: input.operation,
+            estimatedCredits: input.estimatedCredits,
+            reserveCredits: input.estimatedCredits,
+            minimumFloorCredits: input.minimumFloorCredits,
+            balanceCredits: summary.balanceCredits,
+            errorMessage: `Need ${input.estimatedCredits} credits but only ${summary.balanceCredits} available.`,
+            metadata: { pricingMode: 'reserve_then_settle' },
         });
         fastify.log.info({
             traceId: input.traceId,
@@ -422,6 +531,13 @@ function ensureBillingEntitlementOrReply(input: {
         planId: summary.planId,
         planStatus: summary.status,
     }, 'billing entitlement allowed');
+    annotateServerBillingActivity(input.traceId, {
+        operation: input.operation,
+        estimatedCredits: input.estimatedCredits,
+        reserveCredits: input.estimatedCredits,
+        minimumFloorCredits: input.minimumFloorCredits,
+        balanceCredits: summary.balanceCredits,
+    });
     return summary;
 }
 
@@ -503,6 +619,48 @@ await fastify.register(fastifyRawBody, {
     runFirst: true,
 });
 
+fastify.addHook('preHandler', async (request) => {
+    const body = (request.body && typeof request.body === 'object' && !Array.isArray(request.body))
+        ? request.body as Record<string, unknown>
+        : {};
+    upsertServerActivity(request.id, {
+        id: request.id,
+        route: request.routeOptions?.url || request.url,
+        method: request.method,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        ip: request.ip,
+        operation: typeof body.operation === 'string'
+            ? body.operation
+            : typeof body.screenId === 'string'
+                ? 'edit'
+                : undefined,
+        requestPreview: previewText(
+            body.prompt
+            || body.instruction
+            || body.appPrompt
+            || body.query
+            || body.screenName
+            || ''
+        ),
+        preferredModel: typeof body.preferredModel === 'string' ? body.preferredModel : undefined,
+        expectedScreenCount: Number.isFinite(Number(body.expectedScreenCount)) ? Math.max(0, Math.floor(Number(body.expectedScreenCount))) : undefined,
+        expectedImageCount: Number.isFinite(Number(body.expectedImageCount)) ? Math.max(0, Math.floor(Number(body.expectedImageCount))) : undefined,
+    });
+});
+
+fastify.addHook('onResponse', async (request, reply) => {
+    const existing = serverActivityById.get(request.id);
+    if (!existing) return;
+    const startedMs = new Date(existing.startedAt).getTime();
+    const nowMs = Date.now();
+    upsertServerActivity(request.id, {
+        status: reply.statusCode >= 400 ? 'error' : 'success',
+        completedAt: new Date(nowMs).toISOString(),
+        durationMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : undefined,
+    });
+});
+
 // ============================================================================
 // Routes
 // ============================================================================
@@ -513,39 +671,161 @@ fastify.get('/', async (_request, reply) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EazyUI API</title>
+  <title>EazyUI API Activity</title>
   <style>
+    :root { color-scheme: dark; }
     body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f16; color: #e5e7eb; margin: 0; }
-    .wrap { max-width: 860px; margin: 56px auto; padding: 0 20px; }
-    .card { background: #121824; border: 1px solid #263043; border-radius: 12px; padding: 16px; margin-top: 14px; }
+    .wrap { max-width: 1180px; margin: 32px auto 64px; padding: 0 20px; }
+    .hero { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:18px; }
+    .hero h1 { margin:0; font-size:32px; }
+    .muted { color: #94a3b8; }
+    .grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:14px; }
+    .card { background: #121824; border: 1px solid #263043; border-radius: 14px; padding: 16px; }
+    .metric { font-size: 28px; font-weight: 800; margin-top: 8px; }
+    .links { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 18px; }
     a { color: #93c5fd; text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { color: #bfdbfe; }
-    .muted { color: #94a3b8; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding:12px 10px; border-bottom:1px solid #243041; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color:#94a3b8; }
+    .status { display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+    .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+    .running { color:#fde68a; }
+    .running .dot { background:#f59e0b; }
+    .success { color:#86efac; }
+    .success .dot { background:#22c55e; }
+    .error { color:#fca5a5; }
+    .error .dot { background:#ef4444; }
+    .request { max-width: 340px; white-space: normal; word-break: break-word; color:#dbeafe; }
+    .detail { margin-top:6px; font-size:12px; color:#94a3b8; line-height:1.45; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:#cbd5e1; }
+    .table-card { margin-top:14px; overflow:hidden; }
+    .empty { padding:26px; text-align:center; color:#94a3b8; }
+    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 720px) { .hero { flex-direction:column; align-items:flex-start; } .grid { grid-template-columns: 1fr; } th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { display:none; } }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>EazyUI API</h1>
-    <p class="muted">Backend service is running.</p>
-    <div class="card">
-      <h2>Quick Links</h2>
-      <p><a href="/api/health">/api/health</a></p>
-      <p><a href="/api/models">/api/models</a></p>
+    <div class="hero">
+      <div>
+        <h1>EazyUI API Activity</h1>
+        <p class="muted">Live server activity for requests hitting this API instance.</p>
+      </div>
+      <div class="mono">Polling <code>/api/server/activity</code> every 2s</div>
     </div>
-    <div class="card">
-      <h2>Core Endpoints</h2>
-      <p><code>POST /api/generate</code></p>
-      <p><code>POST /api/generate-stream</code></p>
-      <p><code>POST /api/edit</code></p>
-      <p><code>POST /api/generate-image</code></p>
-      <p><code>POST /api/transcribe-audio</code></p>
-      <p><code>POST /api/plan</code></p>
+    <div class="links">
+      <a href="/api/health">/api/health</a>
+      <a href="/api/models">/api/models</a>
+      <a href="/api/server/activity">/api/server/activity</a>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="muted">Recent Requests</div><div id="metric-total" class="metric">0</div></div>
+      <div class="card"><div class="muted">Running</div><div id="metric-running" class="metric">0</div></div>
+      <div class="card"><div class="muted">Errors</div><div id="metric-errors" class="metric">0</div></div>
+      <div class="card"><div class="muted">Avg Duration</div><div id="metric-duration" class="metric">--</div></div>
+    </div>
+    <div class="card table-card">
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Route</th>
+            <th>Request</th>
+            <th>Model</th>
+            <th>Credits</th>
+            <th>Tokens</th>
+            <th>Time</th>
+            <th>Trace</th>
+          </tr>
+        </thead>
+        <tbody id="activity-body">
+          <tr><td colspan="8" class="empty">Waiting for activity...</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
+  <script>
+    const bodyEl = document.getElementById('activity-body');
+    const totalEl = document.getElementById('metric-total');
+    const runningEl = document.getElementById('metric-running');
+    const errorsEl = document.getElementById('metric-errors');
+    const durationEl = document.getElementById('metric-duration');
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', \"'\":'&#39;' }[char] || char));
+    }
+
+    function fmtDuration(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) return '--';
+      if (n < 1000) return n + ' ms';
+      return (n / 1000).toFixed(2) + ' s';
+    }
+
+    function fmtCredits(item) {
+      const parts = [];
+      if (Number.isFinite(item.reserveCredits)) parts.push('reserve ' + item.reserveCredits);
+      if (Number.isFinite(item.minimumFloorCredits)) parts.push('floor ' + item.minimumFloorCredits);
+      if (Number.isFinite(item.finalCredits)) parts.push('final ' + item.finalCredits);
+      if (Number.isFinite(item.balanceCredits)) parts.push('bal ' + item.balanceCredits);
+      return parts.length ? parts.join(' · ') : '-';
+    }
+
+    function render(items) {
+      totalEl.textContent = String(items.length);
+      runningEl.textContent = String(items.filter((item) => item.status === 'running').length);
+      errorsEl.textContent = String(items.filter((item) => item.status === 'error').length);
+      const durations = items.map((item) => Number(item.durationMs)).filter((value) => Number.isFinite(value) && value >= 0);
+      durationEl.textContent = durations.length ? fmtDuration(Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length)) : '--';
+
+      if (!items.length) {
+        bodyEl.innerHTML = '<tr><td colspan="8" class="empty">No recent activity.</td></tr>';
+        return;
+      }
+
+      bodyEl.innerHTML = items.map((item) => {
+        const detailBits = [
+          item.operation ? 'op ' + esc(item.operation) : '',
+          Number.isFinite(item.expectedScreenCount) && item.expectedScreenCount > 0 ? 'screens ' + item.expectedScreenCount : '',
+          Number.isFinite(item.expectedImageCount) && item.expectedImageCount > 0 ? 'images ' + item.expectedImageCount : '',
+          item.pricingMode ? esc(String(item.pricingMode).replace(/_/g, ' ')) : '',
+          item.errorMessage ? 'error ' + esc(item.errorMessage) : ''
+        ].filter(Boolean).join(' · ');
+        return '<tr>'
+          + '<td><span class="status ' + esc(item.status) + '"><span class="dot"></span>' + esc(item.status) + '</span></td>'
+          + '<td><div>' + esc(item.method) + ' ' + esc(item.route) + '</div><div class="detail">' + (detailBits || '&nbsp;') + '</div></td>'
+          + '<td><div class="request">' + esc(item.requestPreview || '-') + '</div></td>'
+          + '<td><div class="mono">' + esc(item.preferredModel || '-') + '</div></td>'
+          + '<td><div class="detail">' + esc(fmtCredits(item)) + '</div></td>'
+          + '<td><div class="mono">' + (Number.isFinite(item.tokensUsed) ? esc(item.tokensUsed.toLocaleString()) : '-') + '</div></td>'
+          + '<td><div>' + esc(new Date(item.startedAt).toLocaleTimeString()) + '</div><div class="detail">' + esc(fmtDuration(item.durationMs)) + '</div></td>'
+          + '<td><div class="mono">' + esc(item.id) + '</div></td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/server/activity', { headers: { 'Accept': 'application/json' } });
+        const payload = await response.json();
+        render(Array.isArray(payload.items) ? payload.items : []);
+      } catch (error) {
+        bodyEl.innerHTML = '<tr><td colspan="8" class="empty">Failed to load activity.</td></tr>';
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
 </body>
 </html>`;
     return reply.type('text/html; charset=utf-8').send(html);
+});
+
+fastify.get('/api/server/activity', async (_request, reply) => {
+    return reply.send({ items: listServerActivities() });
 });
 
 // Health check
@@ -1348,6 +1628,14 @@ fastify.post<{
             usageTotals: usage ? usage.totalTokens : 0,
         }, 'generate: complete');
 
+        annotateServerBillingActivity(traceId, {
+            operation: 'generate',
+            preferredModel,
+            requestPreview,
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: usage ? usage.totalTokens : 0,
+        });
         return {
             designSpec,
             versionId,
@@ -1517,6 +1805,14 @@ fastify.post<{
             creditsRemaining: billingMeta.creditsRemaining,
             usageTotals: usage ? usage.totalTokens : 0,
         }, 'design-system: complete');
+        annotateServerBillingActivity(traceId, {
+            operation: 'design_system',
+            preferredModel,
+            requestPreview,
+            finalCredits: billingMeta.creditsCharged,
+            balanceCredits: billingMeta.creditsRemaining,
+            tokensUsed: usage ? usage.totalTokens : 0,
+        });
         return { designSystem, billing: billingMeta };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
@@ -1665,6 +1961,14 @@ fastify.post<{
             usageTotals: edited.usage ? edited.usage.totalTokens : 0,
         }, 'edit: complete');
 
+        annotateServerBillingActivity(traceId, {
+            operation: 'edit',
+            preferredModel,
+            requestPreview: previewText(instruction, 180),
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: edited.usage ? edited.usage.totalTokens : 0,
+        });
         return {
             html: edited.html,
             description: edited.description,
@@ -1812,6 +2116,14 @@ fastify.post<{
             creditsRemaining: settled.summary.balanceCredits,
             usageTotals: result.usage ? result.usage.totalTokens : 0,
         }, 'synthesize-screen-images: complete');
+        annotateServerBillingActivity(traceId, {
+            operation: 'synthesize_screen_images',
+            preferredModel: preferredModel || 'image',
+            requestPreview,
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: result.usage ? result.usage.totalTokens : 0,
+        });
         return {
             ...result,
             billing: {
@@ -1929,6 +2241,14 @@ fastify.post<{
             creditsRemaining: settled.summary.balanceCredits,
             usageTotals: result.usage ? result.usage.totalTokens : 0,
         }, 'generate-image: complete');
+        annotateServerBillingActivity(traceId, {
+            operation: 'generate_image',
+            preferredModel: preferredModel || 'image',
+            requestPreview: previewText(instruction || prompt, 180),
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: result.usage ? result.usage.totalTokens : 0,
+        });
         return {
             ...result,
             billing: {
@@ -2050,6 +2370,14 @@ fastify.post<{
             creditsRemaining: settled.summary.balanceCredits,
             usageTotals: result.usage?.totalTokens || 0,
         }, 'transcribe-audio: complete');
+        annotateServerBillingActivity(traceId, {
+            operation: 'transcribe_audio',
+            preferredModel: model,
+            requestPreview,
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: result.usage?.totalTokens || 0,
+        });
         return {
             ...result,
             billing: {
@@ -2251,6 +2579,14 @@ fastify.post<{
             reservationId: reservation.reservationId,
             usageTotals: usage ? usage.totalTokens : 0,
         }, 'plan: settled');
+        annotateServerBillingActivity(traceId, {
+            operation: plannerOperation,
+            preferredModel,
+            requestPreview,
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: usage ? usage.totalTokens : 0,
+        });
         return {
             ...plan,
             billing: {
@@ -2593,6 +2929,14 @@ fastify.post<{
                 usage,
                 usageQuote: usageCharge.usageQuote,
             };
+            annotateServerBillingActivity(traceId, {
+                operation: 'generate_stream',
+                preferredModel,
+                requestPreview,
+                finalCredits: settled.finalChargedCredits,
+                balanceCredits: settled.summary.balanceCredits,
+                tokensUsed: usage ? usage.totalTokens : 0,
+            });
             fastify.log.info({
                 traceId,
                 route: '/api/generate-stream',
@@ -2750,6 +3094,14 @@ fastify.post<{
             creditsRemaining: settled.summary.balanceCredits,
             usageTotals: completed.usage ? completed.usage.totalTokens : 0,
         }, 'complete-screen: complete');
+        annotateServerBillingActivity(traceId, {
+            operation: 'complete_screen',
+            preferredModel,
+            requestPreview: previewText(prompt || `Complete ${screenName}`, 180),
+            finalCredits: settled.finalChargedCredits,
+            balanceCredits: settled.summary.balanceCredits,
+            tokensUsed: completed.usage ? completed.usage.totalTokens : 0,
+        });
         return {
             html: completed.html,
             billing: {

@@ -1003,10 +1003,18 @@ export function ProjectSettingsPage({
                                                                 <div className="text-xs text-[var(--ui-text-subtle)]">
                                                                     {row.metadataReason || row.item.projectId || 'Usage event'}
                                                                 </div>
+                                                                <div className="mt-1 text-[11px] text-[var(--ui-text-subtle)]">
+                                                                    {[
+                                                                        row.reserveCredits !== null ? `Reserve ${row.reserveCredits}` : null,
+                                                                        row.minimumFloorCredits !== null ? `Floor ${row.minimumFloorCredits}` : null,
+                                                                        row.finalChargedCredits !== null ? `Final ${row.finalChargedCredits}` : null,
+                                                                        row.pricingMode ? row.pricingMode.replace(/_/g, ' ') : null,
+                                                                    ].filter(Boolean).join(' · ') || 'No billing detail'}
+                                                                </div>
                                                             </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-[var(--ui-text-subtle)]">
                                                                 {row.requestPreview ? (
-                                                                    <span className="block max-w-[320px] truncate whitespace-nowrap" title={row.requestPreview}>
+                                                                    <span className="block max-w-[320px] whitespace-normal break-words" title={row.requestPreview}>
                                                                         {row.requestPreview}
                                                                     </span>
                                                                 ) : (
@@ -1025,7 +1033,12 @@ export function ProjectSettingsPage({
                                                                 </span>
                                                             </td>
                                                             <td className="border-b border-[var(--ui-border)] px-3 py-2 text-right font-semibold text-rose-300">
-                                                                -{row.deductedCredits.toLocaleString()}
+                                                                <div>-{row.deductedCredits.toLocaleString()}</div>
+                                                                {row.reserveCredits !== null && row.reserveCredits !== row.deductedCredits ? (
+                                                                    <div className="text-[11px] font-normal text-[var(--ui-text-subtle)]">
+                                                                        reserved {row.reserveCredits.toLocaleString()}
+                                                                    </div>
+                                                                ) : null}
                                                             </td>
                                                         </tr>
                                                     );
