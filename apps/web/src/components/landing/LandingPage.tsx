@@ -8,7 +8,18 @@ import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { Orb } from '../ui/Orb';
+import { ComposerReferenceChips } from '../ui/ComposerReferenceChips';
+import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import TextType from '../ui/TextType';
+import {
+    createComposerUrlReference,
+    findComposerReferenceTrigger,
+    getFilteredComposerReferenceRootOptions,
+    normalizeComposerReferenceUrl,
+    removeComposerReferenceTrigger,
+    type ComposerReferenceTextRange,
+    type ComposerUrlReference,
+} from '../../utils/composerReferences';
 
 type LandingPageProps = {
     onStart: (payload: {
@@ -18,6 +29,7 @@ type LandingPageProps = {
         stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile: DesignModelProfile;
         modelTemperature?: number;
+        referenceUrls?: string[];
     }) => void;
     onNavigate: (path: string) => void;
     userProfile?: {
@@ -188,16 +200,102 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [isPromptFocused, setIsPromptFocused] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [urlReferences, setUrlReferences] = useState<ComposerUrlReference[]>([]);
+    const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
+    const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
+    const [referenceRootQuery, setReferenceRootQuery] = useState('');
+    const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
+    const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const styleMenuRef = useRef<HTMLDivElement | null>(null);
+    const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const referenceMenuRef = useRef<HTMLDivElement | null>(null);
+    const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
+    const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
+
+    const rootReferenceOptions = useMemo(
+        () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
+        [referenceRootQuery]
+    );
 
     const submit = () => {
         const next = prompt.trim();
         if (!next) return;
-        onStart({ prompt: next, images, platform, stylePreset, modelProfile });
+        onStart({
+            prompt: next,
+            images,
+            platform,
+            stylePreset,
+            modelProfile,
+            referenceUrls: urlReferences.map((item) => item.url),
+        });
+    };
+
+    const closeReferenceMenu = () => {
+        setIsReferenceMenuOpen(false);
+        setReferenceMenuMode('root');
+        setReferenceRootQuery('');
+        setReferenceActiveIndex(0);
+        setReferenceUrlDraft('');
+        referenceTriggerRangeRef.current = null;
+    };
+
+    const syncReferenceTrigger = (value: string, cursor: number) => {
+        const match = findComposerReferenceTrigger(value, cursor);
+        if (!match) {
+            if (referenceMenuMode === 'root') {
+                closeReferenceMenu();
+            }
+            return;
+        }
+        referenceTriggerRangeRef.current = match.range;
+        setReferenceRootQuery(match.query);
+        setReferenceMenuMode('root');
+        setIsReferenceMenuOpen(true);
+    };
+
+    const removeReferenceTriggerToken = () => {
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        setPrompt((prev) => removeComposerReferenceTrigger(prev, range));
+    };
+
+    const focusPromptTextarea = () => {
+        window.setTimeout(() => {
+            promptTextareaRef.current?.focus();
+        }, 0);
+    };
+
+    const openUrlReferenceInput = () => {
+        removeReferenceTriggerToken();
+        setReferenceMenuMode('url');
+        setReferenceActiveIndex(0);
+        setReferenceUrlDraft('');
+        setIsReferenceMenuOpen(true);
+    };
+
+    const submitUrlReference = () => {
+        const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
+        if (!normalized) return;
+        const nextReference = createComposerUrlReference(normalized);
+        setUrlReferences((prev) => {
+            if (prev.some((item) => item.url === nextReference.url)) return prev;
+            return [...prev, nextReference];
+        });
+        closeReferenceMenu();
+        focusPromptTextarea();
+    };
+
+    const removeUrlReference = (referenceId: string) => {
+        setUrlReferences((prev) => prev.filter((item) => item.id !== referenceId));
+    };
+
+    const handlePromptChange = (value: string, cursor: number) => {
+        setPrompt(value);
+        syncReferenceTrigger(value, cursor);
     };
 
     const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
@@ -302,6 +400,22 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (!isReferenceMenuOpen) return;
+        const handlePointerDown = (event: MouseEvent) => {
+            if (referenceMenuRef.current?.contains(event.target as Node)) return;
+            if (event.target === promptTextareaRef.current) return;
+            closeReferenceMenu();
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isReferenceMenuOpen, referenceMenuMode]);
+
+    useEffect(() => {
+        if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
+        referenceUrlInputRef.current?.focus();
+    }, [isReferenceMenuOpen, referenceMenuMode]);
 
     useEffect(() => {
         if (!showStyleMenu) return;
@@ -513,11 +627,42 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     />
                                 </div>
                                 <textarea
+                                    ref={promptTextareaRef}
                                     value={prompt}
-                                    onChange={(e) => setPrompt(e.target.value)}
+                                    onChange={(e) => handlePromptChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
                                     onFocus={() => setIsPromptFocused(true)}
                                     onBlur={() => setIsPromptFocused(false)}
                                     onKeyDown={(e) => {
+                                        if (isReferenceMenuOpen) {
+                                            if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                                                if (e.key === 'ArrowDown') {
+                                                    e.preventDefault();
+                                                    setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                                                    return;
+                                                }
+                                                if (e.key === 'ArrowUp') {
+                                                    e.preventDefault();
+                                                    setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                                                    return;
+                                                }
+                                                if (e.key === 'Escape') {
+                                                    e.preventDefault();
+                                                    closeReferenceMenu();
+                                                    return;
+                                                }
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                                                    if (choice?.key === 'url') openUrlReferenceInput();
+                                                    return;
+                                                }
+                                            }
+                                            if (referenceMenuMode === 'url' && e.key === 'Escape') {
+                                                e.preventDefault();
+                                                closeReferenceMenu();
+                                                return;
+                                            }
+                                        }
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
                                             submit();
@@ -529,6 +674,11 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 />
                             </div>
                         </div>
+
+                        <ComposerReferenceChips
+                            urlReferences={urlReferences}
+                            onRemoveUrl={removeUrlReference}
+                        />
 
                         {images.length > 0 && (
                             <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
@@ -682,6 +832,25 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 </button>
                             </div>
                         </div>
+
+                        {isReferenceMenuOpen && (
+                            <ComposerReferenceMenu
+                                activeIndex={referenceActiveIndex}
+                                menuMode={referenceMenuMode}
+                                menuRef={referenceMenuRef}
+                                onCancel={closeReferenceMenu}
+                                onRootOptionHover={setReferenceActiveIndex}
+                                onScreenHover={setReferenceActiveIndex}
+                                onSelectRootOption={(key) => {
+                                    if (key === 'url') openUrlReferenceInput();
+                                }}
+                                onSubmitUrl={submitUrlReference}
+                                rootOptions={rootReferenceOptions}
+                                urlDraft={referenceUrlDraft}
+                                urlInputRef={referenceUrlInputRef}
+                                onUrlDraftChange={setReferenceUrlDraft}
+                            />
+                        )}
                     </div>
 
                     <div className="mt-5 flex items-center justify-center gap-2 text-gray-400 flex-wrap">

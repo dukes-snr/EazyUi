@@ -1700,12 +1700,13 @@ export function subscribeProjectRealtime(input: {
   };
 }
 
-export async function listProjectsFirestore(uid: string): Promise<{ id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string; coverImageUrls?: string[] }[]> {
+export async function listProjectsFirestore(uid: string): Promise<{ id: string; name: string; createdAt: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; description?: string; designSystem?: HtmlDesignSpec["designSystem"]; coverImageUrl?: string; coverImageUrls?: string[] }[]> {
   const q = query(collection(db, "users", uid, "projects"), orderBy("updatedAt", "desc"), limit(50));
   const snap = await getDocs(q);
   return snap.docs.map((d) => {
     const data = d.data() as {
       name?: string;
+      createdAt?: string;
       updatedAt?: string;
       snapshotPath?: string;
       coverImageUrl?: string;
@@ -1713,7 +1714,11 @@ export async function listProjectsFirestore(uid: string): Promise<{ id: string; 
       coverImageUrls?: string[];
       coverImageDataUrls?: string[];
       screenCount?: number;
-      designSpecMeta?: { screens?: Array<unknown> };
+      designSpecMeta?: {
+        description?: string;
+        designSystem?: HtmlDesignSpec["designSystem"];
+        screens?: Array<unknown>;
+      };
     };
     const persistedCoverUrls = Array.isArray(data.coverImageUrls)
       ? data.coverImageUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -1726,11 +1731,14 @@ export async function listProjectsFirestore(uid: string): Promise<{ id: string; 
     return {
       id: d.id,
       name: data.name || "Untitled project",
+      createdAt: data.createdAt || data.updatedAt || "",
       updatedAt: data.updatedAt || "",
       screenCount: typeof data.screenCount === "number"
         ? data.screenCount
         : (Array.isArray(data.designSpecMeta?.screens) ? data.designSpecMeta!.screens!.length : 0),
       hasSnapshot: Boolean(data.snapshotPath),
+      description: data.designSpecMeta?.description || "",
+      designSystem: data.designSpecMeta?.designSystem,
       coverImageUrl: coverImageUrls[0] || fallbackCover,
       coverImageUrls: coverImageUrls.length > 0 ? coverImageUrls : (fallbackCover ? [fallbackCover] : undefined),
     };

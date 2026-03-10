@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStar, FolderOpen, Gem, House, LineSquiggle, Loader2, LogOut, Monitor, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, House, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Search, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -28,6 +28,31 @@ type ProjectListItem = {
 };
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
+const SIDEBAR_EXPANDED_WIDTH = 264;
+const SIDEBAR_COLLAPSED_WIDTH = 88;
+
+const workspaceSignals = [
+  {
+    id: 'upgrade-plan',
+    title: 'Upgrade plan',
+    detail: 'Unlock faster queues, larger credit caps, and premium workspace tools.',
+    actionLabel: 'View plans',
+    accentClassName: 'border-amber-300/20 bg-amber-400/10 text-amber-100',
+    iconClassName: 'border-amber-300/25 bg-amber-400/12 text-amber-200',
+    Icon: Gem,
+    path: '/pricing',
+  },
+  {
+    id: 'new-feature',
+    title: 'New feature',
+    detail: 'Project-aware planning is live for sharper first drafts and cleaner flows.',
+    actionLabel: 'See changelog',
+    accentClassName: 'border-indigo-300/20 bg-indigo-400/10 text-indigo-100',
+    iconClassName: 'border-indigo-300/25 bg-indigo-400/12 text-indigo-200',
+    Icon: Sparkles,
+    path: '/changelog',
+  },
+] as const;
 
 function formatDate(value: string) {
   try {
@@ -43,7 +68,10 @@ function sortProjects(items: ProjectListItem[]) {
 
 export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, onOpenProject }: ProjectWorkspacePageProps) {
   const requestConfirmation = useUiStore((state) => state.requestConfirmation);
+  const theme = useUiStore((state) => state.theme);
+  const setTheme = useUiStore((state) => state.setTheme);
   const [authUser, setAuthUser] = useState<User | null>(null);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
@@ -60,9 +88,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
   const [openAvatarMenu, setOpenAvatarMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const starterPromptRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
 
+  const isLight = theme === 'light';
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
   const authEmail = authUser?.email || 'No email';
   const authPhotoUrl = authUser?.photoURL
@@ -97,9 +127,58 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
         : stylePreset === 'playful'
           ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-          : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+        : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+  const sidebarNavItems = [
+    // {
+    //   id: 'workspace-home',
+    //   label: 'Workspace Home',
+    //   subtitle: 'Overview',
+    //   Icon: House,
+    //   active: false,
+    //   iconClassName: '',
+    //   onClick: () => onNavigate('/app'),
+    // },
+    {
+      id: 'projects',
+      label: 'Projects',
+      subtitle: 'Library',
+      Icon: FolderOpen,
+      active: true,
+      iconClassName: '',
+      onClick: () => onNavigate('/app/projects'),
+    },
+    {
+      id: 'new-project',
+      label: 'New Project',
+      subtitle: 'Start fresh',
+      Icon: Plus,
+      active: false,
+      iconClassName: '',
+      onClick: () => onNavigate('/app/projects/new'),
+    },
+    {
+      id: 'refresh-projects',
+      label: 'Refresh',
+      subtitle: 'Sync list',
+      Icon: RefreshCcw,
+      active: false,
+      onClick: () => void loadProjects(),
+      iconClassName: loading ? 'animate-spin' : '',
+    },
+  ] as const;
+  const sidebarWidth = sidebarExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
+  const sidebarLabelClassName = sidebarExpanded
+    ? 'max-w-[160px] translate-x-0 opacity-100'
+    : 'pointer-events-none max-w-0 -translate-x-2 opacity-0';
+  const avatarMenuPositionClassName = sidebarExpanded ? 'left-full ml-3' : 'left-[56px]';
+  const shellBadgeClassName = isLight
+    ? 'border-slate-300/70 bg-white/85 text-slate-700'
+    : 'border-white/10 bg-white/[0.04] text-slate-300';
+  const accentButtonClassName = isLight
+    ? 'border-indigo-200 bg-indigo-500 text-white hover:bg-indigo-600'
+    : 'border-indigo-300/10 bg-indigo-500 text-white hover:bg-indigo-400';
 
-  const loadProjects = async () => {
+  async function loadProjects() {
     if (!authReady || !isAuthenticated) return;
     try {
       setLoading(true);
@@ -111,12 +190,24 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     } finally {
       setLoading(false);
     }
+  }
+
+  const focusComposer = () => {
+    starterPromptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    starterPromptRef.current?.focus();
   };
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
     void loadProjects();
   }, [authReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth < 1024) {
+      setSidebarExpanded(false);
+    }
+  }, []);
 
   useEffect(() => {
     const unsub = observeAuthState((user) => setAuthUser(user));
@@ -303,102 +394,263 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   }
 
   return (
-    <div className="h-screen w-screen bg-[--ui-bg] text-[var(--ui-text)]">
-      <aside className="fixed inset-y-0 left-0 z-30 flex w-[74px] flex-col items-center border-r border-white/10 bg-[--ui-bg] px-3 py-4">
-        <button
-          type="button"
-          onClick={() => onNavigate('/')}
-          className="grid h-10 w-10 place-items-center"
-          title="Go to home"
+    <div className="h-screen w-screen text-[var(--ui-text)]">
+      <div className="workspace-shell-frame flex h-full overflow-hidden p-2 md:p-3">
+        <aside
+          className="flex shrink-0 flex-col rounded-[28px] transition-[width] duration-300 ease-out"
+          style={{ width: sidebarWidth }}
         >
-          <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
-        </button>
+          <div className={`flex items-center ${sidebarExpanded ? 'justify-between gap-3' : 'flex-col gap-2'}`}>
+            <button
+              type="button"
+              onClick={() => onNavigate('/')}
+              className={`group flex items-center rounded-[22px] transition-colors ${sidebarExpanded ? 'gap-3 px-2 py-2 hover:bg-[var(--workspace-soft)]' : 'h-12 w-12 justify-center hover:bg-[var(--workspace-soft)]'}`}
+              title="Go to home"
+            >
+              <span className="grid h-10 w-10 shrink-0 place-items-center">
+                <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+              </span>
+              <span className={`overflow-hidden whitespace-nowrap text-left transition-all duration-300 ${sidebarLabelClassName}`}>
+                <span className="block text-lg font-semibold text-[var(--ui-text)]">EazyUI</span>
+              </span>
+            </button>
 
-        <nav className="mt-7 flex flex-1 flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onNavigate('/app')}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-            title="Workspace Home"
-          >
-            <House size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('/app/projects')}
-            className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)]"
-            title="Projects"
-          >
-            <FolderOpen size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('/app/projects/new')}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-            title="New Project"
-          >
-            <Plus size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void loadProjects()}
-            className="grid h-10 w-10 place-items-center rounded-2xl text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-            title="Refresh Projects"
-          >
-            <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
-          </button>
-        </nav>
+            <button
+              type="button"
+              onClick={() => setSidebarExpanded((expanded) => !expanded)}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-[var(--ui-text-subtle)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
+              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+              title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            >
+              {sidebarExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+          </div>
 
-        <div className="relative mt-6" ref={avatarMenuRef}>
-          <button
-            type="button"
-            onClick={() => setOpenAvatarMenu((open) => !open)}
-            className="grid h-10 w-10 place-items-center overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[12px] font-medium text-[var(--ui-text)] hover:border-[var(--ui-border-light)]"
-            title="Account"
-          >
-            <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-          </button>
-          {openAvatarMenu && (
-            <div className="absolute bottom-0 left-[56px] w-[220px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
-              <div className="flex items-center gap-2">
-                <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
-                  <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
-                  <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
+          {/* {sidebarExpanded && (
+            <button
+              type="button"
+              onClick={focusComposer}
+              className="mt-4 flex h-16 items-center justify-between rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-4 text-left transition-colors hover:bg-[var(--workspace-soft-strong)]"
+            >
+              <div className="inline-flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--workspace-soft-strong)] text-[var(--ui-text-subtle)]">
+                  <Search size={16} />
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-[var(--ui-text)]">Search</p>
+                  <p className="text-[11px] text-[var(--ui-text-subtle)]">Jump to your next build idea</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20"
-              >
-                <LogOut size={13} />
-                Logout
-              </button>
+              <span className={`inline-flex items-center gap-2 rounded-2xl border px-2.5 py-2 text-[11px] font-semibold ${shellBadgeClassName}`}>
+                <Search size={12} />
+                Ctrl K
+              </span>
+            </button>
+          )} */}
+
+          <div className="mt-5 flex flex-1 flex-col overflow-hidden">
+            {sidebarExpanded && (
+              <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
+            )}
+            <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2'}`}>
+              {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={onClick}
+                  className={`group flex items-center transition-all duration-300 ${sidebarExpanded
+                    ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
+                      ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_12px_30px_rgba(0,0,0,0.08)]'
+                      : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
+                    : `h-12 w-12 justify-center rounded-2xl ${active
+                      ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_10px_24px_rgba(0,0,0,0.08)]'
+                      : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
+                  title={label}
+                >
+                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
+                    <Icon size={16} className={iconClassName} />
+                  </span>
+                  <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
+                    <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
+                    <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                  </span>
+                </button>
+              ))}
+            </nav>
+
+            <div className="mt-auto flex flex-col gap-3 pt-5">
+              {sidebarExpanded ? (
+                <>
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('/changelog')}
+                    className="flex items-center gap-3 rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-3 py-3 text-left transition-colors hover:bg-[var(--workspace-soft-strong)]"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-indigo-300/20 bg-indigo-400/12 text-indigo-300">
+                      <Gem size={16} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-[var(--ui-text)]">New feature</span>
+                      <span className="block text-[11px] leading-4 text-[var(--ui-text-subtle)]">Project-aware planning is live.</span>
+                    </span>
+                  </button>
+
+                  <div className="rounded-[24px] border border-[var(--workspace-upgrade-border)] bg-[var(--workspace-upgrade-bg)] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.08)]">
+                    <div className="flex items-start gap-3">
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--ui-bg)] text-[var(--color-text)]">
+                        <Sparkles size={16} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">upgrade plan</p>
+                        <p className="mt-1 text-base font-semibold text-[var(--ui-text)]">Pro Plan</p>
+                        <p className="mt-2 text-[12px] leading-5 text-[var(--ui-text-muted)]">
+                          Upgrade to Pro to get the latest and exclusive workspace features.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('/pricing')}
+                      className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/30 bg-[var(--color-accent)] px-4 text-sm font-semibold text-[var(--workspace-upgrade-button-text)] transition-colors hover:bg-white"
+                    >
+                      Upgrade to Pro
+                    </button>
+                  </div>
+
+                  <div className="rounded-[22px]">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)] pl-3">Appearance</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--workspace-soft-strong)] p-1">
+                      <button
+                        type="button"
+                        onClick={() => setTheme('light')}
+                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'light'
+                          ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]'
+                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                      >
+                        <Sun size={14} />
+                        Light
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTheme('dark')}
+                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'dark'
+                          ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]'
+                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                      >
+                        <Moon size={14} />
+                        Dark
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  {workspaceSignals.map(({ id, title, Icon, path }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onNavigate(path)}
+                      className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--workspace-soft-strong)] hover:text-[var(--ui-text)]"
+                      title={title}
+                    >
+                      <Icon size={16} />
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                    className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--workspace-soft-strong)] hover:text-[var(--ui-text)]"
+                    title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                  >
+                    {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+                  </button>
+                </div>
+              )}
+
+              <div className="relative" ref={avatarMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setOpenAvatarMenu((open) => !open)}
+                  className={`flex w-full items-center overflow-hidden text-[12px] font-medium text-[var(--ui-text)] transition-all hover:bg-[var(--workspace-soft-strong)] ${sidebarExpanded ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)]  gap-3 rounded-[22px] px-2.5 py-2.5 text-left' : 'h-12 w-12 justify-center rounded-2xl'}`}
+                  title="Account"
+                >
+                  <span className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
+                    <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                  </span>
+                  <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
+                    <span className="block text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
+                    <span className="block text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
+                  </span>
+                </button>
+                {openAvatarMenu && (
+                  <div className={`absolute bottom-0 ${avatarMenuPositionClassName} w-[220px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.45)]`}>
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                        <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
+                        <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSignOut()}
+                      className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20"
+                    >
+                      <LogOut size={13} />
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      </aside>
+          </div>
+        </aside>
 
-      <div className="h-screen overflow-y-auto pl-[74px]">
+        <div className="min-w-0 flex-1 pl-2 md:pl-3">
+          <div className="flex h-full flex-col overflow-hidden rounded-[30px] bg-[var(--ui-surface-1)] shadow-[var(--workspace-content-shadow)]">
+            <div className="px-5 py-4 md:px-7">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  {/* <h1 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--ui-text)] md:text-[30px]">Projects</h1> */}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${shellBadgeClassName}`}>
+                    <FolderOpen size={12} />
+                    {projects.length} projects
+                  </span>
+                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${shellBadgeClassName}`}>
+                    {theme === 'light' ? <Sun size={12} /> : <Moon size={12} />}
+                    {theme} mode
+                  </span>
+                </div>
+              </div>
+            </div>
 
-      <main className="relative mx-auto max-w-[1200px] px-4 py-10 md:px-7">
-        <section className="mx-auto max-w-[860px] pt-[100px] text-center">
-          <p className="text-[44px] md:text-[58px] leading-none tracking-[-0.03em] font-semibold text-[var(--ui-text)]">
-            EazyUI Projects
-          </p>
-          <p className="mt-3 text-[15px] text-[var(--ui-text-muted)]">Type what you want to build and start a new project instantly.</p>
+            <div className="flex-1 overflow-y-auto">
+              <main className="relative mx-auto max-w-[1200px] px-4 py-8 md:px-7 md:py-10">
+                <section className="mx-auto max-w-[920px] text-center">
+                  <p className="inline-flex items-center gap-2 rounded-full border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                    <Sparkles size={12} />
+                    Build faster in one workspace
+                  </p>
+                  <p className="mt-5 text-[42px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] md:text-[58px]">
+                    EazyUI Projects
+                  </p>
+                  <p className="mt-3 text-[15px] leading-7 text-[var(--ui-text-muted)]">
+                    Type what you want to build and start a new project instantly.
+                  </p>
 
-          <form
-            className="mt-8"
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleCreateFromPrompt();
-            }}
-          >
-            <div className="mx-auto w-full rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3 ">
+                  <form
+                    className="mt-8"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      handleCreateFromPrompt();
+                    }}
+                  >
+                    <div className="mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -438,6 +690,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     />
                   </div>
                   <textarea
+                    ref={starterPromptRef}
                     value={starterPrompt}
                     onChange={(event) => setStarterPrompt(event.target.value)}
                     onKeyDown={(event) => {
@@ -454,7 +707,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 <button
                   type="submit"
                   disabled={!starterPrompt.trim() || creatingFromPrompt}
-                  className="h-9 w-9 shrink-0 rounded-[12px] flex items-center justify-center transition-all bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40"
+                  className={`h-10 w-10 shrink-0 rounded-[14px] border flex items-center justify-center transition-all disabled:opacity-40 ${accentButtonClassName}`}
                   title="Create project from request"
                 >
                   {creatingFromPrompt ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={18} />}
@@ -563,11 +816,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   )}
                 </div>
               </div>
-            </div>
-          </form>
-        </section>
+                    </div>
+                  </form>
+                </section>
 
-        <section className="mt-[100px]">
+                <section className="mt-16 md:mt-20">
           <h1 className="text-[34px] md:text-[52px] leading-[0.96] font-semibold tracking-[-0.03em]">Your Projects</h1>
           <p className="mt-3 text-sm text-[var(--ui-text-muted)]">Open, continue, or remove projects saved in Firestore/Storage.</p>
 
@@ -604,7 +857,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 type="button"
                 onClick={() => void handleDelete(selectedProjectIds)}
                 disabled={!hasSelectedProjects || deleteProgress !== null}
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--color-error)] hover:bg-rose-500/20 disabled:opacity-50"
               >
                 {deleteProgress ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                 Delete selected
@@ -627,7 +880,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           {!loading && projects.length > 0 && (
             <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
-                <article key={project.id} className={`relative rounded-2xl border p-4 ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}>
+                <article key={project.id} className={`relative rounded-[24px] border p-4 shadow-[0_16px_32px_rgba(0,0,0,0.06)] ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}>
                   <div className="absolute left-3 top-3 z-10">
                     <input
                       type="checkbox"
@@ -653,7 +906,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       const secondaryImage = persistedImages[1];
                       const frameImages = secondaryImage ? [primaryImage, secondaryImage] : [primaryImage];
                       return (
-                        <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden r px-3 py-4">
+                        <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden rounded-[20px] bg-[var(--workspace-soft-strong)] px-3 py-4">
                           {frameImages.map((imageUrl, index) => (
                             <div
                               key={`${project.id}-preview-${index}`}
@@ -704,7 +957,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       type="button"
                       onClick={() => void handleDelete([project.id])}
                       disabled={deletingIdSet.has(project.id) || deleteProgress !== null}
-                      className="h-8 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                      className="h-8 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--color-error)] hover:bg-rose-500/20 disabled:opacity-50"
                     >
                       <span className="inline-flex items-center gap-1.5">
                         {deletingIdSet.has(project.id) ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -716,8 +969,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
               ))}
             </section>
           )}
-        </section>
-      </main>
+                </section>
+              </main>
+            </div>
+          </div>
+        </div>
       </div>
       <ConfirmationDialog />
     </div>

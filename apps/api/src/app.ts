@@ -15,6 +15,7 @@ import { saveProject, getProject, listProjects, deleteProject } from './services
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
+import { buildFirecrawlReferenceContext } from './services/firecrawl.js';
 import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import {
     buildBillingSummaryForApi,
@@ -181,6 +182,66 @@ function previewText(value: unknown, max = LOG_PREVIEW_MAX): string {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
     return text.length <= max ? text : `${text.slice(0, max)}...`;
+}
+
+async function applyReferenceUrlContext(
+    text: string,
+    referenceUrls: string[] | undefined,
+    traceId: string,
+    route: string,
+): Promise<{
+    text: string;
+    normalizedUrls: string[];
+    webContextApplied: boolean;
+}> {
+    const baseText = typeof text === 'string' ? text : String(text || '');
+    if (!referenceUrls?.length) {
+        return {
+            text: baseText,
+            normalizedUrls: [],
+            webContextApplied: false,
+        };
+    }
+
+    try {
+        const result = await buildFirecrawlReferenceContext(referenceUrls);
+        if (result.warnings.length) {
+            fastify.log.warn({
+                traceId,
+                route,
+                referenceUrlsCount: referenceUrls.length,
+                normalizedReferenceUrlsCount: result.normalizedUrls.length,
+                warnings: result.warnings.slice(0, 3),
+                skippedReason: result.skippedReason,
+            }, 'reference-urls: partial failure');
+        }
+
+        if (!result.promptContext) {
+            return {
+                text: baseText,
+                normalizedUrls: result.normalizedUrls,
+                webContextApplied: false,
+            };
+        }
+
+        return {
+            text: `${baseText.trim()}\n\n${result.promptContext}`,
+            normalizedUrls: result.normalizedUrls,
+            webContextApplied: true,
+        };
+    } catch (error) {
+        fastify.log.warn({
+            traceId,
+            route,
+            referenceUrlsCount: referenceUrls.length,
+            err: error,
+        }, 'reference-urls: failed to build context');
+        return {
+            text: baseText,
+            normalizedUrls: [],
+            webContextApplied: false,
+        };
+    }
 }
 
 function resolveAuthHeader(request: { headers: Record<string, unknown> }): string | undefined {

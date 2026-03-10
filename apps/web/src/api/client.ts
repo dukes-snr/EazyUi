@@ -170,6 +170,7 @@ export interface GenerateRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[]; // Base64 encoded images
+    referenceUrls?: string[];
     expectedScreenCount?: number;
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
@@ -189,6 +190,7 @@ export interface EditRequest {
     html: string;
     screenId: string;
     images?: string[];
+    referenceUrls?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
     projectId?: string;
@@ -557,6 +559,7 @@ export interface PlannerRequest {
     projectMemorySummary?: string;
     routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
+    referenceUrls?: string[];
     preferredModel?: string;
     temperature?: number;
 }
@@ -1147,7 +1150,7 @@ class ApiClient {
         return project;
     }
 
-    async listProjects(): Promise<{ projects: { id: string; name: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; coverImageUrl?: string; coverImageUrls?: string[] }[] }> {
+    async listProjects(): Promise<{ projects: { id: string; name: string; createdAt: string; updatedAt: string; screenCount: number; hasSnapshot: boolean; description?: string; designSystem?: ProjectDesignSystem; coverImageUrl?: string; coverImageUrls?: string[] }[] }> {
         const uid = this.requireAuthUid();
         const projects = await listProjectsFirestore(uid);
         return { projects };

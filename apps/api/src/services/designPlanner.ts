@@ -110,6 +110,7 @@ export type PlannerInput = {
     projectMemorySummary?: string;
     routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
     referenceImages?: string[];
+    referenceUrls?: string[];
     preferredModel?: string;
     temperature?: number;
 };
