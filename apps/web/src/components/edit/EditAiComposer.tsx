@@ -7,6 +7,17 @@ import { dispatchSelectUid } from '../../utils/editMessaging';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
 import { getPreferredTextModel } from '../../constants/designModels';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
+import {
+    extractComposerInlineReferences,
+    findComposerReferenceTrigger,
+    formatComposerUrlReferenceToken,
+    getFilteredComposerReferenceRootOptions,
+    normalizeComposerReferenceUrl,
+    replaceComposerReferenceTrigger,
+    type ComposerReferenceTextRange,
+} from '../../utils/composerReferences';
+import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { Orb } from '../ui/Orb';
 
 export function EditAiComposer() {
@@ -25,7 +36,17 @@ export function EditAiComposer() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [description, setDescription] = useState('');
+    const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
+    const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
+    const [referenceRootQuery, setReferenceRootQuery] = useState('');
+    const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
+    const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const abortRef = useRef<AbortController | null>(null);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const textareaOverlayRef = useRef<HTMLDivElement | null>(null);
+    const referenceMenuRef = useRef<HTMLDivElement | null>(null);
+    const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
+    const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
     const activeScreen = useMemo(() => {
         if (!spec || !screenId) return null;
@@ -41,11 +62,62 @@ export function EditAiComposer() {
     const { agentState: editOrbState, colors: editOrbColors } = useOrbVisuals(editOrbActivity);
     const editOrbInput = busy ? 0.6 : prompt.trim() ? 0.38 : 0.15;
     const editOrbOutput = busy ? 0.8 : prompt.trim() ? 0.55 : 0.2;
+    const rootReferenceOptions = useMemo(
+        () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
+        [referenceRootQuery]
+    );
+
+    const closeReferenceMenu = () => {
+        setIsReferenceMenuOpen(false);
+        setReferenceMenuMode('root');
+        setReferenceRootQuery('');
+        setReferenceActiveIndex(0);
+        setReferenceUrlDraft('');
+        referenceTriggerRangeRef.current = null;
+    };
+
+    const syncReferenceTrigger = (value: string, cursor: number) => {
+        const match = findComposerReferenceTrigger(value, cursor);
+        if (!match) {
+            if (referenceMenuMode === 'root') {
+                closeReferenceMenu();
+            }
+            return;
+        }
+        referenceTriggerRangeRef.current = match.range;
+        setReferenceRootQuery(match.query);
+        setReferenceMenuMode('root');
+        setIsReferenceMenuOpen(true);
+    };
+
+    const openUrlReferenceInput = () => {
+        setReferenceMenuMode('url');
+        setReferenceActiveIndex(0);
+        setReferenceUrlDraft('');
+        setIsReferenceMenuOpen(true);
+    };
+
+    const submitUrlReference = () => {
+        const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
+        if (!normalized) return;
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        setPrompt(result.value);
+        closeReferenceMenu();
+        window.setTimeout(() => {
+            const target = textareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(result.cursor, result.cursor);
+        }, 0);
+    };
 
     const applyAiEdit = async () => {
         if (!isEditMode || !screenId || !activeScreen || !selected) return;
         const nextPrompt = prompt.trim();
         if (!nextPrompt || busy) return;
+        const parsedReferences = extractComposerInlineReferences(nextPrompt);
 
         const htmlSource = rebuildHtml() || activeScreen.html;
         if (!htmlSource) return;
@@ -54,7 +126,7 @@ export function EditAiComposer() {
 Edit only the selected component in this screen.
 
 USER REQUEST:
-${nextPrompt}
+${parsedReferences.cleanedText.trim()}
 
 TARGET COMPONENT:
 - data-uid: ${selected.uid}
@@ -92,6 +164,7 @@ RULES:
                 instruction: scopedInstruction,
                 html: htmlSource,
                 screenId,
+                referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
                 preferredModel: getPreferredTextModel(modelProfile),
             }, controller.signal);
             const ensured = ensureEditableUids(response.html);
@@ -133,6 +206,22 @@ RULES:
         };
     }, []);
 
+    useEffect(() => {
+        if (!isReferenceMenuOpen) return;
+        const handlePointerDown = (event: MouseEvent) => {
+            if (referenceMenuRef.current?.contains(event.target as Node)) return;
+            if (event.target === textareaRef.current) return;
+            closeReferenceMenu();
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isReferenceMenuOpen, referenceMenuMode]);
+
+    useEffect(() => {
+        if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
+        referenceUrlInputRef.current?.focus();
+    }, [isReferenceMenuOpen, referenceMenuMode]);
+
     if (!isEditMode) return null;
 
     return (
@@ -162,22 +251,109 @@ RULES:
                                 manualOutput={editOrbOutput}
                             />
                         </div>
-                        <textarea
-                            value={prompt}
-                            onChange={(event) => setPrompt(event.target.value)}
-                            onKeyDown={(event) => {
-                                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                                    event.preventDefault();
-                                    void applyAiEdit();
-                                }
-                            }}
-                            placeholder={selected
-                                ? 'Describe exactly what to change for the selected element...'
-                                : 'Select an element first...'}
-                            disabled={!selected || busy}
-                            className="edit-ai-textarea"
-                        />
+                        <div className="relative flex-1 min-w-0">
+                            {prompt.length > 0 && (
+                                <div
+                                    ref={textareaOverlayRef}
+                                    className="absolute inset-0 overflow-hidden rounded-[12px] px-3 py-2.5 text-[13px] leading-[1.4]"
+                                >
+                                    <ComposerInlineReferenceOverlay value={prompt} className="text-[13px] leading-[1.4]" />
+                                </div>
+                            )}
+                            <textarea
+                                ref={textareaRef}
+                                value={prompt}
+                                onChange={(event) => {
+                                    const nextValue = event.target.value;
+                                    const cursor = event.target.selectionStart ?? nextValue.length;
+                                    setPrompt(nextValue);
+                                    syncReferenceTrigger(nextValue, cursor);
+                                }}
+                                onScroll={(event) => {
+                                    if (!textareaOverlayRef.current) return;
+                                    textareaOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                                    textareaOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key === '@') {
+                                        window.setTimeout(() => {
+                                            const target = textareaRef.current;
+                                            if (!target) return;
+                                            const cursor = target.selectionStart ?? target.value.length;
+                                            syncReferenceTrigger(target.value, cursor);
+                                        }, 0);
+                                    }
+                                    if (isReferenceMenuOpen) {
+                                        if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                                            if (event.key === 'ArrowDown') {
+                                                event.preventDefault();
+                                                setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                                                return;
+                                            }
+                                            if (event.key === 'ArrowUp') {
+                                                event.preventDefault();
+                                                setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                                                return;
+                                            }
+                                            if (event.key === 'Escape') {
+                                                event.preventDefault();
+                                                closeReferenceMenu();
+                                                return;
+                                            }
+                                            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                                                // allow submit shortcut to flow below
+                                            } else if (event.key === 'Enter' && !event.shiftKey) {
+                                                event.preventDefault();
+                                                const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                                                if (choice?.key === 'url') openUrlReferenceInput();
+                                                return;
+                                            }
+                                        }
+                                        if (referenceMenuMode === 'url' && event.key === 'Escape') {
+                                            event.preventDefault();
+                                            closeReferenceMenu();
+                                            return;
+                                        }
+                                    }
+                                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                                        event.preventDefault();
+                                        void applyAiEdit();
+                                    }
+                                }}
+                                onClick={(event) => {
+                                    const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                                    syncReferenceTrigger(event.currentTarget.value, cursor);
+                                }}
+                                onKeyUp={(event) => {
+                                    const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                                    syncReferenceTrigger(event.currentTarget.value, cursor);
+                                }}
+                                placeholder={selected
+                                    ? 'Describe exactly what to change for the selected element... (type @ to add a URL reference)'
+                                    : 'Select an element first...'}
+                                disabled={!selected || busy}
+                                className={`edit-ai-textarea ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
+                            />
+                        </div>
                     </div>
+                    {isReferenceMenuOpen && (
+                        <ComposerReferenceMenu
+                            activeIndex={referenceActiveIndex}
+                            menuMode={referenceMenuMode}
+                            menuRef={referenceMenuRef}
+                            onCancel={closeReferenceMenu}
+                            onRootOptionHover={setReferenceActiveIndex}
+                            onScreenHover={setReferenceActiveIndex}
+                            onSelectRootOption={(key) => {
+                                if (key === 'url') openUrlReferenceInput();
+                            }}
+                            onSubmitUrl={submitUrlReference}
+                            rootOptions={rootReferenceOptions}
+                            urlDraft={referenceUrlDraft}
+                            urlInputRef={referenceUrlInputRef}
+                            onUrlDraftChange={setReferenceUrlDraft}
+                        />
+                    )}
                     {busy ? (
                         <button
                             type="button"

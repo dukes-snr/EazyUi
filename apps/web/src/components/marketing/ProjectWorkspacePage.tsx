@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, House, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Search, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -7,7 +7,18 @@ import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
 import { useUiStore } from '../../stores';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
+import {
+  extractComposerInlineReferences,
+  findComposerReferenceTrigger,
+  formatComposerUrlReferenceToken,
+  getFilteredComposerReferenceRootOptions,
+  normalizeComposerReferenceUrl,
+  replaceComposerReferenceTrigger,
+  type ComposerReferenceTextRange,
+} from '../../utils/composerReferences';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
+import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { Orb } from '../ui/Orb';
 
 type ProjectWorkspacePageProps = {
@@ -87,10 +98,19 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [showStyleMenu, setShowStyleMenu] = useState(false);
   const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
   const [openAvatarMenu, setOpenAvatarMenu] = useState(false);
+  const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
+  const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
+  const [referenceRootQuery, setReferenceRootQuery] = useState('');
+  const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
+  const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const starterPromptRef = useRef<HTMLTextAreaElement | null>(null);
+  const starterPromptOverlayRef = useRef<HTMLDivElement | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
+  const referenceMenuRef = useRef<HTMLDivElement | null>(null);
+  const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
+  const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
   const isLight = theme === 'light';
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
@@ -177,6 +197,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const accentButtonClassName = isLight
     ? 'border-indigo-200 bg-indigo-500 text-white hover:bg-indigo-600'
     : 'border-indigo-300/10 bg-indigo-500 text-white hover:bg-indigo-400';
+  const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
 
   async function loadProjects() {
     if (!authReady || !isAuthenticated) return;
@@ -192,9 +213,50 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     }
   }
 
-  const focusComposer = () => {
-    starterPromptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    starterPromptRef.current?.focus();
+  const closeReferenceMenu = () => {
+    setIsReferenceMenuOpen(false);
+    setReferenceMenuMode('root');
+    setReferenceRootQuery('');
+    setReferenceActiveIndex(0);
+    setReferenceUrlDraft('');
+    referenceTriggerRangeRef.current = null;
+  };
+
+  const syncReferenceTrigger = (value: string, cursor: number) => {
+    const match = findComposerReferenceTrigger(value, cursor);
+    if (!match) {
+      if (referenceMenuMode === 'root') {
+        closeReferenceMenu();
+      }
+      return;
+    }
+    referenceTriggerRangeRef.current = match.range;
+    setReferenceRootQuery(match.query);
+    setReferenceMenuMode('root');
+    setIsReferenceMenuOpen(true);
+  };
+
+  const openUrlReferenceInput = () => {
+    setReferenceMenuMode('url');
+    setReferenceActiveIndex(0);
+    setReferenceUrlDraft('');
+    setIsReferenceMenuOpen(true);
+  };
+
+  const submitUrlReference = () => {
+    const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
+    if (!normalized) return;
+    const range = referenceTriggerRangeRef.current;
+    if (!range) return;
+    const result = replaceComposerReferenceTrigger(starterPrompt, range, formatComposerUrlReferenceToken(normalized));
+    setStarterPrompt(result.value);
+    closeReferenceMenu();
+    window.setTimeout(() => {
+      const target = starterPromptRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(result.cursor, result.cursor);
+    }, 0);
   };
 
   useEffect(() => {
@@ -245,6 +307,22 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [showStyleMenu]);
+
+  useEffect(() => {
+    if (!isReferenceMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (referenceMenuRef.current?.contains(event.target as Node)) return;
+      if (event.target === starterPromptRef.current) return;
+      closeReferenceMenu();
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isReferenceMenuOpen, referenceMenuMode]);
+
+  useEffect(() => {
+    if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
+    referenceUrlInputRef.current?.focus();
+  }, [isReferenceMenuOpen, referenceMenuMode]);
 
   useEffect(() => {
     apiClient.setComposerTemperature(modelTemperature);
@@ -344,12 +422,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const handleCreateFromPrompt = () => {
     const nextPrompt = starterPrompt.trim();
     if (!nextPrompt) return;
+    const parsedReferences = extractComposerInlineReferences(nextPrompt);
     setCreatingFromPrompt(true);
     window.sessionStorage.setItem(
       LANDING_DRAFT_KEY,
       JSON.stringify({
-        prompt: nextPrompt,
+        prompt: parsedReferences.cleanedText.trim(),
         images: starterImages,
+        referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
         platform: deviceType,
         stylePreset,
         modelProfile,
@@ -650,7 +730,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       handleCreateFromPrompt();
                     }}
                   >
-                    <div className="mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
+                    <div className="relative mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -677,7 +757,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </div>
               )}
               <div className="flex items-end gap-2 rounded-2xl px-1">
-                <div className="flex min-w-0 flex-1 items-start gap-2">
+                <div className="relative flex min-w-0 flex-1 items-start gap-2">
                   <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
                     <Orb
                       className="h-full w-full"
@@ -689,19 +769,83 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       manualOutput={workspaceOrbOutput}
                     />
                   </div>
+                  {starterPrompt.length > 0 && (
+                    <div
+                      ref={starterPromptOverlayRef}
+                      className="pointer-events-none absolute left-[51px] right-[10px] top-0 max-h-[220px] overflow-hidden px-3 py-2 text-[16px] leading-relaxed"
+                    >
+                      <ComposerInlineReferenceOverlay value={starterPrompt} className="text-[16px] leading-relaxed" />
+                    </div>
+                  )}
                   <textarea
                     ref={starterPromptRef}
                     value={starterPrompt}
-                    onChange={(event) => setStarterPrompt(event.target.value)}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const cursor = event.target.selectionStart ?? nextValue.length;
+                      setStarterPrompt(nextValue);
+                      syncReferenceTrigger(nextValue, cursor);
+                    }}
+                    onScroll={(event) => {
+                      if (!starterPromptOverlayRef.current) return;
+                      starterPromptOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                      starterPromptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                    }}
                     onKeyDown={(event) => {
+                      if (event.key === '@') {
+                        window.setTimeout(() => {
+                          const target = starterPromptRef.current;
+                          if (!target) return;
+                          const cursor = target.selectionStart ?? target.value.length;
+                          syncReferenceTrigger(target.value, cursor);
+                        }, 0);
+                      }
+                      if (isReferenceMenuOpen) {
+                        if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                            return;
+                          }
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                            return;
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            closeReferenceMenu();
+                            return;
+                          }
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                            if (choice?.key === 'url') openUrlReferenceInput();
+                            return;
+                          }
+                        }
+                        if (referenceMenuMode === 'url' && event.key === 'Escape') {
+                          event.preventDefault();
+                          closeReferenceMenu();
+                          return;
+                        }
+                      }
                       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                         event.preventDefault();
                         handleCreateFromPrompt();
                       }
                     }}
+                    onClick={(event) => {
+                      const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                      syncReferenceTrigger(event.currentTarget.value, cursor);
+                    }}
+                    onKeyUp={(event) => {
+                      const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                      syncReferenceTrigger(event.currentTarget.value, cursor);
+                    }}
                     placeholder="What do you want to create?"
                     rows={3}
-                    className="min-h-[64px] max-h-[220px] w-full resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0"
+                    className={`min-h-[64px] max-h-[220px] w-full resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0 ${starterPrompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
                   />
                 </div>
                 <button
@@ -816,6 +960,24 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   )}
                 </div>
               </div>
+              {isReferenceMenuOpen && (
+                <ComposerReferenceMenu
+                  activeIndex={referenceActiveIndex}
+                  menuMode={referenceMenuMode}
+                  menuRef={referenceMenuRef}
+                  onCancel={closeReferenceMenu}
+                  onRootOptionHover={setReferenceActiveIndex}
+                  onScreenHover={setReferenceActiveIndex}
+                  onSelectRootOption={(key) => {
+                    if (key === 'url') openUrlReferenceInput();
+                  }}
+                  onSubmitUrl={submitUrlReference}
+                  rootOptions={rootReferenceOptions}
+                  urlDraft={referenceUrlDraft}
+                  urlInputRef={referenceUrlInputRef}
+                  onUrlDraftChange={setReferenceUrlDraft}
+                />
+              )}
                     </div>
                   </form>
                 </section>

@@ -8,17 +8,17 @@ import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { Orb } from '../ui/Orb';
-import { ComposerReferenceChips } from '../ui/ComposerReferenceChips';
+import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import TextType from '../ui/TextType';
 import {
-    createComposerUrlReference,
+    extractComposerInlineReferences,
     findComposerReferenceTrigger,
+    formatComposerUrlReferenceToken,
     getFilteredComposerReferenceRootOptions,
     normalizeComposerReferenceUrl,
-    removeComposerReferenceTrigger,
+    replaceComposerReferenceTrigger,
     type ComposerReferenceTextRange,
-    type ComposerUrlReference,
 } from '../../utils/composerReferences';
 
 type LandingPageProps = {
@@ -200,7 +200,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [isPromptFocused, setIsPromptFocused] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
-    const [urlReferences, setUrlReferences] = useState<ComposerUrlReference[]>([]);
     const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
     const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
@@ -209,6 +208,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const styleMenuRef = useRef<HTMLDivElement | null>(null);
     const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const promptOverlayRef = useRef<HTMLDivElement | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -224,13 +224,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const submit = () => {
         const next = prompt.trim();
         if (!next) return;
+        const parsedReferences = extractComposerInlineReferences(next);
         onStart({
-            prompt: next,
+            prompt: parsedReferences.cleanedText.trim(),
             images,
             platform,
             stylePreset,
             modelProfile,
-            referenceUrls: urlReferences.map((item) => item.url),
+            referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
         });
     };
 
@@ -257,20 +258,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         setIsReferenceMenuOpen(true);
     };
 
-    const removeReferenceTriggerToken = () => {
-        const range = referenceTriggerRangeRef.current;
-        if (!range) return;
-        setPrompt((prev) => removeComposerReferenceTrigger(prev, range));
-    };
-
-    const focusPromptTextarea = () => {
-        window.setTimeout(() => {
-            promptTextareaRef.current?.focus();
-        }, 0);
-    };
-
     const openUrlReferenceInput = () => {
-        removeReferenceTriggerToken();
         setReferenceMenuMode('url');
         setReferenceActiveIndex(0);
         setReferenceUrlDraft('');
@@ -280,17 +268,17 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const submitUrlReference = () => {
         const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
         if (!normalized) return;
-        const nextReference = createComposerUrlReference(normalized);
-        setUrlReferences((prev) => {
-            if (prev.some((item) => item.url === nextReference.url)) return prev;
-            return [...prev, nextReference];
-        });
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        setPrompt(result.value);
         closeReferenceMenu();
-        focusPromptTextarea();
-    };
-
-    const removeUrlReference = (referenceId: string) => {
-        setUrlReferences((prev) => prev.filter((item) => item.id !== referenceId));
+        window.setTimeout(() => {
+            const target = promptTextareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(result.cursor, result.cursor);
+        }, 0);
     };
 
     const handlePromptChange = (value: string, cursor: number) => {
@@ -597,7 +585,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </h1>
                     <p className="mt-2 text-[20px] md:text-[30px] text-gray-300">Generate production-ready app screens and landing pages from a single prompt.</p>
 
-                    <div className="mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl p-3 md:p-4 text-left">
+                    <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl p-3 md:p-4 text-left">
                         <div className="relative">
                             {!prompt.trim() && !isPromptFocused && (
                                 <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
@@ -626,13 +614,42 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         manualOutput={landingOrbOutput}
                                     />
                                 </div>
+                                {prompt.length > 0 && (
+                                    <div
+                                        ref={promptOverlayRef}
+                                        className="pointer-events-none absolute left-[51px] right-[10px] top-0 max-h-[180px] overflow-hidden px-2 py-1 text-[16px] leading-normal"
+                                    >
+                                        <ComposerInlineReferenceOverlay value={prompt} className="text-[16px]" />
+                                    </div>
+                                )}
                                 <textarea
                                     ref={promptTextareaRef}
                                     value={prompt}
                                     onChange={(e) => handlePromptChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+                                    onScroll={(event) => {
+                                        if (!promptOverlayRef.current) return;
+                                        promptOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                                        promptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                                    }}
+                                    onClick={(event) => {
+                                        const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                                        syncReferenceTrigger(event.currentTarget.value, cursor);
+                                    }}
+                                    onKeyUp={(event) => {
+                                        const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
+                                        syncReferenceTrigger(event.currentTarget.value, cursor);
+                                    }}
                                     onFocus={() => setIsPromptFocused(true)}
                                     onBlur={() => setIsPromptFocused(false)}
                                     onKeyDown={(e) => {
+                                        if (e.key === '@') {
+                                            window.setTimeout(() => {
+                                                const target = promptTextareaRef.current;
+                                                if (!target) return;
+                                                const cursor = target.selectionStart ?? target.value.length;
+                                                syncReferenceTrigger(target.value, cursor);
+                                            }, 0);
+                                        }
                                         if (isReferenceMenuOpen) {
                                             if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
                                                 if (e.key === 'ArrowDown') {
@@ -669,17 +686,11 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         }
                                     }}
                                     placeholder=""
-                                    className="no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0"
+                                    className={`no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0 ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
                                     style={{ border: 'none', boxShadow: 'none' }}
                                 />
                             </div>
                         </div>
-
-                        <ComposerReferenceChips
-                            urlReferences={urlReferences}
-                            onRemoveUrl={removeUrlReference}
-                        />
-
                         {images.length > 0 && (
                             <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
                                 {images.map((img, i) => (

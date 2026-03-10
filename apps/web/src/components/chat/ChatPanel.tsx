@@ -11,7 +11,19 @@ import { getPreferredTextModel, type DesignModelProfile } from '../../constants/
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
+import {
+    extractComposerInlineReferences,
+    findComposerReferenceTrigger,
+    formatComposerScreenReferenceToken,
+    formatComposerUrlReferenceToken,
+    getFilteredComposerReferenceRootOptions,
+    normalizeComposerReferenceUrl,
+    replaceComposerReferenceTrigger,
+    type ComposerReferenceTextRange,
+} from '../../utils/composerReferences';
+import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
 import { Orb } from '../ui/Orb';
+import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import appLogo from '../../assets/Ui-logo.png';
 
 const FEEDBACK_BUCKETS = {
@@ -717,12 +729,14 @@ type PlannerSuggestionContext = {
     modelProfile: DesignModelProfile;
     existingScreenNames: string[];
     styleReference?: string;
+    referenceUrls?: string[];
 };
 
 type DesignSystemProposalContext = {
     prompt: string;
     appPromptForPlanning: string;
     images?: string[];
+    referenceUrls?: string[];
     platform: 'mobile' | 'tablet' | 'desktop';
     stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     modelProfile: DesignModelProfile;
@@ -2050,6 +2064,7 @@ type ChatPanelProps = {
         id: string;
         prompt: string;
         images?: string[];
+        referenceUrls?: string[];
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
@@ -2077,12 +2092,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [usedSuggestionKeysByMessage, setUsedSuggestionKeysByMessage] = useState<Record<string, string[]>>({});
     const [activeAssistantByUser, setActiveAssistantByUser] = useState<Record<string, string>>({});
     const [viewerImage, setViewerImage] = useState<{ src: string; alt?: string } | null>(null);
-    const [composerScreenReferences, setComposerScreenReferences] = useState<ComposerScreenReference[]>([]);
     const [isMentionOpen, setIsMentionOpen] = useState(false);
     const [mentionQuery, setMentionQuery] = useState('');
-    const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
-    const [mentionCursorIndex, setMentionCursorIndex] = useState<number | null>(null);
     const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+    const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url' | 'screen'>('root');
+    const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_MESSAGE_RENDER_COUNT);
     const [isTitleEditing, setIsTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState('');
@@ -2112,8 +2126,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const textareaOverlayRef = useRef<HTMLDivElement>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
     const mentionMenuRef = useRef<HTMLDivElement>(null);
+    const mentionSearchInputRef = useRef<HTMLInputElement>(null);
+    const referenceUrlInputRef = useRef<HTMLInputElement>(null);
+    const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
@@ -2595,14 +2613,16 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     }, [spec?.screens]);
 
     const filteredMentionScreens = useMemo(() => {
-        if (!isMentionOpen) return [];
+        if (!isMentionOpen || referenceMenuMode !== 'screen') return [];
         const query = mentionQuery.trim().toLowerCase();
-        const selected = new Set(composerScreenReferences.map((item) => item.screenId));
         return availableMentionScreens
-            .filter((screen) => !selected.has(screen.screenId))
             .filter((screen) => !query || screen.name.toLowerCase().includes(query))
             .slice(0, 8);
-    }, [availableMentionScreens, composerScreenReferences, isMentionOpen, mentionQuery]);
+    }, [availableMentionScreens, isMentionOpen, mentionQuery, referenceMenuMode]);
+
+    const rootReferenceOptions = useMemo(() => {
+        return getFilteredComposerReferenceRootOptions(mentionQuery, true);
+    }, [mentionQuery]);
 
     useEffect(() => {
         setActiveAssistantByUser((prev) => {
@@ -2736,24 +2756,29 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     useEffect(() => {
         setMentionActiveIndex(0);
-    }, [filteredMentionScreens.length, mentionQuery]);
-
-    useEffect(() => {
-        const validScreenIds = new Set((spec?.screens || []).map((screen) => screen.screenId));
-        setComposerScreenReferences((prev) => prev.filter((item) => validScreenIds.has(item.screenId)));
-    }, [spec?.screens]);
+    }, [filteredMentionScreens.length, rootReferenceOptions.length, mentionQuery, referenceMenuMode]);
 
     useEffect(() => {
         if (!isMentionOpen) return;
         const handlePointerDown = (event: MouseEvent) => {
             if (!mentionMenuRef.current) return;
             if (!mentionMenuRef.current.contains(event.target as Node) && event.target !== textareaRef.current) {
-                setIsMentionOpen(false);
+                closeMentionMenu();
             }
         };
         document.addEventListener('pointerdown', handlePointerDown);
         return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [isMentionOpen]);
+
+    useEffect(() => {
+        if (!isMentionOpen || referenceMenuMode !== 'url') return;
+        referenceUrlInputRef.current?.focus();
+    }, [isMentionOpen, referenceMenuMode]);
+
+    useEffect(() => {
+        if (!isMentionOpen || referenceMenuMode !== 'screen') return;
+        mentionSearchInputRef.current?.focus();
+    }, [isMentionOpen, referenceMenuMode]);
 
     useEffect(() => {
         const validIds = new Set(messages.map((message) => message.id));
@@ -3029,60 +3054,90 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     const closeMentionMenu = () => {
         setIsMentionOpen(false);
+        setReferenceMenuMode('root');
         setMentionQuery('');
-        setMentionAnchorIndex(null);
-        setMentionCursorIndex(null);
         setMentionActiveIndex(0);
+        setReferenceUrlDraft('');
+        referenceTriggerRangeRef.current = null;
     };
 
     const syncMentionState = (value: string, cursor: number) => {
-        const beforeCursor = value.slice(0, cursor);
-        const match = beforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
+        if (referenceMenuMode !== 'root' && isMentionOpen) return;
+        const match = findComposerReferenceTrigger(value, cursor);
         if (!match) {
             closeMentionMenu();
             return;
         }
-        const query = match[1] || '';
-        const anchor = cursor - query.length - 1;
-        setMentionQuery(query);
-        setMentionAnchorIndex(anchor);
-        setMentionCursorIndex(cursor);
+        referenceTriggerRangeRef.current = match.range;
+        setMentionQuery(match.query);
+        setReferenceMenuMode('root');
         setIsMentionOpen(true);
     };
 
-    const addComposerScreenReference = (screen: ComposerScreenReference) => {
-        setComposerScreenReferences((prev) => {
-            if (prev.some((item) => item.screenId === screen.screenId)) return prev;
-            return [...prev, screen];
-        });
+    const openUrlReferenceInput = () => {
+        setReferenceMenuMode('url');
+        setMentionActiveIndex(0);
+        setMentionQuery('');
+        setReferenceUrlDraft('');
+        setIsMentionOpen(true);
     };
 
-    const removeComposerScreenReference = (screenId: string) => {
-        setComposerScreenReferences((prev) => prev.filter((item) => item.screenId !== screenId));
+    const openScreenReferenceInput = () => {
+        setReferenceMenuMode('screen');
+        setMentionActiveIndex(0);
+        setMentionQuery('');
+        setIsMentionOpen(true);
     };
 
-    const selectMentionScreen = (screen: ComposerScreenReference) => {
-        addComposerScreenReference(screen);
-        const start = mentionAnchorIndex ?? 0;
-        const end = mentionCursorIndex ?? start;
-        const nextPrompt = `${prompt.slice(0, start)}${prompt.slice(end)}`.replace(/\s{2,}/g, ' ');
-        setPrompt(nextPrompt);
+    const submitUrlReference = () => {
+        const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
+        if (!normalized) return;
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        setPrompt(result.value);
         closeMentionMenu();
         window.setTimeout(() => {
-            if (!textareaRef.current) return;
-            const cursor = Math.max(0, Math.min(start, nextPrompt.length));
-            textareaRef.current.focus();
-            textareaRef.current.setSelectionRange(cursor, cursor);
+            const target = textareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(result.cursor, result.cursor);
         }, 0);
     };
 
-    const getScreenReferencesFromComposer = (references: ComposerScreenReference[] = composerScreenReferences): HtmlScreen[] => {
+    const selectMentionScreen = (screen: ComposerScreenReference) => {
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerScreenReferenceToken(screen.name));
+        setPrompt(result.value);
+        closeMentionMenu();
+        window.setTimeout(() => {
+            const target = textareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(result.cursor, result.cursor);
+        }, 0);
+    };
+
+    const getScreenReferencesFromComposer = (references: ComposerScreenReference[] = []): HtmlScreen[] => {
         if (!references.length) return [];
         const currentScreens = useDesignStore.getState().spec?.screens || [];
         const byId = new Map(currentScreens.map((screen) => [screen.screenId, screen]));
         return references
             .map((item) => byId.get(item.screenId))
             .filter(Boolean) as HtmlScreen[];
+    };
+
+    const resolveInlineComposerReferences = (value: string) => {
+        const parsed = extractComposerInlineReferences(value, {
+            allowScreen: true,
+            screens: availableMentionScreens,
+        });
+        return {
+            prompt: parsed.cleanedText.trim(),
+            referenceUrls: parsed.urlReferences.map((item) => item.url),
+            referenceScreens: getScreenReferencesFromComposer(parsed.screenReferences),
+        };
     };
 
     const buildPlannerReferenceImages = async (screens: HtmlScreen[]): Promise<string[]> => {
@@ -3321,7 +3376,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             suggestion.screenNames,
             basePromptWithDetails,
             targetExistingScreens,
-            targetStyleReference
+            targetStyleReference,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            suggestionContext?.referenceUrls || []
         );
     };
 
@@ -3359,7 +3420,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             context.parentUserId,
             getScreenReferencesFromComposer(context.referenceScreens),
             false,
-            true
+            true,
+            undefined,
+            context.referenceUrls || []
         );
     };
 
@@ -3446,9 +3509,11 @@ Return a polished, consistent screen without introducing a new navigation patter
         existingUserMessageId?: string,
         overridePrompt?: string,
         overrideImages?: string[],
-        incomingReferenceScreens?: HtmlScreen[]
+        incomingReferenceScreens?: HtmlScreen[],
+        incomingReferenceUrls?: string[]
     ) => {
-        const requestPrompt = (overridePrompt ?? prompt).trim();
+        const resolvedComposerReferences = resolveInlineComposerReferences(overridePrompt ?? prompt);
+        const requestPrompt = resolvedComposerReferences.prompt;
         setIsAwaitingAssistantDecision(false);
         if (!requestPrompt || isGenerating) return;
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -3457,7 +3522,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
 
         const imagesToSend = overrideImages ? [...overrideImages] : [...images];
-        const referenceScreens = incomingReferenceScreens || [];
+        const referenceScreens = incomingReferenceScreens || resolvedComposerReferences.referenceScreens;
+        const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.referenceUrls;
         const routeReferenceScreens = pickRouteReferenceScreens(
             requestPrompt,
             useDesignStore.getState().spec?.screens || [],
@@ -3474,6 +3540,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(useChatStore.getState().messages.find((m) => m.id === userMsgId)?.meta || {}),
                 livePreview: false,
                 requestKind: 'plan',
+                ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             }
         });
@@ -3489,7 +3556,6 @@ Return a polished, consistent screen without introducing a new navigation patter
         if (!existingUserMessageId) {
             setPrompt('');
             setImages([]);
-            setComposerScreenReferences([]);
             closeMentionMenu();
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
@@ -3518,6 +3584,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset,
                 screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
+                referenceUrls,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
             }, routeReferenceScreens));
             captureBillingTokens((route as any)?.billing);
@@ -3546,6 +3613,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             modelProfile,
                             existingScreenNames: snapshotScreenNames,
                             styleReference: snapshotStyleReference,
+                            referenceUrls,
                         } as PlannerSuggestionContext,
                     }
                 });
@@ -3567,6 +3635,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 screenCountDesired: 2,
                 screensGenerated: (spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
+                referenceUrls,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
             }));
             captureBillingTokens((response as any)?.billing);
@@ -3589,6 +3658,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             modelProfile,
                             existingScreenNames: snapshotScreens.map((screen) => screen.name),
                             styleReference: buildContinuationStyleReference(snapshotScreens),
+                            referenceUrls,
                         } as PlannerSuggestionContext,
                     }
                 });
@@ -3625,6 +3695,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             modelProfile,
                             existingScreenNames: snapshotScreens.map((screen) => screen.name),
                             styleReference: buildContinuationStyleReference(snapshotScreens),
+                            referenceUrls,
                         } as PlannerSuggestionContext,
                     }
                 });
@@ -3677,9 +3748,14 @@ Return a polished, consistent screen without introducing a new navigation patter
         incomingReferenceScreens?: HtmlScreen[],
         allowPlannerFlow?: boolean,
         skipDesignSystemStep?: boolean,
-        incomingReferencePreviewMode?: 'screen' | 'palette'
+        incomingReferencePreviewMode?: 'screen' | 'palette',
+        incomingReferenceUrls?: string[]
     ) => {
-        const requestPrompt = (incomingPrompt ?? prompt).trim();
+        const resolvedComposerReferences = extractComposerInlineReferences(incomingPrompt ?? prompt, {
+            allowScreen: true,
+            screens: availableMentionScreens,
+        });
+        const requestPrompt = resolvedComposerReferences.cleanedText.trim();
         setIsAwaitingAssistantDecision(false);
         if (!requestPrompt || isGenerating) return;
         const usePlanner = allowPlannerFlow ?? planMode;
@@ -3692,7 +3768,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             && !hasPriorScreens
             && !hasPriorUserMessages
             && (!incomingTargetScreens || incomingTargetScreens.length === 0);
-        const referenceScreens = incomingReferenceScreens || [];
+        const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer(resolvedComposerReferences.screenReferences);
+        const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.urlReferences.map((item) => item.url);
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
             ? `${requestPrompt}\n\n${referencePromptContext}`
@@ -3742,6 +3819,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 livePreview: false,
                 requestKind: 'generate',
                 ...(incomingReferencePreviewMode ? { referencePreviewMode: incomingReferencePreviewMode } : {}),
+                ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             }
         });
@@ -3761,7 +3839,6 @@ Return a polished, consistent screen without introducing a new navigation patter
         );
         setPrompt('');
         if (!existingUserMessageId) {
-            setComposerScreenReferences([]);
             closeMentionMenu();
         }
         setGenerating(true);
@@ -3800,6 +3877,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         stylePreset: styleToUse,
                         platform: platformToUse,
                         images: imagesToSend,
+                        referenceUrls,
                         preferredModel,
                         bundleWithFirstGeneration: shouldBundleDesignSystemWithFirstGeneration,
                         projectId: projectId || undefined,
@@ -3845,6 +3923,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             prompt: requestPrompt,
                             appPromptForPlanning,
                             images: imagesToSend,
+                            referenceUrls,
                             platform: platformToUse,
                             stylePreset: styleToUse,
                             modelProfile: modelProfileToUse,
@@ -3878,6 +3957,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         screenCountDesired: incomingTargetScreens?.length || 2,
                         screensGenerated: existingScreenNames.map((name) => ({ name })),
                         referenceImages: plannerReferenceImages,
+                        referenceUrls,
                         preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
                     }));
                     captureBillingTokens((discoveryPlan as any)?.billing);
@@ -3986,6 +4066,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    referenceUrls,
                     expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
@@ -4046,6 +4127,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             stylePreset: styleToUse,
                             screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
                             referenceImages: plannerReferenceImages,
+                            referenceUrls,
                             preferredModel: 'llama-3.3-70b-versatile',
                         }));
                         captureBillingTokens((postgen as any)?.billing);
@@ -4080,6 +4162,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 modelProfile: modelProfileToUse,
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
+                                referenceUrls,
                             } as PlannerSuggestionContext,
                         },
                     }
@@ -4111,6 +4194,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
+                referenceUrls,
                 expectedScreenCount: requestedScreenCount,
                 preferredModel,
                 projectDesignSystem: activeProjectDesignSystem,
@@ -4179,6 +4263,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    referenceUrls,
                     expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
@@ -4259,6 +4344,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             stylePreset: styleToUse,
                             screensGenerated: regen.designSpec.screens.map((screen) => ({ name: screen.name })),
                             referenceImages: plannerReferenceImages,
+                            referenceUrls,
                             preferredModel: 'llama-3.3-70b-versatile',
                         }));
                         captureBillingTokens((postgen as any)?.billing);
@@ -4293,6 +4379,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 modelProfile: modelProfileToUse,
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
+                                referenceUrls,
                             } as PlannerSuggestionContext,
                         },
                     }
@@ -4403,6 +4490,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             modelProfile: modelProfileToUse,
                             existingScreenNames: snapshotScreenNames,
                             styleReference: snapshotStyleReference,
+                            referenceUrls,
                         } as PlannerSuggestionContext,
                     },
                 }
@@ -4478,6 +4566,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         const requestId = initialRequest?.id || '';
         const next = (initialRequest?.prompt || '').trim();
         const nextImages = Array.isArray(initialRequest?.images) ? initialRequest.images : [];
+        const nextReferenceUrls = Array.isArray(initialRequest?.referenceUrls)
+            ? initialRequest.referenceUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
+            : [];
         const nextPlatform = initialRequest?.platform;
         const nextStylePreset = initialRequest?.stylePreset;
         const nextModelProfile = initialRequest?.modelProfile;
@@ -4496,7 +4587,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             apiClient.setComposerTemperature(safeTemperature);
         }
         pinToLatest('auto');
-        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile);
+        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, nextReferenceUrls);
     }, [initialRequest, messages.length, isGenerating]);
 
     type EditExecutionOptions = {
@@ -4524,7 +4615,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         attachedImages?: string[],
         existingUserMessageId?: string,
         incomingReferenceScreens?: HtmlScreen[],
-        options?: EditExecutionOptions
+        options?: EditExecutionOptions,
+        incomingReferenceUrls?: string[]
     ): Promise<EditExecutionResult> => {
         setIsAwaitingAssistantDecision(false);
         if (!instruction.trim() || isGenerating) {
@@ -4575,10 +4667,16 @@ Return a polished, consistent screen without introducing a new navigation patter
             type: targetScreen.width >= 1024 ? 'desktop' : targetScreen.width >= 600 ? 'tablet' : 'mobile'
         } as const;
 
+        const parsedEditReferences = extractComposerInlineReferences(instruction, {
+            allowScreen: true,
+            screens: availableMentionScreens,
+        });
+        const currentPrompt = parsedEditReferences.cleanedText.trim();
         const editImages = Array.isArray(attachedImages) ? attachedImages : [];
-        const userMsgId = existingUserMessageId || addMessage('user', instruction, editImages.length ? editImages : undefined, screenRef);
+        const userMsgId = existingUserMessageId || addMessage('user', currentPrompt, editImages.length ? editImages : undefined, screenRef);
         const assistantMsgId = options?.assistantMessageId || addMessage('assistant', 'Updating...', undefined, screenRef);
-        const referenceScreens = incomingReferenceScreens || [];
+        const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer(parsedEditReferences.screenReferences);
+        const referenceUrls = incomingReferenceUrls || parsedEditReferences.urlReferences.map((item) => item.url);
         const referenceMeta = buildScreenReferenceMeta([targetScreen, ...referenceScreens]);
         if (!options?.skipUserMetaUpdate) {
             updateMessage(userMsgId, {
@@ -4586,11 +4684,11 @@ Return a polished, consistent screen without introducing a new navigation patter
                     ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
                     requestKind: 'edit',
                     livePreview: false,
+                    ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                     ...referenceMeta,
                 }
             });
         }
-        const currentPrompt = instruction;
         if (!options?.suppressLoadingToast) {
             startLoadingToast(
                 editLoadingToastRef,
@@ -4632,6 +4730,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
                 images: editImages,
+                referenceUrls,
                 preferredModel: getPreferredTextModel(resolvedModelProfile),
                 projectDesignSystem: useDesignStore.getState().spec?.designSystem,
                 projectId: projectId || undefined,
@@ -4702,6 +4801,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         stylePreset,
                         screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
                         referenceImages: plannerReferenceImages,
+                        referenceUrls,
                         preferredModel: 'llama-3.3-70b-versatile',
                     }));
                     captureBillingTokens((postgen as any)?.billing);
@@ -4739,6 +4839,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 modelProfile: resolvedModelProfile,
                                 existingScreenNames: snapshotScreenNames,
                                 styleReference: snapshotStyleReference,
+                                referenceUrls,
                             } as PlannerSuggestionContext,
                         },
                     }
@@ -4816,9 +4917,10 @@ Return a polished, consistent screen without introducing a new navigation patter
         requestPrompt: string;
         attachedImages: string[];
         referenceMeta: ReturnType<typeof buildScreenReferenceMeta>;
+        referenceUrls: string[];
     }) => {
         setIsAwaitingAssistantDecision(false);
-        const { userMessageId, requestPrompt, attachedImages, referenceMeta } = params;
+        const { userMessageId, requestPrompt, attachedImages, referenceMeta, referenceUrls } = params;
         const currentSpec = useDesignStore.getState().spec;
         const currentDesignSystem = currentSpec?.designSystem;
         if (!currentDesignSystem) return false;
@@ -4833,6 +4935,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             meta: {
                 ...(useChatStore.getState().messages.find((message) => message.id === userMessageId)?.meta || {}),
                 requestKind: 'design_system',
+                ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             },
         });
@@ -4867,6 +4970,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset,
                 platform: selectedPlatform,
                 images: attachedImages,
+                referenceUrls,
                 projectId: projectId || undefined,
                 projectDesignSystem: currentDesignSystem,
                 preferredModel: resolvedModelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
@@ -4979,14 +5083,17 @@ Return a polished, consistent screen without introducing a new navigation patter
         existingUserMessageId?: string,
         overridePrompt?: string,
         overrideImages?: string[],
-        incomingReferenceScreens?: HtmlScreen[]
+        incomingReferenceScreens?: HtmlScreen[],
+        incomingReferenceUrls?: string[]
     ) => {
-        const requestPrompt = (overridePrompt ?? prompt).trim();
+        const resolvedComposerReferences = resolveInlineComposerReferences(overridePrompt ?? prompt);
+        const requestPrompt = resolvedComposerReferences.prompt;
         if (!requestPrompt || isGenerating || isAwaitingAssistantDecision) return;
         setIsAwaitingAssistantDecision(true);
         pinToLatest('smooth');
         const attachedImages = overrideImages ? [...overrideImages] : [...images];
-        const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer();
+        const referenceScreens = incomingReferenceScreens || resolvedComposerReferences.referenceScreens;
+        const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.referenceUrls;
         const routeReferenceScreens = pickRouteReferenceScreens(
             requestPrompt,
             useDesignStore.getState().spec?.screens || [],
@@ -5008,11 +5115,11 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
                 requestKind: 'route',
                 ...(routedReferencePreviewMode ? { referencePreviewMode: routedReferencePreviewMode } : {}),
+                ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             },
         });
         if (!existingUserMessageId) {
-            setComposerScreenReferences([]);
             closeMentionMenu();
             setPrompt('');
             if (attachedImages.length > 0) {
@@ -5027,6 +5134,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 requestPrompt,
                 attachedImages,
                 referenceMeta,
+                referenceUrls,
             });
             if (handledAsDesignSystem) return;
         }
@@ -5035,7 +5143,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             const editLike = /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish)/i.test(requestPrompt);
             const fallbackTarget = generationReferenceScreens[0] || null;
             if (editLike && fallbackTarget) {
-                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, generationReferenceScreens);
+                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, generationReferenceScreens, undefined, referenceUrls);
                 return;
             }
             await handleGenerate(
@@ -5052,7 +5160,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 generationReferenceScreens,
                 false,
                 undefined,
-                routedReferencePreviewMode
+                routedReferencePreviewMode,
+                referenceUrls
             );
         };
 
@@ -5065,6 +5174,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset,
                 screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
                 referenceImages: plannerReferenceImages,
+                referenceUrls,
                 preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
             }, routeReferenceScreens));
             if (routeResponse.phase !== 'route') {
@@ -5084,6 +5194,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     plannerRoute: route,
                     ...(routedReferencePreviewMode ? { referencePreviewMode: routedReferencePreviewMode } : {}),
                     ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
+                    ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                     ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
                 },
             });
@@ -5111,6 +5222,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             modelProfile,
                             existingScreenNames: snapshotScreenNames,
                             styleReference: snapshotStyleReference,
+                            referenceUrls,
                         } as PlannerSuggestionContext,
                         ...(routeTokenUsage !== null ? { tokenUsageTotal: routeTokenUsage } : {}),
                     },
@@ -5207,7 +5319,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     suppressToasts: true,
                                     skipFinalMessageUpdate: true,
                                     skipUserMetaUpdate: true,
-                                }
+                                },
+                                referenceUrls
                             );
                             results.push(result);
                         }
@@ -5277,7 +5390,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                         route.editInstruction || requestPrompt,
                         attachedImages,
                         userMsgId,
-                        perTargetReferences
+                        perTargetReferences,
+                        undefined,
+                        referenceUrls
                     );
                 }
                 return;
@@ -5300,7 +5415,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 generationReferenceScreens,
                 false,
                 undefined,
-                routedReferencePreviewMode
+                routedReferencePreviewMode,
+                referenceUrls
             );
         } catch (routeError) {
             console.warn('[UI] route planner failed; using deterministic fallback', routeError);
@@ -5313,9 +5429,8 @@ Return a polished, consistent screen without introducing a new navigation patter
     const handleSubmit = () => {
         apiClient.setComposerTemperature(modelTemperature);
         pinToLatest('smooth');
-        const referenceScreens = getScreenReferencesFromComposer();
         if (planMode) {
-            void handlePlanOnly(undefined, undefined, undefined, referenceScreens);
+            void handlePlanOnly();
         } else {
             void handleRoutedGenerateOrEdit();
         }
@@ -5336,12 +5451,13 @@ Return a polished, consistent screen without introducing a new navigation patter
         if (source.screenRef?.id && !retryScreenIds.includes(source.screenRef.id)) {
             retryScreenIds.push(source.screenRef.id);
         }
-        const retryReferences = getScreenReferencesFromComposer(
-            retryScreenIds.map((screenId) => ({ screenId, name: '' }))
-        );
+        const retryReferences = getScreenReferencesFromComposer(retryScreenIds.map((screenId) => ({ screenId, name: '' })));
+        const retryReferenceUrls = Array.isArray((source.meta as any)?.referenceUrls)
+            ? (((source.meta as any)?.referenceUrls as string[]).filter((item) => typeof item === 'string' && item.trim().length > 0))
+            : [];
 
         if (requestKind === 'plan') {
-            await handlePlanOnly(userMessageId, retryPrompt, retryImages, retryReferences);
+            await handlePlanOnly(userMessageId, retryPrompt, retryImages, retryReferences, retryReferenceUrls);
             return;
         }
 
@@ -5349,7 +5465,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             userMessageId,
             retryPrompt,
             retryImages,
-            retryReferences
+            retryReferences,
+            retryReferenceUrls
         );
     };
 
@@ -5398,28 +5515,67 @@ Return a polished, consistent screen without introducing a new navigation patter
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (isMentionOpen && filteredMentionScreens.length > 0) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setMentionActiveIndex((prev) => (prev + 1) % filteredMentionScreens.length);
-                return;
+        if (e.key === '@') {
+            window.setTimeout(() => {
+                const target = textareaRef.current;
+                if (!target) return;
+                const cursor = target.selectionStart ?? target.value.length;
+                syncMentionState(target.value, cursor);
+            }, 0);
+        }
+        if (isMentionOpen) {
+            if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeMentionMenu();
+                    return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const choice = rootReferenceOptions[mentionActiveIndex] || rootReferenceOptions[0];
+                    if (choice?.key === 'url') openUrlReferenceInput();
+                    if (choice?.key === 'screen') openScreenReferenceInput();
+                    return;
+                }
             }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setMentionActiveIndex((prev) => (prev - 1 + filteredMentionScreens.length) % filteredMentionScreens.length);
-                return;
+            if (referenceMenuMode === 'screen' && filteredMentionScreens.length > 0) {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionActiveIndex((prev) => (prev + 1) % filteredMentionScreens.length);
+                    return;
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionActiveIndex((prev) => (prev - 1 + filteredMentionScreens.length) % filteredMentionScreens.length);
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeMentionMenu();
+                    return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const choice = filteredMentionScreens[mentionActiveIndex] || filteredMentionScreens[0];
+                    if (choice) {
+                        selectMentionScreen(choice);
+                    }
+                    return;
+                }
             }
-            if (e.key === 'Escape') {
+            if (referenceMenuMode === 'url' && e.key === 'Escape') {
                 e.preventDefault();
                 closeMentionMenu();
-                return;
-            }
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                const choice = filteredMentionScreens[mentionActiveIndex] || filteredMentionScreens[0];
-                if (choice) {
-                    selectMentionScreen(choice);
-                }
                 return;
             }
         }
@@ -6373,26 +6529,6 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                         {/* Text Area & Images */}
                         <div className="flex-1 min-w-0 relative">
-                            {composerScreenReferences.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 mb-2 px-1 pb-2 border-b border-[var(--ui-border)]">
-                                    {composerScreenReferences.map((item) => (
-                                        <div
-                                            key={item.screenId}
-                                            className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)]"
-                                        >
-                                            <span className="truncate max-w-[170px]">@{item.name}</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => removeComposerScreenReference(item.screenId)}
-                                                className="inline-flex items-center justify-center rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]"
-                                                title={`Remove ${item.name}`}
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
                             {images.length > 0 && (
                                 <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-2 px-1 pb-2 border-b border-[var(--ui-border)]">
                                     {images.map((img, idx) => (
@@ -6420,43 +6556,64 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         manualOutput={composerOrbOutput}
                                     />
                                 </div>
-                                <textarea
-                                    name=""
-                                    id=""
-                                    ref={textareaRef}
-                                    value={prompt}
-                                    onChange={handlePromptChange}
-                                    onClick={handlePromptCursorSync}
-                                    onKeyUp={handlePromptCursorSync}
-                                    onKeyDown={handleKeyDown}
-                                    placeholder="Describe your UI you want to create... (type @ to reference screens)"
-                                    disabled={isGenerating}
-                                    className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] pr-2 py-1 leading-relaxed"
-                                    style={{ border: 'none', boxShadow: 'none' }}
-                                />
-                            </div>
-                            {isMentionOpen && filteredMentionScreens.length > 0 && (
-                                <div
-                                    ref={mentionMenuRef}
-                                    className="absolute left-12 right-2 bottom-[2px] mb-14 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl max-h-56 overflow-y-auto z-50"
-                                >
-                                    {filteredMentionScreens.map((screen, index) => (
-                                        <button
-                                            key={screen.screenId}
-                                            type="button"
-                                            onMouseDown={(event) => {
-                                                event.preventDefault();
-                                                selectMentionScreen(screen);
-                                            }}
-                                            className={`w-full text-left px-3 py-2 text-sm transition-colors ${index === mentionActiveIndex
-                                                ? 'bg-indigo-500/20 text-[var(--ui-text)]'
-                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
-                                                }`}
+                                <div className="relative min-w-0 flex-1">
+                                    {prompt.length > 0 && (
+                                        <div
+                                            ref={textareaOverlayRef}
+                                            className="pointer-events-none absolute inset-0 max-h-[200px] overflow-hidden py-1 pr-2 text-[16px] leading-relaxed"
                                         >
-                                            <span className="font-medium">@{screen.name}</span>
-                                        </button>
-                                    ))}
+                                            <ComposerInlineReferenceOverlay
+                                                value={prompt}
+                                                allowScreen
+                                                screens={availableMentionScreens}
+                                                className="text-[16px] leading-relaxed"
+                                            />
+                                        </div>
+                                    )}
+                                    <textarea
+                                        name=""
+                                        id=""
+                                        ref={textareaRef}
+                                        value={prompt}
+                                        onChange={handlePromptChange}
+                                        onScroll={(event) => {
+                                            if (!textareaOverlayRef.current) return;
+                                            textareaOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                                            textareaOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                                        }}
+                                        onClick={handlePromptCursorSync}
+                                        onKeyUp={handlePromptCursorSync}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
+                                        disabled={isGenerating}
+                                        className={`no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] pr-2 py-1 leading-relaxed ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
+                                        style={{ border: 'none', boxShadow: 'none' }}
+                                    />
                                 </div>
+                            </div>
+                            {isMentionOpen && (
+                                <ComposerReferenceMenu
+                                    activeIndex={mentionActiveIndex}
+                                    menuMode={referenceMenuMode}
+                                    menuRef={mentionMenuRef}
+                                    onCancel={closeMentionMenu}
+                                    onRootOptionHover={setMentionActiveIndex}
+                                    onScreenHover={setMentionActiveIndex}
+                                    onScreenQueryChange={setMentionQuery}
+                                    onSelectRootOption={(key) => {
+                                        if (key === 'url') openUrlReferenceInput();
+                                        if (key === 'screen') openScreenReferenceInput();
+                                    }}
+                                    onSelectScreen={selectMentionScreen}
+                                    onSubmitUrl={submitUrlReference}
+                                    rootOptions={rootReferenceOptions}
+                                    screenOptions={filteredMentionScreens}
+                                    screenQuery={referenceMenuMode === 'screen' ? mentionQuery : ''}
+                                    searchInputRef={mentionSearchInputRef}
+                                    urlDraft={referenceUrlDraft}
+                                    urlInputRef={referenceUrlInputRef}
+                                    onUrlDraftChange={setReferenceUrlDraft}
+                                />
                             )}
                         </div>
 

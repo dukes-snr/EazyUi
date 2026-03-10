@@ -1,4 +1,4 @@
-const FIRECRAWL_API_BASE = (process.env.FIRECRAWL_API_BASE_URL || 'https://api.firecrawl.dev/v1').replace(/\/+$/, '');
+const FIRECRAWL_API_BASE = (process.env.FIRECRAWL_API_BASE_URL || 'https://api.firecrawl.dev/v2').replace(/\/+$/, '');
 const FIRECRAWL_TIMEOUT_MS = 15_000;
 const MAX_REFERENCE_URLS = 3;
 const MAX_SOURCE_NOTES_CHARS = 900;

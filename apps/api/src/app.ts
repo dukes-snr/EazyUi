@@ -1654,6 +1654,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        referenceUrls?: string[];
         expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
@@ -1662,7 +1663,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, referenceUrls, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1714,6 +1715,11 @@ fastify.post<{
                 requestPreview,
             },
         });
+        const {
+            text: promptWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate');
         fastify.log.info({
             traceId,
             route: '/api/generate',
@@ -1725,9 +1731,20 @@ fastify.post<{
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
+            webContextApplied,
             promptPreview: previewText(prompt),
         }, 'generate: start');
-        const generated = await generateDesign({ prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem });
+        const generated = await generateDesign({
+            prompt: promptWithReferenceContext,
+            stylePreset,
+            platform,
+            images,
+            preferredModel,
+            temperature,
+            projectDesignSystem,
+        });
         const { designSpec, usage } = generated;
         const versionId = uuidv4();
         const estimateCharge = estimateCredits({
@@ -1804,6 +1821,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -1811,7 +1829,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/design-system', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, referenceUrls, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -1862,6 +1880,11 @@ fastify.post<{
                 },
             });
         }
+        const {
+            text: promptWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/design-system');
         fastify.log.info({
             traceId,
             route: '/api/design-system',
@@ -1874,10 +1897,13 @@ fastify.post<{
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             bundledWithFirstGeneration: bundled,
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
+            webContextApplied,
             promptPreview: previewText(prompt),
         }, 'design-system: start');
         const generated = await generateProjectDesignSystem({
-            prompt,
+            prompt: promptWithReferenceContext,
             stylePreset,
             platform,
             images,
@@ -1972,6 +1998,7 @@ fastify.post<{
         html: string;
         screenId: string;
         images?: string[];
+        referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -1988,7 +2015,7 @@ fastify.post<{
         }>;
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId, images, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const { instruction, html, screenId, images, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2037,6 +2064,11 @@ fastify.post<{
                 requestPreview,
             },
         });
+        const {
+            text: instructionWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit');
         fastify.log.info({
             traceId,
             route: '/api/edit',
@@ -2051,10 +2083,13 @@ fastify.post<{
             consistencyRuleCount: consistencyProfile?.rules?.length || 0,
             canonicalNavbarLabels: consistencyProfile?.canonicalNavbarLabels?.slice(0, 8) || [],
             referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
+            webContextApplied,
             instructionPreview: previewText(instruction),
         }, 'edit: start');
         const edited = await editDesign({
-            instruction,
+            instruction: instructionWithReferenceContext,
             html,
             screenId,
             images,
@@ -2139,6 +2174,7 @@ fastify.post<{
         html: string;
         screenId: string;
         images?: string[];
+        referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -2155,7 +2191,7 @@ fastify.post<{
         }>;
     };
 }>('/api/edit-stream', async (request, reply) => {
-    const { instruction, html, screenId, images, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const { instruction, html, screenId, images, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2238,6 +2274,11 @@ fastify.post<{
     reply.raw.setHeader('Transfer-Encoding', 'chunked');
 
     try {
+        const {
+            text: instructionWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit-stream');
         const { editDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
@@ -2252,11 +2293,14 @@ fastify.post<{
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             consistencyRuleCount: consistencyProfile?.rules?.length || 0,
             referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
+            webContextApplied,
             instructionPreview: previewText(instruction),
         }, 'edit-stream: start');
 
         const { stream, usagePromise } = editDesignStreamWithUsage({
-            instruction,
+            instruction: instructionWithReferenceContext,
             html,
             screenId,
             images,
@@ -2776,6 +2820,7 @@ fastify.post<{
         projectMemorySummary?: string;
         routeReferenceScreens?: Array<{ screenId?: string; name: string; html: string }>;
         referenceImages?: string[];
+        referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
     };
@@ -2792,6 +2837,7 @@ fastify.post<{
         projectMemorySummary,
         routeReferenceScreens,
         referenceImages,
+        referenceUrls,
         preferredModel,
         temperature,
     } = request.body;
@@ -2836,6 +2882,11 @@ fastify.post<{
                 requestPreview,
             },
         });
+        const {
+            text: appPromptWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(appPrompt, referenceUrls, traceId, '/api/plan');
         fastify.log.info({
             traceId,
             route: '/api/plan',
@@ -2851,14 +2902,17 @@ fastify.post<{
             routeReferenceScreensCount: routeReferenceScreens?.length || 0,
             routeReferenceScreenNames: (routeReferenceScreens || []).map((screen) => screen.name).slice(0, 3),
             referenceImagesCount: referenceImages?.length || 0,
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
             preferredModel,
             temperature,
             source: sourceTag,
+            webContextApplied,
             appPromptPreview: previewText(appPrompt),
         }, 'plan: start');
         const plannerResult = await runDesignPlannerWithUsage({
             phase,
-            appPrompt: appPrompt.trim(),
+            appPrompt: appPromptWithReferenceContext.trim(),
             platform,
             stylePreset,
             screenCountDesired,
@@ -3103,6 +3157,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        referenceUrls?: string[];
         expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
@@ -3116,6 +3171,7 @@ fastify.post<{
         stylePreset,
         platform,
         images,
+        referenceUrls,
         expectedScreenCount,
         preferredModel,
         temperature,
@@ -3206,6 +3262,11 @@ fastify.post<{
     reply.raw.setHeader('Transfer-Encoding', 'chunked');
 
     try {
+        const {
+            text: promptWithReferenceContext,
+            normalizedUrls: normalizedReferenceUrls,
+            webContextApplied,
+        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate-stream');
         const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
@@ -3219,10 +3280,13 @@ fastify.post<{
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
+            referenceUrlsCount: referenceUrls?.length || 0,
+            normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
+            webContextApplied,
             promptPreview: previewText(prompt),
         }, 'generate-stream: start');
         const { stream, usagePromise } = generateDesignStreamWithUsage({
-            prompt,
+            prompt: promptWithReferenceContext,
             stylePreset,
             platform,
             images,

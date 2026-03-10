@@ -223,6 +223,7 @@
 }
 
 .edit-ai-input-row {
+    position: relative;
     display: grid;
     grid-template-columns: 1fr 42px;
     gap: 8px;

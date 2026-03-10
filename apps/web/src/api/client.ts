@@ -280,6 +280,7 @@ export interface GenerateDesignSystemRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[];
+    referenceUrls?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
     bundleWithFirstGeneration?: boolean;

@@ -157,6 +157,7 @@ function App() {
         id: string;
         prompt: string;
         images: string[];
+        referenceUrls?: string[];
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
@@ -420,6 +421,7 @@ function App() {
                 const parsed = JSON.parse(staged) as {
                     prompt?: string;
                     images?: string[];
+                    referenceUrls?: string[];
                     platform?: 'mobile' | 'tablet' | 'desktop';
                     stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
                     modelProfile?: DesignModelProfile;
@@ -427,11 +429,13 @@ function App() {
                 };
                 const prompt = (parsed.prompt || '').trim();
                 const images = Array.isArray(parsed.images) ? parsed.images.filter((x) => typeof x === 'string') : [];
+                const referenceUrls = Array.isArray(parsed.referenceUrls) ? parsed.referenceUrls.filter((x) => typeof x === 'string') : [];
                 if (prompt) {
                     setInitialRequest({
                         id: `landing-${Date.now()}`,
                         prompt,
                         images,
+                        referenceUrls,
                         platform: parsed.platform,
                         stylePreset: parsed.stylePreset,
                         modelProfile: parsed.modelProfile,
@@ -718,8 +722,8 @@ function App() {
                 onSignOut={handleSignOut}
                 onSendVerification={handleSendVerification}
                 verificationBusy={verificationBusy}
-                onStart={({ prompt, images, platform, stylePreset, modelProfile, modelTemperature }) => {
-                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, platform, stylePreset, modelProfile, modelTemperature }));
+                onStart={({ prompt, images, referenceUrls, platform, stylePreset, modelProfile, modelTemperature }) => {
+                    window.sessionStorage.setItem(LANDING_DRAFT_KEY, JSON.stringify({ prompt, images, referenceUrls, platform, stylePreset, modelProfile, modelTemperature }));
                     navigate('/app/projects/new');
                 }}
                 onNavigate={(path) => navigate(path)}
