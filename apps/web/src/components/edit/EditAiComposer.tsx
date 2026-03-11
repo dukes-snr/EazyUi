@@ -16,7 +16,7 @@ import {
     replaceComposerReferenceTrigger,
     type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
-import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { Orb } from '../ui/Orb';
 
@@ -42,8 +42,7 @@ export function EditAiComposer() {
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const abortRef = useRef<AbortController | null>(null);
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-    const textareaOverlayRef = useRef<HTMLDivElement | null>(null);
+    const textareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
@@ -102,7 +101,8 @@ export function EditAiComposer() {
         if (!normalized) return;
         const range = referenceTriggerRangeRef.current;
         if (!range) return;
-        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        const source = textareaRef.current?.getValue() ?? prompt;
+        const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
         setPrompt(result.value);
         closeReferenceMenu();
         window.setTimeout(() => {
@@ -210,7 +210,7 @@ RULES:
         if (!isReferenceMenuOpen) return;
         const handlePointerDown = (event: MouseEvent) => {
             if (referenceMenuRef.current?.contains(event.target as Node)) return;
-            if (event.target === textareaRef.current) return;
+            if (textareaRef.current?.element?.contains(event.target as Node)) return;
             closeReferenceMenu();
         };
         document.addEventListener('pointerdown', handlePointerDown);
@@ -252,37 +252,15 @@ RULES:
                             />
                         </div>
                         <div className="relative flex-1 min-w-0">
-                            {prompt.length > 0 && (
-                                <div
-                                    ref={textareaOverlayRef}
-                                    className="absolute inset-0 overflow-hidden rounded-[12px] px-3 py-2.5 text-[13px] leading-[1.4]"
-                                >
-                                    <ComposerInlineReferenceOverlay value={prompt} className="text-[13px] leading-[1.4]" />
-                                </div>
-                            )}
-                            <textarea
+                            <ComposerInlineReferenceInput
                                 ref={textareaRef}
                                 value={prompt}
-                                onChange={(event) => {
-                                    const nextValue = event.target.value;
-                                    const cursor = event.target.selectionStart ?? nextValue.length;
+                                onChange={(nextValue, cursor) => {
                                     setPrompt(nextValue);
                                     syncReferenceTrigger(nextValue, cursor);
                                 }}
-                                onScroll={(event) => {
-                                    if (!textareaOverlayRef.current) return;
-                                    textareaOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                                    textareaOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                                }}
+                                onSelectionChange={syncReferenceTrigger}
                                 onKeyDown={(event) => {
-                                    if (event.key === '@') {
-                                        window.setTimeout(() => {
-                                            const target = textareaRef.current;
-                                            if (!target) return;
-                                            const cursor = target.selectionStart ?? target.value.length;
-                                            syncReferenceTrigger(target.value, cursor);
-                                        }, 0);
-                                    }
                                     if (isReferenceMenuOpen) {
                                         if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
                                             if (event.key === 'ArrowDown') {
@@ -320,19 +298,12 @@ RULES:
                                         void applyAiEdit();
                                     }
                                 }}
-                                onClick={(event) => {
-                                    const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                                    syncReferenceTrigger(event.currentTarget.value, cursor);
-                                }}
-                                onKeyUp={(event) => {
-                                    const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                                    syncReferenceTrigger(event.currentTarget.value, cursor);
-                                }}
                                 placeholder={selected
                                     ? 'Describe exactly what to change for the selected element... (type @ to add a URL reference)'
                                     : 'Select an element first...'}
+                                placeholderClassName="px-3 py-2.5"
                                 disabled={!selected || busy}
-                                className={`edit-ai-textarea ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
+                                className="edit-ai-textarea"
                             />
                         </div>
                     </div>

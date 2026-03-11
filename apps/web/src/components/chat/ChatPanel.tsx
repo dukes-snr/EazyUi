@@ -21,7 +21,7 @@ import {
     replaceComposerReferenceTrigger,
     type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
-import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import appLogo from '../../assets/Ui-logo.png';
@@ -2125,8 +2125,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const textareaOverlayRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
     const mentionMenuRef = useRef<HTMLDivElement>(null);
     const mentionSearchInputRef = useRef<HTMLInputElement>(null);
@@ -2762,7 +2761,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!isMentionOpen) return;
         const handlePointerDown = (event: MouseEvent) => {
             if (!mentionMenuRef.current) return;
-            if (!mentionMenuRef.current.contains(event.target as Node) && event.target !== textareaRef.current) {
+            if (!mentionMenuRef.current.contains(event.target as Node) && !textareaRef.current?.element?.contains(event.target as Node)) {
                 closeMentionMenu();
             }
         };
@@ -3003,11 +3002,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         };
     }, []);
 
-    // Auto-resize textarea
+    // Auto-resize composer
     useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+        const element = textareaRef.current?.element;
+        if (element) {
+            element.style.height = 'auto';
+            element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
         }
     }, [prompt]);
 
@@ -3094,7 +3094,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!normalized) return;
         const range = referenceTriggerRangeRef.current;
         if (!range) return;
-        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        const source = textareaRef.current?.getValue() ?? prompt;
+        const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
         setPrompt(result.value);
         closeMentionMenu();
         window.setTimeout(() => {
@@ -3108,7 +3109,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const selectMentionScreen = (screen: ComposerScreenReference) => {
         const range = referenceTriggerRangeRef.current;
         if (!range) return;
-        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerScreenReferenceToken(screen.name));
+        const source = textareaRef.current?.getValue() ?? prompt;
+        const result = replaceComposerReferenceTrigger(source, range, formatComposerScreenReferenceToken(screen.name));
         setPrompt(result.value);
         closeMentionMenu();
         window.setTimeout(() => {
@@ -5515,14 +5517,6 @@ Return a polished, consistent screen without introducing a new navigation patter
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === '@') {
-            window.setTimeout(() => {
-                const target = textareaRef.current;
-                if (!target) return;
-                const cursor = target.selectionStart ?? target.value.length;
-                syncMentionState(target.value, cursor);
-            }, 0);
-        }
         if (isMentionOpen) {
             if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
                 if (e.key === 'ArrowDown') {
@@ -5585,17 +5579,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
     };
 
-    const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const nextValue = e.target.value;
-        const cursor = e.target.selectionStart ?? nextValue.length;
+    const handlePromptChange = (nextValue: string, cursor: number) => {
         setPrompt(nextValue);
         syncMentionState(nextValue, cursor);
-    };
-
-    const handlePromptCursorSync = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-        const target = e.currentTarget;
-        const cursor = target.selectionStart ?? target.value.length;
-        syncMentionState(target.value, cursor);
     };
 
     const requestInFlight = isGenerating || isAwaitingAssistantDecision;
@@ -6557,37 +6543,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     />
                                 </div>
                                 <div className="relative min-w-0 flex-1">
-                                    {prompt.length > 0 && (
-                                        <div
-                                            ref={textareaOverlayRef}
-                                            className="pointer-events-none absolute inset-0 max-h-[200px] overflow-hidden py-1 pr-2 text-[16px] leading-relaxed"
-                                        >
-                                            <ComposerInlineReferenceOverlay
-                                                value={prompt}
-                                                allowScreen
-                                                screens={availableMentionScreens}
-                                                className="text-[16px] leading-relaxed"
-                                            />
-                                        </div>
-                                    )}
-                                    <textarea
-                                        name=""
-                                        id=""
+                                    <ComposerInlineReferenceInput
                                         ref={textareaRef}
                                         value={prompt}
                                         onChange={handlePromptChange}
-                                        onScroll={(event) => {
-                                            if (!textareaOverlayRef.current) return;
-                                            textareaOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                                            textareaOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                                        }}
-                                        onClick={handlePromptCursorSync}
-                                        onKeyUp={handlePromptCursorSync}
+                                        onSelectionChange={syncMentionState}
                                         onKeyDown={handleKeyDown}
                                         placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
+                                        placeholderClassName="pr-2 py-1 leading-relaxed"
                                         disabled={isGenerating}
-                                        className={`no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] resize-none outline-none placeholder:text-[13px] placeholder:text-[var(--ui-text-subtle)] pr-2 py-1 leading-relaxed ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
-                                        style={{ border: 'none', boxShadow: 'none' }}
+                                        allowScreen
+                                        screens={availableMentionScreens}
+                                        className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] overflow-y-auto outline-none pr-2 py-1 leading-relaxed"
                                     />
                                 </div>
                             </div>

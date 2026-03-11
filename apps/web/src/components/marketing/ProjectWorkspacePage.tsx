@@ -17,7 +17,7 @@ import {
   type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
-import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { Orb } from '../ui/Orb';
 
@@ -104,8 +104,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
   const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const starterPromptRef = useRef<HTMLTextAreaElement | null>(null);
-  const starterPromptOverlayRef = useRef<HTMLDivElement | null>(null);
+  const starterPromptRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceMenuRef = useRef<HTMLDivElement | null>(null);
@@ -248,7 +247,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     if (!normalized) return;
     const range = referenceTriggerRangeRef.current;
     if (!range) return;
-    const result = replaceComposerReferenceTrigger(starterPrompt, range, formatComposerUrlReferenceToken(normalized));
+    const source = starterPromptRef.current?.getValue() ?? starterPrompt;
+    const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
     setStarterPrompt(result.value);
     closeReferenceMenu();
     window.setTimeout(() => {
@@ -312,7 +312,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     if (!isReferenceMenuOpen) return;
     const handlePointerDown = (event: MouseEvent) => {
       if (referenceMenuRef.current?.contains(event.target as Node)) return;
-      if (event.target === starterPromptRef.current) return;
+      if (starterPromptRef.current?.element?.contains(event.target as Node)) return;
       closeReferenceMenu();
     };
     document.addEventListener('pointerdown', handlePointerDown);
@@ -769,37 +769,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       manualOutput={workspaceOrbOutput}
                     />
                   </div>
-                  {starterPrompt.length > 0 && (
-                    <div
-                      ref={starterPromptOverlayRef}
-                      className="pointer-events-none absolute left-[51px] right-[10px] top-0 max-h-[220px] overflow-hidden px-3 py-2 text-[16px] leading-relaxed"
-                    >
-                      <ComposerInlineReferenceOverlay value={starterPrompt} className="text-[16px] leading-relaxed" />
-                    </div>
-                  )}
-                  <textarea
+                  <ComposerInlineReferenceInput
                     ref={starterPromptRef}
                     value={starterPrompt}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      const cursor = event.target.selectionStart ?? nextValue.length;
+                    onChange={(nextValue, cursor) => {
                       setStarterPrompt(nextValue);
                       syncReferenceTrigger(nextValue, cursor);
                     }}
-                    onScroll={(event) => {
-                      if (!starterPromptOverlayRef.current) return;
-                      starterPromptOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                      starterPromptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                    }}
+                    onSelectionChange={syncReferenceTrigger}
                     onKeyDown={(event) => {
-                      if (event.key === '@') {
-                        window.setTimeout(() => {
-                          const target = starterPromptRef.current;
-                          if (!target) return;
-                          const cursor = target.selectionStart ?? target.value.length;
-                          syncReferenceTrigger(target.value, cursor);
-                        }, 0);
-                      }
                       if (isReferenceMenuOpen) {
                         if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
                           if (event.key === 'ArrowDown') {
@@ -835,17 +813,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         handleCreateFromPrompt();
                       }
                     }}
-                    onClick={(event) => {
-                      const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                      syncReferenceTrigger(event.currentTarget.value, cursor);
-                    }}
-                    onKeyUp={(event) => {
-                      const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                      syncReferenceTrigger(event.currentTarget.value, cursor);
-                    }}
                     placeholder="What do you want to create?"
-                    rows={3}
-                    className={`min-h-[64px] max-h-[220px] w-full resize-y border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:outline-none focus:ring-0 ${starterPrompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
+                    placeholderClassName="px-3 py-2 text-left"
+                    className="min-h-[64px] max-h-[220px] w-full overflow-y-auto border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] focus:outline-none focus:ring-0"
                   />
                 </div>
                 <button

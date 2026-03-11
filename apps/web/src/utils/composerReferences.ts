@@ -33,8 +33,19 @@ export type ComposerInlineReferenceSegment =
     | { kind: 'url'; text: string }
     | { kind: 'screen'; text: string };
 
-const INLINE_REFERENCE_PADDING_MARK = '\u00a0';
-const INLINE_REFERENCE_PADDING = INLINE_REFERENCE_PADDING_MARK.repeat(5);
+export type ComposerAtomicReferenceRange = {
+    start: number;
+    end: number;
+    text: string;
+    kind: 'url' | 'screen';
+    url?: string;
+    screen?: ComposerScreenReferenceOption;
+};
+
+type ComposerReferenceResolutionOptions = {
+    allowScreen?: boolean;
+    screens?: ComposerScreenReferenceOption[];
+};
 
 const ROOT_OPTIONS: ComposerReferenceRootOption[] = [
     {
@@ -73,16 +84,12 @@ export function replaceComposerReferenceTrigger(value: string, range: ComposerRe
     const after = value.slice(range.end);
     const needsLeadingSpace = before.length > 0 && !/\s$/.test(before);
     const needsTrailingSpace = after.length > 0 && !/^\s/.test(after);
-    const inserted = `${needsLeadingSpace ? ' ' : ''}${safeToken}${INLINE_REFERENCE_PADDING}${needsTrailingSpace ? ' ' : ''}`;
+    const inserted = `${needsLeadingSpace ? ' ' : ''}${safeToken}${needsTrailingSpace ? ' ' : ''}`;
     const nextValue = `${before}${inserted}${after}`;
     return {
         value: nextValue,
         cursor: before.length + inserted.length,
     };
-}
-
-function stripInlineReferencePadding(value: string): string {
-    return String(value || '').split(INLINE_REFERENCE_PADDING_MARK).join('');
 }
 
 export function getFilteredComposerReferenceRootOptions(query: string, allowScreenOption: boolean): ComposerReferenceRootOption[] {
@@ -148,21 +155,14 @@ export function formatComposerUrlReferenceToken(url: string): string {
     return `@${compact}`;
 }
 
-export function extractComposerInlineReferences(
+export function getComposerAtomicReferenceRanges(
     value: string,
-    options?: {
-        allowScreen?: boolean;
-        screens?: ComposerScreenReferenceOption[];
-    }
-): ComposerInlineReferenceParseResult {
-    const source = stripInlineReferencePadding(value);
+    options?: ComposerReferenceResolutionOptions
+): ComposerAtomicReferenceRange[] {
+    const source = String(value || '');
     const allowScreen = options?.allowScreen ?? false;
-    const screens = Array.isArray(options?.screens) ? options!.screens : [];
+    const screens = Array.isArray(options?.screens) ? options.screens : [];
     const screenByKey = new Map<string, ComposerScreenReferenceOption>();
-    const seenScreenIds = new Set<string>();
-    const seenUrls = new Set<string>();
-    const urlReferences: ComposerUrlReference[] = [];
-    const screenReferences: ComposerScreenReferenceOption[] = [];
 
     screens.forEach((screen) => {
         const key = normalizeComposerScreenReferenceKey(screen.name);
@@ -170,36 +170,154 @@ export function extractComposerInlineReferences(
         screenByKey.set(key, screen);
     });
 
-    const cleanedText = source.replace(/(^|[\s(])@([^\s@]+)/g, (fullMatch, leading: string, rawToken: string) => {
-        let token = rawToken;
-        const trailingMatch = token.match(/[),.!?;:]+$/);
+    const ranges: ComposerAtomicReferenceRange[] = [];
+    const pattern = /(^|[\s(])@([^\s@]+)/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(source)) !== null) {
+        const leading = match[1] || '';
+        let rawToken = match[2] || '';
+        const trailingMatch = rawToken.match(/[),.!?;:]+$/);
         const trailing = trailingMatch ? trailingMatch[0] : '';
         if (trailing) {
-            token = token.slice(0, -trailing.length);
+            rawToken = rawToken.slice(0, -trailing.length);
         }
+        if (!rawToken) continue;
+        const text = `@${rawToken}`;
+        const start = match.index + leading.length;
+        const end = start + text.length;
+        const normalizedUrl = normalizeComposerReferenceUrl(rawToken);
 
-        const normalizedUrl = normalizeComposerReferenceUrl(token);
         if (normalizedUrl) {
-            if (!seenUrls.has(normalizedUrl)) {
-                seenUrls.add(normalizedUrl);
-                urlReferences.push(createComposerUrlReference(normalizedUrl));
-            }
-            return `${leading}${token}${trailing}`;
+            ranges.push({
+                start,
+                end,
+                text,
+                kind: 'url',
+                url: normalizedUrl,
+            });
+            continue;
         }
 
-        if (allowScreen) {
-            const screen = screenByKey.get(normalizeComposerScreenReferenceKey(token));
-            if (screen) {
-                if (!seenScreenIds.has(screen.screenId)) {
-                    seenScreenIds.add(screen.screenId);
-                    screenReferences.push(screen);
-                }
-                return `${leading}${screen.name}${trailing}`;
+        if (!allowScreen) continue;
+        const screen = screenByKey.get(normalizeComposerScreenReferenceKey(rawToken));
+        if (!screen) continue;
+        ranges.push({
+            start,
+            end,
+            text,
+            kind: 'screen',
+            screen,
+        });
+    }
+
+    return ranges;
+}
+
+export function clampComposerReferenceCursor(
+    value: string,
+    cursor: number,
+    options?: ComposerReferenceResolutionOptions
+): number {
+    const ranges = getComposerAtomicReferenceRanges(value, options);
+    for (const range of ranges) {
+        if (cursor > range.start && cursor < range.end) {
+            return range.end;
+        }
+    }
+    return cursor;
+}
+
+export function removeComposerAtomicReferenceAtSelection(
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+    direction: 'backward' | 'forward',
+    options?: ComposerReferenceResolutionOptions
+): { value: string; cursor: number } | null {
+    const source = String(value || '');
+    const ranges = getComposerAtomicReferenceRanges(source, options);
+    if (!ranges.length) return null;
+
+    if (selectionStart !== selectionEnd) {
+        let nextStart = selectionStart;
+        let nextEnd = selectionEnd;
+        let touched = false;
+
+        ranges.forEach((range) => {
+            if (selectionEnd <= range.start || selectionStart >= range.end) return;
+            nextStart = Math.min(nextStart, range.start);
+            nextEnd = Math.max(nextEnd, range.end);
+            touched = true;
+        });
+
+        if (!touched) return null;
+        return {
+            value: `${source.slice(0, nextStart)}${source.slice(nextEnd)}`.replace(/ {2,}/g, ' '),
+            cursor: nextStart,
+        };
+    }
+
+    const targetRange = ranges.find((range) => (
+        direction === 'backward'
+            ? selectionStart > range.start && selectionStart <= range.end
+            : selectionStart >= range.start && selectionStart < range.end
+    ));
+    if (!targetRange) {
+        if (direction === 'backward' && selectionStart > 0 && source[selectionStart - 1] === ' ') {
+            const spacedRange = ranges.find((range) => range.end === selectionStart - 1);
+            if (spacedRange) {
+                return {
+                    value: `${source.slice(0, spacedRange.start)}${source.slice(selectionStart)}`.replace(/ {2,}/g, ' '),
+                    cursor: spacedRange.start,
+                };
             }
         }
+        return null;
+    }
 
-        return fullMatch;
+    return {
+        value: `${source.slice(0, targetRange.start)}${source.slice(targetRange.end)}`.replace(/ {2,}/g, ' '),
+        cursor: targetRange.start,
+    };
+}
+
+export function extractComposerInlineReferences(
+    value: string,
+    options?: ComposerReferenceResolutionOptions
+): ComposerInlineReferenceParseResult {
+    const source = String(value || '');
+    const ranges = getComposerAtomicReferenceRanges(source, options);
+    const seenScreenIds = new Set<string>();
+    const seenUrls = new Set<string>();
+    const urlReferences: ComposerUrlReference[] = [];
+    const screenReferences: ComposerScreenReferenceOption[] = [];
+    let cleanedText = '';
+    let cursor = 0;
+
+    ranges.forEach((range) => {
+        if (range.start > cursor) {
+            cleanedText += source.slice(cursor, range.start);
+        }
+        if (range.kind === 'url' && range.url) {
+            if (!seenUrls.has(range.url)) {
+                seenUrls.add(range.url);
+                urlReferences.push(createComposerUrlReference(range.url));
+            }
+            cleanedText += range.text.slice(1);
+        } else if (range.kind === 'screen' && range.screen) {
+            if (!seenScreenIds.has(range.screen.screenId)) {
+                seenScreenIds.add(range.screen.screenId);
+                screenReferences.push(range.screen);
+            }
+            cleanedText += range.screen.name;
+        }
+        cursor = range.end;
     });
+
+    if (cursor < source.length) {
+        cleanedText += source.slice(cursor);
+    }
 
     return {
         cleanedText,
@@ -210,61 +328,21 @@ export function extractComposerInlineReferences(
 
 export function getComposerInlineReferenceSegments(
     value: string,
-    options?: {
-        allowScreen?: boolean;
-        screens?: ComposerScreenReferenceOption[];
-    }
+    options?: ComposerReferenceResolutionOptions
 ): ComposerInlineReferenceSegment[] {
-    const source = stripInlineReferencePadding(value);
+    const source = String(value || '');
     if (!source) return [{ kind: 'text', text: '' }];
-
-    const allowScreen = options?.allowScreen ?? false;
-    const screens = Array.isArray(options?.screens) ? options!.screens : [];
-    const screenByKey = new Map<string, ComposerScreenReferenceOption>();
-    screens.forEach((screen) => {
-        const key = normalizeComposerScreenReferenceKey(screen.name);
-        if (!key || screenByKey.has(key)) return;
-        screenByKey.set(key, screen);
-    });
-
     const segments: ComposerInlineReferenceSegment[] = [];
-    const pattern = /(^|[\s(])@([^\s@]+)/g;
     let cursor = 0;
-    let match: RegExpExecArray | null;
+    const ranges = getComposerAtomicReferenceRanges(source, options);
 
-    while ((match = pattern.exec(source)) !== null) {
-        const leading = match[1] || '';
-        const rawToken = match[2] || '';
-        const tokenStart = match.index + leading.length;
-        const tokenEnd = pattern.lastIndex;
-
-        if (tokenStart > cursor) {
-            segments.push({ kind: 'text', text: source.slice(cursor, tokenStart) });
+    ranges.forEach((range) => {
+        if (range.start > cursor) {
+            segments.push({ kind: 'text', text: source.slice(cursor, range.start) });
         }
-
-        let token = rawToken;
-        const trailingMatch = token.match(/[),.!?;:]+$/);
-        const trailing = trailingMatch ? trailingMatch[0] : '';
-        if (trailing) {
-            token = token.slice(0, -trailing.length);
-        }
-
-        const tokenText = `@${token}`;
-        const normalizedUrl = normalizeComposerReferenceUrl(token);
-        const matchingScreen = allowScreen ? screenByKey.get(normalizeComposerScreenReferenceKey(token)) : null;
-
-        if (normalizedUrl) {
-            segments.push({ kind: 'url', text: tokenText });
-            if (trailing) segments.push({ kind: 'text', text: trailing });
-        } else if (matchingScreen) {
-            segments.push({ kind: 'screen', text: tokenText });
-            if (trailing) segments.push({ kind: 'text', text: trailing });
-        } else {
-            segments.push({ kind: 'text', text: source.slice(tokenStart, tokenEnd) });
-        }
-
-        cursor = tokenEnd;
-    }
+        segments.push({ kind: range.kind, text: range.text });
+        cursor = range.end;
+    });
 
     if (cursor < source.length) {
         segments.push({ kind: 'text', text: source.slice(cursor) });

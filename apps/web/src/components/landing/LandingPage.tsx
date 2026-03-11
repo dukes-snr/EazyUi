@@ -8,7 +8,7 @@ import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { Orb } from '../ui/Orb';
-import { ComposerInlineReferenceOverlay } from '../ui/ComposerInlineReferenceOverlay';
+import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import TextType from '../ui/TextType';
 import {
@@ -207,8 +207,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const styleMenuRef = useRef<HTMLDivElement | null>(null);
-    const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-    const promptOverlayRef = useRef<HTMLDivElement | null>(null);
+    const promptTextareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -270,7 +269,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         if (!normalized) return;
         const range = referenceTriggerRangeRef.current;
         if (!range) return;
-        const result = replaceComposerReferenceTrigger(prompt, range, formatComposerUrlReferenceToken(normalized));
+        const source = promptTextareaRef.current?.getValue() ?? prompt;
+        const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
         setPrompt(result.value);
         closeReferenceMenu();
         window.setTimeout(() => {
@@ -393,7 +393,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         if (!isReferenceMenuOpen) return;
         const handlePointerDown = (event: MouseEvent) => {
             if (referenceMenuRef.current?.contains(event.target as Node)) return;
-            if (event.target === promptTextareaRef.current) return;
+            if (promptTextareaRef.current?.element?.contains(event.target as Node)) return;
             closeReferenceMenu();
         };
         document.addEventListener('pointerdown', handlePointerDown);
@@ -614,42 +614,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         manualOutput={landingOrbOutput}
                                     />
                                 </div>
-                                {prompt.length > 0 && (
-                                    <div
-                                        ref={promptOverlayRef}
-                                        className="pointer-events-none absolute left-[51px] right-[10px] top-0 max-h-[180px] overflow-hidden px-2 py-1 text-[16px] leading-normal"
-                                    >
-                                        <ComposerInlineReferenceOverlay value={prompt} className="text-[16px]" />
-                                    </div>
-                                )}
-                                <textarea
+                                <ComposerInlineReferenceInput
                                     ref={promptTextareaRef}
                                     value={prompt}
-                                    onChange={(e) => handlePromptChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-                                    onScroll={(event) => {
-                                        if (!promptOverlayRef.current) return;
-                                        promptOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                                        promptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                                    }}
-                                    onClick={(event) => {
-                                        const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                                        syncReferenceTrigger(event.currentTarget.value, cursor);
-                                    }}
-                                    onKeyUp={(event) => {
-                                        const cursor = event.currentTarget.selectionStart ?? event.currentTarget.value.length;
-                                        syncReferenceTrigger(event.currentTarget.value, cursor);
-                                    }}
+                                    onChange={handlePromptChange}
+                                    onSelectionChange={syncReferenceTrigger}
                                     onFocus={() => setIsPromptFocused(true)}
                                     onBlur={() => setIsPromptFocused(false)}
                                     onKeyDown={(e) => {
-                                        if (e.key === '@') {
-                                            window.setTimeout(() => {
-                                                const target = promptTextareaRef.current;
-                                                if (!target) return;
-                                                const cursor = target.selectionStart ?? target.value.length;
-                                                syncReferenceTrigger(target.value, cursor);
-                                            }, 0);
-                                        }
                                         if (isReferenceMenuOpen) {
                                             if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
                                                 if (e.key === 'ArrowDown') {
@@ -686,8 +658,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         }
                                     }}
                                     placeholder=""
-                                    className={`no-focus-ring w-full min-h-[72px] max-h-[180px] resize-none bg-transparent px-2 py-1 text-[16px] text-left text-[var(--ui-text)] placeholder:text-[16px] placeholder:text-[var(--ui-text-subtle)] outline-none border-0 focus:border-0 ring-0 focus:ring-0 ${prompt.length > 0 ? 'text-transparent caret-[var(--ui-text)] placeholder:text-transparent' : ''}`}
-                                    style={{ border: 'none', boxShadow: 'none' }}
+                                    placeholderClassName="px-2 py-1 text-left"
+                                    className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] border-0 focus:border-0 ring-0 focus:ring-0"
                                 />
                             </div>
                         </div>
