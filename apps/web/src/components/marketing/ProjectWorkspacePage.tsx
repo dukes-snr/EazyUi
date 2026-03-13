@@ -730,7 +730,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       handleCreateFromPrompt();
                     }}
                   >
-                    <div className="relative mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
+            <div className="relative mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3">
               <input
                 ref={fileInputRef}
                 type="file"

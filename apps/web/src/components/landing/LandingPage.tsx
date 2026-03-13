@@ -1,6 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, CircleStar, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Tablet, Workflow, X, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, ChevronUp, CircleStar, Gem, LineSquiggle, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/img1.jpg';
+import featureSlide1 from '../../assets/Slide1.png';
+import featureSlide2 from '../../assets/Slide2.png';
+import featureSlide3 from '../../assets/Slide3.png';
+import featureSlide4 from '../../assets/Slide4.png';
 import videodemoimg from '../../assets/videodemoimg.png';
 import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
@@ -108,21 +112,25 @@ const FEATURE_SCROLL_ITEMS = [
         number: '00',
         title: 'Turn a rough prompt into a polished first pass',
         description: 'Start with an idea in plain language and get back screens with hierarchy, spacing, and product structure already moving in the right direction.',
+        image: featureSlide1,
     },
     {
         number: '01',
         title: 'Guide the output with references that actually matter',
         description: 'Attach screenshots, inline URLs, and visual inspiration so EazyUI stays closer to your product reality instead of drifting into generic layouts.',
+        image: featureSlide2,
     },
     {
         number: '02',
         title: 'Design across mobile, tablet, and desktop instantly',
         description: 'Switch targets before generation so the density, composition, and rhythm fit the device from the beginning rather than as an afterthought.',
+        image: featureSlide3,
     },
     {
         number: '03',
         title: 'Refine faster with style control, voice, and iteration',
         description: 'Use style presets, fast versus quality modes, and voice input to move quickly from broad exploration into sharper, premium direction.',
+        image: featureSlide4,
     },
 ] as const;
 
@@ -168,6 +176,21 @@ const FOOTER_PRIMARY_LINKS = [
 const FOOTER_POLICIES = [
     { label: 'Terms & Conditions', path: '/learn' },
     { label: 'Privacy Policy', path: '/learn' },
+] as const;
+const FOOTER_RESOURCE_LINKS = [
+    { label: 'Docs', href: '#' },
+    { label: 'Blog', path: '/learn' },
+    { label: 'Changelog', path: '/changelog' },
+] as const;
+const FOOTER_CONNECT_LINKS = [
+    { label: 'Feedback', href: 'mailto:team@eazyui.com' },
+    { label: 'Discord', href: 'https://discord.gg/nwWJDCaqtc' },
+    { label: 'X', href: 'https://x.com' },
+] as const;
+const FOOTER_SOCIAL_LINKS = [
+    { label: 'X', href: 'https://x.com' },
+    { label: 'Discord', href: 'https://discord.gg/nwWJDCaqtc' },
+    { label: 'Reddit', href: 'https://www.reddit.com' },
 ] as const;
 
 function toChipLabel(text: string): string {
@@ -514,10 +537,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         });
     }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
-    const featureShowcaseCards = useMemo(
-        () => Array.from({ length: 4 }, (_, index) => patternCards[(index + 1) % patternCards.length]),
-        [patternCards]
-    );
     const testimonialPreviewCards = useMemo(
         () => Array.from({ length: 4 }, (_, index) => patternCards[(index + 1) % patternCards.length]),
         [patternCards]
@@ -548,6 +567,15 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
 
         video.currentTime = 0;
         void video.play();
+    };
+    const scrollToTop = () => {
+        const scrollContainer = scrollContainerRef.current;
+        if (scrollContainer) {
+            scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
@@ -1083,7 +1111,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         </p>
                                     </article>
                                     {FEATURE_SCROLL_ITEMS.map((item, index) => {
-                                        const preview = featureShowcaseCards[index];
                                         return (
                                             <article key={item.number} className="landing-feature-scroll-card landing-fade-up" style={{ animationDelay: `${100 + index * 90}ms` }}>
                                                 <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
@@ -1091,11 +1118,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                     {item.title}
                                                 </h4>
                                                 <div className="landing-feature-scroll-preview mt-5">
-                                                    {preview.image ? (
-                                                        <img src={preview.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />
-                                                    ) : (
-                                                        <div className={`h-full w-full bg-gradient-to-br ${preview.accent}`} />
-                                                    )}
+                                                    <img src={item.image} alt={`${item.title} preview`} className="landing-feature-scroll-image" />
                                                 </div>
                                                 <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-slate-300">
                                                     {item.description}
@@ -1199,79 +1222,138 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                 </section>
 
-                <footer className="relative left-1/2 right-1/2 mt-8 -ml-[50vw] -mr-[50vw] w-screen overflow-hidden bg-[#06070B] px-5 pb-0 pt-7 md:px-8 md:pt-8">
-                    <div className="mx-auto max-w-[1320px]">
-                    <div className="relative grid gap-8 text-center md:grid-cols-3">
-                        <div className="flex flex-col items-center">
-                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Explore</p>
-                            <div className="mt-3 flex flex-col items-center gap-2">
-                                {FOOTER_PRIMARY_LINKS.map((item) => (
+                <footer className="landing-footer">
+                    <div className="landing-footer-inner">
+                        <div className="landing-footer-cta">
+                            <div>
+                                <p className="landing-footer-kicker">Get started with EazyUI</p>
+                                <h2 className="landing-footer-title">
+                                    Ship sharper interfaces.
+                                    <span>Try it free.</span>
+                                </h2>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => onNavigate('/app')}
+                                className="landing-footer-cta-button"
+                            >
+                                <Sparkles size={18} />
+                                <span>Open EazyUI</span>
+                                <ArrowRight size={18} />
+                            </button>
+                        </div>
+
+                        <div className="landing-footer-divider" />
+
+                        <div className="landing-footer-main">
+                            <div className="landing-footer-brand">
+                                <img src={appLogo} alt="EazyUI logo" className="landing-footer-logo" />
+                                <p className="landing-footer-brand-copy">
+                                    EazyUI turns product ideas into polished interface direction fast, with better first passes and cleaner refinement loops.
+                                </p>
+                            </div>
+
+                            <div className="landing-footer-nav">
+                                <div className="landing-footer-column">
+                                    <h4>Explore</h4>
+                                    {FOOTER_PRIMARY_LINKS.map((item) => (
+                                        <button
+                                            key={item.label}
+                                            type="button"
+                                            onClick={() => onNavigate(item.path)}
+                                            className="landing-footer-link"
+                                        >
+                                            {item.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div className="landing-footer-column">
+                                    <h4>Resources</h4>
+                                    {FOOTER_RESOURCE_LINKS.map((item) => (
+                                        'path' in item ? (
+                                            <button
+                                                key={item.label}
+                                                type="button"
+                                                onClick={() => onNavigate(item.path)}
+                                                className="landing-footer-link"
+                                            >
+                                                {item.label}
+                                            </button>
+                                        ) : (
+                                            <a
+                                                key={item.label}
+                                                href={item.href}
+                                                className="landing-footer-link"
+                                                target={item.href.startsWith('http') ? '_blank' : undefined}
+                                                rel={item.href.startsWith('http') ? 'noreferrer' : undefined}
+                                            >
+                                                {item.label}
+                                            </a>
+                                        )
+                                    ))}
+                                </div>
+
+                                <div className="landing-footer-column">
+                                    <h4>Connect</h4>
+                                    {FOOTER_CONNECT_LINKS.map((item) => (
+                                        <a
+                                            key={item.label}
+                                            href={item.href}
+                                            className="landing-footer-link"
+                                            target={item.href.startsWith('http') ? '_blank' : undefined}
+                                            rel={item.href.startsWith('http') ? 'noreferrer' : undefined}
+                                        >
+                                            {item.label}
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="landing-footer-meta">
+                            <div className="landing-footer-meta-left">
+                                <span>© 2026 EazyUI</span>
+                                <div className="landing-footer-badge">
+                                    <ShieldCheck size={15} />
+                                    <span>SOC 2 aligned</span>
+                                </div>
+                            </div>
+
+                            <div className="landing-footer-meta-right">
+                                {FOOTER_POLICIES.map((item) => (
                                     <button
                                         key={item.label}
                                         type="button"
                                         onClick={() => onNavigate(item.path)}
-                                        className="text-[13px] text-slate-300 hover:text-white transition-colors"
+                                        className="landing-footer-policy"
                                     >
                                         {item.label}
                                     </button>
                                 ))}
-                            </div>
-                        </div>
 
-                        <div className="flex flex-col items-center">
-                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Follow Us</p>
-                            <p className="mt-3 text-[13px] text-slate-200">team@eazyui.com</p>
-                            <p className="mt-1 text-[13px] text-slate-200">+1 (408) 555-0199</p>
-                            <div className="mt-4 flex items-center gap-2 md:justify-center">
-                                {[Layers3, Workflow, Sparkles, Palette].map((Icon, index) => (
-                                    <button
-                                        key={`${index}`}
-                                        type="button"
-                                        className="h-9 w-9 rounded-[10px] border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10 hover:text-white transition-colors inline-flex items-center justify-center"
-                                        title="Social link"
+                                {FOOTER_SOCIAL_LINKS.map((item) => (
+                                    <a
+                                        key={item.label}
+                                        href={item.href}
+                                        className="landing-footer-social"
+                                        target="_blank"
+                                        rel="noreferrer"
                                     >
-                                        <Icon size={15} />
-                                    </button>
+                                        {item.label}
+                                    </a>
                                 ))}
+
+                                <button type="button" onClick={scrollToTop} className="landing-footer-top">
+                                    <span>Back to top</span>
+                                    <ChevronUp size={16} />
+                                </button>
                             </div>
                         </div>
 
-                        <div className="flex flex-col items-center">
-                            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Address</p>
-                            <p className="mt-3 text-[13px] leading-relaxed text-slate-200">
-                                421 North Street,
-                                <br />
-                                Suite 400, San Francisco,
-                                <br />
-                                California, US.
-                            </p>
+                        <div className="landing-footer-wordmark" aria-hidden="true">
+                            <span>EAZYUI</span>
                         </div>
-                    </div>
-
-                    <div className="relative mt-7 flex flex-col items-center justify-center gap-3 border-t border-white/10 pt-4 text-[12px] text-slate-400 md:flex-row">
-                        <p>© 2026 EazyUI. All rights reserved.</p>
-                        <div className="flex items-center gap-5">
-                            {FOOTER_POLICIES.map((item) => (
-                                <button
-                                    key={item.label}
-                                    type="button"
-                                    onClick={() => onNavigate(item.path)}
-                                    className="hover:text-slate-200 transition-colors"
-                                >
-                                    {item.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="relative mt-7 overflow-hidden px-2 py-4">
-                        <div className="flex items-end justify-center gap-3 md:gap-6">
-                            <img src={appLogo} alt="EazyUI logo" className="h-[130px] w-[130px] md:h-[190px] md:w-[190px] object-contain shrink-0" />
-                            <p className="text-[72px] leading-none tracking-[-0.06em] font-semibold text-white/95 sm:text-[112px] md:text-[170px]">
-                                EAZYUI
-                            </p>
-                        </div>
-                    </div>
                     </div>
                 </footer>
             </main>
