@@ -793,12 +793,10 @@ textarea::placeholder {
 }
 
 .landing-nav-shell.is-scrolled {
-  background:
-    linear-gradient(180deg, rgba(10, 12, 18, 0.82) 0%, rgba(10, 12, 18, 0.66) 100%);
+  background: color-mix(in srgb, var(--ui-surface-1) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
-  box-shadow:
-    0 14px 40px rgba(2, 6, 23, 0.18),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: none;
 }
 
 .landing-nav-frame {
