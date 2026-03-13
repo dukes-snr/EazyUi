@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowUp, CircleStar, Gauge, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, TrendingUp, Wand2, Workflow, X, Zap } from 'lucide-react';
+import { ArrowUp, CircleStar, Gem, Layers3, LineSquiggle, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Tablet, Workflow, X, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/img1.jpg';
+import videodemoimg from '../../assets/videodemoimg.png';
 import appLogo from '../../assets/Ui-logo.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
@@ -102,48 +103,26 @@ const PATTERN_SCREEN_TEMPLATES: Omit<PatternCard, 'image'>[] = [
     },
 ];
 
-const EXPERIENCE_BLOCKS = [
+const FEATURE_SCROLL_ITEMS = [
     {
-        title: 'Idea to polished screen in minutes',
-        description: 'Generate complete layouts with spacing, hierarchy, and visual rhythm that feel crafted.',
-        stat: '< 90 sec first draft',
-        icon: Wand2,
-        glow: 'from-cyan-400/25 to-blue-500/10',
+        number: '00',
+        title: 'Turn a rough prompt into a polished first pass',
+        description: 'Start with an idea in plain language and get back screens with hierarchy, spacing, and product structure already moving in the right direction.',
     },
     {
-        title: 'Pattern-aware generation',
-        description: 'Mix proven UI patterns with your brand direction, platform rules, and product constraints.',
-        stat: '320+ reusable motifs',
-        icon: Layers3,
-        glow: 'from-indigo-400/25 to-violet-500/10',
+        number: '01',
+        title: 'Guide the output with references that actually matter',
+        description: 'Attach screenshots, inline URLs, and visual inspiration so EazyUI stays closer to your product reality instead of drifting into generic layouts.',
     },
     {
-        title: 'Production-minded output',
-        description: 'Create screens built with implementation details, not static comps that die in handoff.',
-        stat: 'Design + build alignment',
-        icon: ShieldCheck,
-        glow: 'from-emerald-400/25 to-teal-500/10',
-    },
-] as const;
-
-const WORKFLOW_STEPS = [
-    {
-        step: '01',
-        title: 'Describe the experience',
-        description: 'Drop a focused prompt with audience, goals, and vibe. Add references when needed.',
-        icon: Workflow,
+        number: '02',
+        title: 'Design across mobile, tablet, and desktop instantly',
+        description: 'Switch targets before generation so the density, composition, and rhythm fit the device from the beginning rather than as an afterthought.',
     },
     {
-        step: '02',
-        title: 'Refine in real-time',
-        description: 'Iterate tone, layout, and density instantly with guided style controls and model modes.',
-        icon: Gauge,
-    },
-    {
-        step: '03',
-        title: 'Ship with confidence',
-        description: 'Move from concept to production-ready screens with clean structure and strong hierarchy.',
-        icon: TrendingUp,
+        number: '03',
+        title: 'Refine faster with style control, voice, and iteration',
+        description: 'Use style presets, fast versus quality modes, and voice input to move quickly from broad exploration into sharper, premium direction.',
     },
 ] as const;
 
@@ -163,6 +142,11 @@ const SOCIAL_PROOF = [
         author: 'Founder',
         company: 'Consumer App',
     },
+    {
+        quote: 'The screens already arrive with structure, so our reviews start at refinement instead of rescue.',
+        author: 'Frontend Lead',
+        company: 'Healthtech',
+    },
 ] as const;
 const CHIP_LABEL_MAX = 34;
 const MARKETING_NAV_LINKS = [
@@ -171,6 +155,8 @@ const MARKETING_NAV_LINKS = [
     { label: 'Learn', path: '/learn' },
     { label: 'Changelog', path: '/changelog' },
 ] as const;
+
+const DEMO_VIDEO_URL = 'https://lf16-web-neutral.traecdn.ai/obj/trae-ai-static/trae_website/static/media/solo-introduce.d2d26c5b.mp4';
 const FOOTER_PRIMARY_LINKS = [
     { label: 'Home', path: '/' },
     { label: 'Templates', path: '/templates' },
@@ -201,11 +187,21 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
+    const [isNavScrolled, setIsNavScrolled] = useState(false);
+    const [isDemoHovered, setIsDemoHovered] = useState(false);
+    const [isDemoPlaying, setIsDemoPlaying] = useState(false);
+    const [featureShowcaseOffset, setFeatureShowcaseOffset] = useState(0);
+    const [featureShowcaseScrollSpan, setFeatureShowcaseScrollSpan] = useState(2200);
     const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+    const demoVideoRef = useRef<HTMLVideoElement | null>(null);
+    const featureShowcaseSectionRef = useRef<HTMLElement | null>(null);
+    const featureShowcaseViewportRef = useRef<HTMLDivElement | null>(null);
+    const featureShowcaseTrackRef = useRef<HTMLDivElement | null>(null);
     const styleMenuRef = useRef<HTMLDivElement | null>(null);
     const promptTextareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
@@ -427,6 +423,84 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         };
     }, [showStyleMenu]);
 
+    useEffect(() => {
+        const scrollContainer = scrollContainerRef.current;
+        if (!scrollContainer) return;
+
+        let animationFrame = 0;
+
+        const updateScrollState = () => {
+            animationFrame = 0;
+            const scrollTop = scrollContainer.scrollTop;
+            const nextScrolled = scrollTop > 10;
+            setIsNavScrolled((current) => (current === nextScrolled ? current : nextScrolled));
+
+            const section = featureShowcaseSectionRef.current;
+            const viewport = featureShowcaseViewportRef.current;
+            const track = featureShowcaseTrackRef.current;
+
+            if (!section || !viewport || !track) {
+                setFeatureShowcaseOffset((current) => (current === 0 ? current : 0));
+                return;
+            }
+
+            const viewportHeight = scrollContainer.clientHeight;
+            const sectionRect = section.getBoundingClientRect();
+            const containerRect = scrollContainer.getBoundingClientRect();
+            const sectionTopInViewport = sectionRect.top - containerRect.top;
+            const scrollableDistance = Math.max(sectionRect.height - viewportHeight, 1);
+            const progress = Math.min(Math.max((-sectionTopInViewport) / scrollableDistance, 0), 1);
+            const maxOffset = Math.max(track.scrollWidth - viewport.clientWidth, 0);
+            const nextOffset = maxOffset * progress;
+            const nextScrollSpan = Math.max(viewportHeight + maxOffset + 240, viewportHeight * 1.8);
+
+            setFeatureShowcaseOffset((current) => (Math.abs(current - nextOffset) < 1 ? current : nextOffset));
+            setFeatureShowcaseScrollSpan((current) => (Math.abs(current - nextScrollSpan) < 2 ? current : nextScrollSpan));
+        };
+
+        const handleScroll = () => {
+            if (animationFrame) return;
+            animationFrame = window.requestAnimationFrame(updateScrollState);
+        };
+
+        const handleResize = () => {
+            if (animationFrame) {
+                window.cancelAnimationFrame(animationFrame);
+            }
+            animationFrame = window.requestAnimationFrame(updateScrollState);
+        };
+
+        updateScrollState();
+        scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            scrollContainer.removeEventListener('scroll', handleScroll);
+            window.removeEventListener('resize', handleResize);
+            if (animationFrame) {
+                window.cancelAnimationFrame(animationFrame);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        const video = demoVideoRef.current;
+        if (!video) return;
+
+        const syncPlayingState = () => setIsDemoPlaying(!video.paused && !video.ended);
+
+        syncPlayingState();
+        video.addEventListener('play', syncPlayingState);
+        video.addEventListener('pause', syncPlayingState);
+        video.addEventListener('ended', syncPlayingState);
+
+        return () => {
+            video.removeEventListener('play', syncPlayingState);
+            video.removeEventListener('pause', syncPlayingState);
+            video.removeEventListener('ended', syncPlayingState);
+        };
+    }, []);
+
     const patternCards = useMemo<PatternCard[]>(() => {
         if (SHOWCASE_SCREEN_IMAGES.length === 0) {
             return PATTERN_SCREEN_TEMPLATES.map((template) => ({ ...template }));
@@ -440,6 +514,15 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         });
     }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
+    const featureShowcaseCards = useMemo(
+        () => Array.from({ length: 4 }, (_, index) => patternCards[(index + 1) % patternCards.length]),
+        [patternCards]
+    );
+    const testimonialPreviewCards = useMemo(
+        () => Array.from({ length: 4 }, (_, index) => patternCards[(index + 1) % patternCards.length]),
+        [patternCards]
+    );
+    const demoVideoPoster = videodemoimg;
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
     const actionIsStop = isRecording;
@@ -448,6 +531,24 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const { agentState: landingOrbState, colors: landingOrbColors } = useOrbVisuals(landingOrbActivity);
     const landingOrbInput = isRecording ? 0.9 : isTranscribing ? 0.58 : showSendAction ? 0.45 : 0.2;
     const landingOrbOutput = (showSendAction || isRecording || isTranscribing) ? 0.5 : 0.2;
+    const toggleDemoPlayback = () => {
+        const video = demoVideoRef.current;
+        if (!video) return;
+
+        if (video.paused || video.ended) {
+            void video.play();
+            return;
+        }
+
+        video.pause();
+    };
+    const restartDemoVideo = () => {
+        const video = demoVideoRef.current;
+        if (!video) return;
+
+        video.currentTime = 0;
+        void video.play();
+    };
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
         : stylePreset === 'vibrant'
@@ -468,7 +569,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
 
     return (
-        <div className="h-screen w-screen overflow-y-auto bg-[#06070B] text-white relative">
+        <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[#06070B] text-white relative">
             <div className="pointer-events-none absolute inset-0">
                 <div
                     className="absolute inset-0"
@@ -483,8 +584,9 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                 {/* <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(6,7,11,0.5),rgba(6,7,11,0.78)_58%,rgba(6,7,11,0.95))]" /> */}
             </div>
 
-            <header className="relative z-10 h-14 border-b border-white/5">
-                <div className="mx-auto h-full max-w-[1160px] px-6 flex items-center justify-between">
+            <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''}`}>
+                <div className="landing-nav-frame">
+                    <div className="mx-auto flex h-14 max-w-[1160px] items-center justify-between px-4 sm:px-6">
                     <button
                         type="button"
                         onClick={() => onNavigate('/')}
@@ -575,10 +677,12 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             </>
                         )}
                     </div>
+                    </div>
                 </div>
             </header>
 
-            <main className="relative z-10 px-4 md:px-[12%] lg:px-[20%] pt-8 md:pt-12 pb-0">
+            <main className="relative z-10 px-4 md:px-[0%] lg:px-[0%] pt-8 md:pt-12 pb-0">
+                {/*Hero section*/}
                 <section className="mx-auto max-w-[980px] text-center min-h-[55vh] flex flex-col items-center justify-center">
                     <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
                         Design better UI with <span className="text-blue-300 italic">EazyUI</span>
@@ -862,10 +966,9 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                 </section> */}
 
-                <section className="relative left-1/2 right-1/2 mt-14 -ml-[50vw] -mr-[50vw] w-screen text-center">
-                    <div className="relative overflow-hidden px-3 md:px-4">
-                        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_right,rgba(6,7,11,1),rgba(6,7,11,0))]" />
-                        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-10 bg-[linear-gradient(to_left,rgba(6,7,11,1),rgba(6,7,11,0))]" />
+                {/*Screens demo section*/}
+                <section className="landing-page-section relative w-screen max-w-none">
+                    <div className="landing-page-section-full relative overflow-hidden px-0">
                         <div
                             className="infinite-scroll-track flex w-max gap-4"
                             style={{ ['--marquee-duration' as any]: `${Math.max(36, patternCards.length * 7)}s` }}
@@ -875,7 +978,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     key={`${item.title}-${idx}`}
                                     type="button"
                                     onClick={() => setPrompt(item.prompt)}
-                                    className="w-[250px] md:w-[280px] shrink-0 rounded-2xl border border-white/10 bg-transparent p-2.5 text-left hover:border-white/20 transition-colors"
+                                    className="w-[250px] md:w-[280px] shrink-0 bg-transparent p-0 text-left transition-colors"
                                     title="Use this pattern in the prompt"
                                 >
                                     <div className={`relative w-full aspect-[9/19.5] rounded-xl border border-white/10 overflow-hidden ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[#0f131e]'}`}>
@@ -889,134 +992,210 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                 </section>
 
-                <section className="mx-auto mt-24 max-w-[1120px] px-2">
-                    <div className="landing-fade-up text-center">
-                        <p className="text-[11px] uppercase tracking-[0.16em] text-cyan-200/80">Experience Layer</p>
-                        <h3 className="mt-3 text-[30px] md:text-[46px] leading-[1.08] tracking-[-0.02em] font-semibold text-white">
-                            Built for teams who ship
+                {/*Video demo section*/}
+                <section className="landing-surface-band landing-surface-band-2 landing-page-section ">
+                    <div className="w-full min-w-none px-[15%]">
+                    <div className="landing-fade-up flex flex-col gap-4 text-center">
+                        {/* <div className="mx-auto inline-flex rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-slate-300">
+                            EazyUI Demo
+                        </div> */}
+                        <h2 className="text-[36px] md:text-[60px] lg:text-[74px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
+                            Watch <span className="text-blue-300 italic">EazyUI</span>
                             <br />
-                            interfaces that feel premium.
+                            in motion.
+                        </h2>
+                        <p className="mx-auto max-w-[760px] text-[16px] md:text-[19px] leading-8 text-slate-300">
+                            See how the prompt flow, generated screens, and refinement loop come together in one fast, polished product experience.
+                        </p>
+                    </div>
+
+                    <div className="landing-fade-up mt-8 flex justify-center" style={{ animationDelay: '80ms' }}>
+                        <button
+                            type="button"
+                            onClick={() => onNavigate('/app')}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-5 py-3 text-[13px] font-semibold text-[#0a0b0d] hover:bg-slate-200 transition-colors"
+                        >
+                            <Sparkles size={16} />
+                            Explore EazyUI
+                        </button>
+                    </div>
+
+                    <div className="landing-demo-shell landing-fade-up mt-14" style={{ animationDelay: '140ms' }}>
+                        <div
+                            className="landing-demo-frame"
+                            onMouseEnter={() => setIsDemoHovered(true)}
+                            onMouseLeave={() => setIsDemoHovered(false)}
+                        >
+                            <video
+                                ref={demoVideoRef}
+                                className="landing-demo-video"
+                                poster={demoVideoPoster}
+                                playsInline
+                                preload="metadata"
+                                onClick={toggleDemoPlayback}
+                            >
+                                <source src={DEMO_VIDEO_URL} type="video/mp4" />
+                            </video>
+                            <button
+                                type="button"
+                                onClick={toggleDemoPlayback}
+                                className={`landing-demo-control ${!isDemoPlaying ? 'is-paused' : ''} ${(!isDemoPlaying || isDemoHovered) ? 'is-visible' : ''}`}
+                                aria-label={isDemoPlaying ? 'Pause demo video' : 'Play demo video'}
+                            >
+                                {isDemoPlaying ? <Pause size={26} className="fill-current" /> : <Play size={30} className="fill-current translate-x-[1px]" />}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={restartDemoVideo}
+                                className={`landing-demo-restart ${isDemoHovered || !isDemoPlaying ? 'is-visible' : ''}`}
+                                aria-label="Restart demo video"
+                            >
+                                <RotateCcw size={16} />
+                                Restart
+                            </button>
+                        </div>
+                    </div>
+                    </div>
+                </section>
+
+                <section
+                    ref={featureShowcaseSectionRef}
+                    className="landing-surface-band landing-surface-band-1 landing-page-section landing-feature-pin-section"
+                    style={{ height: `${featureShowcaseScrollSpan}px` }}
+                >
+                    <div className="landing-feature-pin-inner">
+                        <div className="landing-feature-layout landing-page-section-inner landing-page-section-inner-full h-full">
+                            <div ref={featureShowcaseViewportRef} className="landing-feature-scroll-viewport">
+                                <div
+                                    ref={featureShowcaseTrackRef}
+                                    className="landing-feature-scroll-track"
+                                    style={{ transform: `translate3d(-${featureShowcaseOffset}px, 0, 0)` }}
+                                >
+                                    <article className="landing-feature-scroll-intro landing-fade-up">
+                                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">What EazyUI unlocks</p>
+                                        <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
+                                            From first prompt
+                                            <br />
+                                            to product-ready UI.
+                                        </h3>
+                                        <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-slate-300">
+                                            Scroll through the core capabilities and see how EazyUI turns rough ideas into sharper interface direction, faster refinement, and more confident decisions.
+                                        </p>
+                                    </article>
+                                    {FEATURE_SCROLL_ITEMS.map((item, index) => {
+                                        const preview = featureShowcaseCards[index];
+                                        return (
+                                            <article key={item.number} className="landing-feature-scroll-card landing-fade-up" style={{ animationDelay: `${100 + index * 90}ms` }}>
+                                                <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
+                                                <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-white">
+                                                    {item.title}
+                                                </h4>
+                                                <div className="landing-feature-scroll-preview mt-5">
+                                                    {preview.image ? (
+                                                        <img src={preview.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />
+                                                    ) : (
+                                                        <div className={`h-full w-full bg-gradient-to-br ${preview.accent}`} />
+                                                    )}
+                                                </div>
+                                                <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-slate-300">
+                                                    {item.description}
+                                                </p>
+                                            </article>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="landing-surface-band landing-surface-band-2 landing-page-section">
+                    <GlassPricingSection
+                        className=""
+                        onGetStarted={() => setPrompt('Design a premium SaaS pricing page with calm typography, elegant comparisons, and a clear featured plan')}
+                    />
+                </section>
+
+                <section className="landing-surface-band landing-surface-band-1 landing-page-section">
+                    <div className="landing-page-section-inner landing-page-section-inner-full">
+                    <div className="landing-fade-up text-center">
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Testimonials</p>
+                        <h3 className="mt-4 text-[30px] md:text-[44px] leading-[1.04] tracking-[-0.03em] font-semibold text-white">
+                            Strong first screens change the whole conversation.
                         </h3>
                     </div>
 
-                    <div className="mt-10 grid gap-4 md:grid-cols-3">
-                        {EXPERIENCE_BLOCKS.map((item, index) => {
-                            const Icon = item.icon;
+                    <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        {SOCIAL_PROOF.map((item, index) => {
+                            const preview = testimonialPreviewCards[index];
                             return (
                                 <article
-                                    key={item.title}
-                                    className="landing-fade-up landing-feature-card relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-[2px]"
-                                    style={{ animationDelay: `${110 + index * 130}ms` }}
+                                    key={item.quote}
+                                    className="landing-fade-up rounded-[26px] border border-white/10 bg-white/[0.03] p-5"
+                                    style={{ animationDelay: `${90 + index * 90}ms` }}
                                 >
-                                    <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${item.glow} opacity-70`} />
-                                    <div className="relative">
-                                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/20 text-cyan-100">
-                                            <Icon size={18} />
+                                    <p className="text-[14px] leading-7 text-slate-200">“{item.quote}”</p>
+                                    <div className="mt-8 flex items-center gap-3">
+                                        <div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
+                                            {preview.image ? (
+                                                <img src={preview.image} alt={`${item.author} preview`} className="h-full w-full object-cover" />
+                                            ) : (
+                                                <div className={`h-full w-full bg-gradient-to-br ${preview.accent}`} />
+                                            )}
                                         </div>
-                                        <h4 className="mt-5 text-[18px] font-semibold text-white">{item.title}</h4>
-                                        <p className="mt-3 text-[14px] leading-relaxed text-slate-300">{item.description}</p>
-                                        <div className="mt-6 inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-cyan-100">
-                                            {item.stat}
+                                        <div>
+                                            <p className="text-[13px] font-semibold text-white">{item.author}</p>
+                                            <p className="text-[12px] text-slate-400">{item.company}</p>
                                         </div>
                                     </div>
                                 </article>
                             );
                         })}
                     </div>
-                </section>
 
-                <section className="mx-auto mt-24 max-w-[1120px] px-2">
-                    <div className="rounded-[30px] border border-white/10 bg-[#06070B] p-6 md:p-10">
-                        <div className="landing-fade-up text-center">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-indigo-200/80">Workflow</p>
-                            <h3 className="mt-3 text-[30px] md:text-[42px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
-                                From prompt to production,
-                                <br />
-                                with zero dead ends.
-                            </h3>
-                        </div>
-                        <div className="mt-10 grid gap-4 md:grid-cols-3">
-                            {WORKFLOW_STEPS.map((step, index) => {
-                                const Icon = step.icon;
-                                return (
-                                    <article
-                                        key={step.title}
-                                        className="landing-fade-up relative rounded-2xl border border-white/10 bg-black/20 p-5"
-                                        style={{ animationDelay: `${120 + index * 140}ms` }}
-                                    >
-                                        <div className="mb-4 flex items-center justify-between">
-                                            <span className="text-[12px] font-semibold tracking-[0.14em] text-indigo-200/80">{step.step}</span>
-                                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-400/15 text-indigo-100 ring-1 ring-indigo-300/35">
-                                                <Icon size={14} />
-                                            </span>
-                                        </div>
-                                        <h4 className="text-[17px] font-semibold text-white">{step.title}</h4>
-                                        <p className="mt-2 text-[14px] leading-relaxed text-slate-300">{step.description}</p>
-                                    </article>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </section>
+                    <div className="landing-fade-up mt-12 rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-5 md:p-6" style={{ animationDelay: '180ms' }}>
+                        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-start gap-3">
+                                <div className="mt-1 h-10 w-10 shrink-0 rounded-full border border-white/10 bg-white/[0.05] p-[2px]">
+                                    <Orb
+                                        className="h-full w-full"
+                                        colors={landingOrbColors}
+                                        seed={9101}
+                                        agentState={landingOrbState}
+                                        volumeMode="manual"
+                                        manualInput={0.32}
+                                        manualOutput={0.24}
+                                    />
+                                </div>
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Ready to build</p>
+                                    <h4 className="mt-2 text-[24px] leading-[1.08] tracking-[-0.03em] font-semibold text-white">
+                                        Start your next release on the same sharper canvas.
+                                    </h4>
+                                    <p className="mt-2 max-w-[560px] text-[14px] leading-7 text-slate-300">
+                                        Describe the interface you want and generate a first pass that already feels like part of a real product system.
+                                    </p>
+                                </div>
+                            </div>
 
-                <GlassPricingSection
-                    className="mt-24"
-                    onGetStarted={() => setPrompt('Design a premium fintech pricing and subscription flow with annual billing emphasis')}
-                />
-
-                <section className="relative mx-auto mt-24 max-w-[1120px] px-2 pb-16">
-                    <div className="landing-glow-orb landing-glow-orb-left" />
-                    <div className="landing-glow-orb landing-glow-orb-right" />
-
-                    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[#06070B] p-6 md:p-10">
-                        <div className="landing-fade-up text-center">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-emerald-200/85">Proof</p>
-                            <h3 className="mt-3 text-[30px] md:text-[44px] leading-[1.1] tracking-[-0.02em] font-semibold text-white">
-                                Teams use EazyUI to compress design cycles.
-                            </h3>
-                        </div>
-
-                        <div className="mt-8 grid gap-4 md:grid-cols-3">
-                            {SOCIAL_PROOF.map((item, index) => (
-                                <article
-                                    key={item.quote}
-                                    className={`landing-fade-up rounded-2xl border border-white/10 bg-white/[0.03] p-5 ${index % 2 === 0 ? 'landing-float-slow' : 'landing-float-fast'}`}
-                                    style={{ animationDelay: `${100 + index * 120}ms` }}
-                                >
-                                    <p className="text-[14px] leading-relaxed text-slate-200">"{item.quote}"</p>
-                                    <div className="mt-5">
-                                        <p className="text-[13px] font-semibold text-white">{item.author}</p>
-                                        <p className="text-[12px] text-slate-400">{item.company}</p>
-                                    </div>
-                                </article>
-                            ))}
-                        </div>
-
-                        <div className="landing-fade-up mt-10 rounded-2xl border border-white/10 bg-[#06070B] p-6 text-center">
-                            <p className="text-[12px] uppercase tracking-[0.13em] text-cyan-100/85">Ready To Build</p>
-                            <h4 className="mt-2 text-[24px] md:text-[32px] font-semibold tracking-[-0.02em] text-white">
-                                Start your next release on a stronger canvas.
-                            </h4>
-                            <p className="mt-2 text-[14px] text-slate-200">
-                                Describe the product you want to ship and generate your first production-ready screens now.
-                            </p>
-                            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
                                 <button
                                     type="button"
-                                    onClick={() => setPrompt('Design a modern SaaS workspace with AI automation cards, analytics, and polished onboarding flow')}
-                                    className="rounded-full border border-cyan-200/40 bg-cyan-300/15 px-5 py-2 text-[13px] font-semibold text-cyan-100 hover:bg-cyan-300/20 transition-colors"
+                                    onClick={() => setPrompt('Design a premium AI workspace with elegant analytics, modular cards, and a polished onboarding flow')}
+                                    className="rounded-full border border-cyan-200/35 bg-cyan-300/12 px-5 py-2 text-[13px] font-semibold text-cyan-100 hover:bg-cyan-300/20 transition-colors"
                                 >
-                                    Generate SaaS workspace
+                                    Generate AI workspace
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPrompt('Create a premium mobile commerce experience with personalized collections and frictionless checkout')}
-                                    className="rounded-full border border-white/20 bg-white/10 px-5 py-2 text-[13px] font-semibold text-white hover:bg-white/15 transition-colors"
+                                    onClick={() => setPrompt('Create a refined mobile commerce flow with editorial imagery, curated collections, and calm checkout states')}
+                                    className="rounded-full border border-white/15 bg-white/[0.06] px-5 py-2 text-[13px] font-semibold text-white hover:bg-white/10 transition-colors"
                                 >
                                     Generate mobile commerce
                                 </button>
                             </div>
                         </div>
+                    </div>
                     </div>
                 </section>
 
@@ -1099,4 +1278,3 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         </div>
     );
 }
-
