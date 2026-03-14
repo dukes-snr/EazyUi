@@ -2354,6 +2354,30 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     };
 
+    const getAuthoritativeProjectDesignSystem = () => {
+        const stored = useDesignStore.getState().spec?.designSystem;
+        return stored ? normalizeProjectDesignSystemModes(stored) : null;
+    };
+
+    const syncPendingDesignSystemProposal = (designSystem: ProjectDesignSystem) => {
+        const normalizedDesignSystem = normalizeProjectDesignSystemModes(designSystem);
+        const pendingProposal = [...useChatStore.getState().messages]
+            .reverse()
+            .find((message) => (
+                message.role === 'assistant'
+                && Boolean(message.meta?.designSystemProposalContext)
+                && !Boolean((message.meta as any)?.designSystemProceedAt)
+            ));
+        if (!pendingProposal) return;
+
+        updateMessage(pendingProposal.id, {
+            meta: {
+                ...(pendingProposal.meta || {}),
+                designSystemProposal: normalizedDesignSystem,
+            },
+        });
+    };
+
     const persistProjectAfterAiChange = useCallback((reason: string) => {
         const run = async () => {
             const latestSpec = useDesignStore.getState().spec;
@@ -2496,6 +2520,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
+        syncPendingDesignSystemProposal(normalizedDraft);
+        void persistProjectAfterAiChange('design system edit');
         if ((tokenPatches.length > 0 || typographyChanged || radiusChanged) && patchedScreenCount > 0) {
             const applied: string[] = [];
             if (tokenPatches.length > 0) {
@@ -3393,8 +3419,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         pinToLatest('smooth');
         const source = useChatStore.getState().messages.find((item) => item.id === assistantMessageId && item.role === 'assistant');
         if (!source) return;
-        const designSystem = (source.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
+        const proposedDesignSystem = (source.meta?.designSystemProposal || null) as ProjectDesignSystem | null;
         const context = (source.meta?.designSystemProposalContext || null) as DesignSystemProposalContext | null;
+        const designSystem = getAuthoritativeProjectDesignSystem() || proposedDesignSystem;
         if (!designSystem || !context) return;
         const parentMessage = context.parentUserId
             ? useChatStore.getState().messages.find((item) => item.id === context.parentUserId && item.role === 'user')
@@ -3405,6 +3432,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         updateMessage(assistantMessageId, {
             meta: {
                 ...(source.meta || {}),
+                designSystemProposal: designSystem,
                 designSystemProceedAt: Date.now(),
             }
         });

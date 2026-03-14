@@ -1726,8 +1726,13 @@ export async function listProjectsFirestore(uid: string): Promise<{ id: string; 
     const persistedCoverDataUrls = Array.isArray(data.coverImageDataUrls)
       ? data.coverImageDataUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
-    const coverImageUrls = [...persistedCoverUrls, ...persistedCoverDataUrls];
-    const fallbackCover = data.coverImageUrl || data.coverImageDataUrl || undefined;
+    const coverImageUrls = Array.from(new Set([
+      ...persistedCoverUrls,
+      ...persistedCoverDataUrls,
+      typeof data.coverImageUrl === "string" ? data.coverImageUrl.trim() : "",
+      typeof data.coverImageDataUrl === "string" ? data.coverImageDataUrl.trim() : "",
+    ].filter((value): value is string => value.length > 0))).slice(0, 2);
+    const fallbackCover = coverImageUrls[0] || data.coverImageUrl || data.coverImageDataUrl || undefined;
     return {
       id: d.id,
       name: data.name || "Untitled project",

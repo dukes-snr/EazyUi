@@ -1081,18 +1081,17 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   </div>
                   <div className="mb-3">
                     {(() => {
-                      const persistedImages = (project.coverImageUrls || []).filter(Boolean);
-                      const fallbackImage = project.coverImageUrl;
-                      const primaryImage = persistedImages[0] || fallbackImage;
-                      if (!primaryImage) {
+                      const frameImages = Array.from(new Set([
+                        ...(project.coverImageUrls || []).filter(Boolean),
+                        project.coverImageUrl || '',
+                      ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0))).slice(0, 2);
+                      if (frameImages.length === 0) {
                         return (
                           <div className="grid h-[130px] place-items-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[11px] text-[var(--ui-text-subtle)]">
                             Preview will appear after save
                           </div>
                         );
                       }
-                      const secondaryImage = persistedImages[1];
-                      const frameImages = secondaryImage ? [primaryImage, secondaryImage] : [primaryImage];
                       return (
                         <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden rounded-[20px] bg-[var(--workspace-soft-strong)] px-3 py-4">
                           {frameImages.map((imageUrl, index) => (

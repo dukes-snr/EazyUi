@@ -46,6 +46,7 @@ const HIGHLIGHT_TONES = [
     'bg-[rgba(244,114,182,0.38)] text-[#fff2f8]',
     'bg-[rgba(196,181,253,0.42)] text-[#f7f2ff]',
 ];
+const EMPTY_SCREEN_OPTIONS: ComposerScreenReferenceOption[] = [];
 
 function getHighlightTone(text: string): string {
     let hash = 0;
@@ -212,7 +213,7 @@ export const ComposerInlineReferenceInput = forwardRef<ComposerInlineReferenceIn
             disabled = false,
             className = '',
             allowScreen = false,
-            screens = [],
+            screens = EMPTY_SCREEN_OPTIONS,
         },
         forwardedRef
     ) {
