@@ -1108,7 +1108,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                                 <img
                                   src={imageUrl}
                                   alt={`${project.name} preview ${index + 1}`}
-                                  className="h-full w-full object-cover"
+                                  className="h-full w-full object-contain"
                                   loading="lazy"
                                 />
                               </div>

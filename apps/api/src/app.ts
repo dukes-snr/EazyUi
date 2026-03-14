@@ -3213,12 +3213,22 @@ fastify.post<{
         width?: number;
         height?: number;
         scale?: number;
+        fullPage?: boolean;
+        format?: 'png' | 'jpeg';
+        quality?: number;
+        fitToViewport?: boolean;
     };
 }>('/api/render-screen-image', async (request, reply) => {
     const rawHtml = String(request.body?.html || '');
     const width = Math.max(240, Math.min(2400, Number(request.body?.width || 402)));
     const height = Math.max(240, Math.min(3200, Number(request.body?.height || 874)));
     const scale = Math.max(1, Math.min(3, Number(request.body?.scale || 2)));
+    const fullPage = request.body?.fullPage === true;
+    const format = request.body?.format === 'jpeg' ? 'jpeg' : 'png';
+    const quality = format === 'jpeg'
+        ? Math.max(30, Math.min(95, Number(request.body?.quality || 72)))
+        : undefined;
+    const fitToViewport = request.body?.fitToViewport === true;
 
     if (!rawHtml.trim()) {
         return reply.status(400).send({ error: 'html is required' });
@@ -3244,16 +3254,67 @@ fastify.post<{
             } catch {
                 // ignore
             }
+            if (fitToViewport) {
+                await page.evaluate(({ viewportWidth, viewportHeight }: { viewportWidth: number; viewportHeight: number }) => {
+                    const docEl = document.documentElement;
+                    const body = document.body;
+                    if (!docEl || !body) return;
+                    docEl.style.margin = '0';
+                    body.style.margin = '0';
+                    body.style.transform = 'none';
+                    body.style.width = 'auto';
+                    body.style.height = 'auto';
+                    body.style.minHeight = 'auto';
+                    body.style.position = 'absolute';
+                    body.style.top = '0';
+                    body.style.left = '0';
+                    body.style.right = 'auto';
+                    body.style.bottom = 'auto';
+                    body.style.overflow = 'visible';
+                    const docWidth = Math.max(
+                        docEl.scrollWidth,
+                        docEl.offsetWidth,
+                        body.scrollWidth,
+                        body.offsetWidth,
+                        1,
+                    );
+                    const docHeight = Math.max(
+                        docEl.scrollHeight,
+                        docEl.offsetHeight,
+                        body.scrollHeight,
+                        body.offsetHeight,
+                        1,
+                    );
+                    // Match iframe behavior: fit horizontally when needed, but keep
+                    // the viewport crop instead of shrinking the entire page height.
+                    const scaleToFitWidth = viewportWidth / Math.max(1, docWidth);
+                    const safeScale = Number.isFinite(scaleToFitWidth) ? Math.min(1, Math.max(0.1, scaleToFitWidth)) : 1;
+                    const offsetX = Math.max(0, (viewportWidth - (docWidth * safeScale)) / 2);
+                    docEl.style.width = `${viewportWidth}px`;
+                    docEl.style.height = `${viewportHeight}px`;
+                    docEl.style.overflow = 'hidden';
+                    body.style.overflow = 'hidden';
+                    body.style.transformOrigin = 'top left';
+                    body.style.transform = `translate(${offsetX}px, 0px) scale(${safeScale})`;
+                    body.style.width = `${docWidth}px`;
+                    body.style.height = `${docHeight}px`;
+                }, { viewportWidth: width, viewportHeight: height });
+                await page.waitForTimeout(120);
+            }
             await page.waitForTimeout(180);
             const image = await page.screenshot({
-                type: 'png',
-                fullPage: false,
+                type: format,
+                fullPage,
+                ...(typeof quality === 'number' ? { quality } : {}),
             });
             return {
+                imageBase64: image.toString('base64'),
+                mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
                 pngBase64: image.toString('base64'),
                 width,
                 height,
                 scale,
+                fullPage,
             };
         } finally {
             await context.close();

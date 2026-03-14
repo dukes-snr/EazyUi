@@ -622,13 +622,20 @@ export interface RenderScreenImageRequest {
     width?: number;
     height?: number;
     scale?: number;
+    fullPage?: boolean;
+    format?: 'png' | 'jpeg';
+    quality?: number;
+    fitToViewport?: boolean;
 }
 
 export interface RenderScreenImageResponse {
     pngBase64: string;
+    imageBase64?: string;
+    mimeType?: string;
     width: number;
     height: number;
     scale: number;
+    fullPage?: boolean;
 }
 
 export interface CompleteScreenResponse {

@@ -149,6 +149,49 @@ function getGenerationConfig(hasReferenceImages: boolean, temperature?: number) 
     };
 }
 
+function resolveDesignSystemPreferredModel(preferredModel?: string): string | undefined {
+    const resolved = resolvePreferredModel(preferredModel);
+    if (!resolved) return undefined;
+    if (/gemini-3-pro-preview/i.test(resolved)) return 'gemini-2.5-pro';
+    return resolved;
+}
+
+function buildDesignSystemGenerationConfig(activeModelName: string, temperature: number, retry = false): any {
+    const resolvedTemperature = resolveModelTemperature(temperature, retry ? 0.7 : 0.9);
+    const config: any = {
+        temperature: retry ? Math.min(resolvedTemperature, 0.7) : Math.min(resolvedTemperature, 0.9),
+        topP: 0.85,
+        maxOutputTokens: retry ? 4096 : 3200,
+        responseMimeType: 'application/json',
+    };
+    const normalizedName = String(activeModelName || '').toLowerCase();
+    if (normalizedName.includes('gemini-3')) {
+        config.thinkingConfig = { thinkingBudget: retry ? 128 : 256 };
+    } else if (normalizedName.includes('gemini-2.5')) {
+        config.thinkingConfig = { thinkingBudget: retry ? 0 : 128 };
+    }
+    return config;
+}
+
+function isUsableDesignSystemPayload(raw: unknown): boolean {
+    if (!raw || typeof raw !== 'object') return false;
+    const value = raw as Record<string, any>;
+    const tokens = value.tokens && typeof value.tokens === 'object' ? value.tokens : null;
+    const tokenModes = value.tokenModes && typeof value.tokenModes === 'object' ? value.tokenModes : null;
+    const typography = value.typography && typeof value.typography === 'object' ? value.typography : null;
+    return Boolean(
+        value.systemName &&
+        value.intentSummary &&
+        tokens?.bg &&
+        tokens?.surface &&
+        tokens?.accent &&
+        tokenModes?.light &&
+        tokenModes?.dark &&
+        typography?.displayFont &&
+        typography?.bodyFont
+    );
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -288,7 +331,7 @@ function normalizeUiDescriptionTags(input?: string): string | undefined {
 
 const TOKEN_CONTRACT = `
 TOKENS (MANDATORY):
-Each screen MUST define a unique Tailwind token palette INSIDE <head>:
+Each screen MUST include the project Tailwind token palette INSIDE <head>:
 
 <script>
   tailwind.config = {
@@ -325,6 +368,7 @@ Each screen MUST define a unique Tailwind token palette INSIDE <head>:
 TOKEN USAGE RULES:
 - Do NOT use Tailwind default grays (no text-gray-*, bg-gray-*, slate-*, zinc-*).
 - Use semantic tokens instead: bg-bg, bg-surface, text-text, text-muted, border-stroke, bg-accent, etc.
+- Reuse one coherent project design system across all screens in the same generation. Do NOT invent unrelated palettes per screen.
 - Accent usage must be restrained: only primary CTAs, key highlights, and active states.
 - Do NOT define nested 'colors.dark = {...}' objects inside tailwind.config colors; this causes broken theme behavior.
 - Prefer semantic token classes with dark variants that map to dark token values; avoid brittle hardcoded dark hex classes.
@@ -458,9 +502,10 @@ SAFE TOP LAYOUT (MANDATORY):
 - Never let first visible content render under a fixed header.
 `;
 
-const GENERATE_HTML_PROMPT = `You are a world-class UI designer creating stunning, Dribbble-quality mobile app screens.
+const GENERATE_HTML_PROMPT = `You are a senior product UI designer and front-end UI engineer creating reference-grade HTML UI screens.
 
-TASK: Generate a set of HTML screens for the requested UI design.
+PRIMARY GOAL:
+Generate a set of complete, professional, human-like product screens with strong visual hierarchy, believable product thinking, and runtime-safe HTML.
 
 REQUIREMENTS:
 1. Output a JSON object with the following structure:
@@ -489,18 +534,31 @@ REQUIREMENTS:
 9. Return ONLY the JSON object.
 10. STRICT: Do NOT wrap JSON in markdown code fences. No \`\`\`json and no \`\`\`.
 
+QUALITY BAR:
+- These screens should feel like they were designed by a strong product designer, not assembled from a generic app template.
+- Prioritize clarity, hierarchy, and believable product thinking over decorative noise.
+- Each screen must feel purposeful for the requested product domain, with content, modules, and interactions that make sense for that app.
+
+PLAN SILENTLY BEFORE YOU DESIGN:
+- Decide what makes this product specific before writing HTML.
+- Choose one dominant focal module per screen: hero media, hero stat, hero control, hero card, or hero chart.
+- Decide the supporting modules around that focal point.
+- Reuse one coherent design system, component language, and visual tone across the whole set.
+
 DESIGN PHILOSOPHY (CRITICAL — follow these strictly):
 You are designing screens that would win awards on Dribbble or Behance. Before writing any code, THINK about what makes this specific app unique and design accordingly.
 
 THINK BEFORE YOU DESIGN:
 - What is the app's personality? A finance app should feel trustworthy and clean. A music app should feel vibrant and expressive. A food app should feel warm and appetizing.
 - What emotions should the user feel? Design around that feeling, not around a generic template.
+- A focal point can be hero media, a bold stat, a featured card, a chart, or a control cluster, but it must be obvious at first glance.
 - Each screen should have a clear visual focal point — a hero image, a bold stat, a featured card — NOT just a list of items.
 
 NAVIGATION - CONTEXT-AWARE & PLATFORM-SPECIFIC:
 - Let the navigation pattern be decided by the product context and each screen's purpose.
 - You may use bottom tabs, top tabs, sidebar, top header, contextual back navigation, or no global navigation.
 - Keep navigation usable and accessible, and avoid forcing one identical nav pattern on every screen.
+- Only vary navigation when it improves UX for the screen's role; do not change navigation styles randomly just to create variety.
 - Detail screens usually need contextual back navigation; splash/welcome screens may omit navigation.
 - For Desktop/Tablet, avoid mobile-styled floating nav bars unless the user explicitly requests them.
 
@@ -508,6 +566,7 @@ LAYOUT COMPOSITION — NOT TEMPLATES:
 - Design each screen like an editorial page, NOT a form or a list.
 - Use asymmetric layouts: mix full-width hero sections with offset cards, overlapping elements, and varied column widths.
 - Create visual hierarchy with SIZE CONTRAST: one large featured item alongside smaller supporting items, not a grid of identical cards.
+- Give one module clear dominance and let supporting modules stay visibly secondary. Do NOT give every card equal size, weight, and emphasis.
 - Use full-bleed images with gradient overlays (bg-gradient-to-t from-black/80 via-black/40 to-transparent) as hero sections.
 - Stack content in interesting ways: overlap an avatar over a header, float a price badge over an image, use negative margins creatively.
 - Vary card sizes within the same screen — one tall card next to two short ones, horizontal scrollable chips, etc.
@@ -525,11 +584,17 @@ TYPOGRAPHY & SPACING:
 - Use generous spacing: p-6 minimum on containers, space-y-5 or space-y-6 between sections.
 - Add leading-relaxed for body text readability.
 
+CONTENT REALISM:
+- Use believable product microcopy, labels, and metadata that match the prompt. Avoid filler names such as "Lorem ipsum", "Product Name", "Item 1", or vague placeholder stats.
+- Make modules feel product-aware: finance should show credible financial labels; travel should show destination/date/price patterns; health should show plausible wellness metrics; creative tools should show project-oriented actions.
+- Buttons, tabs, filters, chips, and summaries should sound intentional and human, not generic template UI.
+
 VISUAL RICHNESS:
 - Use large border-radius: rounded-2xl for cards, rounded-3xl for containers, rounded-full for avatars, pills, and tags.
 - Use colored accent borders or rings (e.g. ring-2 ring-purple-500/30) to highlight interactive elements.
 - Add subtle state indicators: active dots, progress bars, status badges with colored backgrounds.
 - Use emoji or styled badges for engagement (ratings, tags, status).
+- Keep the final feel polished and professional; use badges or icon accents only when they fit the product language.
 
 PROHIBITED PATTERNS:
 - No plain white or plain gray backgrounds with basic colored buttons.
@@ -540,6 +605,7 @@ PROHIBITED PATTERNS:
 
 STYLING & CONTENT:
 - THEME & COLOR: You MUST decide the colors and overall theme (light, dark, or vibrant). Use the token contract.
+- Choose a deliberate, domain-appropriate palette with at least one interesting neutral and one purposeful accent direction. Avoid generic startup blue/purple defaults unless they clearly fit the product.
 - ALWAYS prefer CSS Gradients for containers and decorative elements.
 
 ${TOKEN_CONTRACT}
@@ -552,9 +618,18 @@ ${DEVICE_CHROME_RULES}
 ${SAFE_TOP_LAYOUT_RULES}
 ${EDIT_TAGGING_RULES}
 ${MAP_SCREEN_RULES}
+
+FINAL INTERNAL CHECKS BEFORE OUTPUT:
+- Verify every screen has a dominant focal module and does not read like a repeated card stack.
+- Verify colors feel intentional for the product domain and are consistent across the full set.
+- Verify microcopy is specific, believable, and not generic placeholder text.
+- Verify the HTML is complete and the JSON is valid.
 `;
 
-const GENERATE_STREAM_PROMPT = `You are a world-class UI designer. Stream the output using XML blocks.
+const GENERATE_STREAM_PROMPT = `You are a senior product UI designer and front-end UI engineer. Stream the output using XML blocks.
+
+PRIMARY GOAL:
+Generate complete, professional, human-like product screens with strong hierarchy, believable microcopy, and runtime-safe HTML.
 
 STRUCTURE RULE (STRICT):
 1. Output all <screen> blocks first.
@@ -588,17 +663,30 @@ MANDATORY ASSETS:
 - Fonts: include Plus Jakarta Sans + one display font via Google Fonts
 - Material Symbols Rounded
 
+QUALITY BAR:
+- These screens should feel like a considered product design system, not a generic HTML template.
+- Prioritize hierarchy, clarity, and product-specific composition over decorative clutter.
+- Reuse one coherent visual language across the whole set.
+
+PLAN SILENTLY BEFORE OUTPUT:
+- Decide what makes the product specific before writing HTML.
+- Choose one dominant focal module per screen: hero media, hero stat, hero control, hero card, or hero chart.
+- Decide which modules support that focal point.
+- Keep navigation, module anatomy, and color direction coherent across the set.
+
 DESIGN PHILOSOPHY (CRITICAL):
 Design award-winning screens. THINK about what makes this app unique before coding.
 
 THINK FIRST:
 - What is the app's personality? Finance = trustworthy. Music = vibrant. Food = warm. Design around that feeling.
+- A focal point can be hero media, a bold stat, a featured card, a chart, or a control cluster, but it must be obvious at first glance.
 - Each screen needs a clear visual focal point — a hero image, a bold stat, a featured card — NOT just a list.
 
 NAVIGATION - CONTEXT-AWARE & PLATFORM-SPECIFIC:
 - Let navigation be chosen from product context and each screen's role.
 - Allowed patterns include bottom tabs, top tabs, sidebars, top headers, contextual back nav, or no global nav.
 - Avoid repeating one identical nav style on every screen.
+- Only vary navigation when it improves UX for the screen's role; do not vary it randomly for visual novelty.
 - Detail screens usually need back navigation; splash/welcome screens may omit nav.
 - For Desktop/Tablet, avoid mobile-styled floating nav bars unless explicitly requested.
 
@@ -606,6 +694,7 @@ LAYOUT COMPOSITION:
 - Design like an editorial page, NOT a form or list.
 - Use asymmetric layouts: full-width hero + offset cards, overlapping elements, varied card sizes.
 - SIZE CONTRAST: one large featured item with smaller supporting items, not identical card grids.
+- Give one module clear dominance and let the other modules support it. Do NOT make all modules equal in scale or emphasis.
 - Full-bleed images with gradient overlays as hero sections.
 - Overlap elements creatively: avatar over header, price badge over image.
 
@@ -617,10 +706,16 @@ MODERN DEPTH & GLASSMORPHISM:
 
 TYPOGRAPHY: Use font-display for hero headings and font-sans for body. Bold headings (text-3xl+, tracking-tight), clear hierarchy, generous spacing (p-6+, space-y-5+).
 
+CONTENT REALISM:
+- Use believable product microcopy, labels, filters, metadata, and values that match the requested domain.
+- Avoid filler names like "Lorem ipsum", "Item 1", "Product Name", or vague placeholder KPIs.
+- Buttons, chips, tabs, and summaries should sound intentional and human.
+
 PROHIBITED:
 - No plain white/gray backgrounds with basic colored buttons unless needed or requested.
 - No uniform grids of identical cards. Vary sizes, add featured items.
 - No generic Bootstrap/Material Design templates.
+- Avoid generic startup blue/purple palettes unless the product clearly calls for them.
 
 ${TOKEN_CONTRACT}
 ${THEME_AWARENESS_RULES}
@@ -636,6 +731,10 @@ ${MAP_SCREEN_RULES}
 Follow the same STYLING, IMAGE, and MATERIAL SYMBOL rules as the standard generation. 
 CRITICAL: The <screen name="..."> attribute MUST match the actual HTML content of that screen!
 CRITICAL: Every <screen> block MUST be a COMPLETE HTML document.
+FINAL INTERNAL CHECKS BEFORE OUTPUT:
+- Verify every screen has a dominant focal module and supporting modules with clear hierarchy.
+- Verify colors are coherent across the set and feel intentional for the product domain.
+- Verify microcopy is specific and believable.
 Do NOT use markdown fences.`;
 
 const COMPLETE_PARTIAL_SCREEN_PROMPT = `You repair and complete partially streamed HTML screens.
@@ -693,6 +792,7 @@ Rules:
 - Use clear hierarchy with a display heading + supporting text + metadata + emphasized CTA.
 - Compose screen structure with explicit zones: top utility, focal hero, supporting modules, persistent action.
 - Use mixed module scales (hero + standard + compact). Avoid same-sized card stacks.
+- Choose one dominant focal module and keep the rest visibly secondary.
 - Use reusable component anatomy (meta/title/value/action) and purpose labels for major wrappers.
 - Add depth with at least 2 of: gradient background, glass/blur panel, soft shadow, layered overlap.
 - Use prompt-specific labels; no filler copy (no "Lorem ipsum", "Item 1", "Product Name").
@@ -700,6 +800,7 @@ Rules:
 - Put :root/.dark token variables and body base background/text/font defaults in a normal <style> tag in <head>.
 - Do NOT rely only on <style type="text/tailwindcss"> for first-paint theme CSS.
 - Use those semantic tokens for major surfaces and CTA.
+- Keep colors domain-appropriate and avoid generic startup blue/purple defaults unless the prompt clearly supports them.
 - Keep icon/text contrast readable in both light and dark modes; avoid brittle text-white/text-black defaults on controls.
 - Avoid invented class names that are not valid Tailwind utilities.
 - Brand icons must use Iconify + Simple Icons (never placeholder text like LOGO_GOOGLE).
@@ -725,7 +826,9 @@ Rules:
 - Build only core blocks: hero, control row, featured card, secondary list, sticky CTA.
 - Keep explicit zone hierarchy: top utility, focal hero, supporting modules, persistent action.
 - Mix module scales; avoid equal-height repeated cards.
+- Choose one dominant focal module and keep the supporting modules visually secondary.
 - Keep markup concise and visually rich; avoid long repeated sections.
+- Keep labels and microcopy believable for the requested product; no filler placeholders.
 - Do NOT include a mobile OS status bar row (time/signal/wifi/battery).
 - Assume transparent status-bar overlay; keep hero/media full-bleed and use data-eazyui-safe-top="force" for top controls container.
 - If header/nav is fixed or sticky at top, offset first content container with matching top spacing so content starts below the header.
@@ -982,6 +1085,47 @@ const DESIGN_SYSTEM_SEEDS: Record<string, DesignSystemSeed> = {
         },
     },
 };
+
+function buildStylePresetColorDirection(stylePreset: string): string {
+    switch (stylePreset) {
+        case 'minimal':
+            return 'Minimal palettes should feel refined, editorial, and quietly premium. Use softly tinted neutrals instead of flat grayscale, and pair them with one restrained but intelligent accent.';
+        case 'vibrant':
+            return 'Vibrant palettes should feel art-directed, not childish. Push chroma in accents and highlights, but keep the underlying surfaces structured, readable, and commercially credible.';
+        case 'luxury':
+            return 'Luxury palettes should feel expensive through restraint: smoky or mineral neutrals, deep value contrast, and one warm or jewel-toned accent family with deliberate scarcity.';
+        case 'playful':
+            return 'Playful palettes should feel optimistic and memorable without looking toy-like. Use warmer, friendlier hue relationships and keep the base surfaces clean enough for product UI.';
+        case 'modern':
+        default:
+            return 'Modern palettes should feel sharp and current, with subtle hue-cast neutrals and a confident accent strategy that avoids default startup blue-on-charcoal clichés.';
+    }
+}
+
+function buildDomainColorDirection(prompt: string): string {
+    const value = prompt.toLowerCase();
+
+    if (/(fintech|bank|wallet|finance|trading|crypto|investment|payments?)/i.test(value)) {
+        return 'For finance-related products, avoid generic fintech blue gradients. Favor trust-forward palettes with ink, mineral, steel, deep teal, pine, slate, or controlled cobalt; accents should feel precise and premium rather than loud.';
+    }
+    if (/(health|medical|doctor|clinic|wellness|fitness|therapy|care)/i.test(value)) {
+        return 'For health and wellness products, avoid sterile hospital blue or obvious mint defaults. Prefer calming but grown-up tones like eucalyptus, mineral sage, soft marine, warm bone, or clean charcoal with high readability.';
+    }
+    if (/(fashion|beauty|cosmetic|editorial|magazine|luxury|jewelry)/i.test(value)) {
+        return 'For fashion, beauty, or editorial products, bias toward elegant neutrals, inky contrast, espresso, stone, champagne, oxblood, plum, or muted metallic warmth instead of generic app-store colors.';
+    }
+    if (/(travel|hotel|hospitality|restaurant|food|booking)/i.test(value)) {
+        return 'For travel, hospitality, and food products, use atmospheric palettes with a clear sense of place: dusk blues, terracotta, olive, sand, oceanic teal, or sunset warmth, while keeping interfaces polished and readable.';
+    }
+    if (/(music|media|video|creator|social|community|stream|content)/i.test(value)) {
+        return 'For media, creator, or social products, use expressive contrast and a stronger brand voice, but keep it intentional: tinted darks, energetic accent duos, and surfaces that still feel product-grade rather than poster-only.';
+    }
+    if (/(saas|dashboard|admin|analytics|b2b|productivity|crm|workspace)/i.test(value)) {
+        return 'For SaaS and productivity products, avoid the default navy/cyan dashboard treatment. Use more authored neutral families and a single confident accent with a supporting signal hue for hierarchy.';
+    }
+
+    return 'Choose a palette that feels specific to the product’s domain and tone. Do not fall back to generic royal blue, random purple gradients, or flat grayscale UI with one token accent.';
+}
 
 function safeString(input: unknown, fallback: string, max = 240): string {
     const value = typeof input === 'string' ? input.trim() : '';
@@ -1263,12 +1407,125 @@ function resolveTokenModesFromSource(
     };
 }
 
+type DesignFontPair = {
+    displayFont: string;
+    bodyFont: string;
+    tone: string;
+};
+
+const DESIGN_FONT_OPTIONS: Record<string, DesignFontPair[]> = {
+    modern: [
+        { displayFont: 'Space Grotesk', bodyFont: 'Plus Jakarta Sans', tone: 'Crisp, confident, and utility-forward.' },
+        { displayFont: 'Sora', bodyFont: 'DM Sans', tone: 'Modern, precise, and product-led.' },
+        { displayFont: 'Outfit', bodyFont: 'Inter', tone: 'Polished, clear, and contemporary.' },
+        { displayFont: 'Manrope', bodyFont: 'Public Sans', tone: 'Structured, sharp, and quietly premium.' },
+    ],
+    minimal: [
+        { displayFont: 'Manrope', bodyFont: 'Inter', tone: 'Quiet, precise, and highly legible.' },
+        { displayFont: 'Instrument Sans', bodyFont: 'Inter', tone: 'Editorial, restrained, and clean.' },
+        { displayFont: 'Sora', bodyFont: 'DM Sans', tone: 'Refined, airy, and modernist.' },
+    ],
+    vibrant: [
+        { displayFont: 'Clash Display', bodyFont: 'Plus Jakarta Sans', tone: 'Energetic, expressive, and contrast-rich.' },
+        { displayFont: 'Syne', bodyFont: 'DM Sans', tone: 'Bold, art-directed, and dynamic.' },
+        { displayFont: 'Unbounded', bodyFont: 'Manrope', tone: 'Striking, branded, and high-energy.' },
+    ],
+    luxury: [
+        { displayFont: 'Playfair Display', bodyFont: 'Source Sans 3', tone: 'Premium, restrained, and cinematic.' },
+        { displayFont: 'Cormorant Garamond', bodyFont: 'Inter', tone: 'Elegant, composed, and editorial.' },
+        { displayFont: 'Fraunces', bodyFont: 'DM Sans', tone: 'Rich, tailored, and refined.' },
+    ],
+    playful: [
+        { displayFont: 'Baloo 2', bodyFont: 'Nunito', tone: 'Friendly, upbeat, and rounded.' },
+        { displayFont: 'Bricolage Grotesque', bodyFont: 'DM Sans', tone: 'Expressive, warm, and approachable.' },
+        { displayFont: 'Fredoka', bodyFont: 'Plus Jakarta Sans', tone: 'Cheerful, soft, and modern.' },
+    ],
+};
+
+function hashDesignSeed(value: string): number {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function createHexFromHsl(h: number, s: number, l: number): string {
+    const rgb = hslToRgb(h, s, l);
+    return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+
+function pickSeedHue(color: string, fallbackHue: number): number {
+    const parsed = parseHexColor(color);
+    if (!parsed) return fallbackHue;
+    return rgbToHsl(parsed.r, parsed.g, parsed.b).h;
+}
+
+function pickDesignFontPair(stylePreset: string, hash: number, fallback: DesignSystemSeed['typography']): DesignSystemSeed['typography'] {
+    const options = DESIGN_FONT_OPTIONS[stylePreset] || DESIGN_FONT_OPTIONS.modern;
+    const pair = options[hash % options.length] || options[0];
+    return pair || fallback;
+}
+
+function buildPromptAwareFallbackSeed(prompt: string, stylePreset: string): DesignSystemSeed {
+    const base = DESIGN_SYSTEM_SEEDS[stylePreset] || DESIGN_SYSTEM_SEEDS.modern;
+    const hash = hashDesignSeed(`${stylePreset}::${prompt}`);
+    const baseThemeMode = base.themeMode === 'mixed' ? (((hash >> 1) & 1) === 0 ? 'dark' : 'light') : base.themeMode;
+    const darkMode = baseThemeMode === 'dark';
+    const styleConfig = {
+        neutralSat: stylePreset === 'luxury' ? 12 : stylePreset === 'minimal' ? 8 : stylePreset === 'playful' ? 14 : 18,
+        accentSat: stylePreset === 'luxury' ? 56 : stylePreset === 'minimal' ? 62 : stylePreset === 'playful' ? 78 : 72,
+        accent2Sat: stylePreset === 'luxury' ? 48 : stylePreset === 'minimal' ? 56 : stylePreset === 'playful' ? 70 : 66,
+        accentLight: darkMode ? (stylePreset === 'luxury' ? 66 : 62) : (stylePreset === 'minimal' ? 42 : 52),
+        accent2Light: darkMode ? (stylePreset === 'luxury' ? 74 : 58) : (stylePreset === 'minimal' ? 50 : 48),
+    };
+    const hueShiftOptions = [-42, -30, -18, -9, 9, 18, 30, 42, 60];
+    const secondaryGapOptions = stylePreset === 'luxury' ? [18, 30, 42, 60] : [26, 42, 58, 76, 110, 148];
+    const neutralOffsetOptions = [-18, -10, -4, 4, 10, 18];
+    const baseAccentHue = pickSeedHue(base.tokens.accent, stylePreset === 'luxury' ? 38 : 220);
+    const baseNeutralHue = pickSeedHue(base.tokens.bg, baseAccentHue);
+    const accentHue = (baseAccentHue + hueShiftOptions[hash % hueShiftOptions.length] + ((hash >> 3) % 11) - 5 + 360) % 360;
+    const accent2Direction = ((hash >> 6) & 1) === 0 ? 1 : -1;
+    const accent2Hue = (accentHue + accent2Direction * secondaryGapOptions[(hash >> 4) % secondaryGapOptions.length] + 360) % 360;
+    const neutralHue = (baseNeutralHue + neutralOffsetOptions[(hash >> 8) % neutralOffsetOptions.length] + Math.round((accentHue - baseAccentHue) * 0.2) + 360) % 360;
+    const neutralSat = styleConfig.neutralSat + ((hash >> 10) % 5);
+
+    const tokens: ProjectDesignSystem['tokens'] = darkMode
+        ? {
+            bg: createHexFromHsl(neutralHue, neutralSat, 7 + ((hash >> 12) % 3)),
+            surface: createHexFromHsl(neutralHue, neutralSat + 2, 11 + ((hash >> 14) % 3)),
+            surface2: createHexFromHsl((neutralHue + ((hash >> 16) % 7) - 3 + 360) % 360, neutralSat + 4, 16 + ((hash >> 18) % 4)),
+            text: createHexFromHsl(neutralHue, 18, 96),
+            muted: createHexFromHsl(neutralHue, 12, 69 + ((hash >> 20) % 5)),
+            stroke: createHexFromHsl(neutralHue, neutralSat + 6, 28 + ((hash >> 22) % 4)),
+            accent: createHexFromHsl(accentHue, styleConfig.accentSat + ((hash >> 24) % 6), styleConfig.accentLight),
+            accent2: createHexFromHsl(accent2Hue, styleConfig.accent2Sat + ((hash >> 26) % 6), styleConfig.accent2Light),
+        }
+        : {
+            bg: createHexFromHsl(neutralHue, Math.max(4, neutralSat - 4), 97),
+            surface: createHexFromHsl(neutralHue, Math.max(4, neutralSat - 6), 100),
+            surface2: createHexFromHsl((neutralHue + ((hash >> 16) % 7) - 3 + 360) % 360, Math.max(6, neutralSat - 1), 93 + ((hash >> 18) % 2)),
+            text: createHexFromHsl(neutralHue, 18, 11),
+            muted: createHexFromHsl(neutralHue, 10, 45 + ((hash >> 20) % 6)),
+            stroke: createHexFromHsl(neutralHue, Math.max(6, neutralSat), 87 + ((hash >> 22) % 4)),
+            accent: createHexFromHsl(accentHue, styleConfig.accentSat + ((hash >> 24) % 6), styleConfig.accentLight),
+            accent2: createHexFromHsl(accent2Hue, styleConfig.accent2Sat + ((hash >> 26) % 6), styleConfig.accent2Light),
+        };
+
+    return {
+        themeMode: baseThemeMode,
+        tokens,
+        typography: pickDesignFontPair(stylePreset, hash, base.typography),
+    };
+}
+
 function buildFallbackProjectDesignSystem(
     prompt: string,
     stylePreset: string,
     platform: string
 ): ProjectDesignSystem {
-    const preset = DESIGN_SYSTEM_SEEDS[stylePreset] || DESIGN_SYSTEM_SEEDS.modern;
+    const preset = buildPromptAwareFallbackSeed(prompt, stylePreset);
     const projectName = normalizeProjectSystemName('', prompt, 'New Project');
     const appIntent = safeString(prompt, projectName, 80);
     const tokenModes = resolveTokenModesFromSource(preset.tokens, preset.themeMode);
@@ -1552,6 +1809,29 @@ ${dontRules}
 `;
 }
 
+function buildDesignSystemColorPrompt(prompt: string, stylePreset: string): string {
+    return `
+COLOR DIRECTION (MANDATORY):
+- Palette must feel authored for this product, not like a template.
+- Avoid default startup color habits: royal blue with cyan on charcoal, purple gradient on white, or plain grayscale with a random accent.
+- Use neutrals with a subtle hue bias. Surfaces should not feel like untouched gray ramps unless the product explicitly calls for that.
+- Establish a clear palette hierarchy:
+  - one foundational neutral family for bg/surface/surface2
+  - one primary accent for CTA, active, focus, and key emphasis
+  - one secondary accent for support states, data highlights, or selective contrast
+- accent and accent2 must be meaningfully different in role and hue temperature, not near-duplicates.
+- Keep the overall result professional and product-ready. Creative does not mean neon chaos.
+- If using a saturated accent, counterbalance it with calmer surfaces and disciplined usage.
+- Token choices should imply a believable brand personality and product market position.
+
+STYLE-SPECIFIC COLOR DIRECTION:
+${buildStylePresetColorDirection(stylePreset)}
+
+DOMAIN COLOR DIRECTION:
+${buildDomainColorDirection(prompt)}
+`.trim();
+}
+
 export async function generateProjectDesignSystem(options: GenerateProjectDesignSystemOptions): Promise<{
     designSystem: ProjectDesignSystem;
     usage?: TokenUsageSummary;
@@ -1582,6 +1862,7 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
 
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
     const imageAnalysis = await analyzeReferenceImages(images);
+    const colorPrompt = buildDesignSystemColorPrompt(prompt, stylePreset);
 
     const systemPrompt = `You are a senior product designer creating a reusable project design system.
 Return strict JSON only.
@@ -1624,14 +1905,20 @@ Rules:
 - Keep rules concrete and short.
 - componentLanguage entries must describe concrete component anatomy/variants, not vague style adjectives.
 - The rules.do/rules.dont arrays should reinforce non-generic structure: focal module, mixed card scales, and consistent component grammar.
-- Prefer semantic colors over arbitrary color names.`;
+- Prefer semantic colors over arbitrary color names.
+- Typography must feel product-specific. Do not default to Space Grotesk + Plus Jakarta Sans unless it is genuinely the best fit.
+- Avoid repeating the same dark navy + cyan startup palette unless the prompt clearly calls for that direction.
+
+${colorPrompt}`;
 
     const userPrompt = `App request: "${prompt}"
 Style preset: ${stylePreset}
 Platform: ${platform}
 ${imageAnalysis || ''}
 Generate the design system that should be reused for this whole project.
-Infer and set a clean project/product name in systemName (not a sentence, not "Design System").`;
+Infer and set a clean project/product name in systemName (not a sentence, not "Design System").
+Choose a palette that feels creative, product-specific, and professionally art-directed rather than generic.
+Choose typography that fits the brand personality instead of defaulting to the same safe pair every time.`;
 
     try {
         const preferredModel = options.preferredModel;
@@ -1665,23 +1952,58 @@ Infer and set a clean project/product name in systemName (not a sentence, not "D
             usageEntries.push(completion.usage);
             raw = parseJsonSafe(cleanJsonResponse(completion.text));
         } else {
-            const preferredGeminiModel = resolvePreferredModel(preferredModel);
-            const designSystemModel = preferredGeminiModel ? getGenerativeModel(preferredGeminiModel).model : model;
-            const designSystemModelName = preferredGeminiModel || modelName;
+            const preferredGeminiModel = resolveDesignSystemPreferredModel(preferredModel);
+            const defaultDesignSystemModelName = /gemini-3-pro-preview/i.test(modelName) ? 'gemini-2.5-pro' : modelName;
+            const primaryGeminiModelName = preferredGeminiModel || defaultDesignSystemModelName;
             const imageParts = extractInlineImageParts(images).slice(0, 3);
-            const result = await designSystemModel.generateContent({
-                contents: [{
-                    role: 'user',
-                    parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }, ...imageParts],
-                }],
-                generationConfig: {
-                    temperature: modelTemperature,
-                    topP: 0.85,
-                    maxOutputTokens: 2600,
-                },
-            });
-            usageEntries.push(parseGeminiUsageFromResponse(result.response, designSystemModelName));
-            raw = parseJsonSafe(cleanJsonResponse(result.response.text()));
+            const runGeminiDesignSystemAttempt = async (activeModelName: string, retry = false): Promise<unknown> => {
+                const designSystemModel = activeModelName === modelName ? model : getGenerativeModel(activeModelName).model;
+                const result = await designSystemModel.generateContent({
+                    contents: [{
+                        role: 'user',
+                        parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }, ...imageParts],
+                    }],
+                    generationConfig: buildDesignSystemGenerationConfig(activeModelName, modelTemperature, retry),
+                });
+                usageEntries.push(parseGeminiUsageFromResponse(result.response, activeModelName));
+                const responseText = result.response.text() || '';
+                const finishReason = result.response?.candidates?.[0]?.finishReason || 'unknown';
+                const thoughtsTokenCount = toNonNegativeInt((result.response?.usageMetadata as any)?.thoughtsTokenCount);
+                console.info('[Gemini] design-system:attempt', {
+                    model: activeModelName,
+                    retry,
+                    finishReason,
+                    responseChars: responseText.length,
+                    thoughtsTokenCount,
+                });
+                try {
+                    return parseJsonSafe(cleanJsonResponse(responseText));
+                } catch (parseError) {
+                    console.warn('[Gemini] design-system:parse-failed', {
+                        model: activeModelName,
+                        retry,
+                        finishReason,
+                        responseChars: responseText.length,
+                        thoughtsTokenCount,
+                        error: (parseError as Error)?.message || String(parseError),
+                    });
+                    return null;
+                }
+            };
+
+            raw = await runGeminiDesignSystemAttempt(primaryGeminiModelName, false);
+            if (!isUsableDesignSystemPayload(raw)) {
+                const retryModelName = primaryGeminiModelName === 'gemini-2.5-pro' ? primaryGeminiModelName : 'gemini-2.5-pro';
+                console.warn('[Gemini] design-system:retrying-after-invalid-json', {
+                    primaryModel: primaryGeminiModelName,
+                    retryModel: retryModelName,
+                });
+                raw = await runGeminiDesignSystemAttempt(retryModelName, true);
+            }
+        }
+
+        if (!isUsableDesignSystemPayload(raw)) {
+            throw new Error('Design system generation did not return a complete JSON payload.');
         }
 
         const normalized = normalizeProjectDesignSystem(raw, prompt, stylePreset, platform);

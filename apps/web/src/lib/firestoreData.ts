@@ -111,7 +111,6 @@ const MAX_PROJECT_MEMORY_USER_REQUESTS = 16;
 const MAX_PROJECT_MEMORY_USER_REQUEST_LENGTH = 220;
 const MAX_PROJECT_MEMORY_NAV_LABELS = 8;
 const FIRESTORE_PROJECT_DOC_SOFT_LIMIT_BYTES = 920_000;
-const FIRESTORE_COVER_DATA_URL_MAX_LENGTH = 120_000;
 const FIRESTORE_DESCRIPTION_MAX_LENGTH = 6_000;
 
 function isValidDesignSpec(value: unknown): value is HtmlDesignSpec {
@@ -598,9 +597,7 @@ function compactProjectMetaPayloadForFirestore(payload: Record<string, unknown>)
   if (coverUrls.length > 0) {
     coverDataUrls = [];
   } else {
-    coverDataUrls = coverDataUrls
-      .filter((value) => value.length <= FIRESTORE_COVER_DATA_URL_MAX_LENGTH)
-      .slice(0, 2);
+    coverDataUrls = coverDataUrls.slice(0, 2);
   }
   next.coverImageDataUrls = coverDataUrls;
   next.coverImageDataUrl = coverDataUrls[0] || null;
@@ -662,7 +659,10 @@ async function renderScreenImageBase64(params: {
   html: string;
   width: number;
   height: number;
-}): Promise<string | null> {
+  fullPage?: boolean;
+  format?: "png" | "jpeg";
+  quality?: number;
+}): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const response = await fetch("/api/render-screen-image", {
       method: "POST",
@@ -672,12 +672,18 @@ async function renderScreenImageBase64(params: {
         width: params.width,
         height: params.height,
         scale: 1,
+        fullPage: params.fullPage,
+        format: params.format,
+        quality: params.quality,
+        fitToViewport: true,
       }),
     });
     if (!response.ok) return null;
-    const payload = await response.json() as { pngBase64?: string };
-    const base64 = String(payload.pngBase64 || "").trim();
-    return base64 || null;
+    const payload = await response.json() as { imageBase64?: string; pngBase64?: string; mimeType?: string };
+    const base64 = String(payload.imageBase64 || payload.pngBase64 || "").trim();
+    if (!base64) return null;
+    const mimeType = String(payload.mimeType || "image/png").trim() || "image/png";
+    return { base64, mimeType };
   } catch {
     return null;
   }
@@ -717,31 +723,40 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
   const targets = (screens || []).slice(0, 2);
   if (targets.length === 0) return [];
   return Promise.all(targets.map(async (screen, index) => {
-    const width = Math.max(280, Math.min(420, screen.width || 402));
-    const height = Math.max(560, Math.min(920, screen.height || 874));
-    let base64 = await renderScreenImageBase64({
+    const width = Math.max(280, Math.min(402, screen.width || 402));
+    const height = Math.max(560, Math.min(874, screen.height || 874));
+    let rendered = await renderScreenImageBase64({
       html: screen.html,
       width,
       height,
+      fullPage: false,
+      format: "jpeg",
+      quality: 68,
     });
     // Retry once with a smaller viewport for heavy/complex screens.
-    if (!base64) {
-      base64 = await renderScreenImageBase64({
+    if (!rendered) {
+      rendered = await renderScreenImageBase64({
         html: screen.html,
         width: Math.max(280, Math.floor(width * 0.9)),
         height: Math.max(560, Math.floor(height * 0.9)),
+        fullPage: false,
+        format: "jpeg",
+        quality: 60,
       });
     }
     // Final retry with stripped inline assets to avoid oversized payload/render failures.
-    if (!base64) {
-      base64 = await renderScreenImageBase64({
+    if (!rendered) {
+      rendered = await renderScreenImageBase64({
         html: stripHeavyInlineAssetsForRender(screen.html || ""),
         width: Math.max(280, Math.floor(width * 0.9)),
         height: Math.max(560, Math.floor(height * 0.9)),
+        fullPage: false,
+        format: "jpeg",
+        quality: 54,
       });
     }
-    if (base64) {
-      return `data:image/png;base64,${base64}`;
+    if (rendered) {
+      return `data:${rendered.mimeType};base64,${rendered.base64}`;
     }
     return buildFallbackCoverDataUrl({
       screenName: String(screen.name || "Screen"),
@@ -1061,7 +1076,9 @@ export async function saveProjectFirestore(input: SaveProjectInput): Promise<{ p
     || String(existingData?.coverSignature || "") !== nextCoverSignature
     || Number(existingData?.coverVersion || 0) !== PROJECT_COVER_VERSION
   );
-  const shouldRefreshCoverInBackground = shouldRefreshCover && !isAutosave;
+  // Manual/project-level saves should persist fresh previews before navigation.
+  // Autosave can defer cover generation to avoid blocking typing/edit flows.
+  const shouldRefreshCoverInBackground = shouldRefreshCover && isAutosave;
 
   if (shouldRefreshCover && !shouldRefreshCoverInBackground) {
     const coverDataUrls = await buildProjectCoverDataUrls(coverTargetScreens);
