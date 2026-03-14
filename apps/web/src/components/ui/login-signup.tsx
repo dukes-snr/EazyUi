@@ -276,7 +276,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
                       type="button"
                       onClick={submit}
                       disabled={loading || !canSubmit}
-                      className="inline-flex h-10 flex-1 items-center justify-center rounded-xl bg-[#5b8df7] text-sm font-semibold text-white hover:bg-[#6b99f9] disabled:cursor-not-allowed disabled:opacity-65"
+                      className="inline-flex h-10 flex-1 items-center justify-center rounded-xl bg-[#1b1b1b] text-sm font-semibold text-white hover:bg-[#1b1b1b] disabled:cursor-not-allowed disabled:opacity-65"
                     >
                       {loading ? <Loader2 size={15} className="animate-spin" /> : authMode === "signup" ? "Create account" : "Log in"}
                     </button>
@@ -315,7 +315,7 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
                     opacity: 0.5,
                   }}
                 />
-                <div className="absolute inset-0 bg-[radial-gradient(75%_75%_at_16%_82%,rgba(255,255,255,0.45),rgba(53,204,226,0.5)_38%,rgba(39,97,196,0.88)_78%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(75%_75%_at_16%_82%,rgba(255,255,255,0.45),rgba(53,204,226,0.5)_38%,rgba(41, 41, 41, 0.88)_78%)]" />
 
                 <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-md bg-[#f2a25f] px-2.5 py-1 text-[11px] font-semibold text-white">
                   EazyUI Beta

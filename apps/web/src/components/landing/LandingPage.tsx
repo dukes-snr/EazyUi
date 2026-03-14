@@ -537,8 +537,11 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         });
     }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
-    const testimonialPreviewCards = useMemo(
-        () => Array.from({ length: 4 }, (_, index) => patternCards[(index + 1) % patternCards.length]),
+    const testimonialWallCards = useMemo(
+        () => Array.from({ length: 8 }, (_, index) => ({
+            ...SOCIAL_PROOF[index % SOCIAL_PROOF.length],
+            preview: patternCards[(index + 1) % patternCards.length],
+        })),
         [patternCards]
     );
     const demoVideoPoster = videodemoimg;
@@ -1139,86 +1142,63 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     />
                 </section>
 
-                <section className="landing-surface-band landing-surface-band-1 landing-page-section">
+                <section className="landing-surface-band landing-surface-band-1 landing-page-section landing-testimonial-section">
                     <div className="landing-page-section-inner landing-page-section-inner-full">
-                    <div className="landing-fade-up text-center">
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Testimonials</p>
-                        <h3 className="mt-4 text-[30px] md:text-[44px] leading-[1.04] tracking-[-0.03em] font-semibold text-white">
-                            Strong first screens change the whole conversation.
-                        </h3>
-                    </div>
-
-                    <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        {SOCIAL_PROOF.map((item, index) => {
-                            const preview = testimonialPreviewCards[index];
-                            return (
-                                <article
-                                    key={item.quote}
-                                    className="landing-fade-up rounded-[26px] border border-white/10 bg-white/[0.03] p-5"
-                                    style={{ animationDelay: `${90 + index * 90}ms` }}
-                                >
-                                    <p className="text-[14px] leading-7 text-slate-200">“{item.quote}”</p>
-                                    <div className="mt-8 flex items-center gap-3">
-                                        <div className="h-10 w-10 overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
-                                            {preview.image ? (
-                                                <img src={preview.image} alt={`${item.author} preview`} className="h-full w-full object-cover" />
-                                            ) : (
-                                                <div className={`h-full w-full bg-gradient-to-br ${preview.accent}`} />
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p className="text-[13px] font-semibold text-white">{item.author}</p>
-                                            <p className="text-[12px] text-slate-400">{item.company}</p>
-                                        </div>
-                                    </div>
-                                </article>
-                            );
-                        })}
-                    </div>
-
-                    <div className="landing-fade-up mt-12 rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-5 md:p-6" style={{ animationDelay: '180ms' }}>
-                        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                            <div className="flex items-start gap-3">
-                                <div className="mt-1 h-10 w-10 shrink-0 rounded-full border border-white/10 bg-white/[0.05] p-[2px]">
-                                    <Orb
-                                        className="h-full w-full"
-                                        colors={landingOrbColors}
-                                        seed={9101}
-                                        agentState={landingOrbState}
-                                        volumeMode="manual"
-                                        manualInput={0.32}
-                                        manualOutput={0.24}
-                                    />
-                                </div>
-                                <div>
-                                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Ready to build</p>
-                                    <h4 className="mt-2 text-[24px] leading-[1.08] tracking-[-0.03em] font-semibold text-white">
-                                        Start your next release on the same sharper canvas.
-                                    </h4>
-                                    <p className="mt-2 max-w-[560px] text-[14px] leading-7 text-slate-300">
-                                        Describe the interface you want and generate a first pass that already feels like part of a real product system.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setPrompt('Design a premium AI workspace with elegant analytics, modular cards, and a polished onboarding flow')}
-                                    className="rounded-full border border-cyan-200/35 bg-cyan-300/12 px-5 py-2 text-[13px] font-semibold text-cyan-100 hover:bg-cyan-300/20 transition-colors"
-                                >
-                                    Generate AI workspace
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setPrompt('Create a refined mobile commerce flow with editorial imagery, curated collections, and calm checkout states')}
-                                    className="rounded-full border border-white/15 bg-white/[0.06] px-5 py-2 text-[13px] font-semibold text-white hover:bg-white/10 transition-colors"
-                                >
-                                    Generate mobile commerce
-                                </button>
-                            </div>
+                        <div className="landing-fade-up text-center">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Testimonials</p>
+                            <h3 className="mt-4 text-[34px] md:text-[60px] leading-[1.02] tracking-[-0.05em] font-semibold text-white">
+                                Loved by teams
+                                <br />
+                                shipping real product UI.
+                            </h3>
+                            <p className="mx-auto mt-4 max-w-[640px] text-[14px] leading-7 text-slate-400 md:text-[16px]">
+                                EazyUI helps teams move from vague product direction into stronger first passes that are actually worth reviewing.
+                            </p>
                         </div>
                     </div>
+
+                    <div className="landing-testimonial-wall mt-14">
+                        {[
+                            testimonialWallCards.slice(0, 4),
+                            testimonialWallCards.slice(4, 8),
+                        ].map((row, rowIndex) => {
+                            const repeated = [...row, ...row];
+                            return (
+                                <div
+                                    key={`testimonial-row-${rowIndex}`}
+                                    className={`landing-testimonial-row ${rowIndex === 1 ? 'is-reverse' : ''}`}
+                                >
+                                    <div
+                                        className={`infinite-scroll-track flex w-max gap-5 ${rowIndex === 1 ? 'landing-scroll-track-reverse' : ''}`}
+                                        style={{ ['--marquee-duration' as any]: `${rowIndex === 0 ? 42 : 48}s` }}
+                                    >
+                                        {repeated.map((item, index) => (
+                                            <article
+                                                key={`${item.quote}-${rowIndex}-${index}`}
+                                                className="landing-testimonial-wall-card"
+                                            >
+                                                <p className="text-[21px] leading-[1.55] tracking-[-0.025em] text-slate-100">
+                                                    {item.quote}
+                                                </p>
+                                                <div className="mt-8 flex items-center gap-3">
+                                                    <div className="landing-testimonial-avatar">
+                                                        {item.preview.image ? (
+                                                            <img src={item.preview.image} alt={`${item.author} preview`} className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <div className={`h-full w-full bg-gradient-to-br ${item.preview.accent}`} />
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[14px] font-semibold text-white">{item.author}</p>
+                                                        <p className="text-[13px] text-slate-400">{item.company}</p>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </section>
 

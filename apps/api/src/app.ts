@@ -52,6 +52,7 @@ import {
     createStripeCheckoutSession,
     constructStripeWebhookEvent,
     getStripeClient,
+    getStripePricingCatalog,
     getStripePublishableKey,
     isStripeConfigured,
     retrieveCheckoutSessionWithLineItems,
@@ -1078,6 +1079,49 @@ fastify.get('/api/billing/summary', async (request, reply) => {
         fastify.log.error({ traceId: request.id, route: '/api/billing/summary', err: error }, 'billing summary failed');
         return reply.status(500).send({
             error: 'Failed to load billing summary',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get('/api/billing/catalog', async (request, reply) => {
+    try {
+        const prices = await getStripePricingCatalog();
+        return {
+            stripe: {
+                configured: isStripeConfigured(),
+                publishableKeyPresent: Boolean(getStripePublishableKey()),
+            },
+            plans: {
+                free: {
+                    productKey: 'free',
+                    label: 'Free',
+                    monthlyCredits: 100,
+                },
+                pro: {
+                    productKey: 'pro',
+                    label: 'Pro',
+                    monthlyCredits: 3000,
+                    price: prices.pro,
+                },
+                team: {
+                    productKey: 'team',
+                    label: 'Team',
+                    monthlyCredits: 15000,
+                    price: prices.team,
+                },
+                topup_1000: {
+                    productKey: 'topup_1000',
+                    label: 'Credits',
+                    credits: 1000,
+                    price: prices.topup_1000,
+                },
+            },
+        };
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/billing/catalog', err: error }, 'billing catalog failed');
+        return reply.status(500).send({
+            error: 'Failed to load billing catalog',
             message: (error as Error).message,
         });
     }

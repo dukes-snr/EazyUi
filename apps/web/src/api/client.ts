@@ -400,6 +400,50 @@ export interface BillingSummaryResponse {
     };
 }
 
+export interface BillingCatalogPrice {
+    productKey: 'pro' | 'team' | 'topup_1000';
+    priceId: string | null;
+    configured: boolean;
+    active: boolean;
+    currency: string | null;
+    unitAmount: number | null;
+    type: 'one_time' | 'recurring' | null;
+    interval: 'day' | 'week' | 'month' | 'year' | null;
+    intervalCount: number | null;
+}
+
+export interface BillingCatalogResponse {
+    stripe?: {
+        configured: boolean;
+        publishableKeyPresent: boolean;
+    };
+    plans: {
+        free: {
+            productKey: 'free';
+            label: string;
+            monthlyCredits: number;
+        };
+        pro: {
+            productKey: 'pro';
+            label: string;
+            monthlyCredits: number;
+            price: BillingCatalogPrice;
+        };
+        team: {
+            productKey: 'team';
+            label: string;
+            monthlyCredits: number;
+            price: BillingCatalogPrice;
+        };
+        topup_1000: {
+            productKey: 'topup_1000';
+            label: string;
+            credits: number;
+            price: BillingCatalogPrice;
+        };
+    };
+}
+
 export interface McpApiKeyItem {
     keyId: string;
     label: string;
@@ -1040,6 +1084,13 @@ class ApiClient {
 
     async getBillingSummary(signal?: AbortSignal): Promise<BillingSummaryResponse> {
         return this.request<BillingSummaryResponse>('/billing/summary', {
+            method: 'GET',
+            signal,
+        });
+    }
+
+    async getBillingCatalog(signal?: AbortSignal): Promise<BillingCatalogResponse> {
+        return this.request<BillingCatalogResponse>('/billing/catalog', {
             method: 'GET',
             signal,
         });

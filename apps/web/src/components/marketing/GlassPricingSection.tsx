@@ -1,142 +1,298 @@
-import { Check } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Loader2 } from 'lucide-react';
+import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse } from '../../api/client';
 
 type GlassPricingSectionProps = {
     className?: string;
     onGetStarted?: () => void;
+    onSelectPlan?: (productKey: 'free' | 'pro' | 'team' | 'topup_1000') => void;
 };
 
-const TIERS = [
-    {
-        plan: 'Starter',
-        price: '$0',
-        cadence: '/mo',
-        summary: 'For exploring prompts, testing screen directions, and getting a feel for the workflow.',
+type BillingCadence = 'monthly' | 'annual';
+type TierKey = 'free' | 'pro' | 'team' | 'topup_1000';
+
+const FALLBACK_PRICE_CENTS: Record<Exclude<TierKey, 'free'>, { monthly?: number; oneTime?: number; currency: string }> = {
+    pro: { monthly: 2400, currency: 'USD' },
+    team: { monthly: 7900, currency: 'USD' },
+    topup_1000: { oneTime: 1000, currency: 'USD' },
+};
+
+const TIER_CONTENT: Record<TierKey, {
+    title: string;
+    label: string;
+    description: string;
+    features: string[];
+    cta: string;
+    featured?: boolean;
+}> = {
+    free: {
+        title: 'Free',
+        label: 'Best for trying the workflow',
+        description: 'A clean starting point for testing prompts, comparing screen directions, and getting a real feel for the product.',
         features: [
-            'Core prompt composer',
+            '100 monthly credits',
             'Mobile, tablet, and desktop targets',
-            'Basic style preset access',
-            'Image references and export-ready drafts',
-            'Email support',
+            'Prompt composer with references',
+            'Fast first-pass generation',
         ],
-        emphasized: false,
         cta: 'Start free',
     },
-    {
-        plan: 'Pro',
-        price: '$24',
-        cadence: '/editor / mo',
-        summary: 'For designers and product teams who want faster iteration and sharper first-pass quality.',
+    pro: {
+        title: 'Pro',
+        label: 'Best for solo builders',
+        description: 'For designers and founders who need sharper first passes, faster iterations, and a stronger refinement loop.',
         features: [
-            'Unlimited generations',
-            'All five style presets',
+            '3,000 monthly credits',
             'Voice input and inline URL references',
-            'Faster iteration history and saved prompts',
+            'All style controls and model modes',
             'Priority support',
         ],
-        emphasized: true,
-        cta: 'Go pro',
+        cta: 'Choose Pro',
+        featured: true,
     },
-    {
-        plan: 'Studio',
-        price: 'Custom',
-        cadence: '',
-        summary: 'For teams aligning brand systems, collaboration, and rollout across multiple products.',
+    team: {
+        title: 'Team',
+        label: 'Best for product teams',
+        description: 'For teams running multiple flows at once, sharing direction, and keeping product quality high under tighter timelines.',
         features: [
-            'Shared team workspaces',
-            'Brand-aligned prompt libraries',
-            'Advanced review workflows',
-            'Priority onboarding and support',
-            'Custom rollout guidance',
+            '15,000 monthly credits',
+            'Shared team rollout capacity',
+            'Rollover support on paid usage',
+            'Faster team-wide iteration',
         ],
-        emphasized: false,
-        cta: 'Talk to us',
+        cta: 'Choose Team',
     },
-] as const;
+    topup_1000: {
+        title: 'Credits',
+        label: 'Best for one-off bursts',
+        description: 'A one-time credit pack when you need extra generation room without changing your current subscription plan.',
+        features: [
+            '1,000 additional credits',
+            'One-time purchase',
+            'Works alongside paid plans',
+            'Good for launch weeks and spikes',
+        ],
+        cta: 'Buy credits',
+    },
+};
 
-export function GlassPricingSection({ className = '', onGetStarted }: GlassPricingSectionProps) {
+function formatMoney(amountCents: number | null, currency: string | null, options?: Intl.NumberFormatOptions): string {
+    if (amountCents === null || Number.isNaN(amountCents)) return 'Contact';
+    return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: (currency || 'USD').toUpperCase(),
+        maximumFractionDigits: amountCents % 100 === 0 ? 0 : 2,
+        ...options,
+    }).format(amountCents / 100);
+}
+
+function getFallbackDisplayPrice(productKey: Exclude<TierKey, 'free'>, cadence: BillingCadence): {
+    amount: string;
+    cadenceLabel: string;
+    note: string;
+} {
+    const fallback = FALLBACK_PRICE_CENTS[productKey];
+    if (fallback.monthly) {
+        if (cadence === 'annual') {
+            return {
+                amount: formatMoney(fallback.monthly * 12, fallback.currency),
+                cadenceLabel: '/yr',
+                note: `${formatMoney(fallback.monthly, fallback.currency)} per month, billed annually`,
+            };
+        }
+        return {
+            amount: formatMoney(fallback.monthly, fallback.currency),
+            cadenceLabel: '/mo',
+            note: 'Standard pricing',
+        };
+    }
+
+    return {
+        amount: formatMoney(fallback.oneTime ?? null, fallback.currency),
+        cadenceLabel: '',
+        note: 'Standard one-time price',
+    };
+}
+
+function getDisplayPrice(productKey: Exclude<TierKey, 'free'>, price: BillingCatalogPrice | null | undefined, cadence: BillingCadence): {
+    amount: string;
+    cadenceLabel: string;
+    note: string;
+} {
+    if (!price?.configured || !price.active || price.unitAmount === null) {
+        return getFallbackDisplayPrice(productKey, cadence);
+    }
+
+    if (price.type === 'recurring') {
+        const monthlyAmount = price.interval === 'year' && price.intervalCount ? Math.round(price.unitAmount / (12 * price.intervalCount)) : price.unitAmount;
+        const annualAmount = monthlyAmount * 12;
+        if (cadence === 'annual') {
+            return {
+                amount: formatMoney(annualAmount, price.currency),
+                cadenceLabel: '/yr',
+                note: `${formatMoney(monthlyAmount, price.currency)} per month, billed annually`,
+            };
+        }
+        return {
+            amount: formatMoney(monthlyAmount, price.currency),
+            cadenceLabel: '/mo',
+            note: 'Live Stripe price',
+        };
+    }
+
+    return {
+        amount: formatMoney(price.unitAmount, price.currency),
+        cadenceLabel: '',
+        note: 'One-time purchase',
+    };
+}
+
+export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan }: GlassPricingSectionProps) {
+    const [cadence, setCadence] = useState<BillingCadence>('monthly');
+    const [catalog, setCatalog] = useState<BillingCatalogResponse | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const controller = new AbortController();
+
+        const loadCatalog = async () => {
+            try {
+                setLoading(true);
+                setLoadError(null);
+                const response = await apiClient.getBillingCatalog(controller.signal);
+                setCatalog(response);
+            } catch (error) {
+                if (controller.signal.aborted) return;
+                setLoadError((error as Error).message || 'Unable to load live pricing.');
+            } finally {
+                if (!controller.signal.aborted) setLoading(false);
+            }
+        };
+
+        void loadCatalog();
+        return () => controller.abort();
+    }, []);
+
+    const tiers = useMemo(() => {
+        const plans = catalog?.plans;
+        return (['free', 'pro', 'team', 'topup_1000'] as const).map((key) => {
+            const content = TIER_CONTENT[key];
+            const price = key === 'free' ? null : plans?.[key].price ?? null;
+            const display = key === 'free'
+                ? { amount: '$0', cadenceLabel: '/mo', note: 'No card required' }
+                : getDisplayPrice(key, price, cadence);
+
+            return {
+                key,
+                ...content,
+                display,
+            };
+        });
+    }, [cadence, catalog]);
+
+    const handleTierAction = (productKey: TierKey) => {
+        onSelectPlan?.(productKey);
+        if (!onSelectPlan) onGetStarted?.();
+    };
+
     return (
         <section className={`relative ${className}`}>
             <div className="landing-page-section-inner landing-page-section-inner-full">
-                <div className="landing-pricing-shell rounded-[34px] border border-white/10 px-4 py-6 md:px-8 md:py-8">
-                    <div className="landing-fade-up flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="max-w-[660px]">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Pricing</p>
-                            <h3 className="mt-3 text-[30px] md:text-[44px] leading-[1.04] tracking-[-0.03em] font-semibold text-white">
-                                Pick the plan that matches how fast your team wants to move.
-                            </h3>
+                <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[var(--ui-surface-1)]">
+                    <div className="relative px-5 py-8 md:px-8 md:py-10 lg:px-10">
+                        <div className="pointer-events-none absolute inset-0 opacity-70">
+                            <div className="absolute inset-y-0 left-1/4 hidden w-px bg-white/6 md:block" />
+                            <div className="absolute inset-y-0 left-1/2 hidden w-px bg-white/6 md:block" />
+                            <div className="absolute inset-y-0 right-1/4 hidden w-px bg-white/6 md:block" />
                         </div>
-                        <p className="max-w-[420px] text-[14px] leading-7 text-slate-300">
-                            Start lean, upgrade when you need stronger collaboration, more control, and a tighter system around the same core workflow.
-                        </p>
-                    </div>
 
-                    <div className="mt-10 grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
-                        <article className="landing-pricing-intro landing-fade-up">
-                            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Included in every plan</p>
-                            <h4 className="mt-3 text-[28px] leading-[1.08] tracking-[-0.03em] font-semibold text-white">
-                                The same calm, screen-first workflow from solo exploration to studio rollout.
-                            </h4>
-                            <div className="mt-6 space-y-4">
-                                {[
-                                    'Prompt-to-screen generation built for real product review.',
-                                    'Device-aware outputs for mobile, tablet, and desktop.',
-                                    'Refinement tools that keep the first draft worth discussing.',
-                                ].map((item) => (
-                                    <div key={item} className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-[14px] leading-7 text-slate-300">
-                                        {item}
-                                    </div>
-                                ))}
-                            </div>
-                            <button
-                                type="button"
-                                onClick={onGetStarted}
-                                className="mt-6 inline-flex h-11 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] px-5 text-[13px] font-semibold text-white hover:bg-white/10 transition-colors"
-                            >
-                                Generate a pricing concept
-                            </button>
-                        </article>
+                        <div className="relative mx-auto max-w-[760px] text-center">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Pricing</p>
+                            <h3 className="mt-3 text-[34px] font-semibold leading-[1.02] tracking-[-0.05em] text-white md:text-[56px]">
+                                Clean pricing for
+                                <br />
+                                every stage of output.
+                            </h3>
+                            <p className="mx-auto mt-4 max-w-[620px] text-[14px] leading-7 text-slate-300 md:text-[15px]">
+                                Paid plan amounts come from live Stripe pricing. Annual totals are calculated from the current monthly billing price.
+                            </p>
 
-                        <div className="grid gap-4 md:grid-cols-3">
-                            {TIERS.map((tier) => (
-                                <article
-                                    key={tier.plan}
-                                    className={`landing-pricing-card ${tier.emphasized ? 'is-featured' : ''}`}
-                                >
-                                    <div className="landing-pricing-card-top">
-                                        <span className="landing-pricing-chip">{tier.plan}</span>
-                                        {tier.emphasized && <span className="landing-pricing-chip landing-pricing-chip-featured">Most chosen</span>}
-                                    </div>
-                                    <div className="mt-6">
-                                        <div className="flex items-end gap-1.5">
-                                            <h4 className="text-[42px] leading-none tracking-[-0.04em] font-semibold text-white">{tier.price}</h4>
-                                            {tier.cadence && <span className="pb-1 text-[13px] text-slate-400">{tier.cadence}</span>}
-                                        </div>
-                                        <p className="mt-3 text-[13px] leading-6 text-slate-300">{tier.summary}</p>
-                                    </div>
-
-                                    <ul className="mt-8 space-y-3">
-                                        {tier.features.map((feature) => (
-                                            <li key={feature} className="flex items-start gap-3 text-[13px] leading-6 text-slate-300">
-                                                <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/[0.05] text-white">
-                                                    <Check size={12} />
-                                                </span>
-                                                <span>{feature}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-
+                            <div className="mt-7 inline-flex rounded-full border border-white/10 bg-[var(--ui-surface-2)] p-1">
+                                {(['monthly', 'annual'] as const).map((option) => (
                                     <button
+                                        key={option}
                                         type="button"
-                                        onClick={onGetStarted}
-                                        className={`mt-8 h-11 w-full rounded-full text-[13px] font-semibold transition-colors ${tier.emphasized
-                                            ? 'bg-white text-[#070a12] hover:bg-slate-200'
-                                            : 'border border-white/15 bg-white/[0.06] text-white hover:bg-white/10'
+                                        onClick={() => setCadence(option)}
+                                        className={`min-w-[110px] rounded-full px-4 py-2 text-[13px] font-medium transition-colors ${cadence === option
+                                            ? 'bg-white text-[#0a0b0d]'
+                                            : 'text-slate-300 hover:text-white'
                                             }`}
                                     >
-                                        {tier.cta}
+                                        {option === 'monthly' ? 'Monthly' : 'Annually'}
                                     </button>
-                                </article>
-                            ))}
+                                ))}
+                            </div>
+
+                            <div className="mt-4 min-h-6 text-[12px] text-slate-400">
+                                {loading ? (
+                                    <span className="inline-flex items-center gap-2">
+                                        <Loader2 size={13} className="animate-spin" />
+                                        Loading live pricing
+                                    </span>
+                                ) : loadError ? (
+                                    <span>{loadError}</span>
+                                ) : (
+                                    <span>{catalog?.stripe?.configured ? 'Using live billing prices where available.' : 'Showing standard pricing.'}</span>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="relative mt-8 overflow-hidden rounded-[24px] border border-white/10 bg-white/5">
+                            <div className="grid gap-px bg-white/10 lg:grid-cols-4">
+                                {tiers.map((tier) => (
+                                    <article
+                                        key={tier.key}
+                                        className={`flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6 ${tier.featured ? 'bg-[var(--ui-surface-2)]' : ''}`}
+                                    >
+                                        <div>
+                                            <p className="text-[22px] font-semibold tracking-[-0.03em] text-white">{tier.title}</p>
+                                            <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-slate-400">{tier.label}</p>
+                                        </div>
+
+                                        <div className="mt-7">
+                                            <div className="flex items-end gap-1.5">
+                                                <h4 className="text-[40px] font-semibold leading-none tracking-[-0.05em] text-white md:text-[46px]">{tier.display.amount}</h4>
+                                                {tier.display.cadenceLabel ? <span className="pb-1 text-[13px] text-slate-400">{tier.display.cadenceLabel}</span> : null}
+                                            </div>
+                                            <p className="mt-2 text-[12px] text-slate-400">{tier.display.note}</p>
+                                            <p className="mt-4 text-[14px] leading-7 text-slate-300">{tier.description}</p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => handleTierAction(tier.key)}
+                                            className={`mt-6 h-11 w-full rounded-[12px] border text-[13px] font-semibold transition-colors ${tier.featured
+                                                ? 'border-white bg-white text-[#0a0b0d] hover:bg-slate-200'
+                                                : 'border-white/12 bg-[var(--ui-surface-2)] text-white hover:bg-white/8'
+                                                }`}
+                                        >
+                                            {tier.cta}
+                                        </button>
+
+                                        <ul className="mt-7 space-y-3">
+                                            {tier.features.map((feature) => (
+                                                <li key={feature} className="flex items-start gap-3 text-[13px] leading-6 text-slate-300">
+                                                    <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/12 bg-[var(--ui-surface-2)] text-white">
+                                                        <Check size={11} />
+                                                    </span>
+                                                    <span>{feature}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </article>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>

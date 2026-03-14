@@ -708,6 +708,10 @@ textarea::placeholder {
   animation-play-state: paused;
 }
 
+.landing-testimonial-row:hover .infinite-scroll-track {
+  animation-play-state: paused;
+}
+
 @keyframes landing-fade-up-in {
   from {
     opacity: 0;
@@ -974,6 +978,72 @@ textarea::placeholder {
   color: rgba(186, 230, 253, 0.95);
 }
 
+.landing-testimonial-section {
+  overflow: hidden;
+}
+
+.landing-testimonial-wall {
+  position: relative;
+  left: 50%;
+  margin-left: -50vw;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.landing-testimonial-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.landing-testimonial-row + .landing-testimonial-row {
+  margin-top: 1.25rem;
+}
+
+.landing-testimonial-row::before,
+.landing-testimonial-row::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4rem;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.landing-testimonial-row::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--ui-surface-1) 0%, rgba(27, 27, 27, 0) 100%);
+}
+
+.landing-testimonial-row::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--ui-surface-1) 0%, rgba(27, 27, 27, 0) 100%);
+}
+
+.landing-testimonial-row.is-reverse::before {
+  background: linear-gradient(90deg, var(--ui-surface-1) 0%, rgba(27, 27, 27, 0) 100%);
+}
+
+.landing-testimonial-row.is-reverse::after {
+  background: linear-gradient(270deg, var(--ui-surface-1) 0%, rgba(27, 27, 27, 0) 100%);
+}
+
+.landing-testimonial-wall-card {
+  width: min(33rem, 42vw);
+  min-height: 14.5rem;
+  padding: 1.55rem 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.landing-testimonial-avatar {
+  width: 2.75rem;
+  height: 2.75rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .landing-footer {
   position: relative;
   left: 50%;
@@ -1215,6 +1285,10 @@ textarea::placeholder {
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .landing-testimonial-wall-card {
+    width: min(31rem, 62vw);
+  }
 }
 
 @media (max-width: 767px) {
@@ -1268,6 +1342,17 @@ textarea::placeholder {
 
   .landing-footer-nav {
     grid-template-columns: 1fr;
+  }
+
+  .landing-testimonial-wall-card {
+    width: min(25rem, 84vw);
+    min-height: 12.5rem;
+    padding: 1.25rem;
+  }
+
+  .landing-testimonial-row::before,
+  .landing-testimonial-row::after {
+    width: 2rem;
   }
 }
 
