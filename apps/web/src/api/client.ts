@@ -155,6 +155,14 @@ export interface ProjectMemory {
     };
 }
 
+export interface NewsletterSubscribeResponse {
+    success: boolean;
+}
+
+export interface AccountWelcomeEmailResponse {
+    success: boolean;
+}
+
 export interface HtmlDesignSpec {
     id: string;
     name: string;
@@ -1049,6 +1057,22 @@ class ApiClient {
         });
         notifyBillingUpdated(response.billing);
         return response;
+    }
+
+    async subscribeToNewsletter(email: string, signal?: AbortSignal): Promise<NewsletterSubscribeResponse> {
+        return this.request<NewsletterSubscribeResponse>('/newsletter/subscribe', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+            signal,
+        }, false);
+    }
+
+    async sendAccountWelcomeEmail(email: string, signal?: AbortSignal): Promise<AccountWelcomeEmailResponse> {
+        return this.request<AccountWelcomeEmailResponse>('/account/welcome-email', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+            signal,
+        }, false);
     }
 
     async save(request: SaveRequest): Promise<SaveResponse> {

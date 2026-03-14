@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowRight, ArrowUp, ChevronUp, CircleStar, Gem, LineSquiggle, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, ShieldCheck, Smartphone, Smile, Sparkles, Square, Tablet, X, Zap } from 'lucide-react';
+import { motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
+import { ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Tablet, X, Youtube, Zap } from 'lucide-react';
 import heroBg2 from '../../assets/img1.jpg';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
@@ -165,33 +166,67 @@ const MARKETING_NAV_LINKS = [
 ] as const;
 
 const DEMO_VIDEO_URL = 'https://lf16-web-neutral.traecdn.ai/obj/trae-ai-static/trae_website/static/media/solo-introduce.d2d26c5b.mp4';
-const FOOTER_PRIMARY_LINKS = [
-    { label: 'Home', path: '/' },
-    { label: 'Templates', path: '/templates' },
-    { label: 'Pricing', path: '/pricing' },
-    { label: 'Learn', path: '/learn' },
-    { label: 'Changelog', path: '/changelog' },
-    { label: 'Open App', path: '/app' },
-] as const;
-const FOOTER_POLICIES = [
-    { label: 'Terms & Conditions', path: '/learn' },
-    { label: 'Privacy Policy', path: '/learn' },
-] as const;
-const FOOTER_RESOURCE_LINKS = [
-    { label: 'Docs', href: '#' },
-    { label: 'Blog', path: '/learn' },
-    { label: 'Changelog', path: '/changelog' },
-] as const;
-const FOOTER_CONNECT_LINKS = [
-    { label: 'Feedback', href: 'mailto:team@eazyui.com' },
-    { label: 'Discord', href: 'https://discord.gg/nwWJDCaqtc' },
-    { label: 'X', href: 'https://x.com' },
-] as const;
-const FOOTER_SOCIAL_LINKS = [
-    { label: 'X', href: 'https://x.com' },
-    { label: 'Discord', href: 'https://discord.gg/nwWJDCaqtc' },
-    { label: 'Reddit', href: 'https://www.reddit.com' },
-] as const;
+function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
+    const opacity = useTransform(progress, [0.05, 0.18, 0.34], [0.2, 1, 1]);
+    const x = useTransform(progress, [0.05, 0.22], [64, 0]);
+    const y = useTransform(progress, [0.05, 0.22], [28, 0]);
+
+    return (
+        <motion.article className="landing-feature-scroll-intro" style={{ opacity, x, y }}>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">What EazyUI unlocks</p>
+            <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
+                From first prompt
+                <br />
+                to product-ready UI.
+            </h3>
+            <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-slate-300">
+                Scroll through the core capabilities and see how EazyUI turns rough ideas into sharper interface direction, faster refinement, and more confident decisions.
+            </p>
+        </motion.article>
+    );
+}
+
+function FeatureScrollCard({
+    item,
+    index,
+    progress,
+}: {
+    item: (typeof FEATURE_SCROLL_ITEMS)[number];
+    index: number;
+    progress: MotionValue<number>;
+}) {
+    const enterStart = 0.2 + (index * 0.1);
+    const enterEnd = enterStart + 0.14;
+    const settleEnd = enterEnd + 0.1;
+    const y = useTransform(progress, [0, enterStart, enterEnd, settleEnd, 1], [110, 110, 0, 0, -12]);
+    const opacity = useTransform(progress, [0, enterStart, enterEnd], [0.16, 0.16, 1]);
+    const scale = useTransform(progress, [0, enterStart, enterEnd], [0.9, 0.9, 1]);
+    const rotateX = useTransform(progress, [0, enterStart, enterEnd], [10, 10, 0]);
+
+    return (
+        <motion.article
+            className="landing-feature-scroll-card"
+            style={{
+                y,
+                opacity,
+                scale,
+                rotateX,
+                transformPerspective: 1400,
+            }}
+        >
+            <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
+            <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-white">
+                {item.title}
+            </h4>
+            <div className="landing-feature-scroll-preview mt-5">
+                <img src={item.image} alt={`${item.title} preview`} className="landing-feature-scroll-image" />
+            </div>
+            <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-slate-300">
+                {item.description}
+            </p>
+        </motion.article>
+    );
+}
 
 function toChipLabel(text: string): string {
     const clean = text.trim();
@@ -219,6 +254,9 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
+    const [newsletterEmail, setNewsletterEmail] = useState('');
+    const [newsletterBusy, setNewsletterBusy] = useState(false);
+    const [newsletterStatus, setNewsletterStatus] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const demoVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -233,6 +271,46 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
+    const shouldReduceMotion = useReducedMotion();
+    const { scrollY, scrollYProgress } = useScroll({ container: scrollContainerRef });
+    const { scrollYProgress: featureSectionProgressRaw } = useScroll({
+        container: scrollContainerRef,
+        target: featureShowcaseSectionRef,
+        offset: ['start 0.88', 'end 0.16'],
+    });
+    const easedScrollY = useSpring(scrollY, shouldReduceMotion ? {
+        stiffness: 900,
+        damping: 120,
+        mass: 1,
+    } : {
+        stiffness: 120,
+        damping: 26,
+        mass: 0.34,
+    });
+    const easedScrollProgress = useSpring(scrollYProgress, shouldReduceMotion ? {
+        stiffness: 900,
+        damping: 120,
+        mass: 1,
+    } : {
+        stiffness: 110,
+        damping: 24,
+        mass: 0.3,
+    });
+    const featureSectionProgress = useSpring(featureSectionProgressRaw, shouldReduceMotion ? {
+        stiffness: 900,
+        damping: 120,
+        mass: 1,
+    } : {
+        stiffness: 120,
+        damping: 22,
+        mass: 0.34,
+    });
+    const backgroundY = useTransform(easedScrollY, [0, 1400], [0, -112]);
+    const backgroundScale = useTransform(easedScrollProgress, [0, 1], [1, 1.085]);
+    const backgroundGlowOpacity = useTransform(easedScrollProgress, [0, 0.18, 1], [0.4, 0.82, 0.22]);
+    const backgroundGlowY = useTransform(easedScrollY, [0, 1600], [0, -78]);
+    const heroY = useTransform(easedScrollY, [0, 420], [0, -58]);
+    const heroOpacity = useTransform(easedScrollY, [0, 300], [1, 0.66]);
 
     const rootReferenceOptions = useMemo(
         () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
@@ -251,6 +329,23 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             modelProfile,
             referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
         });
+    };
+
+    const handleNewsletterSignup = async () => {
+        const cleanEmail = newsletterEmail.trim();
+        if (!cleanEmail || newsletterBusy) return;
+
+        try {
+            setNewsletterBusy(true);
+            setNewsletterStatus(null);
+            await apiClient.subscribeToNewsletter(cleanEmail);
+            setNewsletterStatus('Thanks. Check your inbox soon.');
+            setNewsletterEmail('');
+        } catch (error) {
+            setNewsletterStatus((error as Error).message || 'Could not send email.');
+        } finally {
+            setNewsletterBusy(false);
+        }
     };
 
     const closeReferenceMenu = () => {
@@ -571,15 +666,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         video.currentTime = 0;
         void video.play();
     };
-    const scrollToTop = () => {
-        const scrollContainer = scrollContainerRef.current;
-        if (scrollContainer) {
-            scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
-            return;
-        }
-
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
         : stylePreset === 'vibrant'
@@ -600,23 +686,39 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
 
     return (
-        <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[#06070B] text-white relative">
-            <div className="pointer-events-none absolute inset-0">
-                <div
+        <div ref={scrollContainerRef} className="landing-scroll-shell h-screen w-full overflow-y-auto bg-[#06070B] text-white relative">
+            <div className="landing-background-stack pointer-events-none absolute inset-0">
+                <motion.div
                     className="absolute inset-0"
                     style={{
+                        y: shouldReduceMotion ? 0 : backgroundY,
+                        scale: shouldReduceMotion ? 1 : backgroundScale,
                         backgroundImage: `url(${heroBg2})`,
                         backgroundPosition: 'center top',
                         backgroundSize: 'cover',
                         backgroundRepeat: 'no-repeat',
                     }}
                 />
-                <div className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_26%,rgba(22,35,70,0.08),rgba(6,7,11,0.45)_48%,rgba(6,7,11,0.95)_84%)]" />
+                <motion.div
+                    className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_26%,rgba(22,35,70,0.08),rgba(6,7,11,0.45)_48%,rgba(6,7,11,0.95)_84%)]"
+                    style={{ y: shouldReduceMotion ? 0 : backgroundGlowY }}
+                />
+                <motion.div
+                    className="absolute inset-0 bg-[radial-gradient(42%_28%_at_18%_12%,rgba(56,189,248,0.24),rgba(6,7,11,0)_72%),radial-gradient(36%_24%_at_82%_10%,rgba(96,165,250,0.2),rgba(6,7,11,0)_70%)]"
+                    style={{
+                        y: shouldReduceMotion ? 0 : backgroundGlowY,
+                        opacity: shouldReduceMotion ? 0.4 : backgroundGlowOpacity,
+                    }}
+                />
                 {/* <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(6,7,11,0.5),rgba(6,7,11,0.78)_58%,rgba(6,7,11,0.95))]" /> */}
             </div>
 
             <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''}`}>
                 <div className="landing-nav-frame">
+                    <motion.div
+                        className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left bg-gradient-to-r from-cyan-300 via-blue-400 to-indigo-500"
+                        style={{ scaleX: shouldReduceMotion ? scrollYProgress : easedScrollProgress }}
+                    />
                     <div className="mx-auto flex h-14 max-w-[1160px] items-center justify-between px-4 sm:px-6">
                     <button
                         type="button"
@@ -714,7 +816,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
 
             <main className="relative z-10 px-4 md:px-[0%] lg:px-[0%] pt-8 md:pt-12 pb-0">
                 {/*Hero section*/}
-                <section className="mx-auto max-w-[980px] text-center min-h-[55vh] flex flex-col items-center justify-center">
+                <motion.section
+                    className="mx-auto max-w-[980px] text-center min-h-[55vh] flex flex-col items-center justify-center"
+                    style={{
+                        y: shouldReduceMotion ? 0 : heroY,
+                        opacity: shouldReduceMotion ? 1 : heroOpacity,
+                    }}
+                >
                     <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
                         Design better UI with <span className="text-blue-300 italic">EazyUI</span>
                     </h1>
@@ -984,7 +1092,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             </button>
                         ))}
                     </div>
-                </section>
+                </motion.section>
 
                 {/* <section className="mx-auto mt-10 max-w-[980px] text-center">
                     <p className="text-[11px] uppercase tracking-[0.11em] text-gray-500">Built for teams shipping high-quality interfaces with AI</p>
@@ -998,7 +1106,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                 </section> */}
 
                 {/*Screens demo section*/}
-                <section className="landing-page-section relative w-screen max-w-none">
+                <motion.section
+                    className="landing-page-section relative w-full max-w-none"
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 36, scale: 0.985 }}
+                    whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
+                >
                     <div className="landing-page-section-full relative overflow-hidden px-0">
                         <div
                             className="infinite-scroll-track flex w-max gap-4"
@@ -1021,12 +1135,18 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             ))}
                         </div>
                     </div>
-                </section>
+                </motion.section>
 
                 {/*Video demo section*/}
                 <section className="landing-surface-band landing-surface-band-2 landing-page-section ">
                     <div className="w-full min-w-none px-[15%]">
-                    <div className="landing-fade-up flex flex-col gap-4 text-center">
+                    <motion.div
+                        className="flex flex-col gap-4 text-center"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.3 }}
+                        transition={{ duration: 0.82, ease: [0.22, 1, 0.36, 1] }}
+                    >
                         {/* <div className="mx-auto inline-flex rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-slate-300">
                             EazyUI Demo
                         </div> */}
@@ -1038,9 +1158,15 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         <p className="mx-auto max-w-[760px] text-[16px] md:text-[19px] leading-8 text-slate-300">
                             See how the prompt flow, generated screens, and refinement loop come together in one fast, polished product experience.
                         </p>
-                    </div>
+                    </motion.div>
 
-                    <div className="landing-fade-up mt-8 flex justify-center" style={{ animationDelay: '80ms' }}>
+                    <motion.div
+                        className="mt-8 flex justify-center"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 28 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.35 }}
+                        transition={{ duration: 0.72, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+                    >
                         <button
                             type="button"
                             onClick={() => onNavigate('/app')}
@@ -1049,9 +1175,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             <Sparkles size={16} />
                             Explore EazyUI
                         </button>
-                    </div>
+                    </motion.div>
 
-                    <div className="landing-demo-shell landing-fade-up mt-14" style={{ animationDelay: '140ms' }}>
+                    <motion.div
+                        className="landing-demo-shell mt-14"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 70, rotateX: 8, scale: 0.97 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, rotateX: 0, scale: 1 }}
+                        viewport={{ once: true, amount: 0.25 }}
+                        transition={{ duration: 0.95, delay: 0.14, ease: [0.22, 1, 0.36, 1] }}
+                        style={{ transformPerspective: 1600 }}
+                    >
                         <div
                             className="landing-demo-frame"
                             onMouseEnter={() => setIsDemoHovered(true)}
@@ -1085,10 +1218,11 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 Restart
                             </button>
                         </div>
-                    </div>
+                    </motion.div>
                     </div>
                 </section>
 
+                {/*Horizontal scroll section*/}
                 <section
                     ref={featureShowcaseSectionRef}
                     className="landing-surface-band landing-surface-band-1 landing-page-section landing-feature-pin-section"
@@ -1102,39 +1236,22 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     className="landing-feature-scroll-track"
                                     style={{ transform: `translate3d(-${featureShowcaseOffset}px, 0, 0)` }}
                                 >
-                                    <article className="landing-feature-scroll-intro landing-fade-up">
-                                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">What EazyUI unlocks</p>
-                                        <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
-                                            From first prompt
-                                            <br />
-                                            to product-ready UI.
-                                        </h3>
-                                        <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-slate-300">
-                                            Scroll through the core capabilities and see how EazyUI turns rough ideas into sharper interface direction, faster refinement, and more confident decisions.
-                                        </p>
-                                    </article>
-                                    {FEATURE_SCROLL_ITEMS.map((item, index) => {
-                                        return (
-                                            <article key={item.number} className="landing-feature-scroll-card landing-fade-up" style={{ animationDelay: `${100 + index * 90}ms` }}>
-                                                <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
-                                                <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-white">
-                                                    {item.title}
-                                                </h4>
-                                                <div className="landing-feature-scroll-preview mt-5">
-                                                    <img src={item.image} alt={`${item.title} preview`} className="landing-feature-scroll-image" />
-                                                </div>
-                                                <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-slate-300">
-                                                    {item.description}
-                                                </p>
-                                            </article>
-                                        );
-                                    })}
+                                    <FeatureScrollIntro progress={featureSectionProgress} />
+                                    {FEATURE_SCROLL_ITEMS.map((item, index) => (
+                                        <FeatureScrollCard
+                                            key={item.number}
+                                            item={item}
+                                            index={index}
+                                            progress={featureSectionProgress}
+                                        />
+                                    ))}
                                 </div>
                             </div>
                         </div>
                     </div>
                 </section>
 
+                {/*pricing section*/}
                 <section className="landing-surface-band landing-surface-band-2 landing-page-section">
                     <GlassPricingSection
                         className=""
@@ -1142,9 +1259,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     />
                 </section>
 
+                {/*testimonial section*/}
                 <section className="landing-surface-band landing-surface-band-1 landing-page-section landing-testimonial-section">
                     <div className="landing-page-section-inner landing-page-section-inner-full">
-                        <div className="landing-fade-up text-center">
+                        <motion.div
+                            className="text-center"
+                            initial={shouldReduceMotion ? false : { opacity: 0, y: 40 }}
+                            whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                            viewport={{ once: true, amount: 0.35 }}
+                            transition={{ duration: 0.78, ease: [0.22, 1, 0.36, 1] }}
+                        >
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Testimonials</p>
                             <h3 className="mt-4 text-[34px] md:text-[60px] leading-[1.02] tracking-[-0.05em] font-semibold text-white">
                                 Loved by teams
@@ -1154,10 +1278,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             <p className="mx-auto mt-4 max-w-[640px] text-[14px] leading-7 text-slate-400 md:text-[16px]">
                                 EazyUI helps teams move from vague product direction into stronger first passes that are actually worth reviewing.
                             </p>
-                        </div>
+                        </motion.div>
                     </div>
 
-                    <div className="landing-testimonial-wall mt-14">
+                    <motion.div
+                        className="landing-testimonial-wall mt-14"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 52 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.18 }}
+                        transition={{ duration: 0.9, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+                    >
                         {[
                             testimonialWallCards.slice(0, 4),
                             testimonialWallCards.slice(4, 8),
@@ -1199,142 +1329,114 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 </div>
                             );
                         })}
-                    </div>
+                    </motion.div>
                 </section>
 
+                {/*footer section*/}
                 <footer className="landing-footer">
-                    <div className="landing-footer-inner">
-                        <div className="landing-footer-cta">
-                            <div>
-                                <p className="landing-footer-kicker">Get started with EazyUI</p>
-                                <h2 className="landing-footer-title">
-                                    Ship sharper interfaces.
-                                    <span>Try it free.</span>
-                                </h2>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => onNavigate('/app')}
-                                className="landing-footer-cta-button"
-                            >
-                                <Sparkles size={18} />
-                                <span>Open EazyUI</span>
-                                <ArrowRight size={18} />
-                            </button>
-                        </div>
-
-                        <div className="landing-footer-divider" />
-
-                        <div className="landing-footer-main">
-                            <div className="landing-footer-brand">
-                                <img src={appLogo} alt="EazyUI logo" className="landing-footer-logo" />
-                                <p className="landing-footer-brand-copy">
-                                    EazyUI turns product ideas into polished interface direction fast, with better first passes and cleaner refinement loops.
-                                </p>
-                            </div>
-
-                            <div className="landing-footer-nav">
-                                <div className="landing-footer-column">
-                                    <h4>Explore</h4>
-                                    {FOOTER_PRIMARY_LINKS.map((item) => (
+                    <motion.div
+                        className="landing-footer-shell"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 56 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.2 }}
+                        transition={{ duration: 0.88, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                        <div className="landing-footer-top-half">
+                            <div className="landing-footer-top-row">
+                                <div className="landing-footer-newsletter">
+                                    <h2 className="landing-footer-newsletter-title">Subscribe to our newsletter</h2>
+                                    <p className="landing-footer-newsletter-copy">
+                                        Product updates, design drops, and new generation workflows from EazyUI.
+                                    </p>
+                                    <div className="landing-footer-newsletter-form">
+                                        <label className="landing-footer-email-field">
+                                            <Mail size={15} />
+                                            <input
+                                                type="email"
+                                                placeholder="name@email.com"
+                                                aria-label="Email address"
+                                                value={newsletterEmail}
+                                                onChange={(event) => setNewsletterEmail(event.target.value)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        void handleNewsletterSignup();
+                                                    }
+                                                }}
+                                            />
+                                        </label>
                                         <button
-                                            key={item.label}
                                             type="button"
-                                            onClick={() => onNavigate(item.path)}
-                                            className="landing-footer-link"
+                                            onClick={() => void handleNewsletterSignup()}
+                                            className="landing-footer-signup-button"
+                                            disabled={newsletterBusy || !newsletterEmail.trim()}
                                         >
-                                            {item.label}
+                                            {newsletterBusy ? 'Sending...' : 'Sign up'}
                                         </button>
-                                    ))}
+                                    </div>
+                                    {newsletterStatus ? (
+                                        <p className="landing-footer-newsletter-status">{newsletterStatus}</p>
+                                    ) : null}
                                 </div>
 
-                                <div className="landing-footer-column">
-                                    <h4>Resources</h4>
-                                    {FOOTER_RESOURCE_LINKS.map((item) => (
-                                        'path' in item ? (
-                                            <button
-                                                key={item.label}
-                                                type="button"
-                                                onClick={() => onNavigate(item.path)}
-                                                className="landing-footer-link"
-                                            >
-                                                {item.label}
-                                            </button>
-                                        ) : (
-                                            <a
-                                                key={item.label}
-                                                href={item.href}
-                                                className="landing-footer-link"
-                                                target={item.href.startsWith('http') ? '_blank' : undefined}
-                                                rel={item.href.startsWith('http') ? 'noreferrer' : undefined}
-                                            >
-                                                {item.label}
-                                            </a>
-                                        )
-                                    ))}
+                                <div className="landing-footer-emblem" aria-hidden="true">
+                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-1" />
+                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-2" />
+                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-3" />
+                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-1" />
+                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-2" />
+                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-3" />
+                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-4" />
+                                    <div className="landing-footer-emblem-core">
+                                        <img src={appLogo} alt="" className="landing-footer-emblem-logo" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="landing-footer-divider" />
+
+                            <div className="landing-footer-bottom-row">
+                                <div className="landing-footer-links-block">
+                                    <h4>Useful links</h4>
+                                    <div className="landing-footer-links-stack">
+                                        <button type="button" onClick={() => onNavigate('/templates')} className="landing-footer-link">Careers</button>
+                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Terms of Services</button>
+                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Privacy Policy</button>
+                                    </div>
                                 </div>
 
-                                <div className="landing-footer-column">
-                                    <h4>Connect</h4>
-                                    {FOOTER_CONNECT_LINKS.map((item) => (
-                                        <a
-                                            key={item.label}
-                                            href={item.href}
-                                            className="landing-footer-link"
-                                            target={item.href.startsWith('http') ? '_blank' : undefined}
-                                            rel={item.href.startsWith('http') ? 'noreferrer' : undefined}
-                                        >
-                                            {item.label}
+                                <div className="landing-footer-follow-block">
+                                    <h4>Follow us</h4>
+                                    <div className="landing-footer-social-row">
+                                        <a href="https://x.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="X">
+                                            <X size={16} />
                                         </a>
-                                    ))}
+                                        <a href="https://youtube.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-red" aria-label="YouTube">
+                                            <Youtube size={16} />
+                                        </a>
+                                        <a href="https://instagram.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="Instagram">
+                                            <Instagram size={16} />
+                                        </a>
+                                        <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-blue" aria-label="LinkedIn">
+                                            <Linkedin size={16} />
+                                        </a>
+                                    </div>
+
+                                    <div className="landing-footer-signature">
+                                        <div className="landing-footer-signature-brand">
+                                            <img src={appLogo} alt="EazyUI logo" className="landing-footer-signature-logo" />
+                                            <span>EazyUI</span>
+                                        </div>
+                                        <p>© Copyright 2026 EazyUI Inc. All rights reserved</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="landing-footer-meta">
-                            <div className="landing-footer-meta-left">
-                                <span>© 2026 EazyUI</span>
-                                <div className="landing-footer-badge">
-                                    <ShieldCheck size={15} />
-                                    <span>SOC 2 aligned</span>
-                                </div>
-                            </div>
-
-                            <div className="landing-footer-meta-right">
-                                {FOOTER_POLICIES.map((item) => (
-                                    <button
-                                        key={item.label}
-                                        type="button"
-                                        onClick={() => onNavigate(item.path)}
-                                        className="landing-footer-policy"
-                                    >
-                                        {item.label}
-                                    </button>
-                                ))}
-
-                                {FOOTER_SOCIAL_LINKS.map((item) => (
-                                    <a
-                                        key={item.label}
-                                        href={item.href}
-                                        className="landing-footer-social"
-                                        target="_blank"
-                                        rel="noreferrer"
-                                    >
-                                        {item.label}
-                                    </a>
-                                ))}
-
-                                <button type="button" onClick={scrollToTop} className="landing-footer-top">
-                                    <span>Back to top</span>
-                                    <ChevronUp size={16} />
-                                </button>
-                            </div>
+                        <div className="landing-footer-bottom-half" aria-hidden="true">
+                            <div className="landing-footer-wordmark">eazyui</div>
                         </div>
-
-                        <div className="landing-footer-wordmark" aria-hidden="true">
-                            <span>EAZYUI</span>
-                        </div>
-                    </div>
+                    </motion.div>
                 </footer>
             </main>
         </div>

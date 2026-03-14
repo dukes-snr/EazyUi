@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Chrome, Eye, EyeOff, Loader2, Mail } from "lucide-react";
 import appLogo from "@/assets/Ui-logo.png";
 import heroBg from "@/assets/img1.jpg";
+import { apiClient } from "@/api/client";
 import { sendPasswordReset, signInWithEmail, signInWithGooglePopup, signUpWithEmail } from "@/lib/auth";
 import { SHOWCASE_SCREEN_IMAGES } from "@/utils/showcaseImages";
 
@@ -83,6 +84,11 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
       setLoading(true);
       if (authMode === "signup") {
         await signUpWithEmail(cleanEmail, password);
+        try {
+          await apiClient.sendAccountWelcomeEmail(cleanEmail);
+        } catch (emailError) {
+          console.warn("Welcome email failed:", emailError);
+        }
       } else {
         await signInWithEmail(cleanEmail, password);
       }

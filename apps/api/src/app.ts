@@ -63,6 +63,7 @@ import {
     resolveMcpApiKey,
     revokeMcpApiKey,
 } from './services/mcpApiKeys.js';
+import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
 
 function loadEnv() {
     const candidates = [
@@ -1006,6 +1007,7 @@ fastify.get('/api/health', async (request, reply) => {
             apiKeyPresent: Boolean((process.env.NVIDIA_API_KEY || '').trim()),
             models: nvidiaModels,
         },
+        resend: getResendConfigSummary(),
     };
 
     const accept = String(request.headers.accept || '');
@@ -1061,6 +1063,56 @@ fastify.get('/api/health', async (request, reply) => {
     }
 
     return payload;
+});
+
+fastify.post('/api/newsletter/subscribe', async (request, reply) => {
+    const body = (request.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+
+    if (!email) {
+        return reply.status(400).send({ error: 'email is required' });
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email)) {
+        return reply.status(400).send({ error: 'Enter a valid email address' });
+    }
+
+    try {
+        await sendNewsletterSignupEmail(email);
+        return reply.send({ success: true });
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/newsletter/subscribe', err: error }, 'newsletter signup email failed');
+        return reply.status(500).send({
+            error: 'Failed to send newsletter email',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post('/api/account/welcome-email', async (request, reply) => {
+    const body = (request.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+
+    if (!email) {
+        return reply.status(400).send({ error: 'email is required' });
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email)) {
+        return reply.status(400).send({ error: 'Enter a valid email address' });
+    }
+
+    try {
+        await sendAccountCreationWelcomeEmail(email);
+        return reply.send({ success: true });
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/account/welcome-email', err: error }, 'account welcome email failed');
+        return reply.status(500).send({
+            error: 'Failed to send welcome email',
+            message: (error as Error).message,
+        });
+    }
 });
 
 fastify.get('/api/billing/summary', async (request, reply) => {
