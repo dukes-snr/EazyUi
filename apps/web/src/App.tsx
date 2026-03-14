@@ -24,6 +24,7 @@ import { createDefaultCanvasDoc, type CanvasDoc } from '@eazyui/shared';
 import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import { subscribeProjectRealtime } from './lib/firestoreData';
+import { capturePostHogPageview, identifyPostHogUser, resetPostHogUser } from './lib/posthog';
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
@@ -401,12 +402,31 @@ function App() {
     }, []);
 
     useEffect(() => {
+        capturePostHogPageview();
+    }, [route]);
+
+    useEffect(() => {
         const unsub = observeAuthState((user) => {
             setAuthUser(user);
             setAuthReady(true);
         });
         return () => unsub();
     }, []);
+
+    useEffect(() => {
+        if (!authReady) return;
+        if (!authUser) {
+            resetPostHogUser();
+            return;
+        }
+
+        identifyPostHogUser(authUser.uid, {
+            displayName: authUser.displayName || authUser.email?.split('@')[0] || 'User',
+            email: authUser.email || undefined,
+            emailVerified: authUser.emailVerified,
+            providerIds: authUser.providerData.map((provider) => provider.providerId).filter(Boolean),
+        });
+    }, [authReady, authUser]);
 
     const landingPrompt = useMemo(() => {
         if (!isCanvasRoute) return '';

@@ -1,6 +1,6 @@
 import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { apiClient } from '../../api/client';
+import { apiClient, type BillingSummary } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import logo from '../../assets/Ui-logo.png';
 import type { User } from 'firebase/auth';
@@ -98,6 +98,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [showStyleMenu, setShowStyleMenu] = useState(false);
   const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
   const [openAvatarMenu, setOpenAvatarMenu] = useState(false);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
   const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
   const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
   const [referenceRootQuery, setReferenceRootQuery] = useState('');
@@ -212,6 +213,16 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     }
   }
 
+  async function loadBillingSummary() {
+    if (!authReady || !isAuthenticated) return;
+    try {
+      const response = await apiClient.getBillingSummary();
+      setBillingSummary(response.summary);
+    } catch {
+      setBillingSummary(null);
+    }
+  }
+
   const closeReferenceMenu = () => {
     setIsReferenceMenuOpen(false);
     setReferenceMenuMode('root');
@@ -262,6 +273,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
     void loadProjects();
+    void loadBillingSummary();
   }, [authReady, isAuthenticated]);
 
   useEffect(() => {
@@ -275,6 +287,12 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     const unsub = observeAuthState((user) => setAuthUser(user));
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setBillingSummary(null);
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -394,6 +412,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     if (!ok) return;
     await performDelete(uniqueIds);
   };
+
+  const creditBalanceLabel = billingSummary
+    ? `${billingSummary.balanceCredits.toLocaleString()} credits`
+    : 'Credits unavailable';
+  const creditPlanLabel = billingSummary?.planLabel || 'Free plan';
 
   const toggleProjectSelection = (projectId: string) => {
     if (deletingIdSet.has(projectId)) return;
@@ -528,7 +551,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             </button>
           )} */}
 
-          <div className="mt-5 flex flex-1 flex-col overflow-hidden">
+          <div className="mt-5 flex flex-1 flex-col overflow-visible">
             {sidebarExpanded && (
               <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
             )}
@@ -648,7 +671,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </div>
               )}
 
-              <div className="relative" ref={avatarMenuRef}>
+              <div className="relative z-20" ref={avatarMenuRef}>
                 <button
                   type="button"
                   onClick={() => setOpenAvatarMenu((open) => !open)}
@@ -664,7 +687,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   </span>
                 </button>
                 {openAvatarMenu && (
-                  <div className={`absolute bottom-0 ${avatarMenuPositionClassName} w-[220px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-[0_18px_50px_rgba(0,0,0,0.45)]`}>
+                  <div className={`absolute bottom-0 z-30 ${avatarMenuPositionClassName} w-[260px] ml-5 mb-2 rounded-[24px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-popover)_94%,transparent)] p-3 backdrop-blur-xl`}>
                     <div className="flex items-center gap-2">
                       <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
                         <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
@@ -674,10 +697,43 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
                       </div>
                     </div>
+                    <div className="mt-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)]/80 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Current plan</p>
+                          <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditPlanLabel}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Balance</p>
+                          <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditBalanceLabel}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenAvatarMenu(false);
+                          onNavigate('/pricing');
+                        }}
+                        className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                      >
+                        Billing
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void loadBillingSummary();
+                        }}
+                        className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                      >
+                        Refresh
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={() => void handleSignOut()}
-                      className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 hover:bg-rose-500/20"
+                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 transition-colors hover:bg-rose-500/20"
                     >
                       <LogOut size={13} />
                       Logout

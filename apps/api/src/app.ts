@@ -63,6 +63,7 @@ import {
     resolveMcpApiKey,
     revokeMcpApiKey,
 } from './services/mcpApiKeys.js';
+import { captureServerAnalyticsEvent } from './services/posthog.js';
 import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
 
 function loadEnv() {
@@ -1067,7 +1068,7 @@ fastify.get('/api/health', async (request, reply) => {
 
 fastify.post('/api/newsletter/subscribe', async (request, reply) => {
     const body = (request.body ?? {}) as { email?: unknown };
-    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
 
     if (!email) {
         return reply.status(400).send({ error: 'email is required' });
@@ -1080,6 +1081,14 @@ fastify.post('/api/newsletter/subscribe', async (request, reply) => {
 
     try {
         await sendNewsletterSignupEmail(email);
+        captureServerAnalyticsEvent({
+            distinctId: email,
+            event: 'newsletter_subscribed',
+            properties: {
+                source: 'landing_footer',
+                traceId: request.id,
+            },
+        });
         return reply.send({ success: true });
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/newsletter/subscribe', err: error }, 'newsletter signup email failed');
@@ -1091,8 +1100,9 @@ fastify.post('/api/newsletter/subscribe', async (request, reply) => {
 });
 
 fastify.post('/api/account/welcome-email', async (request, reply) => {
-    const body = (request.body ?? {}) as { email?: unknown };
-    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    const body = (request.body ?? {}) as { email?: unknown; uid?: unknown };
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const uid = typeof body.uid === 'string' ? body.uid.trim() : '';
 
     if (!email) {
         return reply.status(400).send({ error: 'email is required' });
@@ -1105,6 +1115,16 @@ fastify.post('/api/account/welcome-email', async (request, reply) => {
 
     try {
         await sendAccountCreationWelcomeEmail(email);
+        captureServerAnalyticsEvent({
+            distinctId: uid || email,
+            event: 'account_created',
+            properties: {
+                email,
+                method: 'email_password',
+                welcomeEmailSent: true,
+                traceId: request.id,
+            },
+        });
         return reply.send({ success: true });
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/account/welcome-email', err: error }, 'account welcome email failed');

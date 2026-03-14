@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { initPostHog } from './lib/posthog';
 import 'goey-toast/styles.css';
 import './styles/index.css';
 
@@ -40,6 +41,8 @@ const queryClient = new QueryClient({
         },
     },
 });
+
+initPostHog();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

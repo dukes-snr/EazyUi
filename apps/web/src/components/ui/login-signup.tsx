@@ -83,9 +83,9 @@ export default function LoginCardSection({ onNavigate }: LoginCardSectionProps) 
     try {
       setLoading(true);
       if (authMode === "signup") {
-        await signUpWithEmail(cleanEmail, password);
+        const credential = await signUpWithEmail(cleanEmail, password);
         try {
-          await apiClient.sendAccountWelcomeEmail(cleanEmail);
+          await apiClient.sendAccountWelcomeEmail(cleanEmail, credential.user.uid);
         } catch (emailError) {
           console.warn("Welcome email failed:", emailError);
         }

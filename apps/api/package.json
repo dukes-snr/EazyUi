@@ -23,6 +23,7 @@
         "firebase-admin": "^12.7.0",
         "openai": "^4.104.0",
         "playwright": "^1.53.2",
+        "posthog-node": "^5.21.2",
         "resend": "^4.8.0",
         "stripe": "^16.9.0",
         "uuid": "^9.0.1",

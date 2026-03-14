@@ -1,4 +1,5 @@
 import app, { closeRenderBrowser } from './app.js';
+import { shutdownPostHog } from './services/posthog.js';
 
 const port = parseInt(process.env.PORT || '3001', 10);
 const host = process.env.HOST || '0.0.0.0';
@@ -11,7 +12,11 @@ try {
     process.exit(1);
 }
 
-process.on('SIGINT', async () => {
+async function shutdownServer() {
     await closeRenderBrowser();
+    await shutdownPostHog();
     process.exit(0);
-});
+}
+
+process.on('SIGINT', shutdownServer);
+process.on('SIGTERM', shutdownServer);

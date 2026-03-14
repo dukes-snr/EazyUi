@@ -1067,10 +1067,10 @@ class ApiClient {
         }, false);
     }
 
-    async sendAccountWelcomeEmail(email: string, signal?: AbortSignal): Promise<AccountWelcomeEmailResponse> {
+    async sendAccountWelcomeEmail(email: string, uid?: string, signal?: AbortSignal): Promise<AccountWelcomeEmailResponse> {
         return this.request<AccountWelcomeEmailResponse>('/account/welcome-email', {
             method: 'POST',
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ email, uid }),
             signal,
         }, false);
     }
