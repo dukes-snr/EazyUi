@@ -1,8 +1,7 @@
 import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import type { TokenUsageEntry, TokenUsageSummary } from './tokenUsage.js';
+import { ensureParentDir, resolveSqliteDatabasePath } from './runtimePaths.js';
 
 export type BillingPlanId = 'free' | 'pro' | 'team';
 export type BillingOperation =
@@ -267,11 +266,9 @@ export class InsufficientCreditsError extends Error {
     }
 }
 
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
-const db = new Database(path.join(dataDir, 'eazyui.db'));
+const dbPath = resolveSqliteDatabasePath();
+ensureParentDir(dbPath);
+const db = new Database(dbPath);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS billing_profiles (

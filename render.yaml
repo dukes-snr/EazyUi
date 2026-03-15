@@ -1,0 +1,109 @@
+services:
+  - type: web
+    name: eazyui-api
+    runtime: node
+    rootDir: .
+    plan: starter
+    buildCommand: bash ./scripts/render-build-api.sh
+    startCommand: npm run start --workspace=@eazyui/api
+    healthCheckPath: /api/health
+    disk:
+      name: eazyui-api-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data/eazyui
+      - key: DATABASE_URL
+        value: /var/data/eazyui/eazyui.db
+      - key: FRONTEND_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_BASE_URL
+        value: https://api.firecrawl.dev/v2
+      - key: GEMINI_MODEL
+        value: gemini-2.5-pro
+      - key: INTERNAL_API_KEY
+        generateValue: true
+      - key: MCP_API_KEY_PEPPER
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_BASE64
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://us.i.posthog.com
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: RESEND_AUDIENCE_EMAIL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_TEAM_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_TOPUP_1000
+        sync: false
+  - type: pserv
+    name: eazyui-mcp-server
+    runtime: node
+    rootDir: .
+    plan: starter
+    buildCommand: bash ./scripts/render-build-mcp.sh
+    startCommand: bash ./scripts/render-start-mcp.sh
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MCP_SERVER_HOST
+        value: 0.0.0.0
+      - key: MCP_SERVER_PORT
+        value: 3010
+      - key: MCP_ENABLE_MUTATIONS
+        value: "true"
+      - key: MCP_REQUIRE_AUTH
+        value: "true"
+      - key: MCP_FETCH_TIMEOUT_MS
+        value: "90000"
+      - key: MCP_FETCH_HEAVY_TIMEOUT_MS
+        value: "420000"
+      - key: MCP_FETCH_RETRIES
+        value: "1"
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_BASE64
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: MCP_INTERNAL_API_KEY
+        fromService:
+          type: web
+          name: eazyui-api
+          envVarKey: INTERNAL_API_KEY
+      - key: EAZYUI_API_HOSTPORT
+        fromService:
+          type: web
+          name: eazyui-api
+          property: hostport

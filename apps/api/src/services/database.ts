@@ -5,16 +5,12 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import type { HtmlDesignSpec } from './gemini.js';
-import path from 'path';
-import fs from 'fs';
+import { ensureParentDir, resolveSqliteDatabasePath } from './runtimePaths.js';
 
-// Ensure data directory exists
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
+const dbPath = resolveSqliteDatabasePath();
+ensureParentDir(dbPath);
 
-const db = new Database(path.join(dataDir, 'eazyui.db'));
+const db = new Database(dbPath);
 
 // Initialize tables
 db.exec(`

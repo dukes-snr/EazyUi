@@ -7,6 +7,9 @@ build/
 .env
 .env*
 !.env.example
+!.env.render-api.example
+!.env.render-mcp.example
+!.env.vercel.example
 *.log
 .DS_Store
 Thumbs.db

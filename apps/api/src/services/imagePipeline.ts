@@ -1,9 +1,9 @@
 import fs from 'fs';
-import path from 'path';
 import { createHash } from 'crypto';
 import { generateImageAsset } from './gemini.js';
 import { planImagePromptsWithUsage } from './designPlanner.js';
 import { summarizeTokenUsage, type TokenUsageEntry, type TokenUsageSummary } from './tokenUsage.js';
+import { ensureParentDir, resolveDataFilePath } from './runtimePaths.js';
 
 export interface ImageSynthesisInputScreen {
   screenId?: string;
@@ -53,11 +53,10 @@ type ImageSlot = {
   generate: boolean;
 };
 
-const CACHE_FILE = path.resolve(process.cwd(), 'data', 'generated-image-cache.json');
+const CACHE_FILE = resolveDataFilePath('generated-image-cache.json');
 
 function ensureCacheDir() {
-  const dir = path.dirname(CACHE_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  ensureParentDir(CACHE_FILE);
 }
 
 function loadCache(): CacheShape {
