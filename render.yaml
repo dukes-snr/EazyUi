@@ -73,7 +73,6 @@ services:
     plan: starter
     buildCommand: bash ./scripts/render-build-mcp.sh
     startCommand: bash ./scripts/render-start-mcp.sh
-    healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
         value: 20

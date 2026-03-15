@@ -116,6 +116,115 @@ https://<your-render-api-domain>/api/stripe/webhook
 - `https://<your-vercel-domain>`
 - `https://<your-render-api-domain>/api/models`
 
+## Environment checklist
+
+Use this when entering variables into Render and Vercel.
+
+### Vercel web
+
+Required for the app to boot correctly:
+
+- `VITE_API_BASE_URL`
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+
+Optional:
+
+- `VITE_FIREBASE_MEASUREMENT_ID` for Firebase Analytics
+- `VITE_POSTHOG_KEY`
+- `VITE_POSTHOG_HOST`
+- `VITE_ENABLE_STORAGE_RESTORE`
+- `VITE_ENABLE_STORAGE_UPLOADS`
+
+### Render API
+
+Required for core product behavior:
+
+- `FRONTEND_URL`
+- `GEMINI_API_KEY`
+- `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_BASE64`
+
+Required for this Render deployment shape, but already handled by the Blueprint:
+
+- `HOST`
+- `DATA_DIR`
+- `DATABASE_URL`
+- `INTERNAL_API_KEY`
+
+Required only if you use these features:
+
+- `FIRECRAWL_API_KEY` for URL reference scraping
+- `GROQ_API_KEY` for Groq-backed models and audio transcription
+- `NVIDIA_API_KEY` for NVIDIA-backed models
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_PRO_MONTHLY`
+- `STRIPE_PRICE_TEAM_MONTHLY`
+- `STRIPE_PRICE_TOPUP_1000`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `RESEND_AUDIENCE_EMAIL`
+- `POSTHOG_API_KEY`
+
+Recommended but not strictly required:
+
+- `MCP_API_KEY_PEPPER`
+- `FIREBASE_STORAGE_BUCKET`
+- `POSTHOG_HOST`
+
+Optional tuning:
+
+- `GEMINI_MODEL`
+- `GEMINI_IMAGE_MODEL`
+- `GEMINI_IMAGE_FALLBACK_MODEL`
+- `FIRECRAWL_API_BASE_URL`
+- `GROQ_MODEL`
+- `GROQ_WHISPER_MODEL`
+- `NVIDIA_MODEL`
+- `API_BODY_LIMIT`
+- `BILLING_PAID_ONLY_OPERATIONS`
+- `BILLING_CREDITS_PER_USD`
+- `BILLING_USAGE_MARKUP_MULTIPLIER`
+- `BILLING_USAGE_MIN_CREDITS`
+- `BILLING_USAGE_FALLBACK_INPUT_USD_PER_1M`
+- `BILLING_USAGE_FALLBACK_OUTPUT_USD_PER_1M`
+
+### Render MCP
+
+Required:
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_BASE64`
+
+Required for connectivity, but already handled by the Blueprint:
+
+- `MCP_INTERNAL_API_KEY`
+- `EAZYUI_API_HOSTPORT`
+- `MCP_SERVER_HOST`
+- `MCP_SERVER_PORT`
+
+Recommended:
+
+- `FIREBASE_STORAGE_BUCKET`
+
+Only needed if you are not using the Blueprint wiring:
+
+- `EAZYUI_API_BASE_URL`
+
+Optional tuning:
+
+- `MCP_ENABLE_MUTATIONS`
+- `MCP_REQUIRE_AUTH`
+- `MCP_DEV_UID`
+- `MCP_FETCH_TIMEOUT_MS`
+- `MCP_FETCH_HEAVY_TIMEOUT_MS`
+- `MCP_FETCH_RETRIES`
+- `FIREBASE_PROJECT_ID`
+
 ## Persistence notes
 
 The API now honors:
