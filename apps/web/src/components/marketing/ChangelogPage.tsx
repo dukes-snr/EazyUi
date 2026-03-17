@@ -118,10 +118,10 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
     return (
-        <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-bg)] text-[var(--ui-text)]">
-            <MarketingHeader onNavigate={onNavigate} onOpenApp={onOpenApp} scrollContainerRef={scrollContainerRef} />
+        <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)]">
+            <MarketingHeader onNavigate={onNavigate} onOpenApp={onOpenApp} scrollContainerRef={scrollContainerRef} tone="surface" />
 
-            <main className="relative overflow-hidden bg-[var(--ui-bg)]">
+            <main className="relative overflow-hidden bg-[var(--ui-surface-1)]">
                 <section className="relative overflow-hidden border-b border-[color:color-mix(in_srgb,var(--ui-primary)_10%,rgba(255,255,255,0.06))] px-4 pb-20 pt-14 md:px-6 md:pb-24 md:pt-24">
                     <div className="pointer-events-none absolute inset-0">
                         <div className="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(60%_46%_at_50%_12%,color-mix(in_srgb,var(--ui-primary)_18%,transparent),rgba(6,8,12,0)_70%)]" />
@@ -154,7 +154,7 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
 
                 <section className="px-4 pb-24 pt-12 md:px-6 md:pt-16">
                     <div className="relative mx-auto max-w-[1040px]">
-                        <div className="absolute bottom-0 left-[1.1rem] top-0 hidden w-px bg-[linear-gradient(180deg,rgba(255,255,255,0.02),color-mix(in_srgb,var(--ui-primary)_12%,rgba(255,255,255,0.08)),rgba(255,255,255,0.02))] md:block lg:left-[2.25rem]" />
+                        <div className="absolute bottom-0 left-[1.1rem] top-0 hidden w-px bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_10%,transparent),color-mix(in_srgb,var(--ui-primary)_78%,transparent),color-mix(in_srgb,var(--ui-primary)_10%,transparent))] md:block lg:left-[2.25rem]" />
 
                         <div className="space-y-0">
                             {CHANGELOG_ENTRIES.map((entry) => (
@@ -164,7 +164,7 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
                                 >
                                     <div className="relative hidden md:block">
                                         <div className="sticky top-24 flex items-start justify-center pt-2">
-                                            <span className="relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,rgba(255,255,255,0.14))] bg-[var(--ui-bg)] shadow-[0_0_0_5px_rgba(6,8,12,0.94)]">
+                                            <span className="relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,rgba(255,255,255,0.14))] bg-[var(--ui-surface-1)] shadow-[0_0_0_5px_var(--ui-surface-1)]">
                                                 <span className="h-2 w-2 rounded-full bg-[var(--ui-primary)] shadow-[0_0_22px_color-mix(in_srgb,var(--ui-primary)_42%,transparent)]" />
                                             </span>
                                         </div>

@@ -10,6 +10,7 @@ type MarketingHeaderProps = {
     onNavigate: (path: string) => void;
     onOpenApp?: () => void;
     scrollContainerRef?: RefObject<HTMLElement | null>;
+    tone?: 'default' | 'surface';
 };
 
 const NAV_ITEMS = [
@@ -19,7 +20,7 @@ const NAV_ITEMS = [
     { label: "What's New", path: '/changelog' },
 ] as const;
 
-export function MarketingHeader({ onNavigate, scrollContainerRef }: MarketingHeaderProps) {
+export function MarketingHeader({ onNavigate, scrollContainerRef, tone = 'default' }: MarketingHeaderProps) {
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
     const shouldReduceMotion = useReducedMotion();
@@ -71,7 +72,7 @@ export function MarketingHeader({ onNavigate, scrollContainerRef }: MarketingHea
     };
 
     return (
-        <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''}`}>
+        <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''} ${tone === 'surface' ? 'is-surface' : ''}`}>
             <div className="landing-nav-frame">
                 <motion.div
                     className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left bg-gradient-to-r from-cyan-300 via-blue-400 to-indigo-500"

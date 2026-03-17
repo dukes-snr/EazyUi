@@ -840,6 +840,20 @@ textarea::placeholder {
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ui-primary) 22%, transparent);
 }
 
+.landing-nav-shell.is-surface {
+  background: var(--ui-surface-1);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ui-primary) 14%, transparent);
+}
+
+.landing-nav-shell.is-surface.is-scrolled {
+  background: var(--ui-surface-1);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ui-primary) 18%, transparent);
+}
+
 .landing-nav-frame {
   position: relative;
   width: 100%;
