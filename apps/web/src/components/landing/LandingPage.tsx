@@ -7,6 +7,8 @@ import featureSlide3 from '../../assets/Slide3.png';
 import featureSlide4 from '../../assets/Slide4.png';
 import videodemoimg from '../../assets/videodemoimg.png';
 import appLogo from '../../assets/Ui-logo.png';
+import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
+import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
@@ -237,6 +239,7 @@ function toChipLabel(text: string): string {
 export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy = false }: LandingPageProps) {
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
+    const heroWordmark = theme === 'light' ? eazyuiWordmarkLight : eazyuiWordmark;
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
@@ -851,7 +854,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                 >
                     <div className="relative z-10 mx-auto flex min-h-[55vh] w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
                         <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
-                            Design better UI with <span className="text-[var(--ui-primary)] italic">EazyUI</span>
+                            Design better UI with{' '}
+                            <span className="relative inline-flex align-baseline">
+                                <span className="sr-only">EazyUI</span>
+                                <img
+                                    src={heroWordmark}
+                                    alt=""
+                                    aria-hidden="true"
+                                    className="relative top-[8px] md:top-[30px] -left-[10px] h-[1.94em] w-auto -rotate-[3.5deg] object-contain"
+                                />
+                            </span>
                         </h1>
                         <p className="mt-2 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
 
@@ -1168,9 +1180,9 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
 
                 {/*Video demo section*/}
                 <section className="landing-surface-band landing-surface-band-2 landing-page-section ">
-                    <div className="w-full min-w-none px-[15%]">
+                    <div className="w-full min-w-none px-0 md:px-[15%]">
                     <motion.div
-                        className="flex flex-col gap-4 text-center"
+                        className="flex flex-col gap-4 px-4 text-center md:px-0"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                         viewport={{ once: true, amount: 0.3 }}
@@ -1180,7 +1192,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             EazyUI Demo
                         </div> */}
                         <h2 className="text-[36px] md:text-[60px] lg:text-[74px] leading-[0.98] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
-                            Watch <span className="text-[var(--ui-primary)] italic">EazyUI</span>
+                            Watch{' '}
+                            <span className="relative inline-flex align-baseline">
+                                <span className="sr-only">EazyUI</span>
+                                <img
+                                    src={heroWordmark}
+                                    alt=""
+                                    aria-hidden="true"
+                                    className="relative top-[8px] md:top-[30px] -left-[10px]  h-[1.64em] w-auto rotate-[3.5deg] object-contain"
+                                />
+                            </span>
                             <br />
                             in motion.
                         </h2>
@@ -1190,7 +1211,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </motion.div>
 
                     <motion.div
-                        className="mt-8 flex justify-center"
+                        className="mt-8 flex justify-center px-4 md:px-0"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 28 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                         viewport={{ once: true, amount: 0.35 }}
@@ -1207,7 +1228,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </motion.div>
 
                     <motion.div
-                        className="landing-demo-shell mt-14"
+                        className="landing-demo-shell landing-demo-shell-mobile-bleed mt-14"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 70, rotateX: 8, scale: 0.97 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, rotateX: 0, scale: 1 }}
                         viewport={{ once: true, amount: 0.25 }}

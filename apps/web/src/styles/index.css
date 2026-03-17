@@ -24,7 +24,7 @@
   --ui-text: #E8ECF2;
   --ui-text-muted: #8B95A5;
   --ui-text-subtle: #5A6472;
-  --ui-primary: #6366F1;
+  --ui-primary: #01a6cb;
   --ui-primary-hover: #818CF8;
   --ui-canvas-dot: #484949;
   --ui-tab-active-bg: #2a2f37;
@@ -139,7 +139,7 @@
   --ui-text: #0F172A;
   --ui-text-muted: #334155;
   --ui-text-subtle: #64748B;
-  --ui-primary: #4F46E5;
+  --ui-primary: #01a6cb;
   --ui-primary-hover: #4338CA;
   --ui-canvas-dot: #959595;
   --ui-tab-active-bg: #ffffff;
@@ -572,6 +572,10 @@ textarea::placeholder {
   position: relative;
   /* border-radius: 2.25rem; */
   /* box-shadow: 0 34px 100px rgba(2, 6, 23, 0.32); */
+}
+
+.landing-demo-shell-mobile-bleed {
+  width: 100%;
 }
 
 .landing-demo-frame {
@@ -1479,6 +1483,16 @@ textarea::placeholder {
 
   .landing-page-section {
     padding: 3.25rem 0;
+  }
+
+  .landing-demo-shell-mobile-bleed {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+  }
+
+  .landing-demo-shell-mobile-bleed .landing-demo-frame {
+    border-radius: 0;
   }
 
   .landing-footer {
