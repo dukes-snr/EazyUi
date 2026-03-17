@@ -7,19 +7,15 @@ services:
     buildCommand: bash ./scripts/render-build-api.sh
     startCommand: npm run start --workspace=@eazyui/api
     healthCheckPath: /api/health
-    disk:
-      name: eazyui-api-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 20
       - key: HOST
         value: 0.0.0.0
       - key: DATA_DIR
-        value: /var/data/eazyui
+        value: /tmp/eazyui
       - key: DATABASE_URL
-        value: /var/data/eazyui/eazyui.db
+        sync: false
       - key: FRONTEND_URL
         sync: false
       - key: GEMINI_API_KEY

@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { generateDesign, editDesign, completePartialScreen, generateImageAsset, generateProjectDesignSystem, type HtmlDesignSpec, type ProjectDesignSystem } from './services/gemini.js';
 import { synthesizeImagesForScreens } from './services/imagePipeline.js';
 import { saveProject, getProject, listProjects, deleteProject } from './services/database.js';
+import { ensurePersistenceSchema } from './services/postgres.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
@@ -86,6 +87,12 @@ loadEnv();
 const fastify = Fastify({
     logger: true,
     bodyLimit: parseInt(process.env.API_BODY_LIMIT || `${25 * 1024 * 1024}`, 10),
+});
+
+const persistenceReadyPromise = ensurePersistenceSchema();
+
+fastify.addHook('onReady', async () => {
+    await persistenceReadyPromise;
 });
 
 let renderBrowserPromise: Promise<any> | null = null;
@@ -369,7 +376,7 @@ function toCreditModelProfile(preferredModel?: string): CreditModelProfile {
     return inferCreditModelProfile(preferredModel || '');
 }
 
-function settleForOutcome(
+async function settleForOutcome(
     uid: string,
     reservationId: string,
     outcome: ReservationOutcome,
@@ -462,11 +469,11 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
     const customerId = typeof session.customer === 'string'
         ? session.customer
         : session.customer?.id;
-    const uid = String(session.metadata?.uid || '').trim() || (customerId ? findUidByStripeCustomerId(customerId) : null);
+    const uid = String(session.metadata?.uid || '').trim() || (customerId ? await findUidByStripeCustomerId(customerId) : null);
     if (!uid) return { uid: null, applied: false };
 
     if (customerId) {
-        attachStripeCustomer(uid, customerId);
+        await attachStripeCustomer(uid, customerId);
     }
 
     const linePrice = session.line_items?.data?.[0]?.price?.id || null;
@@ -486,9 +493,9 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
         : topupCredits > 0
             ? 'topup'
             : 'other';
-    const existingPurchase = getBillingPurchaseBySource(sourceType, sourceId);
+    const existingPurchase = await getBillingPurchaseBySource(sourceType, sourceId);
 
-    upsertBillingPurchase({
+    await upsertBillingPurchase({
         uid,
         sourceType,
         sourceId,
@@ -520,7 +527,7 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
     });
 
     if (planId) {
-        const summary = setUserPlan({
+        const summary = await setUserPlan({
             uid,
             planId,
             reason: eventId ? 'stripe_checkout_completed' : 'stripe_checkout_return',
@@ -532,9 +539,9 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
 
     if (topupCredits > 0) {
         if (existingPurchase) {
-            return { uid, applied: false, summary: buildBillingSummaryForApi(uid) };
+            return { uid, applied: false, summary: await buildBillingSummaryForApi(uid) };
         }
-        const summary = grantTopupCredits({
+        const summary = await grantTopupCredits({
             uid,
             credits: topupCredits,
             reason: eventId ? 'stripe_topup_purchase' : 'stripe_topup_return',
@@ -546,7 +553,7 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
         return { uid, applied: true, summary };
     }
 
-    return { uid, applied: !existingPurchase, summary: buildBillingSummaryForApi(uid) };
+    return { uid, applied: !existingPurchase, summary: await buildBillingSummaryForApi(uid) };
 }
 
 const KNOWN_BILLING_OPERATIONS: BillingOperation[] = [
@@ -598,7 +605,7 @@ function sendPlanRequired(
     });
 }
 
-function ensureBillingEntitlementOrReply(input: {
+async function ensureBillingEntitlementOrReply(input: {
     reply: { status: (code: number) => { send: (body: unknown) => unknown } };
     traceId: string;
     route: string;
@@ -606,8 +613,8 @@ function ensureBillingEntitlementOrReply(input: {
     operation: BillingOperation;
     estimatedCredits: number;
     minimumFloorCredits?: number;
-}): BillingSummary | null {
-    const summary = buildBillingSummaryForApi(input.uid);
+}): Promise<BillingSummary | null> {
+    const summary = await buildBillingSummaryForApi(input.uid);
     const requiresPaidPlan = PAID_ONLY_OPERATIONS.has(input.operation);
     const hasActivePaidPlan = summary.planId !== 'free' && summary.status === 'active';
 
@@ -1139,7 +1146,7 @@ fastify.get('/api/billing/summary', async (request, reply) => {
     const user = await requireAuthenticatedUser(request, reply, '/api/billing/summary');
     if (!user) return;
     try {
-        const summary = buildBillingSummaryForApi(user.uid);
+        const summary = await buildBillingSummaryForApi(user.uid);
         return {
             summary,
             stripe: {
@@ -1206,7 +1213,7 @@ fastify.get<{
     if (!user) return;
     try {
         const limit = Math.max(1, Math.min(200, Number(request.query.limit || 50)));
-        const items = listBillingLedgerForApi(user.uid, limit);
+        const items = await listBillingLedgerForApi(user.uid, limit);
         return { items };
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/billing/ledger', err: error }, 'billing ledger failed');
@@ -1224,7 +1231,7 @@ fastify.get<{
     if (!user) return;
     try {
         const limit = Math.max(1, Math.min(200, Number(request.query.limit || 50)));
-        const items = listBillingPurchases(user.uid, limit);
+        const items = await listBillingPurchases(user.uid, limit);
         return { items };
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/billing/purchases', err: error }, 'billing purchases failed');
@@ -1241,7 +1248,7 @@ fastify.get<{
     const user = await requireAuthenticatedUser(request, reply, '/api/billing/purchases/:purchaseId/invoice');
     if (!user) return;
     try {
-        const purchase = getBillingPurchase(user.uid, request.params.purchaseId);
+        const purchase = await getBillingPurchase(user.uid, request.params.purchaseId);
         if (!purchase) {
             return reply.status(404).send({
                 error: 'Purchase not found',
@@ -1365,7 +1372,7 @@ fastify.post<{
             expectedMinutes: request.body.expectedMinutes,
             bundleIncludesDesignSystem: Boolean(request.body.bundleIncludesDesignSystem),
         });
-        const summary = buildBillingSummaryForApi(user.uid);
+        const summary = await buildBillingSummaryForApi(user.uid);
         return { estimate, summary };
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/billing/estimate', err: error }, 'billing estimate failed');
@@ -1435,14 +1442,14 @@ fastify.post<{
             });
         }
 
-        let customerId = getStripeCustomerId(user.uid);
+        let customerId = await getStripeCustomerId(user.uid);
         if (!customerId) {
             const customer = await stripe.customers.create({
                 email: user.email,
                 metadata: { uid: user.uid },
             });
             customerId = customer.id;
-            attachStripeCustomer(user.uid, customerId);
+            await attachStripeCustomer(user.uid, customerId);
         }
 
         const mode = inferredMode;
@@ -1476,7 +1483,7 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/billing/portal-session');
     if (!user) return;
     try {
-        const customerId = getStripeCustomerId(user.uid);
+        const customerId = await getStripeCustomerId(user.uid);
         if (!customerId) {
             return reply.status(400).send({
                 error: 'No billing customer',
@@ -1518,7 +1525,7 @@ fastify.get<{
         const customerId = typeof session.customer === 'string'
             ? session.customer
             : session.customer?.id;
-        const sessionUid = String(session.metadata?.uid || '').trim() || (customerId ? findUidByStripeCustomerId(customerId) : null);
+        const sessionUid = String(session.metadata?.uid || '').trim() || (customerId ? await findUidByStripeCustomerId(customerId) : null);
         if (!sessionUid || sessionUid !== user.uid) {
             return reply.status(403).send({
                 error: 'Forbidden',
@@ -1534,14 +1541,14 @@ fastify.get<{
             return {
                 status: 'completed',
                 applied: result.applied,
-                summary: result.summary || buildBillingSummaryForApi(user.uid),
+                summary: result.summary || await buildBillingSummaryForApi(user.uid),
             };
         }
 
         return {
             status: String(session.status || session.payment_status || 'open'),
             applied: false,
-            summary: buildBillingSummaryForApi(user.uid),
+            summary: await buildBillingSummaryForApi(user.uid),
         };
     } catch (error) {
         fastify.log.error({ traceId: request.id, route: '/api/billing/checkout-status', err: error }, 'checkout status failed');
@@ -1665,7 +1672,7 @@ fastify.post<{
     try {
         const raw = ((request as any).rawBody as Buffer | undefined) || Buffer.from(JSON.stringify(request.body || {}));
         const event = constructStripeWebhookEvent(raw, signature);
-        const firstSeen = recordStripeWebhookEvent(event.id, event.type);
+        const firstSeen = await recordStripeWebhookEvent(event.id, event.type);
         if (!firstSeen) {
             fastify.log.info({
                 traceId,
@@ -1683,7 +1690,7 @@ fastify.post<{
         } else if (event.type === 'invoice.paid') {
             const invoice = event.data.object as any;
             const customerId = String(invoice.customer || '').trim();
-            const uid = customerId ? findUidByStripeCustomerId(customerId) : null;
+            const uid = customerId ? await findUidByStripeCustomerId(customerId) : null;
             if (uid) {
                 const priceId = invoice.lines?.data?.[0]?.price?.id
                     || invoice.parent?.subscription_details?.metadata?.price_id
@@ -1698,7 +1705,7 @@ fastify.post<{
                     : topupCredits > 0
                         ? 'topup'
                         : 'other';
-                upsertBillingPurchase({
+                await upsertBillingPurchase({
                     uid,
                     sourceType: 'invoice',
                     sourceId: String(invoice.id || '').trim(),
@@ -1724,7 +1731,7 @@ fastify.post<{
                     createdAt: new Date((Number(invoice.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
                 });
                 if (mappedPlan) {
-                    setUserPlan({
+                    await setUserPlan({
                         uid,
                         planId: mappedPlan,
                         status: 'active',
@@ -1737,12 +1744,12 @@ fastify.post<{
         } else if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.updated') {
             const subscription = event.data.object as any;
             const customerId = String(subscription.customer || '').trim();
-            const uid = customerId ? findUidByStripeCustomerId(customerId) : null;
+            const uid = customerId ? await findUidByStripeCustomerId(customerId) : null;
             if (uid) {
                 const active = subscription.status === 'active' || subscription.status === 'trialing';
                 const priceId = subscription.items?.data?.[0]?.price?.id || '';
                 const mappedPlan = resolvePlanFromStripePriceId(priceId);
-                setUserPlan({
+                await setUserPlan({
                     uid,
                     planId: mappedPlan || 'free',
                     status: active ? 'active' : 'cancelled',
@@ -1805,7 +1812,7 @@ fastify.post<{
         expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/generate',
@@ -1817,7 +1824,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'generate',
@@ -1874,7 +1881,7 @@ fastify.post<{
             usage,
             fallbackEstimatedCredits: estimateCharge.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/generate',
             screenCount: designSpec.screens.length,
             usage,
@@ -1918,7 +1925,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/generate',
                 error: (error as Error).message,
             });
@@ -1971,7 +1978,7 @@ fastify.post<{
             preferredModel,
         })
         : null;
-    if (designSystemEstimate && !ensureBillingEntitlementOrReply({
+    if (designSystemEstimate && !await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/design-system',
@@ -1984,7 +1991,7 @@ fastify.post<{
 
     try {
         if (!bundled) {
-            reservation = reserveCredits({
+            reservation = await reserveCredits({
                 uid: user.uid,
                 requestId: billingRequestId,
                 operation: 'design_system',
@@ -2045,7 +2052,7 @@ fastify.post<{
                 usage,
                 fallbackEstimatedCredits: estimateCharge.estimatedCredits,
             });
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+            const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/design-system',
                 bundledWithFirstGeneration: bundled,
                 usage,
@@ -2059,7 +2066,7 @@ fastify.post<{
                 ...(usageCharge.usageQuote ? { usageQuote: usageCharge.usageQuote } : {}),
             };
         } else {
-            const summary = buildBillingSummaryForApi(user.uid);
+            const summary = await buildBillingSummaryForApi(user.uid);
             billingMeta = {
                 creditsCharged: 0,
                 creditsRemaining: summary.balanceCredits,
@@ -2094,7 +2101,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/design-system',
                 error: (error as Error).message,
             });
@@ -2156,7 +2163,7 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
         preferredModel,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/edit',
@@ -2168,7 +2175,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'edit',
@@ -2225,7 +2232,7 @@ fastify.post<{
             usage: edited.usage,
             fallbackEstimatedCredits: estimateCharge.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/edit',
             screenId,
             usage: edited.usage,
@@ -2270,7 +2277,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/edit',
                 error: (error as Error).message,
                 screenId,
@@ -2332,7 +2339,7 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
         preferredModel,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/edit-stream',
@@ -2363,7 +2370,7 @@ fastify.post<{
     });
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'edit',
@@ -2447,7 +2454,7 @@ fastify.post<{
                 usage,
                 fallbackEstimatedCredits: estimateCharge.estimatedCredits,
             });
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+            const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/edit-stream',
                 screenId,
                 chunkCount,
@@ -2486,7 +2493,7 @@ fastify.post<{
         }, 'edit-stream: complete');
     } catch (error) {
         if (reservation) {
-            settleForOutcome(
+            await settleForOutcome(
                 user.uid,
                 reservation.reservationId,
                 clientAborted ? 'cancelled' : 'failed',
@@ -2551,7 +2558,7 @@ fastify.post<{
         preferredModel,
         expectedImageCount: screens.length,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/synthesize-screen-images',
@@ -2563,7 +2570,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'synthesize_screen_images',
@@ -2607,7 +2614,7 @@ fastify.post<{
             usage: result.usage,
             fallbackEstimatedCredits: estimateCharge.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/synthesize-screen-images',
             generatedCount,
             usage: result.usage,
@@ -2647,7 +2654,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/synthesize-screen-images',
                 error: (error as Error).message,
             });
@@ -2689,7 +2696,7 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
         preferredModel,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/generate-image',
@@ -2701,7 +2708,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'generate_image',
@@ -2731,7 +2738,7 @@ fastify.post<{
             usage: result.usage,
             fallbackEstimatedCredits: estimateCharge.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/generate-image',
             modelUsed: result.modelUsed,
             usage: result.usage,
@@ -2772,7 +2779,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/generate-image',
                 error: (error as Error).message,
             });
@@ -2821,7 +2828,7 @@ fastify.post<{
         preferredModel: model,
         expectedMinutes: approxMinutes,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/transcribe-audio',
@@ -2833,7 +2840,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'transcribe_audio',
@@ -2863,7 +2870,7 @@ fastify.post<{
             } : undefined,
             fallbackEstimatedCredits: estimate.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/transcribe-audio',
             textLength: result.text.length,
             usage: result.usage,
@@ -2901,7 +2908,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/transcribe-audio',
                 error: (error as Error).message,
             });
@@ -2975,7 +2982,7 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
     });
     const plannerEstimate = rawPlannerEstimate;
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/plan',
@@ -2986,7 +2993,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: plannerOperation,
@@ -3079,7 +3086,7 @@ fastify.post<{
             usage,
             fallbackEstimatedCredits: plannerEstimate.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/plan',
             phase,
             source: sourceTag,
@@ -3120,7 +3127,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/plan',
                 phase,
                 source: sourceTag,
@@ -3380,7 +3387,7 @@ fastify.post<{
         expectedScreenCount: Math.max(1, Math.floor(Number(expectedScreenCount || 0))) || 4,
         bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/generate-stream',
@@ -3411,7 +3418,7 @@ fastify.post<{
     });
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'generate_stream',
@@ -3503,7 +3510,7 @@ fastify.post<{
                 usage,
                 fallbackEstimatedCredits: estimateCharge.estimatedCredits,
             });
-            const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+            const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
                 route: '/api/generate-stream',
                 chunkCount,
                 charCount,
@@ -3552,7 +3559,7 @@ fastify.post<{
         }, 'generate-stream: complete');
     } catch (error) {
         if (reservation) {
-            settleForOutcome(
+            await settleForOutcome(
                 user.uid,
                 reservation.reservationId,
                 clientAborted ? 'cancelled' : 'failed',
@@ -3613,7 +3620,7 @@ fastify.post<{
         modelProfile: toCreditModelProfile(preferredModel),
         preferredModel,
     });
-    if (!ensureBillingEntitlementOrReply({
+    if (!await ensureBillingEntitlementOrReply({
         reply,
         traceId,
         route: '/api/complete-screen',
@@ -3625,7 +3632,7 @@ fastify.post<{
     let reservation: { reservationId: string } | null = null;
 
     try {
-        reservation = reserveCredits({
+        reservation = await reserveCredits({
             uid: user.uid,
             requestId: billingRequestId,
             operation: 'complete_screen',
@@ -3664,7 +3671,7 @@ fastify.post<{
             usage: completed.usage,
             fallbackEstimatedCredits: estimate.estimatedCredits,
         });
-        const settled = settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
+        const settled = await settleForOutcome(user.uid, reservation.reservationId, 'success', usageCharge.finalCredits, {
             route: '/api/complete-screen',
             screenName,
             htmlChars: completed.html.length,
@@ -3706,7 +3713,7 @@ fastify.post<{
             return sendInsufficientCredits(reply, error);
         }
         if (reservation) {
-            settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
+            await settleForOutcome(user.uid, reservation.reservationId, 'failed', 0, {
                 route: '/api/complete-screen',
                 error: (error as Error).message,
                 screenName,
@@ -3737,7 +3744,7 @@ fastify.post<{
     }
 
     try {
-        const result = saveProject(designSpec, canvasDoc, chatState, projectId);
+        const result = await saveProject(designSpec, canvasDoc, chatState, projectId);
         return result;
     } catch (error) {
         fastify.log.error(error);
@@ -3755,7 +3762,7 @@ fastify.get<{
     const { id } = request.params;
 
     try {
-        const project = getProject(id);
+        const project = await getProject(id);
 
         if (!project) {
             return reply.status(404).send({ error: 'Project not found' });
@@ -3780,7 +3787,7 @@ fastify.get<{
 
 // List projects
 fastify.get('/api/projects', async () => {
-    const projects = listProjects();
+    const projects = await listProjects();
     return { projects };
 });
 
@@ -3791,7 +3798,7 @@ fastify.delete<{
     const { id } = request.params;
 
     try {
-        const deleted = deleteProject(id);
+        const deleted = await deleteProject(id);
 
         if (!deleted) {
             return reply.status(404).send({ error: 'Project not found' });

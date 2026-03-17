@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import type { Pool, PoolClient } from 'pg';
 import type { TokenUsageEntry, TokenUsageSummary } from './tokenUsage.js';
-import { ensureParentDir, resolveSqliteDatabasePath } from './runtimePaths.js';
+import { ensurePersistenceSchema, getDbPool, queryOne, queryRows, withTransaction } from './postgres.js';
 
 export type BillingPlanId = 'free' | 'pro' | 'team';
 export type BillingOperation =
@@ -187,6 +187,48 @@ type DeductBreakdown = {
     topup: number;
 };
 
+type BillingLedgerRow = {
+    id: string;
+    type: 'grant' | 'reserve' | 'settle' | 'refund' | 'expire' | 'adjustment';
+    operation: BillingOperation | null;
+    credits_delta: number;
+    balance_after: number;
+    request_id: string | null;
+    reservation_id: string | null;
+    project_id: string | null;
+    metadata: string | null;
+    created_at: string;
+};
+
+type BillingPurchaseRow = {
+    id: string;
+    uid: string;
+    source_key: string;
+    source_type: string;
+    source_id: string;
+    purchase_kind: string;
+    product_key: string | null;
+    plan_id: string | null;
+    stripe_customer_id: string | null;
+    stripe_subscription_id: string | null;
+    stripe_invoice_id: string | null;
+    stripe_payment_intent_id: string | null;
+    stripe_price_id: string | null;
+    amount_total: number;
+    currency: string;
+    quantity: number;
+    status: string;
+    description: string | null;
+    invoice_number: string | null;
+    invoice_url: string | null;
+    invoice_pdf_url: string | null;
+    metadata: string | null;
+    created_at: string;
+    updated_at: string;
+};
+
+type BillingExecutor = Pool | PoolClient;
+
 const PLAN_DEFINITIONS: Record<BillingPlanId, PlanDefinition> = {
     free: { id: 'free', label: 'Free', monthlyCredits: 100, paid: false },
     pro: { id: 'pro', label: 'Pro', monthlyCredits: 3000, paid: true },
@@ -266,108 +308,6 @@ export class InsufficientCreditsError extends Error {
     }
 }
 
-const dbPath = resolveSqliteDatabasePath();
-ensureParentDir(dbPath);
-const db = new Database(dbPath);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS billing_profiles (
-    uid TEXT PRIMARY KEY,
-    plan_id TEXT NOT NULL DEFAULT 'free',
-    status TEXT NOT NULL DEFAULT 'active',
-    monthly_credits_remaining INTEGER NOT NULL DEFAULT 0,
-    rollover_credits INTEGER NOT NULL DEFAULT 0,
-    topup_credits_remaining INTEGER NOT NULL DEFAULT 0,
-    stripe_customer_id TEXT,
-    stripe_subscription_id TEXT,
-    stripe_price_id TEXT,
-    period_start_at TEXT NOT NULL,
-    period_end_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS billing_reservations (
-    id TEXT PRIMARY KEY,
-    uid TEXT NOT NULL,
-    request_id TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    status TEXT NOT NULL,
-    reserved_credits INTEGER NOT NULL,
-    final_credits INTEGER,
-    consumed_monthly INTEGER NOT NULL DEFAULT 0,
-    consumed_rollover INTEGER NOT NULL DEFAULT 0,
-    consumed_topup INTEGER NOT NULL DEFAULT 0,
-    project_id TEXT,
-    metadata TEXT,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_billing_reservations_uid_created_at
-    ON billing_reservations(uid, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_billing_reservations_uid_request
-    ON billing_reservations(uid, request_id);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_reservations_uid_operation_request
-    ON billing_reservations(uid, operation, request_id);
-
-  CREATE TABLE IF NOT EXISTS billing_ledger (
-    id TEXT PRIMARY KEY,
-    uid TEXT NOT NULL,
-    type TEXT NOT NULL,
-    operation TEXT,
-    credits_delta INTEGER NOT NULL,
-    balance_after INTEGER NOT NULL,
-    request_id TEXT,
-    reservation_id TEXT,
-    project_id TEXT,
-    metadata TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_billing_ledger_uid_created_at
-    ON billing_ledger(uid, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_billing_profiles_stripe_customer
-    ON billing_profiles(stripe_customer_id);
-
-  CREATE TABLE IF NOT EXISTS stripe_webhook_events (
-    id TEXT PRIMARY KEY,
-    event_type TEXT NOT NULL,
-    received_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS billing_purchases (
-    id TEXT PRIMARY KEY,
-    uid TEXT NOT NULL,
-    source_key TEXT NOT NULL UNIQUE,
-    source_type TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    purchase_kind TEXT NOT NULL,
-    product_key TEXT,
-    plan_id TEXT,
-    stripe_customer_id TEXT,
-    stripe_subscription_id TEXT,
-    stripe_invoice_id TEXT,
-    stripe_payment_intent_id TEXT,
-    stripe_price_id TEXT,
-    amount_total INTEGER NOT NULL DEFAULT 0,
-    currency TEXT NOT NULL DEFAULT 'usd',
-    quantity INTEGER NOT NULL DEFAULT 1,
-    status TEXT NOT NULL DEFAULT 'paid',
-    description TEXT,
-    invoice_number TEXT,
-    invoice_url TEXT,
-    invoice_pdf_url TEXT,
-    metadata TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_billing_purchases_uid_created_at
-    ON billing_purchases(uid, created_at DESC);
-`);
-
 function parseIso(value: string): Date {
     return new Date(value);
 }
@@ -402,155 +342,6 @@ function normalizePlanId(value: string | null | undefined): BillingPlanId {
 function getPlan(planId: BillingPlanId): PlanDefinition {
     return PLAN_DEFINITIONS[planId] || PLAN_DEFINITIONS.free;
 }
-
-const selectProfileStmt = db.prepare<string, BillingProfileRow>(
-    'SELECT * FROM billing_profiles WHERE uid = ?'
-);
-const upsertProfileStmt = db.prepare(`
-  INSERT INTO billing_profiles (
-    uid, plan_id, status, monthly_credits_remaining, rollover_credits, topup_credits_remaining,
-    stripe_customer_id, stripe_subscription_id, stripe_price_id,
-    period_start_at, period_end_at, created_at, updated_at
-  ) VALUES (
-    @uid, @plan_id, @status, @monthly_credits_remaining, @rollover_credits, @topup_credits_remaining,
-    @stripe_customer_id, @stripe_subscription_id, @stripe_price_id,
-    @period_start_at, @period_end_at, @created_at, @updated_at
-  )
-  ON CONFLICT(uid) DO UPDATE SET
-    plan_id = @plan_id,
-    status = @status,
-    monthly_credits_remaining = @monthly_credits_remaining,
-    rollover_credits = @rollover_credits,
-    topup_credits_remaining = @topup_credits_remaining,
-    stripe_customer_id = @stripe_customer_id,
-    stripe_subscription_id = @stripe_subscription_id,
-    stripe_price_id = @stripe_price_id,
-    period_start_at = @period_start_at,
-    period_end_at = @period_end_at,
-    updated_at = @updated_at
-`);
-
-const insertReservationStmt = db.prepare(`
-  INSERT INTO billing_reservations (
-    id, uid, request_id, operation, status, reserved_credits, final_credits,
-    consumed_monthly, consumed_rollover, consumed_topup,
-    project_id, metadata, expires_at, created_at, updated_at
-  ) VALUES (
-    @id, @uid, @request_id, @operation, @status, @reserved_credits, @final_credits,
-    @consumed_monthly, @consumed_rollover, @consumed_topup,
-    @project_id, @metadata, @expires_at, @created_at, @updated_at
-  )
-`);
-
-const selectReservationByIdStmt = db.prepare<[string, string], BillingReservationRow>(
-    'SELECT * FROM billing_reservations WHERE id = ? AND uid = ?'
-);
-const selectReservationByRequestStmt = db.prepare<[string, BillingOperation, string], BillingReservationRow>(
-    'SELECT * FROM billing_reservations WHERE uid = ? AND operation = ? AND request_id = ? ORDER BY created_at DESC LIMIT 1'
-);
-
-const updateReservationStmt = db.prepare(`
-  UPDATE billing_reservations
-  SET status = @status, final_credits = @final_credits, metadata = @metadata, updated_at = @updated_at
-  WHERE id = @id AND uid = @uid
-`);
-
-const insertLedgerStmt = db.prepare(`
-  INSERT INTO billing_ledger (
-    id, uid, type, operation, credits_delta, balance_after, request_id, reservation_id, project_id, metadata, created_at
-  ) VALUES (
-    @id, @uid, @type, @operation, @credits_delta, @balance_after, @request_id, @reservation_id, @project_id, @metadata, @created_at
-  )
-`);
-
-type BillingLedgerRow = {
-    id: string;
-    type: 'grant' | 'reserve' | 'settle' | 'refund' | 'expire' | 'adjustment';
-    operation: BillingOperation | null;
-    credits_delta: number;
-    balance_after: number;
-    request_id: string | null;
-    reservation_id: string | null;
-    project_id: string | null;
-    metadata: string | null;
-    created_at: string;
-};
-
-const listLedgerStmt = db.prepare(
-    'SELECT id, type, operation, credits_delta, balance_after, request_id, reservation_id, project_id, metadata, created_at FROM billing_ledger WHERE uid = ? ORDER BY created_at DESC LIMIT ?'
-);
-type BillingPurchaseRow = {
-    id: string;
-    uid: string;
-    source_key: string;
-    source_type: string;
-    source_id: string;
-    purchase_kind: string;
-    product_key: string | null;
-    plan_id: string | null;
-    stripe_customer_id: string | null;
-    stripe_subscription_id: string | null;
-    stripe_invoice_id: string | null;
-    stripe_payment_intent_id: string | null;
-    stripe_price_id: string | null;
-    amount_total: number;
-    currency: string;
-    quantity: number;
-    status: string;
-    description: string | null;
-    invoice_number: string | null;
-    invoice_url: string | null;
-    invoice_pdf_url: string | null;
-    metadata: string | null;
-    created_at: string;
-    updated_at: string;
-};
-const selectPurchaseBySourceKeyStmt = db.prepare<string, BillingPurchaseRow>(
-    'SELECT * FROM billing_purchases WHERE source_key = ? LIMIT 1'
-);
-const selectPurchaseByIdStmt = db.prepare<[string, string], BillingPurchaseRow>(
-    'SELECT * FROM billing_purchases WHERE uid = ? AND id = ? LIMIT 1'
-);
-const upsertPurchaseStmt = db.prepare(`
-  INSERT INTO billing_purchases (
-    id, uid, source_key, source_type, source_id, purchase_kind, product_key, plan_id,
-    stripe_customer_id, stripe_subscription_id, stripe_invoice_id, stripe_payment_intent_id, stripe_price_id,
-    amount_total, currency, quantity, status, description, invoice_number, invoice_url, invoice_pdf_url,
-    metadata, created_at, updated_at
-  ) VALUES (
-    @id, @uid, @source_key, @source_type, @source_id, @purchase_kind, @product_key, @plan_id,
-    @stripe_customer_id, @stripe_subscription_id, @stripe_invoice_id, @stripe_payment_intent_id, @stripe_price_id,
-    @amount_total, @currency, @quantity, @status, @description, @invoice_number, @invoice_url, @invoice_pdf_url,
-    @metadata, @created_at, @updated_at
-  )
-  ON CONFLICT(source_key) DO UPDATE SET
-    source_type = @source_type,
-    source_id = @source_id,
-    purchase_kind = @purchase_kind,
-    product_key = @product_key,
-    plan_id = @plan_id,
-    stripe_customer_id = @stripe_customer_id,
-    stripe_subscription_id = @stripe_subscription_id,
-    stripe_invoice_id = @stripe_invoice_id,
-    stripe_payment_intent_id = @stripe_payment_intent_id,
-    stripe_price_id = @stripe_price_id,
-    amount_total = @amount_total,
-    currency = @currency,
-    quantity = @quantity,
-    status = @status,
-    description = @description,
-    invoice_number = @invoice_number,
-    invoice_url = @invoice_url,
-    invoice_pdf_url = @invoice_pdf_url,
-    metadata = @metadata,
-    updated_at = @updated_at
-`);
-const listPurchasesStmt = db.prepare(
-    'SELECT * FROM billing_purchases WHERE uid = ? ORDER BY created_at DESC LIMIT ?'
-);
-const insertStripeWebhookEventStmt = db.prepare(
-    'INSERT OR IGNORE INTO stripe_webhook_events (id, event_type, received_at) VALUES (?, ?, ?)'
-);
 
 function mapPurchaseRow(row: BillingPurchaseRow): BillingPurchase {
     return {
@@ -587,8 +378,96 @@ function parseMetadataObject(raw: string | null | undefined): Record<string, unk
     return {};
 }
 
-function hydrateProfile(uid: string, now = new Date()): BillingProfileRow {
-    const existing = selectProfileStmt.get(uid);
+async function selectProfile(executor: BillingExecutor, uid: string, forUpdate = false): Promise<BillingProfileRow | null> {
+    return queryOne<BillingProfileRow>(
+        executor,
+        `SELECT * FROM billing_profiles WHERE uid = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+        [uid],
+    );
+}
+
+async function insertLedger(executor: BillingExecutor, input: {
+    uid: string;
+    type: BillingLedgerItem['type'];
+    operation?: BillingOperation | null;
+    creditsDelta: number;
+    balanceAfter: number;
+    requestId?: string | null;
+    reservationId?: string | null;
+    projectId?: string | null;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+}): Promise<void> {
+    await executor.query(
+        `
+        INSERT INTO billing_ledger (
+            id, uid, type, operation, credits_delta, balance_after, request_id, reservation_id, project_id, metadata, created_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+        )
+        `,
+        [
+            uuidv4(),
+            input.uid,
+            input.type,
+            input.operation || null,
+            input.creditsDelta,
+            input.balanceAfter,
+            input.requestId || null,
+            input.reservationId || null,
+            input.projectId || null,
+            input.metadata ? JSON.stringify(input.metadata) : null,
+            input.createdAt,
+        ],
+    );
+}
+
+async function persistProfile(executor: BillingExecutor, profile: BillingProfileRow): Promise<void> {
+    await executor.query(
+        `
+        INSERT INTO billing_profiles (
+            uid, plan_id, status, monthly_credits_remaining, rollover_credits, topup_credits_remaining,
+            stripe_customer_id, stripe_subscription_id, stripe_price_id,
+            period_start_at, period_end_at, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9,
+            $10, $11, $12, $13
+        )
+        ON CONFLICT(uid) DO UPDATE SET
+            plan_id = EXCLUDED.plan_id,
+            status = EXCLUDED.status,
+            monthly_credits_remaining = EXCLUDED.monthly_credits_remaining,
+            rollover_credits = EXCLUDED.rollover_credits,
+            topup_credits_remaining = EXCLUDED.topup_credits_remaining,
+            stripe_customer_id = EXCLUDED.stripe_customer_id,
+            stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+            stripe_price_id = EXCLUDED.stripe_price_id,
+            period_start_at = EXCLUDED.period_start_at,
+            period_end_at = EXCLUDED.period_end_at,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+        `,
+        [
+            profile.uid,
+            profile.plan_id,
+            profile.status,
+            profile.monthly_credits_remaining,
+            profile.rollover_credits,
+            profile.topup_credits_remaining,
+            profile.stripe_customer_id,
+            profile.stripe_subscription_id,
+            profile.stripe_price_id,
+            profile.period_start_at,
+            profile.period_end_at,
+            profile.created_at,
+            profile.updated_at,
+        ],
+    );
+}
+
+async function hydrateProfile(executor: BillingExecutor, uid: string, now = new Date()): Promise<BillingProfileRow> {
+    const existing = await selectProfile(executor, uid, true);
     if (existing) {
         return existing;
     }
@@ -611,21 +490,54 @@ function hydrateProfile(uid: string, now = new Date()): BillingProfileRow {
         created_at: createdAt,
         updated_at: createdAt,
     };
-    upsertProfileStmt.run(profile);
-    insertLedgerStmt.run({
-        id: uuidv4(),
-        uid,
-        type: 'grant',
-        operation: null,
-        credits_delta: plan.monthlyCredits,
-        balance_after: profileBalance(profile),
-        request_id: null,
-        reservation_id: null,
-        project_id: null,
-        metadata: JSON.stringify({ reason: 'initial_monthly_grant', planId: plan.id }),
-        created_at: createdAt,
-    });
-    return profile;
+
+    const insertResult = await executor.query(
+        `
+        INSERT INTO billing_profiles (
+            uid, plan_id, status, monthly_credits_remaining, rollover_credits, topup_credits_remaining,
+            stripe_customer_id, stripe_subscription_id, stripe_price_id,
+            period_start_at, period_end_at, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9,
+            $10, $11, $12, $13
+        )
+        ON CONFLICT(uid) DO NOTHING
+        `,
+        [
+            profile.uid,
+            profile.plan_id,
+            profile.status,
+            profile.monthly_credits_remaining,
+            profile.rollover_credits,
+            profile.topup_credits_remaining,
+            profile.stripe_customer_id,
+            profile.stripe_subscription_id,
+            profile.stripe_price_id,
+            profile.period_start_at,
+            profile.period_end_at,
+            profile.created_at,
+            profile.updated_at,
+        ],
+    );
+
+    if ((insertResult.rowCount || 0) > 0) {
+        await insertLedger(executor, {
+            uid,
+            type: 'grant',
+            creditsDelta: plan.monthlyCredits,
+            balanceAfter: profileBalance(profile),
+            metadata: { reason: 'initial_monthly_grant', planId: plan.id },
+            createdAt,
+        });
+        return profile;
+    }
+
+    const locked = await selectProfile(executor, uid, true);
+    if (!locked) {
+        throw new Error('Failed to hydrate billing profile');
+    }
+    return locked;
 }
 
 function maybeAdvanceBillingPeriod(profile: BillingProfileRow, now = new Date()): BillingProfileRow {
@@ -647,10 +559,6 @@ function maybeAdvanceBillingPeriod(profile: BillingProfileRow, now = new Date())
     if (!changed) return next;
     next.updated_at = now.toISOString();
     return next;
-}
-
-function persistProfile(profile: BillingProfileRow) {
-    upsertProfileStmt.run(profile);
 }
 
 function applyReservationDeduction(profile: BillingProfileRow, credits: number): DeductBreakdown {
@@ -785,7 +693,7 @@ export function quoteCreditsFromTokenUsage(input: {
     const minimumCredits = Math.max(0, Math.floor(
         Number.isFinite(input.minimumCredits || NaN)
             ? Number(input.minimumCredits)
-            : sanitizeRate(USAGE_BILLING_MIN_CREDITS, 1)
+            : sanitizeRate(USAGE_BILLING_MIN_CREDITS, 1),
     ));
 
     const normalizedEntries = (usageSummary.entries || []).filter(Boolean);
@@ -802,7 +710,7 @@ export function quoteCreditsFromTokenUsage(input: {
             outputTokens: toTokenInt(usageSummary.outputTokens),
             totalTokens: Math.max(
                 toTokenInt(usageSummary.totalTokens),
-                toTokenInt(usageSummary.inputTokens) + toTokenInt(usageSummary.outputTokens)
+                toTokenInt(usageSummary.inputTokens) + toTokenInt(usageSummary.outputTokens),
             ),
             ...(toTokenInt(usageSummary.cachedInputTokens) > 0
                 ? { cachedInputTokens: toTokenInt(usageSummary.cachedInputTokens) }
@@ -1022,22 +930,35 @@ function summarizeProfile(profile: BillingProfileRow): BillingSummary {
     };
 }
 
-export function getBillingSummary(uid: string): BillingSummary {
-    const tx = db.transaction((userId: string) => {
-        const now = new Date();
-        const hydrated = hydrateProfile(userId, now);
-        const advanced = maybeAdvanceBillingPeriod(hydrated, now);
-        if (advanced.updated_at !== hydrated.updated_at) {
-            persistProfile(advanced);
-        }
-        return summarizeProfile(advanced);
-    });
-    return tx(uid);
+async function getBillingSummaryWithClient(executor: BillingExecutor, uid: string): Promise<BillingSummary> {
+    const now = new Date();
+    const hydrated = await hydrateProfile(executor, uid, now);
+    const advanced = maybeAdvanceBillingPeriod(hydrated, now);
+    if (advanced.updated_at !== hydrated.updated_at) {
+        await persistProfile(executor, advanced);
+    }
+    return summarizeProfile(advanced);
 }
 
-export function listBillingLedger(uid: string, limit = 40): BillingLedgerItem[] {
+export async function getBillingSummary(uid: string): Promise<BillingSummary> {
+    return withTransaction((client) => getBillingSummaryWithClient(client, uid));
+}
+
+export async function listBillingLedger(uid: string, limit = 40): Promise<BillingLedgerItem[]> {
+    await ensurePersistenceSchema();
     const size = Math.max(1, Math.min(200, Math.floor(limit)));
-    const rows = listLedgerStmt.all(uid, size) as BillingLedgerRow[];
+    const rows = await queryRows<BillingLedgerRow>(
+        getDbPool(),
+        `
+        SELECT id, type, operation, credits_delta, balance_after, request_id, reservation_id, project_id, metadata, created_at
+        FROM billing_ledger
+        WHERE uid = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+        `,
+        [uid, size],
+    );
+
     return rows.map((row) => ({
         id: row.id,
         type: row.type,
@@ -1052,24 +973,35 @@ export function listBillingLedger(uid: string, limit = 40): BillingLedgerItem[] 
     }));
 }
 
-export function reserveCredits(input: {
+export async function reserveCredits(input: {
     uid: string;
     requestId: string;
     operation: BillingOperation;
     reservedCredits: number;
     projectId?: string;
     metadata?: Record<string, unknown>;
-}): BillingReservation {
-    const tx = db.transaction((payload: typeof input) => {
+}): Promise<BillingReservation> {
+    return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
-        const profileBefore = hydrateProfile(payload.uid, now);
+        const profileBefore = await hydrateProfile(client, input.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
 
-        const existing = selectReservationByRequestStmt.get(payload.uid, payload.operation, payload.requestId);
+        const existing = await queryOne<BillingReservationRow>(
+            client,
+            `
+            SELECT *
+            FROM billing_reservations
+            WHERE uid = $1 AND operation = $2 AND request_id = $3
+            ORDER BY created_at DESC
+            LIMIT 1
+            FOR UPDATE
+            `,
+            [input.uid, input.operation, input.requestId],
+        );
         if (existing) {
             if (profile.updated_at !== profileBefore.updated_at) {
-                persistProfile(profile);
+                await persistProfile(client, profile);
             }
             return {
                 reservationId: existing.id,
@@ -1078,16 +1010,16 @@ export function reserveCredits(input: {
                 reservedCredits: existing.reserved_credits,
                 balanceAfterReserve: profileBalance(profile),
                 expiresAt: existing.expires_at,
-                status: existing.status as BillingReservation['status'],
+                status: existing.status,
                 reused: true,
-            } as BillingReservation;
+            };
         }
 
-        const amount = clampNonNegative(payload.reservedCredits);
+        const amount = clampNonNegative(input.reservedCredits);
         const available = profileBalance(profile);
         if (available < amount) {
             throw new InsufficientCreditsError({
-                operation: payload.operation,
+                operation: input.operation,
                 requiredCredits: amount,
                 availableCredits: available,
             });
@@ -1095,78 +1027,92 @@ export function reserveCredits(input: {
 
         const breakdown = applyReservationDeduction(profile, amount);
         profile.updated_at = nowAt;
-        persistProfile(profile);
+        await persistProfile(client, profile);
 
         const reservationId = uuidv4();
         const expiresAt = new Date(now.getTime() + RESERVATION_TTL_MS).toISOString();
-        insertReservationStmt.run({
-            id: reservationId,
-            uid: payload.uid,
-            request_id: payload.requestId,
-            operation: payload.operation,
-            status: 'open',
-            reserved_credits: amount,
-            final_credits: null,
-            consumed_monthly: breakdown.monthly,
-            consumed_rollover: breakdown.rollover,
-            consumed_topup: breakdown.topup,
-            project_id: payload.projectId || null,
-            metadata: payload.metadata ? JSON.stringify(payload.metadata) : null,
-            expires_at: expiresAt,
-            created_at: nowAt,
-            updated_at: nowAt,
-        });
+        await client.query(
+            `
+            INSERT INTO billing_reservations (
+                id, uid, request_id, operation, status, reserved_credits, final_credits,
+                consumed_monthly, consumed_rollover, consumed_topup,
+                project_id, metadata, expires_at, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10,
+                $11, $12, $13, $14, $15
+            )
+            `,
+            [
+                reservationId,
+                input.uid,
+                input.requestId,
+                input.operation,
+                'open',
+                amount,
+                null,
+                breakdown.monthly,
+                breakdown.rollover,
+                breakdown.topup,
+                input.projectId || null,
+                input.metadata ? JSON.stringify(input.metadata) : null,
+                expiresAt,
+                nowAt,
+                nowAt,
+            ],
+        );
 
         const balanceAfter = profileBalance(profile);
-        insertLedgerStmt.run({
-            id: uuidv4(),
-            uid: payload.uid,
+        await insertLedger(client, {
+            uid: input.uid,
             type: 'reserve',
-            operation: payload.operation,
-            credits_delta: -amount,
-            balance_after: balanceAfter,
-            request_id: payload.requestId,
-            reservation_id: reservationId,
-            project_id: payload.projectId || null,
-            metadata: JSON.stringify({
+            operation: input.operation,
+            creditsDelta: -amount,
+            balanceAfter,
+            requestId: input.requestId,
+            reservationId,
+            projectId: input.projectId || null,
+            metadata: {
                 reservedCredits: amount,
                 consumed: breakdown,
-                ...(payload.metadata || {}),
-            }),
-            created_at: nowAt,
+                ...(input.metadata || {}),
+            },
+            createdAt: nowAt,
         });
 
         return {
             reservationId,
-            requestId: payload.requestId,
-            operation: payload.operation,
+            requestId: input.requestId,
+            operation: input.operation,
             reservedCredits: amount,
             balanceAfterReserve: balanceAfter,
             expiresAt,
             status: 'open',
             reused: false,
-        } as BillingReservation;
+        };
     });
-
-    return tx(input);
 }
 
-export function settleReservation(input: {
+export async function settleReservation(input: {
     uid: string;
     reservationId: string;
     outcome: ReservationOutcome;
     finalCredits?: number;
     metadata?: Record<string, unknown>;
-}): { finalChargedCredits: number; summary: BillingSummary; status: BillingReservationRow['status'] } {
-    const tx = db.transaction((payload: typeof input) => {
+}): Promise<{ finalChargedCredits: number; summary: BillingSummary; status: BillingReservationRow['status'] }> {
+    return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
-        const reservation = selectReservationByIdStmt.get(payload.reservationId, payload.uid);
+        const reservation = await queryOne<BillingReservationRow>(
+            client,
+            'SELECT * FROM billing_reservations WHERE id = $1 AND uid = $2 FOR UPDATE',
+            [input.reservationId, input.uid],
+        );
         if (!reservation) {
             throw new Error('Billing reservation not found');
         }
         if (reservation.status !== 'open') {
-            const summary = getBillingSummary(payload.uid);
+            const summary = await getBillingSummaryWithClient(client, input.uid);
             return {
                 finalChargedCredits: reservation.final_credits || reservation.reserved_credits,
                 summary,
@@ -1174,7 +1120,7 @@ export function settleReservation(input: {
             };
         }
 
-        const profileBefore = hydrateProfile(payload.uid, now);
+        const profileBefore = await hydrateProfile(client, input.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
         const reserved = reservation.reserved_credits;
         const reservationMetadata = parseMetadataObject(reservation.metadata);
@@ -1183,12 +1129,12 @@ export function settleReservation(input: {
             : undefined;
 
         let target = reserved;
-        if (payload.outcome === 'failed') {
+        if (input.outcome === 'failed') {
             target = 0;
-        } else if (payload.outcome === 'cancelled') {
+        } else if (input.outcome === 'cancelled') {
             target = Math.ceil(reserved * CANCELLED_JOB_CHARGE_RATIO);
-        } else if (typeof payload.finalCredits === 'number' && Number.isFinite(payload.finalCredits)) {
-            target = clampNonNegative(payload.finalCredits);
+        } else if (typeof input.finalCredits === 'number' && Number.isFinite(input.finalCredits)) {
+            target = clampNonNegative(input.finalCredits);
         }
 
         const delta = target - reserved;
@@ -1213,47 +1159,53 @@ export function settleReservation(input: {
         }
 
         profile.updated_at = nowAt;
-        persistProfile(profile);
+        await persistProfile(client, profile);
         const balanceAfter = profileBalance(profile);
 
         const adjustment = reserved - finalCharged;
-        insertLedgerStmt.run({
-            id: uuidv4(),
-            uid: payload.uid,
+        await insertLedger(client, {
+            uid: input.uid,
             type: adjustment >= 0 ? 'refund' : 'settle',
             operation: reservation.operation,
-            credits_delta: adjustment,
-            balance_after: balanceAfter,
-            request_id: reservation.request_id,
-            reservation_id: reservation.id,
-            project_id: reservation.project_id,
-            metadata: JSON.stringify({
-                outcome: payload.outcome,
+            creditsDelta: adjustment,
+            balanceAfter,
+            requestId: reservation.request_id,
+            reservationId: reservation.id,
+            projectId: reservation.project_id,
+            metadata: {
+                outcome: input.outcome,
                 reservedCredits: reserved,
                 finalChargedCredits: finalCharged,
                 ...(reservationRequestPreview ? { requestPreview: reservationRequestPreview } : {}),
-                ...(payload.metadata || {}),
-            }),
-            created_at: nowAt,
+                ...(input.metadata || {}),
+            },
+            createdAt: nowAt,
         });
 
-        updateReservationStmt.run({
-            id: reservation.id,
-            uid: payload.uid,
-            status,
-            final_credits: finalCharged,
-            metadata: JSON.stringify({
-                ...reservationMetadata,
-                settlement: {
-                    outcome: payload.outcome,
-                    finalChargedCredits: finalCharged,
-                    requestedFinalCredits: target,
-                    settledAt: nowAt,
-                    ...(payload.metadata || {}),
-                },
-            }),
-            updated_at: nowAt,
-        });
+        await client.query(
+            `
+            UPDATE billing_reservations
+            SET status = $3, final_credits = $4, metadata = $5, updated_at = $6
+            WHERE id = $1 AND uid = $2
+            `,
+            [
+                reservation.id,
+                input.uid,
+                status,
+                finalCharged,
+                JSON.stringify({
+                    ...reservationMetadata,
+                    settlement: {
+                        outcome: input.outcome,
+                        finalChargedCredits: finalCharged,
+                        requestedFinalCredits: target,
+                        settledAt: nowAt,
+                        ...(input.metadata || {}),
+                    },
+                }),
+                nowAt,
+            ],
+        );
 
         return {
             finalChargedCredits: finalCharged,
@@ -1261,119 +1213,109 @@ export function settleReservation(input: {
             status,
         };
     });
-
-    return tx(input);
 }
 
-export function setUserPlan(input: {
+export async function setUserPlan(input: {
     uid: string;
     planId: BillingPlanId;
     status?: BillingProfileRow['status'];
     stripeSubscriptionId?: string | null;
     stripePriceId?: string | null;
     reason?: string;
-}): BillingSummary {
-    const tx = db.transaction((payload: typeof input) => {
+}): Promise<BillingSummary> {
+    return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
-        const profileBefore = hydrateProfile(payload.uid, now);
+        const profileBefore = await hydrateProfile(client, input.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
         const previousBalance = profileBalance(profile);
 
-        const plan = getPlan(payload.planId);
+        const plan = getPlan(input.planId);
         profile.plan_id = plan.id;
-        profile.status = payload.status || 'active';
+        profile.status = input.status || 'active';
         profile.monthly_credits_remaining = plan.monthlyCredits;
-        profile.stripe_subscription_id = payload.stripeSubscriptionId ?? profile.stripe_subscription_id;
-        profile.stripe_price_id = payload.stripePriceId ?? profile.stripe_price_id;
+        profile.stripe_subscription_id = input.stripeSubscriptionId ?? profile.stripe_subscription_id;
+        profile.stripe_price_id = input.stripePriceId ?? profile.stripe_price_id;
         profile.updated_at = nowAt;
-        persistProfile(profile);
+        await persistProfile(client, profile);
 
         const newBalance = profileBalance(profile);
         const delta = newBalance - previousBalance;
         if (delta !== 0) {
-            insertLedgerStmt.run({
-                id: uuidv4(),
-                uid: payload.uid,
+            await insertLedger(client, {
+                uid: input.uid,
                 type: 'adjustment',
-                operation: null,
-                credits_delta: delta,
-                balance_after: newBalance,
-                request_id: null,
-                reservation_id: null,
-                project_id: null,
-                metadata: JSON.stringify({
-                    reason: payload.reason || 'plan_change',
+                creditsDelta: delta,
+                balanceAfter: newBalance,
+                metadata: {
+                    reason: input.reason || 'plan_change',
                     planId: plan.id,
-                }),
-                created_at: nowAt,
+                },
+                createdAt: nowAt,
             });
         }
         return summarizeProfile(profile);
     });
-    return tx(input);
 }
 
-export function grantTopupCredits(input: {
+export async function grantTopupCredits(input: {
     uid: string;
     credits: number;
     reason?: string;
     metadata?: Record<string, unknown>;
-}): BillingSummary {
-    const tx = db.transaction((payload: typeof input) => {
+}): Promise<BillingSummary> {
+    return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
-        const profileBefore = hydrateProfile(payload.uid, now);
+        const profileBefore = await hydrateProfile(client, input.uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
-        const grant = clampNonNegative(payload.credits);
+        const grant = clampNonNegative(input.credits);
         profile.topup_credits_remaining += grant;
         profile.updated_at = nowAt;
-        persistProfile(profile);
+        await persistProfile(client, profile);
         const balanceAfter = profileBalance(profile);
-        insertLedgerStmt.run({
-            id: uuidv4(),
-            uid: payload.uid,
+        await insertLedger(client, {
+            uid: input.uid,
             type: 'grant',
-            operation: null,
-            credits_delta: grant,
-            balance_after: balanceAfter,
-            request_id: null,
-            reservation_id: null,
-            project_id: null,
-            metadata: JSON.stringify({
-                reason: payload.reason || 'topup',
-                ...(payload.metadata || {}),
-            }),
-            created_at: nowAt,
+            creditsDelta: grant,
+            balanceAfter,
+            metadata: {
+                reason: input.reason || 'topup',
+                ...(input.metadata || {}),
+            },
+            createdAt: nowAt,
         });
         return summarizeProfile(profile);
     });
-    return tx(input);
 }
 
-export function attachStripeCustomer(uid: string, stripeCustomerId: string): BillingSummary {
-    const tx = db.transaction((userId: string, customerId: string) => {
+export async function attachStripeCustomer(uid: string, stripeCustomerId: string): Promise<BillingSummary> {
+    return withTransaction(async (client) => {
         const now = new Date();
-        const profileBefore = hydrateProfile(userId, now);
+        const profileBefore = await hydrateProfile(client, uid, now);
         const profile = maybeAdvanceBillingPeriod(profileBefore, now);
-        profile.stripe_customer_id = customerId;
+        profile.stripe_customer_id = stripeCustomerId;
         profile.updated_at = now.toISOString();
-        persistProfile(profile);
+        await persistProfile(client, profile);
         return summarizeProfile(profile);
     });
-    return tx(uid, stripeCustomerId);
 }
 
-export function getStripeCustomerId(uid: string): string | null {
-    const profile = selectProfileStmt.get(uid);
+export async function getStripeCustomerId(uid: string): Promise<string | null> {
+    await ensurePersistenceSchema();
+    const profile = await selectProfile(getDbPool(), uid, false);
     return profile?.stripe_customer_id || null;
 }
 
-export function findUidByStripeCustomerId(stripeCustomerId: string): string | null {
-    if (!stripeCustomerId.trim()) return null;
-    const row = db
-        .prepare<string, { uid: string }>('SELECT uid FROM billing_profiles WHERE stripe_customer_id = ? LIMIT 1')
-        .get(stripeCustomerId.trim());
+export async function findUidByStripeCustomerId(stripeCustomerId: string): Promise<string | null> {
+    const normalized = stripeCustomerId.trim();
+    if (!normalized) return null;
+    await ensurePersistenceSchema();
+    const row = await queryOne<{ uid: string }>(
+        getDbPool(),
+        'SELECT uid FROM billing_profiles WHERE stripe_customer_id = $1 LIMIT 1',
+        [normalized],
+    );
     return row?.uid || null;
 }
 
@@ -1401,14 +1343,23 @@ export function resolveTopupCreditsForPriceId(priceId: string | null | undefined
     return 0;
 }
 
-export function recordStripeWebhookEvent(eventId: string, eventType: string): boolean {
+export async function recordStripeWebhookEvent(eventId: string, eventType: string): Promise<boolean> {
     const id = String(eventId || '').trim();
     if (!id) return false;
-    const result = insertStripeWebhookEventStmt.run(id, String(eventType || '').trim() || 'unknown', new Date().toISOString());
-    return result.changes > 0;
+    await ensurePersistenceSchema();
+    const result = await getDbPool().query(
+        `
+        INSERT INTO stripe_webhook_events (id, event_type, received_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+        `,
+        [id, String(eventType || '').trim() || 'unknown', new Date().toISOString()],
+    );
+    return (result.rowCount || 0) > 0;
 }
 
-export function upsertBillingPurchase(input: {
+export async function upsertBillingPurchase(input: {
     uid: string;
     sourceType: 'checkout' | 'invoice';
     sourceId: string;
@@ -1430,72 +1381,136 @@ export function upsertBillingPurchase(input: {
     invoicePdfUrl?: string | null;
     metadata?: Record<string, unknown>;
     createdAt?: string;
-}): BillingPurchase {
-    const tx = db.transaction((payload: typeof input) => {
-        const sourceId = String(payload.sourceId || '').trim();
+}): Promise<BillingPurchase> {
+    return withTransaction(async (client) => {
+        const sourceId = String(input.sourceId || '').trim();
         if (!sourceId) {
             throw new Error('Purchase sourceId is required');
         }
-        const sourceKey = `${payload.sourceType}:${sourceId}`;
+
+        const sourceKey = `${input.sourceType}:${sourceId}`;
         const nowAt = new Date().toISOString();
-        const existing = selectPurchaseBySourceKeyStmt.get(sourceKey);
+        const existing = await queryOne<BillingPurchaseRow>(
+            client,
+            'SELECT * FROM billing_purchases WHERE source_key = $1 LIMIT 1 FOR UPDATE',
+            [sourceKey],
+        );
         const id = existing?.id || uuidv4();
-        const createdAt = payload.createdAt || existing?.created_at || nowAt;
-        upsertPurchaseStmt.run({
-            id,
-            uid: payload.uid,
-            source_key: sourceKey,
-            source_type: payload.sourceType,
-            source_id: sourceId,
-            purchase_kind: payload.purchaseKind,
-            product_key: payload.productKey || null,
-            plan_id: payload.planId || null,
-            stripe_customer_id: payload.stripeCustomerId || null,
-            stripe_subscription_id: payload.stripeSubscriptionId || null,
-            stripe_invoice_id: payload.stripeInvoiceId || null,
-            stripe_payment_intent_id: payload.stripePaymentIntentId || null,
-            stripe_price_id: payload.stripePriceId || null,
-            amount_total: clampNonNegative(payload.amountTotal),
-            currency: String(payload.currency || 'usd').toLowerCase(),
-            quantity: Math.max(1, clampNonNegative(payload.quantity || 1)),
-            status: String(payload.status || 'paid'),
-            description: payload.description || null,
-            invoice_number: payload.invoiceNumber || null,
-            invoice_url: payload.invoiceUrl || null,
-            invoice_pdf_url: payload.invoicePdfUrl || null,
-            metadata: payload.metadata ? JSON.stringify(payload.metadata) : null,
-            created_at: createdAt,
-            updated_at: nowAt,
-        });
-        const row = selectPurchaseBySourceKeyStmt.get(sourceKey);
-        if (!row) throw new Error('Failed to persist purchase');
+        const createdAt = input.createdAt || existing?.created_at || nowAt;
+
+        const row = await queryOne<BillingPurchaseRow>(
+            client,
+            `
+            INSERT INTO billing_purchases (
+                id, uid, source_key, source_type, source_id, purchase_kind, product_key, plan_id,
+                stripe_customer_id, stripe_subscription_id, stripe_invoice_id, stripe_payment_intent_id, stripe_price_id,
+                amount_total, currency, quantity, status, description, invoice_number, invoice_url, invoice_pdf_url,
+                metadata, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21,
+                $22, $23, $24
+            )
+            ON CONFLICT(source_key) DO UPDATE SET
+                uid = EXCLUDED.uid,
+                source_type = EXCLUDED.source_type,
+                source_id = EXCLUDED.source_id,
+                purchase_kind = EXCLUDED.purchase_kind,
+                product_key = EXCLUDED.product_key,
+                plan_id = EXCLUDED.plan_id,
+                stripe_customer_id = EXCLUDED.stripe_customer_id,
+                stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                stripe_invoice_id = EXCLUDED.stripe_invoice_id,
+                stripe_payment_intent_id = EXCLUDED.stripe_payment_intent_id,
+                stripe_price_id = EXCLUDED.stripe_price_id,
+                amount_total = EXCLUDED.amount_total,
+                currency = EXCLUDED.currency,
+                quantity = EXCLUDED.quantity,
+                status = EXCLUDED.status,
+                description = EXCLUDED.description,
+                invoice_number = EXCLUDED.invoice_number,
+                invoice_url = EXCLUDED.invoice_url,
+                invoice_pdf_url = EXCLUDED.invoice_pdf_url,
+                metadata = EXCLUDED.metadata,
+                updated_at = EXCLUDED.updated_at
+            RETURNING *
+            `,
+            [
+                id,
+                input.uid,
+                sourceKey,
+                input.sourceType,
+                sourceId,
+                input.purchaseKind,
+                input.productKey || null,
+                input.planId || null,
+                input.stripeCustomerId || null,
+                input.stripeSubscriptionId || null,
+                input.stripeInvoiceId || null,
+                input.stripePaymentIntentId || null,
+                input.stripePriceId || null,
+                clampNonNegative(input.amountTotal),
+                String(input.currency || 'usd').toLowerCase(),
+                Math.max(1, clampNonNegative(input.quantity || 1)),
+                String(input.status || 'paid'),
+                input.description || null,
+                input.invoiceNumber || null,
+                input.invoiceUrl || null,
+                input.invoicePdfUrl || null,
+                input.metadata ? JSON.stringify(input.metadata) : null,
+                createdAt,
+                nowAt,
+            ],
+        );
+
+        if (!row) {
+            throw new Error('Failed to persist purchase');
+        }
         return mapPurchaseRow(row);
     });
-    return tx(input);
 }
 
-export function getBillingPurchaseBySource(sourceType: 'checkout' | 'invoice', sourceId: string): BillingPurchase | null {
-    const key = `${sourceType}:${String(sourceId || '').trim()}`;
-    if (!key || key.endsWith(':')) return null;
-    const row = selectPurchaseBySourceKeyStmt.get(key);
+export async function getBillingPurchaseBySource(
+    sourceType: 'checkout' | 'invoice',
+    sourceId: string,
+): Promise<BillingPurchase | null> {
+    const normalizedSourceId = String(sourceId || '').trim();
+    if (!normalizedSourceId) return null;
+    await ensurePersistenceSchema();
+    const row = await queryOne<BillingPurchaseRow>(
+        getDbPool(),
+        'SELECT * FROM billing_purchases WHERE source_key = $1 LIMIT 1',
+        [`${sourceType}:${normalizedSourceId}`],
+    );
     return row ? mapPurchaseRow(row) : null;
 }
 
-export function listBillingPurchases(uid: string, limit = 40): BillingPurchase[] {
+export async function listBillingPurchases(uid: string, limit = 40): Promise<BillingPurchase[]> {
+    await ensurePersistenceSchema();
     const size = Math.max(1, Math.min(200, Math.floor(limit)));
-    const rows = listPurchasesStmt.all(uid, size) as BillingPurchaseRow[];
+    const rows = await queryRows<BillingPurchaseRow>(
+        getDbPool(),
+        'SELECT * FROM billing_purchases WHERE uid = $1 ORDER BY created_at DESC LIMIT $2',
+        [uid, size],
+    );
     return rows.map(mapPurchaseRow);
 }
 
-export function getBillingPurchase(uid: string, purchaseId: string): BillingPurchase | null {
-    const row = selectPurchaseByIdStmt.get(uid, purchaseId);
+export async function getBillingPurchase(uid: string, purchaseId: string): Promise<BillingPurchase | null> {
+    await ensurePersistenceSchema();
+    const row = await queryOne<BillingPurchaseRow>(
+        getDbPool(),
+        'SELECT * FROM billing_purchases WHERE uid = $1 AND id = $2 LIMIT 1',
+        [uid, purchaseId],
+    );
     return row ? mapPurchaseRow(row) : null;
 }
 
-export function buildBillingSummaryForApi(uid: string): BillingSummary {
+export async function buildBillingSummaryForApi(uid: string): Promise<BillingSummary> {
     return getBillingSummary(uid);
 }
 
-export function listBillingLedgerForApi(uid: string, limit = 40): BillingLedgerItem[] {
+export async function listBillingLedgerForApi(uid: string, limit = 40): Promise<BillingLedgerItem[]> {
     return listBillingLedger(uid, limit);
 }

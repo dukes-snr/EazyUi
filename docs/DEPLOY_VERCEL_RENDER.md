@@ -9,7 +9,7 @@ This repo is now set up for the split deployment model:
 ## Why this split
 
 - The web app is a standard Vite SPA and fits Vercel well.
-- The API uses SQLite-backed persistence and Playwright rendering, which are a better fit for a long-running Node service with a persistent disk than for Vercel Functions.
+- The API now uses Postgres-backed persistence and Playwright rendering, which fit better on a long-running Node service than on Vercel Functions.
 - The MCP server is an internal Fastify service and fits naturally on Render's private network.
 
 ## Repo files used for deployment
@@ -32,7 +32,6 @@ This repo is now set up for the split deployment model:
 4. Render will create:
    - `eazyui-api` as a public web service
    - `eazyui-mcp-server` as a private service
-   - a persistent disk mounted to `/var/data` for `eazyui-api`
 5. Fill in all `sync: false` environment variables before the first deploy.
 6. Use `.env.render-api.example` and `.env.render-mcp.example` as the source of truth while entering values into Render.
 
@@ -152,8 +151,11 @@ Required for this Render deployment shape, but already handled by the Blueprint:
 
 - `HOST`
 - `DATA_DIR`
-- `DATABASE_URL`
 - `INTERNAL_API_KEY`
+
+Required to connect persistence:
+
+- `DATABASE_URL`
 
 Required only if you use these features:
 
@@ -227,18 +229,14 @@ Optional tuning:
 
 ## Persistence notes
 
-The API now honors:
+The API now uses:
 
-- `DATA_DIR` for generated local data
-- `DATABASE_URL` for the SQLite database file path
+- `DATABASE_URL` for the Postgres connection string
+- `DATA_DIR` only for generated local cache/files
 
-The Render Blueprint mounts a persistent disk at `/var/data` and configures:
+The Render Blueprint configures:
 
-- `DATA_DIR=/var/data/eazyui`
-- `DATABASE_URL=/var/data/eazyui/eazyui.db`
+- `DATA_DIR=/tmp/eazyui`
+- `DATABASE_URL` as a manual secret you provide
 
-That keeps the billing and project SQLite file on persistent storage instead of the container filesystem.
-
-## Remaining recommendation
-
-This setup is production-usable, but billing and project persistence still rely on SQLite. The next backend hardening step is to move that data to a managed database.
+For production, point `DATABASE_URL` at a managed Postgres instance such as Render Postgres, Neon, Supabase, or Railway Postgres.

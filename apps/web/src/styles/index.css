@@ -31,6 +31,8 @@
   --ui-canvas-profile-bg: var(--ui-surface-3);
   --ui-canvas-profile-border: rgba(255, 255, 255, 0.12);
   --ui-canvas-profile-hover: rgba(255, 255, 255, 0.08);
+  --landing-hero-dot-subtle: rgba(255, 255, 255, 0.08);
+  --landing-hero-dot-strong: rgba(255, 255, 255, 0.52);
 
   /* Toast palette (goey-toast) */
   --ui-toast-default-fill: #0f1621;
@@ -144,6 +146,8 @@
   --ui-canvas-profile-bg: var(--ui-surface-3);
   --ui-canvas-profile-border: rgba(15, 23, 42, 0.16);
   --ui-canvas-profile-hover: rgba(15, 23, 42, 0.07);
+  --landing-hero-dot-subtle: rgba(15, 23, 42, 0.2);
+  --landing-hero-dot-strong: rgba(15, 23, 42, 0.52);
 
   /* Toast palette (goey-toast) */
   --ui-toast-default-fill: #f8fafc;
@@ -505,6 +509,22 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.landing-hero-backdrop {
+  background-color: var(--ui-surface-1);
+  background-image: radial-gradient(circle at center, var(--landing-hero-dot-subtle) 0 1px, transparent 1.45px);
+  background-size: 16px 16px;
+  background-position: 0 0;
+  background-repeat: repeat;
+}
+
+.landing-hero-dot-spotlight {
+  background-image: radial-gradient(circle at center, var(--landing-hero-dot-strong) 0 1.1px, transparent 1.5px);
+  background-size: 16px 16px;
+  background-position: 0 0;
+  background-repeat: repeat;
+  will-change: opacity, mask-image, -webkit-mask-image;
+}
+
 .landing-surface-band {
   position: relative;
   box-shadow: 0 0 0 100vmax transparent;
@@ -580,9 +600,9 @@ textarea::placeholder {
   width: 72px;
   height: 72px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(15, 23, 42, 0.46);
-  color: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface-2) 76%, transparent);
+  color: var(--ui-text);
   box-shadow: 0 18px 50px rgba(2, 6, 23, 0.28);
   backdrop-filter: blur(18px);
   opacity: 0;
@@ -598,11 +618,11 @@ textarea::placeholder {
 .landing-demo-control.is-paused {
   width: 88px;
   height: 88px;
-  background: rgba(88, 88, 93, 0.34);
+  background: color-mix(in srgb, var(--ui-surface-3) 82%, transparent);
 }
 
 .landing-demo-control:hover {
-  background: rgba(15, 23, 42, 0.62);
+  background: color-mix(in srgb, var(--ui-surface-3) 88%, transparent);
 }
 
 .landing-demo-restart {
@@ -616,9 +636,9 @@ textarea::placeholder {
   height: 2.75rem;
   padding: 0 0.95rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(15, 23, 42, 0.52);
-  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface-2) 82%, transparent);
+  color: var(--ui-text);
   box-shadow: 0 18px 40px rgba(2, 6, 23, 0.24);
   backdrop-filter: blur(18px);
   opacity: 0;
@@ -636,8 +656,8 @@ textarea::placeholder {
 }
 
 .landing-demo-restart:hover {
-  background: rgba(15, 23, 42, 0.68);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: color-mix(in srgb, var(--ui-surface-3) 92%, transparent);
+  border-color: var(--ui-border-light);
 }
 
 .landing-feature-pin-section {
@@ -702,8 +722,8 @@ textarea::placeholder {
   justify-content: center;
   overflow: hidden;
   border-radius: 1.25rem;
-  border: 2px solid rgba(255, 255, 255, 0.08);
-  background: #0c122000;
+  border: 2px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface-2) 84%, transparent);
   min-height: clamp(24rem, 34vw, 32rem);
 }
 
@@ -946,7 +966,7 @@ textarea::placeholder {
   font-size: 0.65rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.9);
+  color: var(--ui-text-muted);
   backdrop-filter: blur(10px);
 }
 
@@ -979,7 +999,7 @@ textarea::placeholder {
   font-size: 0.67rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.88);
+  color: var(--ui-text-muted);
 }
 
 .landing-pricing-chip-featured {
@@ -1043,16 +1063,16 @@ textarea::placeholder {
   width: min(33rem, 42vw);
   min-height: 14.5rem;
   padding: 1.55rem 1.6rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface-2) 88%, transparent);
 }
 
 .landing-testimonial-avatar {
   width: 2.75rem;
   height: 2.75rem;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface-2);
 }
 
 .landing-footer {
@@ -1104,7 +1124,7 @@ textarea::placeholder {
   line-height: 1.03;
   letter-spacing: -0.05em;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.97);
+  color: var(--ui-text);
 }
 
 .landing-footer-newsletter-copy {
@@ -1112,7 +1132,7 @@ textarea::placeholder {
   max-width: 31rem;
   font-size: 0.94rem;
   line-height: 1.55;
-  color: rgba(143, 148, 159, 0.74);
+  color: var(--ui-text-muted);
 }
 
 .landing-footer-newsletter-form {
@@ -1132,8 +1152,8 @@ textarea::placeholder {
   min-height: 2.75rem;
   padding: 0 0.95rem;
   border-radius: 0.7rem;
-  background: rgba(22, 22, 22, 0.82);
-  color: rgba(110, 115, 125, 0.9);
+  background: color-mix(in srgb, var(--ui-surface-3) 88%, transparent);
+  color: var(--ui-text-subtle);
 }
 
 .landing-footer-email-field input {
@@ -1141,12 +1161,12 @@ textarea::placeholder {
   border: 0;
   outline: 0;
   background: transparent;
-  color: rgba(238, 241, 246, 0.94);
+  color: var(--ui-text);
   font-size: 0.93rem;
 }
 
 .landing-footer-email-field input::placeholder {
-  color: rgba(110, 115, 125, 0.78);
+  color: var(--ui-text-subtle);
 }
 
 .landing-footer-signup-button {
@@ -1155,8 +1175,8 @@ textarea::placeholder {
   padding: 0 1rem;
   border-radius: 0.6rem;
   border: 0;
-  background: rgba(42, 42, 42, 0.98);
-  color: rgba(228, 232, 240, 0.92);
+  background: var(--ui-text);
+  color: var(--ui-surface-1);
   font-size: 0.9rem;
   transition: background 180ms ease, color 180ms ease, transform 180ms ease;
 }
@@ -1168,21 +1188,21 @@ textarea::placeholder {
 }
 
 .landing-footer-signup-button:hover {
-  background: rgba(45, 45, 45, 0.98);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--ui-text) 88%, transparent);
+  color: var(--ui-surface-1);
   transform: translateY(-1px);
 }
 
 .landing-footer-newsletter-status {
   margin: 0.8rem 0 0;
   font-size: 0.84rem;
-  color: rgba(174, 180, 190, 0.86);
+  color: var(--ui-text-muted);
 }
 
 .landing-footer-divider {
   display: block;
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--ui-border);
 }
 
 .landing-footer-emblem {
@@ -1223,8 +1243,8 @@ textarea::placeholder {
   width: 1.35rem;
   height: 1.35rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(29, 29, 29, 0.92);
+  border: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface-2) 94%, transparent);
 }
 
 .landing-footer-emblem-node::after {
@@ -1232,7 +1252,7 @@ textarea::placeholder {
   position: absolute;
   inset: 0.35rem;
   border-radius: 999px;
-  background: rgba(136, 141, 151, 0.46);
+  background: color-mix(in srgb, var(--ui-text-subtle) 70%, transparent);
 }
 
 .landing-footer-emblem-node-1 {
@@ -1262,8 +1282,8 @@ textarea::placeholder {
   height: 42%;
   transform: translate(-50%, -50%);
   border-radius: 1.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  background: radial-gradient(circle at 35% 25%, rgba(48, 48, 48, 0.9), rgba(17, 17, 17, 0.98) 72%);
+  border: 1px solid var(--ui-border);
+  background: radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--ui-surface-4) 92%, transparent), color-mix(in srgb, var(--ui-surface-2) 96%, transparent) 72%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1281,7 +1301,7 @@ textarea::placeholder {
   margin: 0 0 1.35rem;
   font-size: 1rem;
   font-weight: 500;
-  color: rgba(247, 249, 251, 0.92);
+  color: var(--ui-text);
 }
 
 .landing-footer-links-stack {
@@ -1291,7 +1311,7 @@ textarea::placeholder {
 }
 
 .landing-footer-link {
-  color: rgba(133, 138, 149, 0.84);
+  color: var(--ui-text-muted);
   font-size: 0.95rem;
   line-height: 1.4;
   text-align: left;
@@ -1299,7 +1319,7 @@ textarea::placeholder {
 }
 
 .landing-footer-link:hover {
-  color: rgba(244, 246, 250, 0.94);
+  color: var(--ui-text);
 }
 
 .landing-footer-social-row {
@@ -1314,7 +1334,7 @@ textarea::placeholder {
   justify-content: center;
   width: 1.55rem;
   height: 1.55rem;
-  color: rgba(240, 242, 246, 0.92);
+  color: var(--ui-text);
 }
 
 .landing-footer-social-icon.is-red {
@@ -1333,7 +1353,7 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  color: rgba(245, 247, 250, 0.94);
+  color: var(--ui-text);
   font-size: 1.45rem;
   font-weight: 600;
   letter-spacing: -0.03em;
@@ -1347,7 +1367,7 @@ textarea::placeholder {
 
 .landing-footer-signature p {
   margin: 0.45rem 0 0;
-  color: rgba(104, 110, 120, 0.74);
+  color: var(--ui-text-subtle);
   font-size: 0.78rem;
 }
 
@@ -1368,7 +1388,7 @@ textarea::placeholder {
   letter-spacing: -0.08em;
   font-weight: 600;
   text-transform: lowercase;
-  color: rgba(255, 255, 255, 0.018);
+  color: color-mix(in srgb, var(--ui-text) 3%, transparent);
   -webkit-text-stroke: 1px rgba(10, 234, 250, 0.22);
   text-shadow: 0 -8px 28px rgba(0, 0, 0, 0.2);
   pointer-events: none;

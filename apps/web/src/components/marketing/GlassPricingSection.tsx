@@ -199,34 +199,34 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
     return (
         <section className={`relative ${className}`}>
             <div className="landing-page-section-inner landing-page-section-inner-full">
-                <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[var(--ui-surface-1)]">
+                <div className="overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
                     <div className="relative px-5 py-8 md:px-8 md:py-10 lg:px-10">
                         <div className="pointer-events-none absolute inset-0 opacity-70">
-                            <div className="absolute inset-y-0 left-1/4 hidden w-px bg-white/6 md:block" />
-                            <div className="absolute inset-y-0 left-1/2 hidden w-px bg-white/6 md:block" />
-                            <div className="absolute inset-y-0 right-1/4 hidden w-px bg-white/6 md:block" />
+                            <div className="absolute inset-y-0 left-1/4 hidden w-px bg-[var(--ui-border)] md:block" />
+                            <div className="absolute inset-y-0 left-1/2 hidden w-px bg-[var(--ui-border)] md:block" />
+                            <div className="absolute inset-y-0 right-1/4 hidden w-px bg-[var(--ui-border)] md:block" />
                         </div>
 
                         <div className="relative mx-auto max-w-[760px] text-center">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Pricing</p>
-                            <h3 className="mt-3 text-[34px] font-semibold leading-[1.02] tracking-[-0.05em] text-white md:text-[56px]">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Pricing</p>
+                            <h3 className="mt-3 text-[34px] font-semibold leading-[1.02] tracking-[-0.05em] text-[var(--ui-text)] md:text-[56px]">
                                 Clean pricing for
                                 <br />
                                 every stage of output.
                             </h3>
-                            <p className="mx-auto mt-4 max-w-[620px] text-[14px] leading-7 text-slate-300 md:text-[15px]">
+                            <p className="mx-auto mt-4 max-w-[620px] text-[14px] leading-7 text-[var(--ui-text-muted)] md:text-[15px]">
                                 Paid plan amounts come from live Stripe pricing. Annual totals are calculated from the current monthly billing price.
                             </p>
 
-                            <div className="mt-7 inline-flex rounded-full border border-white/10 bg-[var(--ui-surface-2)] p-1">
+                            <div className="mt-7 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1">
                                 {(['monthly', 'annual'] as const).map((option) => (
                                     <button
                                         key={option}
                                         type="button"
                                         onClick={() => setCadence(option)}
                                         className={`min-w-[110px] rounded-full px-4 py-2 text-[13px] font-medium transition-colors ${cadence === option
-                                            ? 'bg-white text-[#0a0b0d]'
-                                            : 'text-slate-300 hover:text-white'
+                                            ? 'bg-[var(--ui-text)] text-[var(--ui-surface-1)]'
+                                            : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'
                                             }`}
                                     >
                                         {option === 'monthly' ? 'Monthly' : 'Annually'}
@@ -234,7 +234,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                 ))}
                             </div>
 
-                            <div className="mt-4 min-h-6 text-[12px] text-slate-400">
+                            <div className="mt-4 min-h-6 text-[12px] text-[var(--ui-text-subtle)]">
                                 {loading ? (
                                     <span className="inline-flex items-center gap-2">
                                         <Loader2 size={13} className="animate-spin" />
@@ -248,33 +248,33 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                             </div>
                         </div>
 
-                        <div className="relative mt-8 overflow-hidden rounded-[24px] border border-white/10 bg-white/5">
-                            <div className="grid gap-px bg-white/10 lg:grid-cols-4">
+                        <div className="relative mt-8 overflow-hidden rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                            <div className="grid gap-px bg-[var(--ui-border)] lg:grid-cols-4">
                                 {tiers.map((tier) => (
                                     <article
                                         key={tier.key}
                                         className={`flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6 ${tier.featured ? 'bg-[var(--ui-surface-2)]' : ''}`}
                                     >
                                         <div>
-                                            <p className="text-[22px] font-semibold tracking-[-0.03em] text-white">{tier.title}</p>
-                                            <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-slate-400">{tier.label}</p>
+                                            <p className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--ui-text)]">{tier.title}</p>
+                                            <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">{tier.label}</p>
                                         </div>
 
                                         <div className="mt-7">
                                             <div className="flex items-end gap-1.5">
-                                                <h4 className="text-[40px] font-semibold leading-none tracking-[-0.05em] text-white md:text-[46px]">{tier.display.amount}</h4>
-                                                {tier.display.cadenceLabel ? <span className="pb-1 text-[13px] text-slate-400">{tier.display.cadenceLabel}</span> : null}
+                                                <h4 className="text-[40px] font-semibold leading-none tracking-[-0.05em] text-[var(--ui-text)] md:text-[46px]">{tier.display.amount}</h4>
+                                                {tier.display.cadenceLabel ? <span className="pb-1 text-[13px] text-[var(--ui-text-subtle)]">{tier.display.cadenceLabel}</span> : null}
                                             </div>
-                                            <p className="mt-2 text-[12px] text-slate-400">{tier.display.note}</p>
-                                            <p className="mt-4 text-[14px] leading-7 text-slate-300">{tier.description}</p>
+                                            <p className="mt-2 text-[12px] text-[var(--ui-text-subtle)]">{tier.display.note}</p>
+                                            <p className="mt-4 text-[14px] leading-7 text-[var(--ui-text-muted)]">{tier.description}</p>
                                         </div>
 
                                         <button
                                             type="button"
                                             onClick={() => handleTierAction(tier.key)}
                                             className={`mt-6 h-11 w-full rounded-[12px] border text-[13px] font-semibold transition-colors ${tier.featured
-                                                ? 'border-white bg-white text-[#0a0b0d] hover:bg-slate-200'
-                                                : 'border-white/12 bg-[var(--ui-surface-2)] text-white hover:bg-white/8'
+                                                ? 'border-[var(--ui-text)] bg-[var(--ui-text)] text-[var(--ui-surface-1)] hover:opacity-90'
+                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]'
                                                 }`}
                                         >
                                             {tier.cta}
@@ -282,8 +282,8 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
 
                                         <ul className="mt-7 space-y-3">
                                             {tier.features.map((feature) => (
-                                                <li key={feature} className="flex items-start gap-3 text-[13px] leading-6 text-slate-300">
-                                                    <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/12 bg-[var(--ui-surface-2)] text-white">
+                                                <li key={feature} className="flex items-start gap-3 text-[13px] leading-6 text-[var(--ui-text-muted)]">
+                                                    <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)]">
                                                         <Check size={11} />
                                                     </span>
                                                     <span>{feature}</span>

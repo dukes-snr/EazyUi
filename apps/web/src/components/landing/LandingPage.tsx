@@ -1,7 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Tablet, X, Youtube, Zap } from 'lucide-react';
-import heroBg2 from '../../assets/img1.jpg';
+import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
+import { ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
@@ -17,6 +16,7 @@ import { Orb } from '../ui/Orb';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import TextType from '../ui/TextType';
+import { useUiStore } from '../../stores';
 import {
     extractComposerInlineReferences,
     findComposerReferenceTrigger,
@@ -173,13 +173,13 @@ function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
 
     return (
         <motion.article className="landing-feature-scroll-intro" style={{ opacity, x, y }}>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">What EazyUI unlocks</p>
-            <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">What EazyUI unlocks</p>
+            <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
                 From first prompt
                 <br />
                 to product-ready UI.
             </h3>
-            <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-slate-300">
+            <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-[var(--ui-text-muted)]">
                 Scroll through the core capabilities and see how EazyUI turns rough ideas into sharper interface direction, faster refinement, and more confident decisions.
             </p>
         </motion.article>
@@ -215,13 +215,13 @@ function FeatureScrollCard({
             }}
         >
             <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
-            <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-white">
+            <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-[var(--ui-text)]">
                 {item.title}
             </h4>
             <div className="landing-feature-scroll-preview mt-5">
                 <img src={item.image} alt={`${item.title} preview`} className="landing-feature-scroll-image" />
             </div>
-            <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-slate-300">
+            <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-[var(--ui-text-muted)]">
                 {item.description}
             </p>
         </motion.article>
@@ -235,6 +235,8 @@ function toChipLabel(text: string): string {
 }
 
 export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy = false }: LandingPageProps) {
+    const theme = useUiStore((state) => state.theme);
+    const toggleTheme = useUiStore((state) => state.toggleTheme);
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
@@ -260,6 +262,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const demoVideoRef = useRef<HTMLVideoElement | null>(null);
+    const demoScreensSectionRef = useRef<HTMLElement | null>(null);
     const featureShowcaseSectionRef = useRef<HTMLElement | null>(null);
     const featureShowcaseViewportRef = useRef<HTMLDivElement | null>(null);
     const featureShowcaseTrackRef = useRef<HTMLDivElement | null>(null);
@@ -307,10 +310,12 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     });
     const backgroundY = useTransform(easedScrollY, [0, 1400], [0, -112]);
     const backgroundScale = useTransform(easedScrollProgress, [0, 1], [1, 1.085]);
-    const backgroundGlowOpacity = useTransform(easedScrollProgress, [0, 0.18, 1], [0.4, 0.82, 0.22]);
-    const backgroundGlowY = useTransform(easedScrollY, [0, 1600], [0, -78]);
     const heroY = useTransform(easedScrollY, [0, 420], [0, -58]);
     const heroOpacity = useTransform(easedScrollY, [0, 300], [1, 0.66]);
+    const heroSpotlightX = useMotionValue(0);
+    const heroSpotlightY = useMotionValue(0);
+    const heroSpotlightOpacity = useMotionValue(0);
+    const heroSpotlightMask = useMotionTemplate`radial-gradient(circle 280px at ${heroSpotlightX}px ${heroSpotlightY}px, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 28%, rgba(0, 0, 0, 0.78) 52%, rgba(0, 0, 0, 0.36) 74%, transparent 100%)`;
 
     const rootReferenceOptions = useMemo(
         () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
@@ -686,31 +691,43 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
 
     return (
-        <div ref={scrollContainerRef} className="landing-scroll-shell h-screen w-full overflow-y-auto bg-[#06070B] text-white relative">
+        <div
+            ref={scrollContainerRef}
+            className="landing-scroll-shell h-screen w-full overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)] relative"
+            onPointerMove={(event) => {
+                if (event.pointerType === 'touch') return;
+                const container = scrollContainerRef.current;
+                if (!container) return;
+                const rect = container.getBoundingClientRect();
+                const pointerX = event.clientX - rect.left;
+                const pointerY = event.clientY - rect.top + container.scrollTop;
+                const spotlightLimit = demoScreensSectionRef.current
+                    ? demoScreensSectionRef.current.offsetTop + demoScreensSectionRef.current.offsetHeight
+                    : 0;
+                heroSpotlightX.set(pointerX);
+                heroSpotlightY.set(pointerY);
+                heroSpotlightOpacity.set(pointerY <= spotlightLimit ? 1 : 0);
+            }}
+            onPointerLeave={() => {
+                heroSpotlightOpacity.set(0);
+            }}
+        >
             <div className="landing-background-stack pointer-events-none absolute inset-0">
                 <motion.div
-                    className="absolute inset-0"
+                    className="landing-hero-backdrop absolute inset-0"
                     style={{
                         y: shouldReduceMotion ? 0 : backgroundY,
                         scale: shouldReduceMotion ? 1 : backgroundScale,
-                        backgroundImage: `url(${heroBg2})`,
-                        backgroundPosition: 'center top',
-                        backgroundSize: 'cover',
-                        backgroundRepeat: 'no-repeat',
                     }}
                 />
                 <motion.div
-                    className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_26%,rgba(22,35,70,0.08),rgba(6,7,11,0.45)_48%,rgba(6,7,11,0.95)_84%)]"
-                    style={{ y: shouldReduceMotion ? 0 : backgroundGlowY }}
-                />
-                <motion.div
-                    className="absolute inset-0 bg-[radial-gradient(42%_28%_at_18%_12%,rgba(56,189,248,0.24),rgba(6,7,11,0)_72%),radial-gradient(36%_24%_at_82%_10%,rgba(96,165,250,0.2),rgba(6,7,11,0)_70%)]"
+                    className="landing-hero-dot-spotlight absolute inset-0"
                     style={{
-                        y: shouldReduceMotion ? 0 : backgroundGlowY,
-                        opacity: shouldReduceMotion ? 0.4 : backgroundGlowOpacity,
+                        opacity: heroSpotlightOpacity,
+                        WebkitMaskImage: heroSpotlightMask,
+                        maskImage: heroSpotlightMask,
                     }}
                 />
-                {/* <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(6,7,11,0.5),rgba(6,7,11,0.78)_58%,rgba(6,7,11,0.95))]" /> */}
             </div>
 
             <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''}`}>
@@ -726,7 +743,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         className="inline-flex items-center gap-2 text-left"
                     >
                         <img src={appLogo} alt="EazyUI logo" className="h-6 w-6 object-contain" />
-                        <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-gray-200">EazyUI</span>
+                        <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-[var(--ui-text)]">EazyUI</span>
                     </button>
                     <div className="hidden lg:flex items-center gap-2">
                         {MARKETING_NAV_LINKS.map((item) => (
@@ -734,21 +751,30 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] transition-colors"
                             >
                                 {item.label}
                             </button>
                         ))}
                     </div>
                     <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={toggleTheme}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                        >
+                            {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
+                        </button>
                         {userProfile ? (
                             <>
-                                <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-2.5 py-1.5">
+                                <div className="hidden sm:flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5">
                                     {userProfile.photoUrl ? (
                                         <img
                                             src={userProfile.photoUrl}
                                             alt={userProfile.name}
-                                            className="h-6 w-6 rounded-full object-cover border border-white/20"
+                                            className="h-6 w-6 rounded-full object-cover border border-[var(--ui-border)]"
                                             onError={(e) => {
                                                 const fallbackName = userProfile.name || userProfile.email || 'User';
                                                 const img = e.currentTarget;
@@ -757,13 +783,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                             }}
                                         />
                                     ) : (
-                                        <div className="h-6 w-6 rounded-full bg-white/15 text-[11px] font-semibold text-white inline-flex items-center justify-center">
+                                        <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-[11px] font-semibold text-[var(--ui-text)]">
                                             {(userProfile.name || userProfile.email || 'U').slice(0, 1).toUpperCase()}
                                         </div>
                                     )}
                                     <div className="leading-tight">
-                                        <p className="text-[11px] text-gray-200 max-w-[170px] truncate">{userProfile.name}</p>
-                                        <p className="text-[10px] text-gray-400 max-w-[170px] truncate">{userProfile.email}</p>
+                                        <p className="max-w-[170px] truncate text-[11px] text-[var(--ui-text)]">{userProfile.name}</p>
+                                        <p className="max-w-[170px] truncate text-[10px] text-[var(--ui-text-muted)]">{userProfile.email}</p>
                                     </div>
                                 </div>
                                 {!userProfile.emailVerified && (
@@ -771,7 +797,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         type="button"
                                         onClick={onSendVerification}
                                         disabled={verificationBusy}
-                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-amber-200/40 bg-amber-300/10 px-3 text-[11px] uppercase tracking-[0.08em] text-amber-100 hover:bg-amber-300/20 transition-colors disabled:opacity-60"
+                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
                                     >
                                         {verificationBusy ? 'Sending...' : 'Verify email'}
                                     </button>
@@ -779,14 +805,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/app')}
-                                    className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
+                                    className="h-8 rounded-full bg-[var(--ui-text)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
                                 >
                                     Open app
                                 </button>
                                 <button
                                     type="button"
                                     onClick={onSignOut}
-                                    className="h-8 rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
+                                    className="h-8 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
                                 >
                                     Sign out
                                 </button>
@@ -796,14 +822,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/login')}
-                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-[11px] uppercase tracking-[0.08em] text-gray-300 hover:text-white hover:border-white/30 transition-colors"
+                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
                                 >
                                     Log in
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/login')}
-                                    className="h-8 rounded-full bg-white px-3 text-[11px] uppercase tracking-[0.08em] text-[#0b1020] font-semibold hover:bg-gray-200 transition-colors"
+                                    className="h-8 rounded-full bg-[var(--ui-text)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
                                 >
                                     Sign up
                                 </button>
@@ -817,95 +843,96 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             <main className="relative z-10 px-4 md:px-[0%] lg:px-[0%] pt-8 md:pt-12 pb-0">
                 {/*Hero section*/}
                 <motion.section
-                    className="mx-auto max-w-[980px] text-center min-h-[55vh] flex flex-col items-center justify-center"
+                    className="landing-hero-section relative w-full overflow-hidden"
                     style={{
                         y: shouldReduceMotion ? 0 : heroY,
                         opacity: shouldReduceMotion ? 1 : heroOpacity,
                     }}
                 >
-                    <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
-                        Design better UI with <span className="text-blue-300 italic">EazyUI</span>
-                    </h1>
-                    <p className="mt-2 text-[20px] md:text-[30px] text-gray-300">Generate production-ready app screens and landing pages from a single prompt.</p>
+                    <div className="relative z-10 mx-auto flex min-h-[55vh] w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
+                        <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
+                            Design better UI with <span className="text-[var(--ui-primary)] italic">EazyUI</span>
+                        </h1>
+                        <p className="mt-2 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
 
-                    <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] shadow-2xl p-3 md:p-4 text-left">
-                        <div className="relative">
-                            {!prompt.trim() && !isPromptFocused && (
-                                <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
-                                    <TextType
-                                        text={TYPED_PLACEHOLDER_SUGGESTIONS}
-                                        className="text-[16px] text-[var(--ui-text-subtle)] text-left"
-                                        typingSpeed={62}
-                                        deletingSpeed={38}
-                                        pauseDuration={2200}
-                                        showCursor
-                                        cursorCharacter="_"
-                                        cursorClassName="text-[var(--ui-text-subtle)]"
-                                        loop
-                                    />
-                                </div>
-                            )}
-                            <div className="flex items-start gap-2 px-1">
-                                <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
-                                    <Orb
-                                        className="h-full w-full"
-                                        colors={landingOrbColors}
-                                        seed={9101}
-                                        agentState={landingOrbState}
-                                        volumeMode="manual"
-                                        manualInput={landingOrbInput}
-                                        manualOutput={landingOrbOutput}
-                                    />
-                                </div>
-                                <ComposerInlineReferenceInput
-                                    ref={promptTextareaRef}
-                                    value={prompt}
-                                    onChange={handlePromptChange}
-                                    onSelectionChange={syncReferenceTrigger}
-                                    onFocus={() => setIsPromptFocused(true)}
-                                    onBlur={() => setIsPromptFocused(false)}
-                                    onKeyDown={(e) => {
-                                        if (isReferenceMenuOpen) {
-                                            if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
-                                                if (e.key === 'ArrowDown') {
-                                                    e.preventDefault();
-                                                    setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
-                                                    return;
+                        <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3 md:p-4 text-left">
+                            <div className="relative">
+                                {!prompt.trim() && !isPromptFocused && (
+                                    <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
+                                        <TextType
+                                            text={TYPED_PLACEHOLDER_SUGGESTIONS}
+                                            className="text-[16px] text-[var(--ui-text-subtle)] text-left"
+                                            typingSpeed={62}
+                                            deletingSpeed={38}
+                                            pauseDuration={2200}
+                                            showCursor
+                                            cursorCharacter="_"
+                                            cursorClassName="text-[var(--ui-text-subtle)]"
+                                            loop
+                                        />
+                                    </div>
+                                )}
+                                <div className="flex items-start gap-2 px-1">
+                                    <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                                        <Orb
+                                            className="h-full w-full"
+                                            colors={landingOrbColors}
+                                            seed={9101}
+                                            agentState={landingOrbState}
+                                            volumeMode="manual"
+                                            manualInput={landingOrbInput}
+                                            manualOutput={landingOrbOutput}
+                                        />
+                                    </div>
+                                    <ComposerInlineReferenceInput
+                                        ref={promptTextareaRef}
+                                        value={prompt}
+                                        onChange={handlePromptChange}
+                                        onSelectionChange={syncReferenceTrigger}
+                                        onFocus={() => setIsPromptFocused(true)}
+                                        onBlur={() => setIsPromptFocused(false)}
+                                        onKeyDown={(e) => {
+                                            if (isReferenceMenuOpen) {
+                                                if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                                                    if (e.key === 'ArrowDown') {
+                                                        e.preventDefault();
+                                                        setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                                                        return;
+                                                    }
+                                                    if (e.key === 'ArrowUp') {
+                                                        e.preventDefault();
+                                                        setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                                                        return;
+                                                    }
+                                                    if (e.key === 'Escape') {
+                                                        e.preventDefault();
+                                                        closeReferenceMenu();
+                                                        return;
+                                                    }
+                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                                                        if (choice?.key === 'url') openUrlReferenceInput();
+                                                        return;
+                                                    }
                                                 }
-                                                if (e.key === 'ArrowUp') {
-                                                    e.preventDefault();
-                                                    setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
-                                                    return;
-                                                }
-                                                if (e.key === 'Escape') {
+                                                if (referenceMenuMode === 'url' && e.key === 'Escape') {
                                                     e.preventDefault();
                                                     closeReferenceMenu();
                                                     return;
                                                 }
-                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                                                    if (choice?.key === 'url') openUrlReferenceInput();
-                                                    return;
-                                                }
                                             }
-                                            if (referenceMenuMode === 'url' && e.key === 'Escape') {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
                                                 e.preventDefault();
-                                                closeReferenceMenu();
-                                                return;
+                                                submit();
                                             }
-                                        }
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            submit();
-                                        }
-                                    }}
-                                    placeholder=""
-                                    placeholderClassName="px-2 py-1 text-left"
-                                    className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] border-0 focus:border-0 ring-0 focus:ring-0"
-                                />
+                                        }}
+                                        placeholder=""
+                                        placeholderClassName="px-2 py-1 text-left"
+                                        className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] border-0 focus:border-0 ring-0 focus:ring-0"
+                                    />
+                                </div>
                             </div>
-                        </div>
                         {images.length > 0 && (
                             <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
                                 {images.map((img, i) => (
@@ -918,7 +945,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         <button
                                             type="button"
                                             onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                                            className="absolute top-0 right-0 h-4 w-4 rounded-full bg-black/70 border border-[var(--ui-border-light)] text-[var(--ui-text)] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                                            className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] opacity-0 transition-opacity group-hover:opacity-100"
                                             title="Remove attachment"
                                         >
                                             <X size={10} />
@@ -1078,15 +1105,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             />
                         )}
                     </div>
+                    </div>
 
-                    <div className="mt-5 flex items-center justify-center gap-2 text-gray-400 flex-wrap">
+                    <div className="relative z-10 mt-5 flex flex-wrap items-center justify-center gap-2 text-[var(--ui-text-subtle)]">
                         {APP_SUGGESTIONS.map((chip) => (
                             <button
                                 key={chip}
                                 type="button"
                                 onClick={() => setPrompt(chip)}
                                 title={chip}
-                                className="h-9 rounded-full border border-white/15 bg-black/25 px-4 text-[14px] text-gray-200 hover:bg-white/10 transition-colors"
+                                className="h-9 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                             >
                                 {toChipLabel(chip)}
                             </button>
@@ -1107,6 +1135,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
 
                 {/*Screens demo section*/}
                 <motion.section
+                    ref={demoScreensSectionRef}
                     className="landing-page-section relative w-full max-w-none"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 36, scale: 0.985 }}
                     whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
@@ -1126,7 +1155,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     className="w-[250px] md:w-[280px] shrink-0 bg-transparent p-0 text-left transition-colors"
                                     title="Use this pattern in the prompt"
                                 >
-                                    <div className={`relative w-full aspect-[9/19.5] rounded-xl border border-white/10 overflow-hidden ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[#0f131e]'}`}>
+                                    <div className={`relative w-full aspect-[9/19.5] overflow-hidden rounded-xl border border-[var(--ui-border)] ${!item.image ? `bg-gradient-to-b ${item.accent}` : 'bg-[var(--ui-surface-2)]'}`}>
                                         {item.image && (
                                             <img src={item.image} alt={`${item.title} preview`} className="h-full w-full object-cover" />
                                         )}
@@ -1150,12 +1179,12 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         {/* <div className="mx-auto inline-flex rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-slate-300">
                             EazyUI Demo
                         </div> */}
-                        <h2 className="text-[36px] md:text-[60px] lg:text-[74px] leading-[0.98] tracking-[-0.05em] font-semibold text-white">
-                            Watch <span className="text-blue-300 italic">EazyUI</span>
+                        <h2 className="text-[36px] md:text-[60px] lg:text-[74px] leading-[0.98] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
+                            Watch <span className="text-[var(--ui-primary)] italic">EazyUI</span>
                             <br />
                             in motion.
                         </h2>
-                        <p className="mx-auto max-w-[760px] text-[16px] md:text-[19px] leading-8 text-slate-300">
+                        <p className="mx-auto max-w-[760px] text-[16px] md:text-[19px] leading-8 text-[var(--ui-text-muted)]">
                             See how the prompt flow, generated screens, and refinement loop come together in one fast, polished product experience.
                         </p>
                     </motion.div>
@@ -1170,7 +1199,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         <button
                             type="button"
                             onClick={() => onNavigate('/app')}
-                            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-5 py-3 text-[13px] font-semibold text-[#0a0b0d] hover:bg-slate-200 transition-colors"
+                            className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-text)] bg-[var(--ui-text)] px-5 py-3 text-[13px] font-semibold text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
                         >
                             <Sparkles size={16} />
                             Explore EazyUI
@@ -1269,13 +1298,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             viewport={{ once: true, amount: 0.35 }}
                             transition={{ duration: 0.78, ease: [0.22, 1, 0.36, 1] }}
                         >
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Testimonials</p>
-                            <h3 className="mt-4 text-[34px] md:text-[60px] leading-[1.02] tracking-[-0.05em] font-semibold text-white">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Testimonials</p>
+                            <h3 className="mt-4 text-[34px] md:text-[60px] leading-[1.02] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
                                 Loved by teams
                                 <br />
                                 shipping real product UI.
                             </h3>
-                            <p className="mx-auto mt-4 max-w-[640px] text-[14px] leading-7 text-slate-400 md:text-[16px]">
+                            <p className="mx-auto mt-4 max-w-[640px] text-[14px] leading-7 text-[var(--ui-text-muted)] md:text-[16px]">
                                 EazyUI helps teams move from vague product direction into stronger first passes that are actually worth reviewing.
                             </p>
                         </motion.div>
@@ -1307,7 +1336,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                 key={`${item.quote}-${rowIndex}-${index}`}
                                                 className="landing-testimonial-wall-card"
                                             >
-                                                <p className="text-[21px] leading-[1.55] tracking-[-0.025em] text-slate-100">
+                                                <p className="text-[21px] leading-[1.55] tracking-[-0.025em] text-[var(--ui-text)]">
                                                     {item.quote}
                                                 </p>
                                                 <div className="mt-8 flex items-center gap-3">
@@ -1319,8 +1348,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                         )}
                                                     </div>
                                                     <div>
-                                                        <p className="text-[14px] font-semibold text-white">{item.author}</p>
-                                                        <p className="text-[13px] text-slate-400">{item.company}</p>
+                                                        <p className="text-[14px] font-semibold text-[var(--ui-text)]">{item.author}</p>
+                                                        <p className="text-[13px] text-[var(--ui-text-muted)]">{item.company}</p>
                                                     </div>
                                                 </div>
                                             </article>
