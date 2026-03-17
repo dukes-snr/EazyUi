@@ -153,8 +153,9 @@ function Scene({
     }, []);
 
     useFrame((_, delta: number) => {
-        const mat = circleRef.current?.material;
-        if (!mat) return;
+        const mesh = circleRef.current;
+        const mat = mesh?.material;
+        if (!mat || !mesh) return;
 
         const live = colorsRef?.current;
         if (live) {
@@ -163,7 +164,7 @@ function Scene({
         }
 
         const u = mat.uniforms;
-        u.uTime.value += delta * 0.5;
+        u.uTime.value += delta * 0.95;
 
         if (u.uOpacity.value < 1) {
             u.uOpacity.value = Math.min(1, u.uOpacity.value + delta * 2);
@@ -175,35 +176,52 @@ function Scene({
             targetIn = clamp01(manualInput ?? inputVolumeRef?.current ?? getInputVolume?.() ?? 0);
             targetOut = clamp01(manualOutput ?? outputVolumeRef?.current ?? getOutputVolume?.() ?? 0);
         } else {
-            const t = u.uTime.value * 2;
+            const t = u.uTime.value * 2.6;
             if (agentRef.current === null) {
-                targetIn = 0;
-                targetOut = 0.3;
+                targetIn = clamp01(0.24 + Math.sin(t * 1.15) * 0.1 + Math.sin(t * 2.8 + 0.8) * 0.05);
+                targetOut = clamp01(0.52 + Math.sin(t * 1.45 + 0.4) * 0.12 + Math.sin(t * 3.2) * 0.05);
             } else if (agentRef.current === 'listening') {
-                targetIn = clamp01(0.55 + Math.sin(t * 3.2) * 0.35);
-                targetOut = 0.45;
+                targetIn = clamp01(0.68 + Math.sin(t * 4.2) * 0.22 + Math.sin(t * 7.4 + 0.3) * 0.08);
+                targetOut = clamp01(0.62 + Math.sin(t * 2.9 + 0.8) * 0.12);
             } else if (agentRef.current === 'talking') {
-                targetIn = clamp01(0.65 + Math.sin(t * 4.8) * 0.22);
-                targetOut = clamp01(0.75 + Math.sin(t * 3.6) * 0.22);
+                targetIn = clamp01(0.8 + Math.sin(t * 5.8) * 0.12 + Math.sin(t * 10.0) * 0.06);
+                targetOut = clamp01(0.88 + Math.sin(t * 4.2) * 0.12);
             } else {
-                const base = 0.38 + 0.07 * Math.sin(t * 0.7);
-                const wander = 0.05 * Math.sin(t * 2.1) * Math.sin(t * 0.37 + 1.2);
+                const base = 0.5 + 0.1 * Math.sin(t * 1.4);
+                const wander = 0.08 * Math.sin(t * 3.2) * Math.sin(t * 0.8 + 1.2);
                 targetIn = clamp01(base + wander);
-                targetOut = clamp01(0.48 + 0.12 * Math.sin(t * 1.05 + 0.6));
+                targetOut = clamp01(0.7 + 0.14 * Math.sin(t * 1.8 + 0.6) + 0.04 * Math.sin(t * 5.0));
             }
         }
 
-        curInRef.current += (targetIn - curInRef.current) * 0.2;
-        curOutRef.current += (targetOut - curOutRef.current) * 0.2;
+        curInRef.current += (targetIn - curInRef.current) * 0.24;
+        curOutRef.current += (targetOut - curOutRef.current) * 0.24;
 
-        const targetSpeed = 0.1 + (1 - Math.pow(curOutRef.current - 1, 2)) * 0.9;
-        animSpeedRef.current += (targetSpeed - animSpeedRef.current) * 0.12;
+        const targetSpeed = 0.42 + curOutRef.current * 1.28;
+        animSpeedRef.current += (targetSpeed - animSpeedRef.current) * 0.16;
 
         u.uAnimation.value += delta * animSpeedRef.current;
         u.uInputVolume.value = curInRef.current;
         u.uOutputVolume.value = curOutRef.current;
         u.uColor1.value.lerp(targetColor1Ref.current, 0.08);
         u.uColor2.value.lerp(targetColor2Ref.current, 0.08);
+
+        const pulseTime = u.uTime.value;
+        const stateScaleBoost = agentRef.current === 'talking'
+            ? 0.07
+            : agentRef.current === 'thinking'
+                ? 0.05
+                : agentRef.current === 'listening'
+                    ? 0.06
+                    : 0.035;
+        const pulse = 1
+            + Math.sin(pulseTime * 2.4) * 0.024
+            + Math.sin(pulseTime * 5.6 + 0.8) * 0.012
+            + curOutRef.current * stateScaleBoost;
+        mesh.scale.setScalar(pulse);
+        mesh.rotation.z = Math.sin(pulseTime * 0.72) * 0.2 + curOutRef.current * 0.08;
+        mesh.position.x = Math.sin(pulseTime * 1.14) * 0.05;
+        mesh.position.y = Math.cos(pulseTime * 0.94 + 0.6) * 0.04;
     });
 
     useEffect(() => {
@@ -391,8 +409,8 @@ void main() {
         abs(theta / PI - 1.0)
     );
 
-    float noise = flow(decomposed, radius * 0.03 - uAnimation * 0.2) - 0.5;
-    theta += noise * mix(0.08, 0.25, uOutputVolume);
+    float noise = flow(decomposed, radius * 0.05 - uAnimation * 0.32) - 0.5;
+    theta += noise * mix(0.16, 0.42, uOutputVolume);
 
     vec4 color = vec4(1.0, 1.0, 1.0, 1.0);
 
@@ -400,16 +418,16 @@ void main() {
 
     float centers[7];
     for (int i = 0; i < 7; i++) {
-        centers[i] = originalCenters[i] + 0.5 * sin(uTime / 20.0 + uOffsets[i]);
+        centers[i] = originalCenters[i] + 0.8 * sin(uTime / 10.0 + uOffsets[i]);
     }
 
     float a, b;
     vec4 ovalColor;
 
     for (int i = 0; i < 7; i++) {
-        float noiseSample = texture(uPerlinTexture, vec2(mod(centers[i] + uTime * 0.05, 1.0), 0.5)).r;
-        a = 0.5 + noiseSample * 0.3;
-        b = noiseSample * mix(3.5, 2.5, uInputVolume);
+        float noiseSample = texture(uPerlinTexture, vec2(mod(centers[i] + uTime * 0.11, 1.0), 0.5)).r;
+        a = 0.44 + noiseSample * 0.42;
+        b = noiseSample * mix(4.15, 2.85, uInputVolume);
         bool reverseGradient = (i % 2 == 1);
 
         float distTheta = min(
@@ -432,10 +450,10 @@ void main() {
     float ringRadius1 = sharpRing(decomposed, uTime * 0.1);
     float ringRadius2 = smoothRing(decomposed, uTime * 0.1);
     
-    float inputRadius1 = radius + uInputVolume * 0.2;
-    float inputRadius2 = radius + uInputVolume * 0.15;
-    float opacity1 = mix(0.2, 0.6, uInputVolume);
-    float opacity2 = mix(0.15, 0.45, uInputVolume);
+    float inputRadius1 = radius + uInputVolume * 0.28;
+    float inputRadius2 = radius + uInputVolume * 0.22;
+    float opacity1 = mix(0.3, 0.88, uInputVolume);
+    float opacity2 = mix(0.22, 0.62, uInputVolume);
 
     float ringAlpha1 = (inputRadius2 >= ringRadius1) ? opacity1 : 0.0;
     float ringAlpha2 = smoothstep(ringRadius2 - 0.05, ringRadius2 + 0.05, inputRadius1) * opacity2;
@@ -453,9 +471,11 @@ void main() {
     float luminance = mix(color.r, 1.0 - color.r, uInverted);
     color.rgb = colorRamp(luminance, color1, color2, color3, color4);
 
+    float aura = smoothstep(1.18, 0.48, radius) * smoothstep(0.03, 0.42, radius) * (0.08 + uOutputVolume * 0.18);
+    color.rgb = mix(color.rgb, mix(uColor1, uColor2, 0.62), aura);
+
     color.a *= uOpacity;
 
     gl_FragColor = color;
 }
 `;
-

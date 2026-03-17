@@ -163,6 +163,18 @@ export interface AccountWelcomeEmailResponse {
     success: boolean;
 }
 
+export interface ContactRequestPayload {
+    name: string;
+    email: string;
+    company?: string;
+    reason: string;
+    message: string;
+}
+
+export interface ContactRequestResponse {
+    success: boolean;
+}
+
 export interface HtmlDesignSpec {
     id: string;
     name: string;
@@ -1078,6 +1090,14 @@ class ApiClient {
         return this.request<AccountWelcomeEmailResponse>('/account/welcome-email', {
             method: 'POST',
             body: JSON.stringify({ email, uid }),
+            signal,
+        }, false);
+    }
+
+    async submitContactRequest(payload: ContactRequestPayload, signal?: AbortSignal): Promise<ContactRequestResponse> {
+        return this.request<ContactRequestResponse>('/contact/request', {
+            method: 'POST',
+            body: JSON.stringify(payload),
             signal,
         }, false);
     }

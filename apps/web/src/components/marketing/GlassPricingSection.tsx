@@ -225,7 +225,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                         type="button"
                                         onClick={() => setCadence(option)}
                                         className={`min-w-[110px] rounded-full px-4 py-2 text-[13px] font-medium transition-colors ${cadence === option
-                                            ? 'bg-[var(--ui-text)] text-[var(--ui-surface-1)]'
+                                            ? 'bg-[var(--ui-primary)] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)]'
                                             : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]'
                                             }`}
                                     >
@@ -274,7 +274,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                             onClick={() => handleTierAction(tier.key)}
                                             className={`mt-6 h-11 w-full rounded-[12px] border text-[13px] font-semibold transition-colors ${tier.featured
                                                 ? 'border-[var(--ui-text)] bg-[var(--ui-text)] text-[var(--ui-surface-1)] hover:opacity-90'
-                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]'
+                                                : 'border-[var(--ui-primary)] bg-[var(--ui-surface-2)] text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))]'
                                                 }`}
                                         >
                                             {tier.cta}

@@ -1,79 +1,122 @@
-import { ArrowRight, Check, LayoutTemplate, PanelsTopLeft, Smartphone } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
+import { apiClient } from '../../api/client';
 
 type TemplatesPageProps = {
     onNavigate: (path: string) => void;
     onOpenApp: () => void;
 };
 
-const TEMPLATE_CARDS = [
-    { title: 'SaaS Workspace', type: 'Desktop', detail: 'KPI header, command palette, dense data table.' },
-    { title: 'Commerce Mobile', type: 'Mobile', detail: 'Product feed, sticky cart rail, fast checkout.' },
-    { title: 'Fintech Flow', type: 'Hybrid', detail: 'Wallet summary, transfer flow, card controls.' },
-] as const;
-
 export function TemplatesPage({ onNavigate, onOpenApp }: TemplatesPageProps) {
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+    const [email, setEmail] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState<string | null>(null);
+
+    const handleNotify = async () => {
+        const cleanEmail = email.trim();
+        if (!cleanEmail || busy) return;
+
+        try {
+            setBusy(true);
+            setStatus(null);
+            await apiClient.subscribeToNewsletter(cleanEmail);
+            setEmail('');
+            setStatus('You are on the list. We will email you when templates go live.');
+        } catch (error) {
+            setStatus((error as Error).message || 'Could not sign you up right now.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
     return (
-        <div className="h-screen w-screen overflow-y-auto bg-[#070b12] text-white">
-            <div className="pointer-events-none fixed inset-0">
-                <div className="absolute inset-0 bg-[radial-gradient(60%_40%_at_18%_0%,rgba(0,214,255,0.18),rgba(7,11,18,0)_64%),radial-gradient(60%_40%_at_84%_12%,rgba(255,194,112,0.15),rgba(7,11,18,0)_70%)]" />
-            </div>
+        <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)]">
+            <MarketingHeader onNavigate={onNavigate} onOpenApp={onOpenApp} scrollContainerRef={scrollContainerRef} />
 
-            <MarketingHeader onNavigate={onNavigate} onOpenApp={onOpenApp} />
+            <main className="relative min-h-[calc(100vh-56px)] overflow-hidden bg-[var(--ui-surface-1)] px-4 pb-12 pt-6 md:px-6 md:pb-16 md:pt-10">
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                    <div className="absolute -left-10 top-[16%] h-40 w-40 rounded-[45%] bg-[radial-gradient(circle_at_35%_30%,rgba(97,195,120,0.95),rgba(75,141,88,0.78)_58%,rgba(75,141,88,0)_72%)] blur-[1px] md:h-56 md:w-56" />
+                    <div className="absolute -left-2 top-[20%] h-32 w-20 rotate-[-24deg] rounded-[55%] bg-[linear-gradient(180deg,rgba(152,206,143,0.96),rgba(90,155,93,0.86))] blur-[2px] md:h-40 md:w-24" />
+                    <div className="absolute bottom-[14%] left-[2%] h-24 w-24 rounded-full bg-[radial-gradient(circle_at_35%_30%,rgba(255,228,94,0.98),rgba(255,185,62,0.92)_64%,rgba(255,155,0,0.2)_78%)] shadow-[0_18px_50px_rgba(255,184,0,0.18)] md:h-32 md:w-32" />
+                    <div className="absolute bottom-[12%] left-[5%] h-14 w-14 rounded-[42%] border border-white/30 bg-[radial-gradient(circle_at_45%_35%,rgba(255,201,86,0.98),rgba(255,140,36,0.9)_68%)] md:h-16 md:w-16" />
 
-            <main className="relative z-10 mx-auto max-w-[1180px] px-4 md:px-6 pt-10 pb-20">
-                <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-                    <article className="rounded-[30px] border border-white/10 bg-white/[0.03] p-7 md:p-10">
-                        <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.1em] text-cyan-100">
-                            <LayoutTemplate size={13} /> Templates
-                        </p>
-                        <h1 className="mt-4 text-[38px] md:text-[58px] tracking-[-0.03em] leading-[1.02] font-semibold max-w-[12ch]">
-                            Production page starters for real shipping teams.
+                    <div className="absolute right-[4%] top-[13%] h-5 w-5 rotate-[18deg] rounded-[35%] bg-[radial-gradient(circle_at_35%_35%,rgba(224,65,52,0.98),rgba(158,17,9,0.94))] shadow-[0_10px_24px_rgba(158,17,9,0.18)] md:h-6 md:w-6" />
+                    <div className="absolute right-[8%] top-[16%] h-4 w-4 rounded-full bg-[radial-gradient(circle_at_35%_35%,rgba(255,98,82,0.96),rgba(190,30,23,0.92))] md:h-5 md:w-5" />
+                    <div className="absolute right-[6%] top-[20%] h-16 w-2 rotate-[34deg] rounded-full bg-[linear-gradient(180deg,rgba(173,18,18,0.98),rgba(113,5,5,0.92))] md:h-20 md:w-3" />
+
+                    <div className="absolute bottom-[10%] right-[-4%] h-32 w-36 rotate-[12deg] rounded-[2.5rem] bg-[linear-gradient(135deg,rgba(255,230,112,0.98),rgba(255,197,73,0.92))] shadow-[0_24px_60px_rgba(255,190,74,0.2)] md:h-44 md:w-52" />
+                    <div className="absolute bottom-[13%] right-[3%] h-28 w-6 rotate-[20deg] rounded-full bg-[linear-gradient(180deg,rgba(245,255,229,0.96),rgba(227,239,211,0.88))] md:h-40 md:w-8" />
+                    <div className="absolute bottom-[18%] right-[1%] h-10 w-10 rounded-full bg-white/70 blur-[6px]" />
+                </div>
+
+                <section className="relative mx-auto flex min-h-[calc(100vh-120px)] max-w-[1040px] flex-col items-center justify-center text-center">
+                    <div className="max-w-[760px]">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,transparent)] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                            <Sparkles size={12} />
+                            Coming Soon
+                        </div>
+
+                        <h1 className="mx-auto mt-6 max-w-[10ch] text-[48px] font-semibold leading-[0.94] tracking-[-0.06em] text-[var(--ui-text)] md:text-[84px]">
+                            Hey!
+                            <br />
+                            We are cooking it up...
                         </h1>
-                        <p className="mt-4 text-[15px] text-slate-300 max-w-[58ch] leading-relaxed">
-                            Pick a base, inject your prompt, and instantly reshape layout, hierarchy, and interaction density.
+
+                        <p className="mx-auto mt-5 max-w-[42ch] text-[16px] leading-8 text-[var(--ui-text-muted)] md:text-[18px]">
+                            The template library is almost ready. We are polishing the first set so they feel worth starting from, not just nice to browse.
                         </p>
-                        <div className="mt-6 grid gap-2">
-                            {['Landing, onboarding, dashboard, settings', 'Tuned spacing + typography presets', 'Web + mobile-first structure'].map((line) => (
-                                <p key={line} className="text-[13px] text-slate-200 inline-flex items-center gap-2">
-                                    <span className="h-5 w-5 rounded-full border border-emerald-300/40 bg-emerald-300/10 inline-flex items-center justify-center text-emerald-100">
-                                        <Check size={12} />
-                                    </span>
-                                    {line}
-                                </p>
-                            ))}
-                        </div>
-                    </article>
 
-                    <aside className="rounded-[30px] border border-white/10 bg-[#0b1220]/85 p-6">
-                        <p className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Template Match Rate</p>
-                        <p className="mt-2 text-[56px] leading-none font-semibold text-cyan-100">93%</p>
-                        <p className="mt-2 text-[13px] text-slate-300">First-pass acceptance by teams using prompt + template pairing.</p>
-                        <div className="mt-6 h-40 rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-300/15 via-transparent to-amber-200/10 p-4">
-                            <p className="text-[11px] uppercase tracking-[0.1em] text-slate-300">Best For</p>
-                            <div className="mt-4 grid grid-cols-2 gap-2 text-[12px] text-slate-200">
-                                <span className="rounded-full border border-white/15 px-2 py-1 inline-flex items-center gap-1"><PanelsTopLeft size={12} /> SaaS</span>
-                                <span className="rounded-full border border-white/15 px-2 py-1 inline-flex items-center gap-1"><Smartphone size={12} /> Mobile</span>
-                            </div>
+                        <div className="mx-auto mt-10 flex w-full max-w-[560px] flex-col gap-3 sm:flex-row sm:items-stretch">
+                            <label className="flex-1">
+                                <span className="sr-only">Email address</span>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(event) => setEmail(event.target.value)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                            event.preventDefault();
+                                            void handleNotify();
+                                        }
+                                    }}
+                                    placeholder="Enter your email"
+                                    className="h-14 w-full rounded-[1.1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-white px-5 text-[15px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)] dark:bg-[var(--ui-surface-2)]"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => void handleNotify()}
+                                disabled={busy || !email.trim()}
+                                className="inline-flex h-14 min-w-[180px] items-center justify-center gap-2 rounded-[1.1rem] bg-[var(--ui-primary)] px-6 text-[13px] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_18px_40px_color-mix(in_srgb,var(--ui-primary)_30%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+                                Notify Me
+                            </button>
                         </div>
-                    </aside>
-                </section>
 
-                <section className="mt-8 grid gap-4 md:grid-cols-3">
-                    {TEMPLATE_CARDS.map((card) => (
-                        <article key={card.title} className="rounded-2xl border border-white/10 bg-black/25 p-5">
-                            <p className="inline-flex rounded-full border border-indigo-300/40 bg-indigo-300/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.1em] text-indigo-100">{card.type}</p>
-                            <h3 className="mt-3 text-[22px] leading-[1.15] font-semibold">{card.title}</h3>
-                            <p className="mt-2 text-[14px] text-slate-300">{card.detail}</p>
+                        {status ? (
+                            <p className="mx-auto mt-4 max-w-[38ch] text-[13px] leading-6 text-[var(--ui-text-muted)]">
+                                {status}
+                            </p>
+                        ) : null}
+
+                        <div className="mt-14 flex flex-col items-center justify-between gap-5 text-[12px] text-[var(--ui-text-subtle)] md:flex-row">
+                            <button type="button" onClick={() => onNavigate('/learn')} className="transition-colors hover:text-[var(--ui-text)]">
+                                Privacy Policy
+                            </button>
+                            <p>Made with EazyUI</p>
                             <button
                                 type="button"
                                 onClick={onOpenApp}
-                                className="mt-5 h-9 rounded-full bg-white px-4 text-[11px] uppercase tracking-[0.1em] text-[#0b1120] font-semibold hover:bg-slate-200 transition-colors inline-flex items-center gap-1"
+                                className="inline-flex items-center gap-2 transition-colors hover:text-[var(--ui-primary)]"
                             >
-                                Use template <ArrowRight size={12} />
+                                Open app
+                                <ArrowRight size={13} />
                             </button>
-                        </article>
-                    ))}
+                        </div>
+                    </div>
                 </section>
             </main>
         </div>

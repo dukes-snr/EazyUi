@@ -14,6 +14,7 @@ import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
 import { ChangelogPage } from './components/marketing/ChangelogPage';
+import { ContactPage } from './components/marketing/ContactPage';
 import { ProjectSettingsPage } from './components/settings/ProjectSettingsPage';
 import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { ToastViewport } from './components/ui/ToastViewport';
@@ -41,6 +42,7 @@ type RouteInfo =
     | { kind: 'learn' }
     | { kind: 'pricing' }
     | { kind: 'changelog' }
+    | { kind: 'contact' }
     | { kind: 'app-home' }
     | { kind: 'app-projects' }
     | { kind: 'app-project-new' }
@@ -98,6 +100,7 @@ function getRouteFromPath(): RouteInfo {
     if (path === '/learn') return { kind: 'learn' };
     if (path === '/pricing') return { kind: 'pricing' };
     if (path === '/changelog') return { kind: 'changelog' };
+    if (path === '/contact') return { kind: 'contact' };
 
     if (path === '/workspace') return { kind: 'app-home' }; // legacy route support
     if (path === '/app') return { kind: 'app-home' };
@@ -785,6 +788,9 @@ function App() {
         }
         if (route.kind === 'changelog') {
             return <ChangelogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        }
+        if (route.kind === 'contact') {
+            return <ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
         return <LearnPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
     }

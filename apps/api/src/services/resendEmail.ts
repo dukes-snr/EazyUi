@@ -144,3 +144,59 @@ export async function sendAccountCreationWelcomeEmail(email: string) {
         }),
     });
 }
+
+export async function sendContactInquiryEmail(params: {
+    name: string;
+    email: string;
+    company?: string;
+    reason: string;
+    message: string;
+}) {
+    const resend = getResendClient();
+    const cleanEmail = params.email.trim().toLowerCase();
+    const cleanName = params.name.trim();
+    const cleanCompany = (params.company || '').trim();
+    const cleanReason = params.reason.trim();
+    const cleanMessage = params.message.trim();
+    const displayName = cleanName || inferDisplayName(cleanEmail);
+
+    const ownerMessageHtml = `
+        <div style="font-family:Inter,Segoe UI,Arial,sans-serif;color:#111827;line-height:1.7;">
+            <p>A new contact form submission was sent from the EazyUI website.</p>
+            <p><strong>Name:</strong> ${escapeHtml(cleanName)}</p>
+            <p><strong>Email:</strong> ${escapeHtml(cleanEmail)}</p>
+            <p><strong>Company:</strong> ${escapeHtml(cleanCompany || 'Not provided')}</p>
+            <p><strong>Reason:</strong> ${escapeHtml(cleanReason)}</p>
+            <p><strong>Message:</strong></p>
+            <div style="padding:14px 16px;border-radius:14px;background:#F3F4F6;border:1px solid #E5E7EB;white-space:pre-wrap;">${escapeHtml(cleanMessage)}</div>
+        </div>
+    `;
+
+    const [ownerDelivery] = await Promise.all([
+        resend.emails.send({
+            from: RESEND_FROM_EMAIL,
+            to: RESEND_AUDIENCE_EMAIL,
+            replyTo: cleanEmail,
+            subject: `New contact inquiry: ${cleanReason}`,
+            html: ownerMessageHtml,
+        }),
+        resend.emails.send({
+            from: RESEND_FROM_EMAIL,
+            to: cleanEmail,
+            subject: `${displayName}, we received your EazyUI message`,
+            html: renderEmailShell({
+                eyebrow: 'Contact Request',
+                title: `Thanks, ${displayName}`,
+                intro: 'Your message has been received by the EazyUI team. We will review the reason you selected and follow up from a real person as soon as possible.',
+                bullets: [
+                    `Reason: ${cleanReason}`,
+                    cleanCompany ? `Company: ${cleanCompany}` : 'Company: Not provided',
+                    'Your message was successfully delivered through our contact workflow',
+                ],
+                closing: 'We appreciate the context. It helps us reply with something more useful than a generic response.',
+            }),
+        }),
+    ]);
+
+    return ownerDelivery;
+}

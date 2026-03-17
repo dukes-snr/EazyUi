@@ -65,7 +65,7 @@ import {
     revokeMcpApiKey,
 } from './services/mcpApiKeys.js';
 import { captureServerAnalyticsEvent } from './services/posthog.js';
-import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
+import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendContactInquiryEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
 
 function loadEnv() {
     const candidates = [
@@ -1137,6 +1137,60 @@ fastify.post('/api/account/welcome-email', async (request, reply) => {
         fastify.log.error({ traceId: request.id, route: '/api/account/welcome-email', err: error }, 'account welcome email failed');
         return reply.status(500).send({
             error: 'Failed to send welcome email',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post('/api/contact/request', async (request, reply) => {
+    const body = (request.body ?? {}) as {
+        name?: unknown;
+        email?: unknown;
+        company?: unknown;
+        reason?: unknown;
+        message?: unknown;
+    };
+
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const company = typeof body.company === 'string' ? body.company.trim() : '';
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+    if (!name) {
+        return reply.status(400).send({ error: 'name is required' });
+    }
+    if (!email) {
+        return reply.status(400).send({ error: 'email is required' });
+    }
+    if (!reason) {
+        return reply.status(400).send({ error: 'reason is required' });
+    }
+    if (!message) {
+        return reply.status(400).send({ error: 'message is required' });
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email)) {
+        return reply.status(400).send({ error: 'Enter a valid email address' });
+    }
+
+    try {
+        await sendContactInquiryEmail({ name, email, company, reason, message });
+        captureServerAnalyticsEvent({
+            distinctId: email,
+            event: 'contact_request_submitted',
+            properties: {
+                reason,
+                company: company || undefined,
+                traceId: request.id,
+            },
+        });
+        return reply.send({ success: true });
+    } catch (error) {
+        fastify.log.error({ traceId: request.id, route: '/api/contact/request', err: error }, 'contact inquiry email failed');
+        return reply.status(500).send({
+            error: 'Failed to send contact request',
             message: (error as Error).message,
         });
     }

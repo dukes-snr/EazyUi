@@ -1,8 +1,11 @@
 import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient, type BillingSummary } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import logo from '../../assets/Ui-logo.png';
+import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
+import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
 import { useUiStore } from '../../stores';
@@ -113,6 +116,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
   const isLight = theme === 'light';
+  const shouldReduceMotion = useReducedMotion();
+  const workspaceWordmark = isLight ? eazyuiWordmarkLight : eazyuiWordmark;
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
   const authEmail = authUser?.email || 'No email';
   const authPhotoUrl = authUser?.photoURL
@@ -140,14 +145,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           ? Smile
           : CircleStar;
   const styleButtonTone = stylePreset === 'minimal'
-    ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
+    ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))]'
     : stylePreset === 'vibrant'
       ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
       : stylePreset === 'luxury'
         ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
         : stylePreset === 'playful'
           ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-        : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+        : 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[color:color-mix(in_srgb,var(--ui-primary)_62%,white)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)]';
   const sidebarNavItems = [
     // {
     //   id: 'workspace-home',
@@ -194,9 +199,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const shellBadgeClassName = isLight
     ? 'border-slate-300/70 bg-white/85 text-slate-700'
     : 'border-white/10 bg-white/[0.04] text-slate-300';
-  const accentButtonClassName = isLight
-    ? 'border-indigo-200 bg-indigo-500 text-white hover:bg-indigo-600'
-    : 'border-indigo-300/10 bg-indigo-500 text-white hover:bg-indigo-400';
+  const accentButtonClassName = 'border-[var(--ui-primary)] bg-[var(--ui-primary)] text-white shadow-[0_14px_34px_color-mix(in_srgb,var(--ui-primary)_26%,transparent)] hover:bg-[var(--ui-primary-hover)]';
   const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
 
   async function loadProjects() {
@@ -767,26 +770,58 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
 
             <div className="flex-1 overflow-y-auto">
               <main className="relative mx-auto max-w-[1200px] px-4 py-8 md:px-7 md:py-10">
-                <section className="mx-auto max-w-[920px] text-center">
-                  <p className="inline-flex items-center gap-2 rounded-full border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                <motion.section
+                  className="mx-auto max-w-[920px] text-center"
+                  initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
+                  animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  <motion.p
+                    className="inline-flex items-center gap-2 rounded-full border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-primary)]"
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
+                    animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    transition={{ duration: 0.48, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
+                  >
                     <Sparkles size={12} />
                     Build faster in one workspace
-                  </p>
-                  <p className="mt-5 text-[42px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] md:text-[58px]">
-                    EazyUI Projects
-                  </p>
-                  <p className="mt-3 text-[15px] leading-7 text-[var(--ui-text-muted)]">
+                  </motion.p>
+                  <motion.p
+                    className="mt-5 text-[42px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] md:text-[58px]"
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 16 }}
+                    animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    transition={{ duration: 0.58, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <span className="relative inline-flex align-baseline">
+                      <span className="sr-only">EazyUI</span>
+                      <img
+                        src={workspaceWordmark}
+                        alt=""
+                        aria-hidden="true"
+                        className="relative top-[16px] md:top-[20px] -right-[10px] h-[1.78em] w-auto  object-contain"
+                      />
+                    </span>{' '}
+                    Projects
+                  </motion.p>
+                  <motion.p
+                    className="mt-3 text-[15px] leading-7 text-[var(--ui-text-muted)]"
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 14 }}
+                    animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    transition={{ duration: 0.52, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                  >
                     Type what you want to build and start a new project instantly.
-                  </p>
+                  </motion.p>
 
-                  <form
+                  <motion.form
                     className="mt-8"
                     onSubmit={(event) => {
                       event.preventDefault();
                       handleCreateFromPrompt();
                     }}
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 20, scale: 0.985 }}
+                    animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.62, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
                   >
-            <div className="relative mx-auto w-full rounded-[28px] border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] p-3">
+            <div className="relative mx-auto w-full rounded-[28px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-3 md:p-4 text-left">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -795,104 +830,100 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 onChange={handleFileSelect}
                 className="hidden"
               />
+              <div className="flex items-start gap-2 px-1">
+                <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
+                  <Orb
+                    className="h-full w-full"
+                    colors={workspaceOrbColors}
+                    seed={7307}
+                    agentState={workspaceOrbState}
+                    volumeMode="manual"
+                    manualInput={workspaceOrbInput}
+                    manualOutput={workspaceOrbOutput}
+                  />
+                </div>
+                <ComposerInlineReferenceInput
+                  ref={starterPromptRef}
+                  value={starterPrompt}
+                  onChange={(nextValue, cursor) => {
+                    setStarterPrompt(nextValue);
+                    syncReferenceTrigger(nextValue, cursor);
+                  }}
+                  onSelectionChange={syncReferenceTrigger}
+                  onKeyDown={(event) => {
+                    if (isReferenceMenuOpen) {
+                      if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                        if (event.key === 'ArrowDown') {
+                          event.preventDefault();
+                          setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                          return;
+                        }
+                        if (event.key === 'ArrowUp') {
+                          event.preventDefault();
+                          setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                          return;
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          closeReferenceMenu();
+                          return;
+                        }
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                          if (choice?.key === 'url') openUrlReferenceInput();
+                          return;
+                        }
+                      }
+                      if (referenceMenuMode === 'url' && event.key === 'Escape') {
+                        event.preventDefault();
+                        closeReferenceMenu();
+                        return;
+                      }
+                    }
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      handleCreateFromPrompt();
+                    }
+                  }}
+                  placeholder="What do you want to create?"
+                  placeholderClassName="px-2 py-1 text-left"
+                  className="no-focus-ring w-full min-h-[72px] max-h-[220px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0"
+                />
+              </div>
               {starterImages.length > 0 && (
-                <div className="mb-2 flex gap-2 overflow-x-auto border-b border-[var(--ui-border)] px-1 pb-2">
+                <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
                   {starterImages.map((img, idx) => (
-                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[var(--ui-border)]">
-                      <img src={img} alt="upload" className="w-full h-full object-cover" />
+                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group h-10 w-10 shrink-0">
+                      <img
+                        src={img}
+                        alt="upload"
+                        className="h-10 w-10 rounded-md border border-[var(--ui-border)] object-cover"
+                      />
                       <button
                         type="button"
                         onClick={() => setStarterImages((prev) => prev.filter((_, i) => i !== idx))}
-                        className="absolute inset-0 bg-black/45 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] opacity-0 transition-opacity group-hover:opacity-100"
                         title="Remove attachment"
                       >
-                        <X size={14} className="text-white" />
+                        <X size={10} />
                       </button>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="flex items-end gap-2 rounded-2xl px-1">
-                <div className="relative flex min-w-0 flex-1 items-start gap-2">
-                  <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
-                    <Orb
-                      className="h-full w-full"
-                      colors={workspaceOrbColors}
-                      seed={7307}
-                      agentState={workspaceOrbState}
-                      volumeMode="manual"
-                      manualInput={workspaceOrbInput}
-                      manualOutput={workspaceOrbOutput}
-                    />
-                  </div>
-                  <ComposerInlineReferenceInput
-                    ref={starterPromptRef}
-                    value={starterPrompt}
-                    onChange={(nextValue, cursor) => {
-                      setStarterPrompt(nextValue);
-                      syncReferenceTrigger(nextValue, cursor);
-                    }}
-                    onSelectionChange={syncReferenceTrigger}
-                    onKeyDown={(event) => {
-                      if (isReferenceMenuOpen) {
-                        if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
-                          if (event.key === 'ArrowDown') {
-                            event.preventDefault();
-                            setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
-                            return;
-                          }
-                          if (event.key === 'ArrowUp') {
-                            event.preventDefault();
-                            setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
-                            return;
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            closeReferenceMenu();
-                            return;
-                          }
-                          if (event.key === 'Enter' && !event.shiftKey) {
-                            event.preventDefault();
-                            const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                            if (choice?.key === 'url') openUrlReferenceInput();
-                            return;
-                          }
-                        }
-                        if (referenceMenuMode === 'url' && event.key === 'Escape') {
-                          event.preventDefault();
-                          closeReferenceMenu();
-                          return;
-                        }
-                      }
-                      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                        event.preventDefault();
-                        handleCreateFromPrompt();
-                      }
-                    }}
-                    placeholder="What do you want to create?"
-                    placeholderClassName="px-3 py-2 text-left"
-                    className="min-h-[64px] max-h-[220px] w-full overflow-y-auto border-0 bg-transparent px-3 py-2 text-[16px] leading-relaxed text-[var(--ui-text)] focus:outline-none focus:ring-0"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={!starterPrompt.trim() || creatingFromPrompt}
-                  className={`h-10 w-10 shrink-0 rounded-[14px] border flex items-center justify-center transition-all disabled:opacity-40 ${accentButtonClassName}`}
-                  title="Create project from request"
-                >
-                  {creatingFromPrompt ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={18} />}
-                </button>
-              </div>
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
                 <div className="flex items-center gap-2">
-                  <button
+                  <motion.button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] transition-all hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]"
+                    className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                     title="Add image"
+                    whileHover={shouldReduceMotion ? undefined : { y: -1 }}
+                    whileTap={shouldReduceMotion ? undefined : { scale: 0.97 }}
                   >
                     <Plus size={18} />
-                  </button>
+                  </motion.button>
                   <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                       <button
@@ -900,7 +931,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         type="button"
                         onClick={() => setDeviceType(p)}
                         className={`p-1.5 rounded-full transition-all ${deviceType === p
-                          ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-sm'
+                          ? 'bg-[var(--ui-primary)] text-white shadow-[0_8px_22px_color-mix(in_srgb,var(--ui-primary)_20%,transparent)]'
                           : 'text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text-muted)]'
                           }`}
                         title={`Generate for ${p}`}
@@ -912,78 +943,90 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
-                  <button
-                    type="button"
-                    onClick={() => setModelProfile('fast')}
-                    className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                      ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
-                      : 'text-amber-400 hover:bg-[var(--ui-surface-4)] hover:text-amber-200'
-                      }`}
-                    title="Fast mode"
-                  >
-                    <Zap size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModelProfile('quality')}
-                    className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                      ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
-                      : 'text-indigo-300 hover:bg-[var(--ui-surface-4)] hover:text-indigo-100'
-                      }`}
-                    title="Quality mode"
-                  >
-                    <Sparkles size={12} />
-                  </button>
-                </div>
-                <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowStyleMenu((open) => !open)}
-                    className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
-                    title="Select style preset"
-                  >
-                    <StyleIcon size={14} />
-                  </button>
-                  {showStyleMenu && (
-                    <div className="absolute bottom-12 right-0 w-56 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
-                      {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setStylePreset(preset)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                            ? 'bg-indigo-500/20 text-[var(--ui-text)]'
-                            : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
-                            }`}
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                      <div className="mt-2 border-t border-[var(--ui-border)] pt-2 px-1">
-                        <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
-                          <span>Temporary</span>
-                          <span>{modelTemperature.toFixed(2)}</span>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
+                    <button
+                      type="button"
+                      onClick={() => setModelProfile('fast')}
+                      className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
+                        ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
+                        : 'text-amber-400 hover:bg-[var(--ui-surface-4)] hover:text-amber-200'
+                        }`}
+                      title="Fast mode"
+                    >
+                      <Zap size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModelProfile('quality')}
+                      className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
+                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] text-[var(--ui-text)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
+                        : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-primary)]'
+                        }`}
+                      title="Quality mode"
+                    >
+                      <Sparkles size={12} />
+                    </button>
+                  </div>
+                  <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowStyleMenu((open) => !open)}
+                      className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
+                      title="Select style preset"
+                    >
+                      <StyleIcon size={14} />
+                    </button>
+                    {showStyleMenu && (
+                      <div className="absolute bottom-12 right-0 w-56 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
+                        {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setStylePreset(preset)}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
+                              ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]'
+                              : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
+                              }`}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                        <div className="mt-2 border-t border-[var(--ui-border)] pt-2 px-1">
+                          <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
+                            <span>Temporary</span>
+                            <span>{modelTemperature.toFixed(2)}</span>
+                          </div>
+                          <label className="mt-1.5 block text-[11px] text-[var(--ui-text-muted)]">
+                            Temperature
+                            <input
+                              type="range"
+                              min={0}
+                              max={2}
+                              step={0.01}
+                              value={modelTemperature}
+                              onChange={(event) => {
+                                const numeric = Number(event.target.value);
+                                if (!Number.isFinite(numeric)) return;
+                                setModelTemperature(Math.max(0, Math.min(2, numeric)));
+                              }}
+                              className="mt-2 w-full accent-[var(--ui-primary)] cursor-pointer"
+                            />
+                          </label>
                         </div>
-                        <label className="mt-1.5 block text-[11px] text-[var(--ui-text-muted)]">
-                          Temperature
-                          <input
-                            type="range"
-                            min={0}
-                            max={2}
-                            step={0.01}
-                            value={modelTemperature}
-                            onChange={(event) => {
-                              const numeric = Number(event.target.value);
-                              if (!Number.isFinite(numeric)) return;
-                              setModelTemperature(Math.max(0, Math.min(2, numeric)));
-                            }}
-                            className="mt-2 w-full accent-[var(--ui-primary)] cursor-pointer"
-                          />
-                        </label>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                  <motion.button
+                    type="submit"
+                    disabled={!starterPrompt.trim() || creatingFromPrompt}
+                    className={`h-10 w-10 shrink-0 rounded-full border flex items-center justify-center transition-all disabled:opacity-40 ${accentButtonClassName}`}
+                    title="Create project from request"
+                    whileHover={shouldReduceMotion ? undefined : { y: -1, scale: 1.02 }}
+                    whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
+                  >
+                    {creatingFromPrompt ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={15} />}
+                  </motion.button>
                 </div>
               </div>
               {isReferenceMenuOpen && (
@@ -1005,10 +1048,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 />
               )}
                     </div>
-                  </form>
-                </section>
+                  </motion.form>
+                </motion.section>
 
-                <section className="mt-16 md:mt-20">
+                <motion.section
+                  className="mt-16 md:mt-20"
+                  initial={shouldReduceMotion ? false : { opacity: 0, y: 22 }}
+                  animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                  transition={{ duration: 0.58, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                >
           <h1 className="text-[34px] md:text-[52px] leading-[0.96] font-semibold tracking-[-0.03em]">Your Projects</h1>
           <p className="mt-3 text-sm text-[var(--ui-text-muted)]">Open, continue, or remove projects saved in Firestore/Storage.</p>
 
@@ -1067,8 +1115,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
 
           {!loading && projects.length > 0 && (
             <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {projects.map((project) => (
-                <article key={project.id} className={`relative rounded-[24px] border p-4 shadow-[0_16px_32px_rgba(0,0,0,0.06)] ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}>
+              {projects.map((project, index) => (
+                <motion.article
+                  key={project.id}
+                  className={`relative rounded-[24px] border p-4 shadow-[0_16px_32px_rgba(0,0,0,0.06)] ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}
+                  initial={shouldReduceMotion ? false : { opacity: 0, y: 24, scale: 0.985 }}
+                  animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.42, delay: Math.min(index * 0.04, 0.24), ease: [0.22, 1, 0.36, 1] }}
+                  whileHover={shouldReduceMotion ? undefined : { y: -4 }}
+                >
                   <div className="absolute left-3 top-3 z-10">
                     <input
                       type="checkbox"
@@ -1152,11 +1207,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       </span>
                     </button>
                   </div>
-                </article>
+                </motion.article>
               ))}
             </section>
           )}
-                </section>
+                </motion.section>
               </main>
             </div>
           </div>

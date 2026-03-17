@@ -164,7 +164,7 @@ const MARKETING_NAV_LINKS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
     { label: 'Learn', path: '/learn' },
-    { label: 'Changelog', path: '/changelog' },
+    { label: "What's New", path: '/changelog' },
 ] as const;
 
 const DEMO_VIDEO_URL = 'https://lf16-web-neutral.traecdn.ai/obj/trae-ai-static/trae_website/static/media/solo-introduce.d2d26c5b.mp4';
@@ -175,7 +175,7 @@ function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
 
     return (
         <motion.article className="landing-feature-scroll-intro" style={{ opacity, x, y }}>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">What EazyUI unlocks</p>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-primary)]">What EazyUI unlocks</p>
             <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
                 From first prompt
                 <br />
@@ -216,7 +216,7 @@ function FeatureScrollCard({
                 transformPerspective: 1400,
             }}
         >
-            <p className="text-[18px] tracking-[-0.04em] font-semibold text-emerald-300/95">[{item.number}]</p>
+            <p className="text-[18px] tracking-[-0.04em] font-semibold text-[var(--ui-primary)]">[{item.number}]</p>
             <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-[var(--ui-text)]">
                 {item.title}
             </h4>
@@ -684,14 +684,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     ? Smile
                     : CircleStar;
     const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
+        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))]'
         : stylePreset === 'vibrant'
             ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
             : stylePreset === 'luxury'
                 ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
                 : stylePreset === 'playful'
                     ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-                    : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+                    : 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[color:color-mix(in_srgb,var(--ui-primary)_62%,white)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)]';
 
     return (
         <div
@@ -754,7 +754,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] transition-colors"
+                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] transition-colors"
                             >
                                 {item.label}
                             </button>
@@ -764,7 +764,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         <button
                             type="button"
                             onClick={toggleTheme}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)]"
                             title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
                             aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
                         >
@@ -800,7 +800,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         type="button"
                                         onClick={onSendVerification}
                                         disabled={verificationBusy}
-                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-primary)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] disabled:opacity-60"
                                     >
                                         {verificationBusy ? 'Sending...' : 'Verify email'}
                                     </button>
@@ -808,14 +808,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/app')}
-                                    className="h-8 rounded-full bg-[var(--ui-text)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
+                                    className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
                                 >
                                     Open app
                                 </button>
                                 <button
                                     type="button"
                                     onClick={onSignOut}
-                                    className="h-8 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
+                                    className="h-8 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
                                 >
                                     Sign out
                                 </button>
@@ -825,14 +825,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/login')}
-                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
+                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
                                 >
                                     Log in
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => onNavigate('/login')}
-                                    className="h-8 rounded-full bg-[var(--ui-text)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
+                                    className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
                                 >
                                     Sign up
                                 </button>
@@ -861,13 +861,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     src={heroWordmark}
                                     alt=""
                                     aria-hidden="true"
-                                    className="relative top-[8px] md:top-[30px] -left-[10px] h-[1.94em] w-auto -rotate-[3.5deg] object-contain"
+                                    className="relative top-[8px] md:top-[30px] -left-[10px] h-[1.94em] w-auto object-contain"
                                 />
                             </span>
                         </h1>
                         <p className="mt-2 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
 
-                        <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3 md:p-4 text-left">
+                        <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_3%,var(--ui-surface-1))] p-3 shadow-[0_20px_65px_color-mix(in_srgb,var(--ui-primary)_10%,transparent)] md:p-4 text-left">
                             <div className="relative">
                                 {!prompt.trim() && !isPromptFocused && (
                                     <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
@@ -885,7 +885,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     </div>
                                 )}
                                 <div className="flex items-start gap-2 px-1">
-                                    <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                                    <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
                                         <Orb
                                             className="h-full w-full"
                                             colors={landingOrbColors}
@@ -980,7 +980,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 <button
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="h-8 rounded-md px-2.5 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] transition-colors  flex items-center justify-center gap-1.5"
+                                    className="h-8 rounded-md px-2.5 text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] transition-colors  flex items-center justify-center gap-1.5"
                                     title="Attach images"
                                 >
                                     <Paperclip size={17} />
@@ -1032,8 +1032,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
-                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-[var(--ui-surface-3)]'
+                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] text-[var(--ui-text)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
+                                            : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-3)]'
                                             }`}
                                         title="Quality model"
                                     >
@@ -1060,7 +1060,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                         setShowStyleMenu(false);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-indigo-500/20 text-[var(--ui-text)]'
+                                                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]'
                                                         : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
                                                         }`}
                                                 >
@@ -1088,7 +1088,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     className={`h-9 w-9 rounded-full text-[12px] font-semibold transition-colors flex items-center justify-center ${isRecording
                                         ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
                                         : showSendAction
-                                            ? 'bg-indigo-500 text-[var(--ui-text)] hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                            ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)] shadow-lg shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_30%,transparent)]'
                                             : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
                                         } ${actionDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     title={isRecording ? 'Stop recording' : showSendAction ? 'Send prompt' : isTranscribing ? 'Transcribing...' : 'Record voice'}
@@ -1126,7 +1126,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 type="button"
                                 onClick={() => setPrompt(chip)}
                                 title={chip}
-                                className="h-9 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 text-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                className="h-9 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-2))] px-4 text-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)]"
                             >
                                 {toChipLabel(chip)}
                             </button>
@@ -1220,7 +1220,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         <button
                             type="button"
                             onClick={() => onNavigate('/app')}
-                            className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-text)] bg-[var(--ui-text)] px-5 py-3 text-[13px] font-semibold text-[var(--ui-surface-1)] transition-opacity hover:opacity-90"
+                            className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-primary)] bg-[var(--ui-primary)] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_28%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
                         >
                             <Sparkles size={16} />
                             Explore EazyUI
@@ -1319,7 +1319,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             viewport={{ once: true, amount: 0.35 }}
                             transition={{ duration: 0.78, ease: [0.22, 1, 0.36, 1] }}
                         >
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Testimonials</p>
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-primary)]">Testimonials</p>
                             <h3 className="mt-4 text-[34px] md:text-[60px] leading-[1.02] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
                                 Loved by teams
                                 <br />
