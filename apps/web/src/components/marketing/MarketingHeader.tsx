@@ -50,6 +50,7 @@ export function MarketingHeader({ onNavigate, scrollContainerRef, tone = 'defaul
 
     const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
     const authEmail = authUser?.email || '';
+    const currentPath = window.location.pathname;
     const authPhotoUrl = useMemo(() => (
         authUser?.photoURL
         || authUser?.providerData.find((provider) => Boolean(provider?.photoURL))?.photoURL
@@ -93,7 +94,7 @@ export function MarketingHeader({ onNavigate, scrollContainerRef, tone = 'defaul
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)]"
+                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)] ${currentPath === item.path ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
                             >
                                 {item.label}
                             </button>

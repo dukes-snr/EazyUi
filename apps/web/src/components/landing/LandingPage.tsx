@@ -237,6 +237,7 @@ function toChipLabel(text: string): string {
 }
 
 export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy = false }: LandingPageProps) {
+    const currentPath = window.location.pathname;
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
     const heroWordmark = theme === 'light' ? eazyuiWordmarkLight : eazyuiWordmark;
@@ -754,7 +755,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] transition-colors"
+                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] transition-colors ${currentPath === item.path ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
                             >
                                 {item.label}
                             </button>
