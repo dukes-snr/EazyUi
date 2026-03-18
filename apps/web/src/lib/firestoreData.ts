@@ -13,7 +13,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "firebase/storage";
-import type { HtmlDesignSpec, ProjectMemory } from "@/api/client";
+import type { HtmlDesignSpec, ProjectMemory, ReferenceContextMeta } from "@/api/client";
 import { db, storage } from "./firebase";
 
 const IS_LOCAL_DEV_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
@@ -103,6 +103,10 @@ const MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048;
 const MAX_INLINE_CHAT_IMAGE_DATA_URL_LENGTH = 350_000;
 const MAX_PERSISTED_IMAGE_COUNT = 8;
 const MAX_PERSISTED_SCREEN_ID_COUNT = 32;
+const MAX_PERSISTED_REFERENCE_URL_COUNT = 8;
+const MAX_PERSISTED_REFERENCE_WARNING_COUNT = 4;
+const MAX_PERSISTED_SCREEN_SNAPSHOT_COUNT = 8;
+const MAX_PERSISTED_SCREEN_SNAPSHOT_HTML_LENGTH = 12_000;
 const MAX_PERSISTED_DESIGN_SYSTEM_RULE_COUNT = 10;
 const MAX_PERSISTED_DESIGN_SYSTEM_REFERENCE_SCREENS = 12;
 const MAX_PROJECT_MEMORY_SCREEN_COUNT = 24;
@@ -191,6 +195,71 @@ function sanitizeMetaStringArray(value: unknown, maxItems: number, maxLength = 2
     .filter(Boolean)
     .slice(0, maxItems)
     .map((item) => (item.length <= maxLength ? item : item.slice(0, maxLength)));
+}
+
+function sanitizeReferenceContextForMeta(value: unknown): ReferenceContextMeta | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const requestedUrls = sanitizeMetaStringArray(raw.requestedUrls, MAX_PERSISTED_REFERENCE_URL_COUNT, MAX_PERSISTED_IMAGE_URL_LENGTH);
+  const normalizedUrls = sanitizeMetaStringArray(raw.normalizedUrls, MAX_PERSISTED_REFERENCE_URL_COUNT, MAX_PERSISTED_IMAGE_URL_LENGTH);
+  const warnings = sanitizeMetaStringArray(raw.warnings, MAX_PERSISTED_REFERENCE_WARNING_COUNT, 240);
+  const webContextApplied = raw.webContextApplied === true;
+  const skippedReason = raw.skippedReason === "missing_api_key" || raw.skippedReason === "no_valid_urls" || raw.skippedReason === "all_failed"
+    ? raw.skippedReason
+    : undefined;
+  const sourceCount = sanitizeMetaNumber(raw.sourceCount, 0, 0, MAX_PERSISTED_REFERENCE_URL_COUNT);
+  const referenceImageCount = sanitizeMetaNumber(raw.referenceImageCount, 0, 0, MAX_PERSISTED_IMAGE_COUNT);
+
+  if (
+    requestedUrls.length === 0
+    && normalizedUrls.length === 0
+    && warnings.length === 0
+    && !webContextApplied
+    && !skippedReason
+    && sourceCount === 0
+    && referenceImageCount === 0
+  ) {
+    return null;
+  }
+
+  return {
+    requestedUrls,
+    normalizedUrls,
+    webContextApplied,
+    warnings,
+    ...(skippedReason ? { skippedReason } : {}),
+    sourceCount,
+    referenceImageCount,
+  };
+}
+
+function sanitizeScreenSnapshotsForMeta(value: unknown): Record<string, { screenId: string; name: string; html: string; width: number; height: number }> | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const next: Record<string, { screenId: string; name: string; html: string; width: number; height: number }> = {};
+
+  for (const [key, item] of Object.entries(raw)) {
+    if (Object.keys(next).length >= MAX_PERSISTED_SCREEN_SNAPSHOT_COUNT) break;
+    if (!item || typeof item !== "object") continue;
+
+    const snapshot = item as Record<string, unknown>;
+    const screenId = sanitizeMetaString(snapshot.screenId ?? key, "", 128);
+    if (!screenId) continue;
+
+    const html = typeof snapshot.html === "string"
+      ? snapshot.html.slice(0, MAX_PERSISTED_SCREEN_SNAPSHOT_HTML_LENGTH)
+      : "";
+
+    next[screenId] = {
+      screenId,
+      name: sanitizeMetaString(snapshot.name, "Screen", 120),
+      html,
+      width: sanitizeMetaNumber(snapshot.width, 390, 120, 2048),
+      height: sanitizeMetaNumber(snapshot.height, 844, 120, 4096),
+    };
+  }
+
+  return Object.keys(next).length > 0 ? next : null;
 }
 
 function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDesignSpec["designSystem"]> | null {
@@ -326,6 +395,16 @@ function sanitizeDesignSystemProposalContextForMeta(value: unknown): Record<stri
     out.images = images;
   }
 
+  const referenceUrls = sanitizeMetaStringArray(raw.referenceUrls, MAX_PERSISTED_REFERENCE_URL_COUNT, MAX_PERSISTED_IMAGE_URL_LENGTH);
+  if (referenceUrls.length > 0) {
+    out.referenceUrls = referenceUrls;
+  }
+
+  const referenceImageUrls = sanitizeMetaStringArray(raw.referenceImageUrls, 3, MAX_PERSISTED_IMAGE_URL_LENGTH);
+  if (referenceImageUrls.length > 0) {
+    out.referenceImageUrls = referenceImageUrls;
+  }
+
   return out;
 }
 
@@ -357,6 +436,15 @@ function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
   copyNumber("feedbackStart");
   copyNumber("designSystemProceedAt");
 
+  if (raw.referencePreviewMode === "screen" || raw.referencePreviewMode === "palette") {
+    next.referencePreviewMode = raw.referencePreviewMode;
+  }
+
+  const referenceUrls = sanitizeMetaStringArray(raw.referenceUrls, MAX_PERSISTED_REFERENCE_URL_COUNT, MAX_PERSISTED_IMAGE_URL_LENGTH);
+  if (referenceUrls.length > 0) {
+    next.referenceUrls = referenceUrls;
+  }
+
   const designSystemProposal = sanitizeDesignSystemProposalForMeta(raw.designSystemProposal);
   if (designSystemProposal) {
     next.designSystemProposal = designSystemProposal;
@@ -366,10 +454,20 @@ function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
     next.designSystemProposalContext = designSystemProposalContext;
   }
 
+  const referenceContext = sanitizeReferenceContextForMeta(raw.referenceContext);
+  if (referenceContext) {
+    next.referenceContext = referenceContext;
+  }
+
   if (Array.isArray(raw.screenIds)) {
     next.screenIds = raw.screenIds
       .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
       .slice(0, MAX_PERSISTED_SCREEN_ID_COUNT);
+  }
+
+  const screenSnapshots = sanitizeScreenSnapshotsForMeta(raw.screenSnapshots);
+  if (screenSnapshots) {
+    next.screenSnapshots = screenSnapshots;
   }
 
   return Object.keys(next).length > 0 ? next : null;
