@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
-import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
+import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
 import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
@@ -44,6 +44,7 @@ const SUBSCRIPTION_NAV: Array<{ key: SettingsTab; label: string; icon: LucideIco
     { key: 'billing', label: 'Plan & Billing', icon: CreditCard },
     { key: 'usage', label: 'Usage', icon: BarChart3 },
 ];
+const BILLING_REFRESH_RETRY_MS = 60_000;
 
 function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
     if (!user) return null;
@@ -88,6 +89,7 @@ export function CanvasProfileMenu() {
     const [saveLabel, setSaveLabel] = useState<'saving' | 'saved' | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const saveLabelTimerRef = useRef<number | null>(null);
+    const billingRetryBlockedUntilRef = useRef(0);
 
     const { screens: exportScreens, scope } = getExportTargetScreens(spec, {
         selectedBoardId: doc.selection.selectedBoardId,
@@ -133,14 +135,21 @@ export function CanvasProfileMenu() {
         return () => unsub();
     }, []);
 
-    const refreshBillingData = async (options?: { silent?: boolean }) => {
+    const refreshBillingData = async (options?: { silent?: boolean; force?: boolean }) => {
         const silent = Boolean(options?.silent);
+        const force = Boolean(options?.force);
+        if (billingLoading) return;
+        if (!force && billingRetryBlockedUntilRef.current > Date.now()) return;
         try {
             setBillingLoading(true);
             const [summaryRes, ledgerRes] = await Promise.all([apiClient.getBillingSummary(), apiClient.getBillingLedger(100)]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
+            billingRetryBlockedUntilRef.current = 0;
         } catch (error) {
+            if (error instanceof ApiRequestError && error.code === 'NETWORK_ERROR') {
+                billingRetryBlockedUntilRef.current = Date.now() + BILLING_REFRESH_RETRY_MS;
+            }
             if (!silent) {
                 pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
             }
@@ -151,13 +160,17 @@ export function CanvasProfileMenu() {
 
     useEffect(() => {
         if (!openSettingsModal) return;
-        void refreshBillingData();
+        void refreshBillingData({ force: true });
     }, [openSettingsModal]);
 
     useEffect(() => {
         if (!authUser) return;
+        void refreshBillingData({ silent: true, force: true });
+    }, [authUser]);
 
-        void refreshBillingData({ silent: true });
+    useEffect(() => {
+        if (!authUser) return;
+        if (!openCredits && !openSettingsModal) return;
 
         const onFocus = () => {
             void refreshBillingData({ silent: true });
@@ -179,7 +192,7 @@ export function CanvasProfileMenu() {
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisibility);
         };
-    }, [authUser]);
+    }, [authUser, openCredits, openSettingsModal, billingLoading]);
 
     useEffect(() => {
         if (!authUser) return;

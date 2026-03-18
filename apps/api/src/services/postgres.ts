@@ -10,6 +10,22 @@ function requireDatabaseUrl(): string {
     if (!value) {
         throw new Error('DATABASE_URL is required for Postgres persistence.');
     }
+    let parsed: URL;
+    try {
+        parsed = new URL(value);
+    } catch {
+        throw new Error(
+            'DATABASE_URL must be a full Postgres URL like postgresql://postgres:postgres@localhost:5432/eazyui.'
+        );
+    }
+    if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+        throw new Error(
+            'DATABASE_URL must use the postgres:// or postgresql:// protocol.'
+        );
+    }
+    if (!parsed.hostname) {
+        throw new Error('DATABASE_URL must include a Postgres hostname.');
+    }
     return value;
 }
 

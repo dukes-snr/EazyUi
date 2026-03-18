@@ -778,10 +778,22 @@ class ApiClient {
         if (requireAuth) {
             headers.set('Authorization', await this.getAuthHeaderValue());
         }
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
-            headers,
-        });
+        let response: Response;
+        try {
+            response = await fetch(`${API_BASE}${endpoint}`, {
+                ...options,
+                headers,
+            });
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                throw error;
+            }
+            throw new ApiRequestError({
+                message: 'Unable to reach the API server. Start the backend or set VITE_API_BASE_URL.',
+                status: 0,
+                code: 'NETWORK_ERROR',
+            });
+        }
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: 'Request failed' }));
