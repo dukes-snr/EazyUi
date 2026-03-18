@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
@@ -54,12 +54,59 @@ type LandingPageProps = {
 
 // const TRUSTED_BRANDS = ['Startups', 'Product Teams', 'Agencies', 'Founders', 'Designers', 'Developers', 'Studios'];
 
-const APP_SUGGESTIONS = [
-    'Design a fintech mobile app with cards, budgets, and transfer flow',
-    'Create a SaaS analytics dashboard with KPI cards and trend charts',
-    'Build an e-commerce app with product discovery and smart filters',
-    'Generate a healthcare booking app with doctor profiles and schedule',
-];
+const LANDING_SUGGESTION_TABS = [
+    {
+        key: 'suggested',
+        label: 'Suggested',
+        icon: CircleStar,
+        prompts: [
+            'A developer portfolio with dark theme, project cards, and contact form.',
+            'A modern SaaS landing page for a time-tracking app.',
+            'An e-commerce homepage for a skincare brand.',
+        ],
+    },
+    {
+        key: 'wireframe',
+        label: 'Wireframe',
+        icon: Square,
+        prompts: [
+            'A low-fidelity onboarding wireframe with three intro screens and a sign-up CTA.',
+            'A dashboard wireframe with KPI tiles, chart blocks, and a recent activity section.',
+            'A mobile checkout wireframe with address, payment, and order summary steps.',
+        ],
+    },
+    {
+        key: 'apps',
+        label: 'Apps',
+        icon: Smartphone,
+        prompts: [
+            'A fintech mobile app with cards, budgets, transfers, and spending insights.',
+            'A fitness tracking app with workout plans, progress charts, and coach messaging.',
+            'A travel planning app with itinerary cards, map previews, and booking actions.',
+        ],
+    },
+    {
+        key: 'websites',
+        label: 'Websites',
+        icon: Monitor,
+        prompts: [
+            'A premium agency website with bold typography, case studies, and service sections.',
+            'A product marketing site for an AI note-taking tool with testimonials and pricing.',
+            'A restaurant website with menu highlights, reservation CTA, and location details.',
+        ],
+    },
+    {
+        key: 'prototype',
+        label: 'Prototype',
+        icon: Sparkles,
+        prompts: [
+            'An interactive prototype concept for a team workspace with side navigation and live panels.',
+            'A prototype-ready mobile shopping flow with discovery, product detail, and cart screens.',
+            'A prototype concept for a creator dashboard with analytics, content queue, and quick actions.',
+        ],
+    },
+] as const;
+type LandingSuggestionTabKey = (typeof LANDING_SUGGESTION_TABS)[number]['key'];
 const TYPED_PLACEHOLDER_SUGGESTIONS = [
     'Design a modern fintech dashboard with spending analytics, cards, and transfers...',
     'Build a SaaS admin panel with analytics, billing, and team permissions...',
@@ -160,7 +207,6 @@ const SOCIAL_PROOF = [
         company: 'Healthtech',
     },
 ] as const;
-const CHIP_LABEL_MAX = 34;
 const MARKETING_NAV_LINKS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
@@ -231,18 +277,14 @@ function FeatureScrollCard({
     );
 }
 
-function toChipLabel(text: string): string {
-    const clean = text.trim();
-    if (clean.length <= CHIP_LABEL_MAX) return clean;
-    return `${clean.slice(0, CHIP_LABEL_MAX - 1).trimEnd()}...`;
-}
-
 export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy = false }: LandingPageProps) {
     const currentPath = window.location.pathname;
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
     const heroWordmark = theme === 'light' ? eazyuiWordmarkLight : eazyuiWordmark;
     const [prompt, setPrompt] = useState('');
+    const [activeSuggestionTab, setActiveSuggestionTab] = useState<LandingSuggestionTabKey | null>(null);
+    const [activeSuggestionPrompt, setActiveSuggestionPrompt] = useState<string>(LANDING_SUGGESTION_TABS[0].prompts[1]);
     const [images, setImages] = useState<string[]>([]);
     const [platform, setPlatform] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
@@ -326,6 +368,10 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
         [referenceRootQuery]
     );
+    const activeLandingSuggestionTab = useMemo(
+        () => LANDING_SUGGESTION_TABS.find((tab) => tab.key === activeSuggestionTab) || null,
+        [activeSuggestionTab]
+    );
 
     const submit = () => {
         const next = prompt.trim();
@@ -408,6 +454,17 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const handlePromptChange = (value: string, cursor: number) => {
         setPrompt(value);
         syncReferenceTrigger(value, cursor);
+    };
+
+    const applyLandingSuggestion = (nextPrompt: string) => {
+        setPrompt(nextPrompt);
+        setActiveSuggestionPrompt(nextPrompt);
+        window.setTimeout(() => {
+            const target = promptTextareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(nextPrompt.length, nextPrompt.length);
+        }, 0);
     };
 
     const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1127,18 +1184,73 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                     </div>
 
-                    <div className="relative z-10 -mt-5 flex flex-wrap items-center justify-center gap-2 text-[var(--ui-text-subtle)]">
-                        {APP_SUGGESTIONS.map((chip) => (
-                            <button
-                                key={chip}
-                                type="button"
-                                onClick={() => setPrompt(chip)}
-                                title={chip}
-                                className="h-9 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-2))] px-4 text-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)]"
-                            >
-                                {toChipLabel(chip)}
-                            </button>
-                        ))}
+                    <div className="relative z-10 mx-auto -mt-12 w-full max-w-[780px] px-2 sm:px-0">
+                        <div className="rounded-[28px]  bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-surface-1)),color-mix(in_srgb,var(--ui-primary)_1%,var(--ui-surface-1)))] p-3 text-left">
+                            <div className="flex flex-wrap gap-2">
+                                {LANDING_SUGGESTION_TABS.map((tab) => {
+                                    const TabIcon = tab.icon;
+                                    const isActive = activeSuggestionTab === tab.key;
+                                    return (
+                                        <button
+                                            key={tab.key}
+                                            type="button"
+                                            onClick={() => {
+                                                setActiveSuggestionTab((current) => {
+                                                    const next = current === tab.key ? null : tab.key;
+                                                    if (next) {
+                                                        setActiveSuggestionPrompt(tab.prompts[1] || tab.prompts[0]);
+                                                    }
+                                                    return next;
+                                                });
+                                            }}
+                                            className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[13px] font-medium transition-all ${isActive
+                                                ? 'border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-2))] text-[var(--ui-primary)]'
+                                                : 'border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] hover:text-[var(--ui-text)]'
+                                                }`}
+                                        >
+                                            <TabIcon size={14} />
+                                            <span>{tab.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {activeLandingSuggestionTab ? (
+                            <div className="mt-3 space-y-1.5">
+                                {activeLandingSuggestionTab.prompts.map((suggestion, index) => {
+                                    const isFeatured = activeSuggestionPrompt === suggestion || (!activeSuggestionPrompt && index === 1);
+                                    return (
+                                        <button
+                                            key={suggestion}
+                                            type="button"
+                                            onClick={() => applyLandingSuggestion(suggestion)}
+                                            className={`group flex w-full items-center gap-3 rounded-[18px] border px-4 py-3 text-left transition-all ${isFeatured
+                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-2))]'
+                                                : 'border-transparent bg-transparent hover:border-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-2))]'
+                                                }`}
+                                            title={suggestion}
+                                        >
+                                            <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${isFeatured
+                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]'
+                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'
+                                                }`}>
+                                                {index === 0 ? <CircleStar size={13} /> : index === 1 ? <Sparkles size={13} /> : <Square size={12} />}
+                                            </span>
+                                            <span className={`min-w-0 flex-1 text-[14px] leading-6 ${isFeatured ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] group-hover:text-[var(--ui-text)]'}`}>
+                                                {suggestion}
+                                            </span>
+                                            <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isFeatured
+                                                ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]'
+                                                : 'text-[var(--ui-text-subtle)] group-hover:text-[var(--ui-primary)]'
+                                                }`}>
+                                                <ArrowRight size={15} />
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            ) : null}
+                        </div>
                     </div>
                 </motion.section>
 
