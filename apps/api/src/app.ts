@@ -16,7 +16,7 @@ import { ensurePersistenceSchema } from './services/postgres.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
-import { buildFirecrawlReferenceContext } from './services/firecrawl.js';
+import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import {
     buildBillingSummaryForApi,
@@ -66,6 +66,7 @@ import {
 } from './services/mcpApiKeys.js';
 import { captureServerAnalyticsEvent } from './services/posthog.js';
 import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendContactInquiryEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
+import { logRequestComplete, logRequestStart, logTagged, warnTagged } from './utils/devLogs.js';
 
 function loadEnv() {
     const candidates = [
@@ -93,6 +94,15 @@ const persistenceReadyPromise = ensurePersistenceSchema();
 
 fastify.addHook('onReady', async () => {
     await persistenceReadyPromise;
+});
+
+fastify.addHook('onRequest', async (request) => {
+    logRequestStart(request.id, request.method, request.url);
+});
+
+fastify.addHook('onResponse', async (request, reply) => {
+    const responseTimeMs = typeof reply.elapsedTime === 'number' ? reply.elapsedTime : undefined;
+    logRequestComplete(request.id, request.method, request.url, reply.statusCode, responseTimeMs);
 });
 
 let renderBrowserPromise: Promise<any> | null = null;
@@ -237,7 +247,37 @@ async function applyReferenceUrlContext(
     }
 
     try {
-        const result = await buildFirecrawlReferenceContext(referenceUrls);
+        const logFirecrawlEvent = (event: FirecrawlLogEvent) => {
+            const payload = {
+                traceId,
+                route,
+                firecrawlStage: event.stage,
+                firecrawlEndpoint: event.endpoint,
+                requestedUrls: 'requestedUrls' in event ? event.requestedUrls : undefined,
+                normalizedUrls: 'normalizedUrls' in event ? event.normalizedUrls : undefined,
+                url: 'url' in event ? event.url : undefined,
+                resolvedUrl: 'resolvedUrl' in event ? event.resolvedUrl : undefined,
+                title: 'title' in event ? event.title : undefined,
+                description: 'description' in event ? event.description : undefined,
+                notesLength: 'notesLength' in event ? event.notesLength : undefined,
+                notesPreview: 'notesPreview' in event ? event.notesPreview : undefined,
+                brandingPreview: 'brandingPreview' in event ? event.brandingPreview : undefined,
+                warnings: 'warnings' in event ? event.warnings?.slice(0, 3) : undefined,
+                skippedReason: 'skippedReason' in event ? event.skippedReason : undefined,
+                sourceCount: 'sourceCount' in event ? event.sourceCount : undefined,
+                promptContextLength: 'promptContextLength' in event ? event.promptContextLength : undefined,
+                sources: 'sources' in event ? event.sources : undefined,
+                errorMessage: 'errorMessage' in event ? event.errorMessage : undefined,
+            };
+            if (event.level === 'warn') {
+                fastify.log.warn(payload, 'reference-urls: firecrawl');
+                warnTagged('Firecrawl', event.stage, payload);
+                return;
+            }
+            fastify.log.info(payload, 'reference-urls: firecrawl');
+            logTagged('Firecrawl', event.stage, payload);
+        };
+        const result = await buildFirecrawlReferenceContext(referenceUrls, { onEvent: logFirecrawlEvent });
         const referenceContext: ReferenceContextMeta = {
             requestedUrls,
             normalizedUrls: result.normalizedUrls,
@@ -256,6 +296,15 @@ async function applyReferenceUrlContext(
                 skippedReason: result.skippedReason,
             }, 'reference-urls: partial failure');
         }
+        logTagged('Firecrawl', `context ${referenceContext.webContextApplied ? 'applied' : 'skipped'}`, {
+            route,
+            requestedUrls: referenceContext.requestedUrls,
+            normalizedUrls: referenceContext.normalizedUrls,
+            sourceCount: referenceContext.sourceCount,
+            skippedReason: referenceContext.skippedReason,
+            warnings: referenceContext.warnings.slice(0, 2),
+            contextPreview: result.promptContext ? previewText(result.promptContext, 600) : undefined,
+        });
 
         if (!result.promptContext) {
             return {
@@ -279,6 +328,11 @@ async function applyReferenceUrlContext(
             referenceUrlsCount: referenceUrls.length,
             err: error,
         }, 'reference-urls: failed to build context');
+        warnTagged('Firecrawl', 'context failed', {
+            route,
+            requestedUrls,
+            errorMessage: (error as Error).message,
+        });
         return {
             text: baseText,
             normalizedUrls: [],
@@ -424,13 +478,21 @@ async function settleForOutcome(
     finalCredits?: number,
     metadata?: Record<string, unknown>
 ) {
-    return settleReservation({
+    const settled = await settleReservation({
         uid,
         reservationId,
         outcome,
         finalCredits,
         metadata,
     });
+    logTagged('Billing', `settled ${outcome}`, {
+        uid,
+        reservationId,
+        route: typeof metadata?.route === 'string' ? metadata.route : undefined,
+        finalCredits,
+        balanceCredits: settled.summary.balanceCredits,
+    });
+    return settled;
 }
 
 function annotateServerBillingActivity(traceId: string, patch: {
@@ -679,6 +741,14 @@ async function ensureBillingEntitlementOrReply(input: {
             estimatedCredits: input.estimatedCredits,
             balanceCredits: summary.balanceCredits,
         }, 'billing entitlement blocked');
+        warnTagged('Billing', 'entitlement blocked', {
+            route: input.route,
+            operation: input.operation,
+            reason: 'plan_required',
+            estimatedCredits: input.estimatedCredits,
+            balanceCredits: summary.balanceCredits,
+            planId: summary.planId,
+        });
         sendPlanRequired(input.reply, {
             operation: input.operation,
             planId: summary.planId,
@@ -713,6 +783,13 @@ async function ensureBillingEntitlementOrReply(input: {
             estimatedCredits: input.estimatedCredits,
             balanceCredits: summary.balanceCredits,
         }, 'billing entitlement blocked');
+        warnTagged('Billing', 'entitlement blocked', {
+            route: input.route,
+            operation: input.operation,
+            reason: 'insufficient_credits',
+            estimatedCredits: input.estimatedCredits,
+            balanceCredits: summary.balanceCredits,
+        });
         sendInsufficientCredits(input.reply, insufficient, {
             reserveEstimatedCredits: input.estimatedCredits,
             minimumFloorCredits: typeof input.minimumFloorCredits === 'number'
@@ -735,6 +812,13 @@ async function ensureBillingEntitlementOrReply(input: {
         planId: summary.planId,
         planStatus: summary.status,
     }, 'billing entitlement allowed');
+    logTagged('Billing', 'entitlement allowed', {
+        route: input.route,
+        operation: input.operation,
+        estimatedCredits: input.estimatedCredits,
+        balanceCredits: summary.balanceCredits,
+        planId: summary.planId,
+    });
     annotateServerBillingActivity(input.traceId, {
         operation: input.operation,
         estimatedCredits: input.estimatedCredits,

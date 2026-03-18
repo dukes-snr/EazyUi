@@ -264,7 +264,7 @@ export interface ProjectDesignSystem {
     };
     spacing: {
         baseUnit: number;
-        density: 'compact' | 'balanced' | 'airy';
+        density: string;
         rhythm: string;
     };
     radius: {
@@ -1144,7 +1144,7 @@ function safeThemeMode(input: unknown, fallback: ProjectDesignSystem['themeMode'
 }
 
 function safeDensity(input: unknown, fallback: ProjectDesignSystem['spacing']['density']): ProjectDesignSystem['spacing']['density'] {
-    return input === 'compact' || input === 'balanced' || input === 'airy' ? input : fallback;
+    return safeString(input, fallback, 80);
 }
 
 function safeStringList(input: unknown, fallback: string[], maxItems = 8): string[] {
@@ -1669,7 +1669,7 @@ function normalizeProjectDesignSystem(
             tone: safeString(rawTypography.tone, fallback.typography.tone, 180),
         },
         spacing: {
-            baseUnit: safeNumber(rawSpacing.baseUnit, fallback.spacing.baseUnit, 2, 16),
+            baseUnit: safeNumber(rawSpacing.baseUnit, fallback.spacing.baseUnit, 1, 64),
             density: safeDensity(rawSpacing.density, fallback.spacing.density),
             rhythm: safeString(rawSpacing.rhythm, fallback.spacing.rhythm, 200),
         },
@@ -1832,6 +1832,19 @@ ${buildDomainColorDirection(prompt)}
 `.trim();
 }
 
+function buildBrandingPriorityPrompt(prompt: string): string {
+    if (!/Branding priority:|Branding:\s*/i.test(prompt)) return '';
+    return `
+BRANDING PRIORITY (MANDATORY WHEN WEB REFERENCE BRANDING IS PRESENT):
+- If Web reference context includes Branding, treat it as the primary visual source of truth over other style heuristics.
+- Reuse the exact branded hex values and named fonts when they are available and usable.
+- If branding provides a clear primary/background/text palette, map those directly or very closely into tokens and tokenModes instead of inventing a different palette family.
+- If branding indicates a dark or light scheme, default themeMode to that scheme unless the user prompt explicitly asks for the opposite.
+- If branding only gives one accent hue, keep accent2 close to the same family or derive it subtly from the brand neutrals/links. Do NOT invent an unrelated bright blue, purple, or cyan accent.
+- Keep the product name and visual tone aligned to the referenced brand when it is clearly identifiable.
+`.trim();
+}
+
 export async function generateProjectDesignSystem(options: GenerateProjectDesignSystemOptions): Promise<{
     designSystem: ProjectDesignSystem;
     usage?: TokenUsageSummary;
@@ -1863,6 +1876,7 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
     const imageAnalysis = await analyzeReferenceImages(images);
     const colorPrompt = buildDesignSystemColorPrompt(prompt, stylePreset);
+    const brandingPriorityPrompt = buildBrandingPriorityPrompt(prompt);
 
     const systemPrompt = `You are a senior product designer creating a reusable project design system.
 Return strict JSON only.
@@ -1886,8 +1900,8 @@ Output schema:
     "scale": { "display": "tailwind-like guidance", "h1": "string", "h2": "string", "body": "string", "caption": "string" },
     "tone": "string"
   },
-  "spacing": { "baseUnit": 4, "density": "compact|balanced|airy", "rhythm": "string" },
-  "radius": { "card": "24px", "control": "14px", "pill": "999px" },
+  "spacing": { "baseUnit": "number", "density": "string", "rhythm": "string" },
+  "radius": { "card": "string", "control": "string", "pill": "string" },
   "shadows": { "soft": "css shadow", "glow": "css shadow" },
   "componentLanguage": { "button": "string", "card": "string", "input": "string", "nav": "string", "chips": "string" },
   "motion": { "style": "string", "durationFastMs": 140, "durationBaseMs": 220 },
@@ -1908,8 +1922,11 @@ Rules:
 - Prefer semantic colors over arbitrary color names.
 - Typography must feel product-specific. Do not default to Space Grotesk + Plus Jakarta Sans unless it is genuinely the best fit.
 - Avoid repeating the same dark navy + cyan startup palette unless the prompt clearly calls for that direction.
+- The schema literals are examples only. You may use any practical font names, sizing guidance, base units, density labels, radii, and motion values that fit the product.
+- If branding provides font sizes, spacing units, or corner radii, carry those through into typography.scale, spacing, and radius instead of replacing them with defaults.
 
-${colorPrompt}`;
+${colorPrompt}
+${brandingPriorityPrompt ? `\n\n${brandingPriorityPrompt}` : ''}`;
 
     const userPrompt = `App request: "${prompt}"
 Style preset: ${stylePreset}
@@ -1918,6 +1935,7 @@ ${imageAnalysis || ''}
 Generate the design system that should be reused for this whole project.
 Infer and set a clean project/product name in systemName (not a sentence, not "Design System").
 Choose a palette that feels creative, product-specific, and professionally art-directed rather than generic.
+If Branding is present in the web reference context, prioritize those brand colors/fonts over generic style defaults.
 Choose typography that fits the brand personality instead of defaulting to the same safe pair every time.`;
 
     try {

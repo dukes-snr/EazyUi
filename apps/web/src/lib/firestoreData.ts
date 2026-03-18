@@ -212,9 +212,7 @@ function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDe
   const themeMode = raw.themeMode === "light" || raw.themeMode === "dark" || raw.themeMode === "mixed"
     ? raw.themeMode
     : "mixed";
-  const spacingDensity = rawSpacing.density === "compact" || rawSpacing.density === "balanced" || rawSpacing.density === "airy"
-    ? rawSpacing.density
-    : "balanced";
+  const spacingDensity = sanitizeMetaString(rawSpacing.density, "balanced", 80);
   const sanitizeTokenSet = (source: Record<string, unknown>, fallback: Record<string, string>) => ({
     bg: sanitizeMetaString(source.bg, fallback.bg, 40),
     surface: sanitizeMetaString(source.surface, fallback.surface, 40),
@@ -263,7 +261,7 @@ function sanitizeDesignSystemProposalForMeta(value: unknown): NonNullable<HtmlDe
       tone: sanitizeMetaString(rawTypography.tone, "", 180),
     },
     spacing: {
-      baseUnit: sanitizeMetaNumber(rawSpacing.baseUnit, 4, 2, 16),
+      baseUnit: sanitizeMetaNumber(rawSpacing.baseUnit, 4, 1, 64),
       density: spacingDensity,
       rhythm: sanitizeMetaString(rawSpacing.rhythm, "", 200),
     },

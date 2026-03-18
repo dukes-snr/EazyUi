@@ -101,7 +101,7 @@ export interface ProjectDesignSystem {
     };
     spacing: {
         baseUnit: number;
-        density: 'compact' | 'balanced' | 'airy';
+        density: string;
         rhythm: string;
     };
     radius: {

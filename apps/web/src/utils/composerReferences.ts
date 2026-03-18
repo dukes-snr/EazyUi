@@ -111,6 +111,9 @@ export function normalizeComposerReferenceUrl(value: string): string | null {
     try {
         const parsed = new URL(withProtocol);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+        if (/^www\./i.test(parsed.hostname)) {
+            parsed.hostname = parsed.hostname.replace(/^www\./i, '');
+        }
         parsed.hash = '';
         return parsed.toString();
     } catch {
@@ -304,7 +307,11 @@ export function extractComposerInlineReferences(
                 seenUrls.add(range.url);
                 urlReferences.push(createComposerUrlReference(range.url));
             }
-            cleanedText += range.text.slice(1);
+            const previousChar = cleanedText[cleanedText.length - 1] || '';
+            const nextChar = source[range.end] || '';
+            if (previousChar && !/\s/.test(previousChar) && nextChar && !/\s/.test(nextChar)) {
+                cleanedText += ' ';
+            }
         } else if (range.kind === 'screen' && range.screen) {
             if (!seenScreenIds.has(range.screen.screenId)) {
                 seenScreenIds.add(range.screen.screenId);
