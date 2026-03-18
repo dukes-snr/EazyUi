@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, Zap } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient, type BillingSummary } from '../../api/client';
@@ -20,6 +20,7 @@ import {
   type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
+import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
@@ -524,12 +525,17 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
-    Array.from(files).forEach((file) => {
+    const availableSlots = Math.max(0, MAX_COMPOSER_ATTACHMENTS - starterImages.length);
+    if (availableSlots === 0) {
+      event.target.value = '';
+      return;
+    }
+    Array.from(files).slice(0, availableSlots).forEach((file) => {
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = typeof reader.result === 'string' ? reader.result : '';
         if (!base64) return;
-        setStarterImages((prev) => [...prev, base64]);
+        setStarterImages((prev) => (prev.length >= MAX_COMPOSER_ATTACHMENTS ? prev : [...prev, base64]));
       };
       reader.readAsDataURL(file);
     });
@@ -877,99 +883,83 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.62, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
                   >
-            <div className="relative mx-auto w-full rounded-[28px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-3 md:p-4 text-left">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
+            <div className="relative mx-auto w-full overflow-visible">
+              <ComposerAttachmentStack
+                images={starterImages}
+                onRemove={(index) => setStarterImages((prev) => prev.filter((_, i) => i !== index))}
               />
-              <div className="flex items-start gap-2 px-1">
-                <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
-                  <Orb
-                    className="h-full w-full"
-                    colors={workspaceOrbColors}
-                    seed={7307}
-                    agentState={workspaceOrbState}
-                    volumeMode="manual"
-                    manualInput={workspaceOrbInput}
-                    manualOutput={workspaceOrbOutput}
-                  />
-                </div>
-                <ComposerInlineReferenceInput
-                  ref={starterPromptRef}
-                  value={starterPrompt}
-                  onChange={(nextValue, cursor) => {
-                    setStarterPrompt(nextValue);
-                    syncReferenceTrigger(nextValue, cursor);
-                  }}
-                  onSelectionChange={syncReferenceTrigger}
-                  onReferenceClick={handleReferenceTokenClick}
-                  onKeyDown={(event) => {
-                    if (isReferenceMenuOpen) {
-                      if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
-                        if (event.key === 'ArrowDown') {
-                          event.preventDefault();
-                          setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
-                          return;
+              <div className="relative z-10 rounded-[28px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-3 text-left md:p-4">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <div className="flex items-start gap-2 px-1">
+                  <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
+                    <Orb
+                      className="h-full w-full"
+                      colors={workspaceOrbColors}
+                      seed={7307}
+                      agentState={workspaceOrbState}
+                      volumeMode="manual"
+                      manualInput={workspaceOrbInput}
+                      manualOutput={workspaceOrbOutput}
+                    />
+                  </div>
+                  <ComposerInlineReferenceInput
+                    ref={starterPromptRef}
+                    value={starterPrompt}
+                    onChange={(nextValue, cursor) => {
+                      setStarterPrompt(nextValue);
+                      syncReferenceTrigger(nextValue, cursor);
+                    }}
+                    onSelectionChange={syncReferenceTrigger}
+                    onReferenceClick={handleReferenceTokenClick}
+                    onKeyDown={(event) => {
+                      if (isReferenceMenuOpen) {
+                        if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                            return;
+                          }
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                            return;
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            closeReferenceMenu();
+                            return;
+                          }
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                            if (choice?.key === 'url') openUrlReferenceInput('trigger');
+                            return;
+                          }
                         }
-                        if (event.key === 'ArrowUp') {
-                          event.preventDefault();
-                          setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
-                          return;
-                        }
-                        if (event.key === 'Escape') {
+                        if (referenceMenuMode === 'url' && event.key === 'Escape') {
                           event.preventDefault();
                           closeReferenceMenu();
                           return;
                         }
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                          if (choice?.key === 'url') openUrlReferenceInput('trigger');
-                          return;
-                        }
                       }
-                      if (referenceMenuMode === 'url' && event.key === 'Escape') {
+                      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                         event.preventDefault();
-                        closeReferenceMenu();
-                        return;
+                        handleCreateFromPrompt();
                       }
-                    }
-                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                      event.preventDefault();
-                      handleCreateFromPrompt();
-                    }
-                  }}
-                  placeholder="What do you want to create?"
-                  placeholderClassName="px-2 py-1 text-left"
-                  className="no-focus-ring w-full min-h-[72px] max-h-[220px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0"
-                />
-              </div>
-              {starterImages.length > 0 && (
-                <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
-                  {starterImages.map((img, idx) => (
-                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group h-10 w-10 shrink-0">
-                      <img
-                        src={img}
-                        alt="upload"
-                        className="h-10 w-10 rounded-md border border-[var(--ui-border)] object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setStarterImages((prev) => prev.filter((_, i) => i !== idx))}
-                        className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] opacity-0 transition-opacity group-hover:opacity-100"
-                        title="Remove attachment"
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  ))}
+                    }}
+                    placeholder="What do you want to create?"
+                    placeholderClassName="px-2 py-1 text-left"
+                    className="no-focus-ring w-full min-h-[72px] max-h-[220px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0"
+                  />
                 </div>
-              )}
-              <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
+                <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <motion.button
@@ -1128,7 +1118,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   onUrlDraftChange={setReferenceUrlDraft}
                 />
               )}
-                    </div>
+              </div>
+            </div>
                   </motion.form>
                 </motion.section>
 

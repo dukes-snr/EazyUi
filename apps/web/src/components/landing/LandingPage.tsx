@@ -15,6 +15,7 @@ import type { DesignModelProfile } from '../../constants/designModels';
 import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
+import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { Orb } from '../ui/Orb';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
@@ -511,12 +512,18 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         const files = e.target.files;
         if (!files) return;
 
-        Array.from(files).forEach((file) => {
+        const availableSlots = Math.max(0, MAX_COMPOSER_ATTACHMENTS - images.length);
+        if (availableSlots === 0) {
+            e.target.value = '';
+            return;
+        }
+
+        Array.from(files).slice(0, availableSlots).forEach((file) => {
             const reader = new FileReader();
             reader.onloadend = () => {
                 const base64 = typeof reader.result === 'string' ? reader.result : '';
                 if (!base64) return;
-                setImages((prev) => [...prev, base64]);
+                setImages((prev) => (prev.length >= MAX_COMPOSER_ATTACHMENTS ? prev : [...prev, base64]));
             };
             reader.readAsDataURL(file);
         });
@@ -983,153 +990,136 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         </h1>
                         <p className="mt-2 mb-12 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
 
-                        <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_3%,var(--ui-surface-1))] p-3 shadow-[0_20px_65px_color-mix(in_srgb,var(--ui-primary)_10%,transparent)] md:p-4 text-left">
-                            <img
-                                src={mascotComposer}
-                                alt=""
-                                aria-hidden="true"
-                                className="pointer-events-none absolute right-1 top-[-6.5rem] z-10 w-[4.7rem] select-none sm:right-3 sm:top-[-8.2rem] sm:w-[5.8rem] md:right-5 md:top-[-8.4rem] md:w-[6rem]"
+                        <div className="relative mx-auto mt-7 w-full max-w-[780px] overflow-visible">
+                            <ComposerAttachmentStack
+                                images={images}
+                                onRemove={(index) => setImages((prev) => prev.filter((_, idx) => idx !== index))}
                             />
-                            <div className="relative">
-                                {!prompt.trim() && !isPromptFocused && (
-                                    <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
-                                        <TextType
-                                            text={TYPED_PLACEHOLDER_SUGGESTIONS}
-                                            className="text-[16px] text-[var(--ui-text-subtle)] text-left"
-                                            typingSpeed={62}
-                                            deletingSpeed={38}
-                                            pauseDuration={2200}
-                                            showCursor
-                                            cursorCharacter="_"
-                                            cursorClassName="text-[var(--ui-text-subtle)]"
-                                            loop
-                                        />
-                                    </div>
-                                )}
-                                <div className="flex items-start gap-2 px-1">
-                                    <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
-                                        <Orb
-                                            className="h-full w-full"
-                                            colors={landingOrbColors}
-                                            seed={9101}
-                                            agentState={landingOrbState}
-                                            volumeMode="manual"
-                                            manualInput={landingOrbInput}
-                                            manualOutput={landingOrbOutput}
-                                        />
-                                    </div>
-                                    <ComposerInlineReferenceInput
-                                        ref={promptTextareaRef}
-                                        value={prompt}
-                                        onChange={handlePromptChange}
-                                        onSelectionChange={syncReferenceTrigger}
-                                        onReferenceClick={handleReferenceTokenClick}
-                                        onFocus={() => setIsPromptFocused(true)}
-                                        onBlur={() => setIsPromptFocused(false)}
-                                        onKeyDown={(e) => {
-                                            if (isReferenceMenuOpen) {
-                                                if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
-                                                    if (e.key === 'ArrowDown') {
-                                                        e.preventDefault();
-                                                        setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
-                                                        return;
+                            <div className="relative z-10 rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_3%,var(--ui-surface-1))] p-3 text-left shadow-[0_20px_65px_color-mix(in_srgb,var(--ui-primary)_10%,transparent)] md:p-4">
+                                <img
+                                    src={mascotComposer}
+                                    alt=""
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute right-1 top-[-6.5rem] z-10 w-[4.7rem] select-none sm:right-3 sm:top-[-8.2rem] sm:w-[5.8rem] md:right-5 md:top-[-8.4rem] md:w-[6rem]"
+                                />
+                                <div className="relative">
+                                    {!prompt.trim() && !isPromptFocused && (
+                                        <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
+                                            <TextType
+                                                text={TYPED_PLACEHOLDER_SUGGESTIONS}
+                                                className="text-[16px] text-[var(--ui-text-subtle)] text-left"
+                                                typingSpeed={62}
+                                                deletingSpeed={38}
+                                                pauseDuration={2200}
+                                                showCursor
+                                                cursorCharacter="_"
+                                                cursorClassName="text-[var(--ui-text-subtle)]"
+                                                loop
+                                            />
+                                        </div>
+                                    )}
+                                    <div className="flex items-start gap-2 px-1">
+                                        <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
+                                            <Orb
+                                                className="h-full w-full"
+                                                colors={landingOrbColors}
+                                                seed={9101}
+                                                agentState={landingOrbState}
+                                                volumeMode="manual"
+                                                manualInput={landingOrbInput}
+                                                manualOutput={landingOrbOutput}
+                                            />
+                                        </div>
+                                        <ComposerInlineReferenceInput
+                                            ref={promptTextareaRef}
+                                            value={prompt}
+                                            onChange={handlePromptChange}
+                                            onSelectionChange={syncReferenceTrigger}
+                                            onReferenceClick={handleReferenceTokenClick}
+                                            onFocus={() => setIsPromptFocused(true)}
+                                            onBlur={() => setIsPromptFocused(false)}
+                                            onKeyDown={(e) => {
+                                                if (isReferenceMenuOpen) {
+                                                    if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
+                                                        if (e.key === 'ArrowDown') {
+                                                            e.preventDefault();
+                                                            setReferenceActiveIndex((prev) => (prev + 1) % rootReferenceOptions.length);
+                                                            return;
+                                                        }
+                                                        if (e.key === 'ArrowUp') {
+                                                            e.preventDefault();
+                                                            setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
+                                                            return;
+                                                        }
+                                                        if (e.key === 'Escape') {
+                                                            e.preventDefault();
+                                                            closeReferenceMenu();
+                                                            return;
+                                                        }
+                                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                                            e.preventDefault();
+                                                            const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
+                                                            if (choice?.key === 'url') openUrlReferenceInput('trigger');
+                                                            return;
+                                                        }
                                                     }
-                                                    if (e.key === 'ArrowUp') {
-                                                        e.preventDefault();
-                                                        setReferenceActiveIndex((prev) => (prev - 1 + rootReferenceOptions.length) % rootReferenceOptions.length);
-                                                        return;
-                                                    }
-                                                    if (e.key === 'Escape') {
+                                                    if (referenceMenuMode === 'url' && e.key === 'Escape') {
                                                         e.preventDefault();
                                                         closeReferenceMenu();
                                                         return;
                                                     }
-                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                                                        if (choice?.key === 'url') openUrlReferenceInput('trigger');
+                                                }
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    submit();
+                                                }
+                                            }}
+                                            placeholder=""
+                                            placeholderClassName="px-2 py-1 text-left"
+                                            className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:ring-0"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
+                                    <div className="flex items-center gap-2.5">
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            multiple
+                                            className="hidden"
+                                            onChange={handleFileSelect}
+                                        />
+                                        <div className="relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsReferenceMenuOpen(false);
+                                                    if (isAddMenuOpen) {
+                                                        closeAddMenu();
                                                         return;
                                                     }
-                                                }
-                                                if (referenceMenuMode === 'url' && e.key === 'Escape') {
-                                                    e.preventDefault();
-                                                    closeReferenceMenu();
-                                                    return;
-                                                }
-                                            }
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                submit();
-                                            }
-                                        }}
-                                        placeholder=""
-                                        placeholderClassName="px-2 py-1 text-left"
-                                        className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] border-0 focus:border-0 ring-0 focus:ring-0"
-                                    />
-                                </div>
-                            </div>
-                        {images.length > 0 && (
-                            <div className="mt-1 mb-2 flex items-center gap-2 overflow-x-auto overflow-y-visible px-1 pb-1">
-                                {images.map((img, i) => (
-                                    <div key={`${img.slice(0, 24)}-${i}`} className="relative h-10 w-10 shrink-0 group">
-                                        <img
-                                            src={img}
-                                            alt="attachment"
-                                            className="h-10 w-10 rounded-md border border-[var(--ui-border)] object-cover"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                                            className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] opacity-0 transition-opacity group-hover:opacity-100"
-                                            title="Remove attachment"
-                                        >
-                                            <X size={10} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        <div className="flex items-center justify-between pt-2 border-t border-[var(--ui-border)]">
-                            <div className="flex items-center gap-2.5">
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept="image/*"
-                                    multiple
-                                    className="hidden"
-                                    onChange={handleFileSelect}
-                                />
-                                <div className="relative">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setIsReferenceMenuOpen(false);
-                                            if (isAddMenuOpen) {
-                                                closeAddMenu();
-                                                return;
-                                            }
-                                            setIsAddMenuOpen(true);
-                                        }}
-                                        className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
-                                        title="Add to prompt"
-                                    >
-                                        <Plus size={18} />
-                                    </button>
-                                    {isAddMenuOpen && (
-                                        <ComposerAddMenu
-                                            menuRef={addMenuRef}
-                                            onAddFiles={() => {
-                                                closeAddMenu();
-                                                fileInputRef.current?.click();
-                                            }}
-                                            onAddUrl={() => {
-                                                closeAddMenu();
-                                                openUrlReferenceInput('append');
-                                            }}
-                                        />
-                                    )}
-                                </div>
+                                                    setIsAddMenuOpen(true);
+                                                }}
+                                                className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                                                title="Add to prompt"
+                                            >
+                                                <Plus size={18} />
+                                            </button>
+                                            {isAddMenuOpen && (
+                                                <ComposerAddMenu
+                                                    menuRef={addMenuRef}
+                                                    onAddFiles={() => {
+                                                        closeAddMenu();
+                                                        fileInputRef.current?.click();
+                                                    }}
+                                                    onAddUrl={() => {
+                                                        closeAddMenu();
+                                                        openUrlReferenceInput('append');
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
                                 {/* <button
                                     type="button"
                                     className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
@@ -1265,7 +1255,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                     </div>
 
-                    <div className="relative z-10 mx-auto -mt-12 w-full max-w-[780px] px-2 sm:px-0">
+                    <div className="relative z-10 mx-auto mt-12 w-full max-w-[780px] px-2 sm:px-0">
                         <div className="rounded-[28px]  bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-surface-1)),color-mix(in_srgb,var(--ui-primary)_1%,var(--ui-surface-1)))] p-3 text-left">
                             <div className="flex flex-wrap gap-2">
                                 {LANDING_SUGGESTION_TABS.map((tab) => {
@@ -1332,6 +1322,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             </div>
                             ) : null}
                         </div>
+                    </div>
                     </div>
                 </motion.section>
 

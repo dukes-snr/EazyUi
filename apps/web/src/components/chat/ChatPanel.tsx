@@ -23,6 +23,7 @@ import {
     type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
+import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import appLogo from '../../assets/Ui-logo.png';
@@ -3254,11 +3255,17 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const files = e.target.files;
         if (!files) return;
 
-        Array.from(files).forEach(file => {
+        const availableSlots = Math.max(0, MAX_COMPOSER_ATTACHMENTS - images.length);
+        if (availableSlots === 0) {
+            e.target.value = '';
+            return;
+        }
+
+        Array.from(files).slice(0, availableSlots).forEach(file => {
             const reader = new FileReader();
             reader.onloadend = () => {
                 const base64 = reader.result as string;
-                setImages(prev => [...prev, base64]);
+                setImages(prev => (prev.length >= MAX_COMPOSER_ATTACHMENTS ? prev : [...prev, base64]));
             };
             reader.readAsDataURL(file);
         });
@@ -6616,95 +6623,82 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <>
                     {/* Chat Input Container */}
-                    <div className="relative mx-4 mb-6 flex flex-col gap-2 rounded-[20px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-1)),var(--ui-surface-1))] p-3 transition-all">
-                        <button
-                            type="button"
-                            onClick={togglePlanMode}
-                            className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${planMode
-                                ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
-                                : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
-                                }`}
-                            title={planMode ? 'Disable plan mode' : 'Enable plan mode'}
-                        >
-                            <Sparkles size={12} />
-                            <span>Plan mode</span>
-                        </button>
+                    <div className="relative mx-4 mb-6 overflow-visible">
+                        <ComposerAttachmentStack images={images} onRemove={removeImage} size="compact" />
+                        <div className="relative flex flex-col gap-2 rounded-[20px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-1)),var(--ui-surface-1))] p-3 transition-all">
+                            <button
+                                type="button"
+                                onClick={togglePlanMode}
+                                className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${planMode
+                                    ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
+                                    : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                                    }`}
+                                title={planMode ? 'Disable plan mode' : 'Enable plan mode'}
+                            >
+                                <Sparkles size={12} />
+                                <span>Plan mode</span>
+                            </button>
 
 
-                        {/* Text Area & Images */}
-                        <div className="flex-1 min-w-0 relative">
-                            {images.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto scrollbar-hide mb-2 px-1 pb-2 border-b border-[var(--ui-border)]">
-                                    {images.map((img, idx) => (
-                                        <div key={idx} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-[var(--ui-border)] shrink-0">
-                                            <img src={img} alt="upload" className="w-full h-full object-cover" />
-                                            <button
-                                                onClick={() => removeImage(idx)}
-                                                className="absolute inset-0 bg-black/45 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
-                                                <X size={14} className="text-[var(--ui-text)]" />
-                                            </button>
-                                        </div>
-                                    ))}
+                            {/* Text Area & Images */}
+                            <div className="relative min-w-0 flex-1">
+                                <div className="flex items-start gap-2 px-1">
+                                    <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] p-[2px]">
+                                        <Orb
+                                            className="h-full w-full"
+                                            colors={composerOrbColors}
+                                            seed={2401}
+                                            agentState={composerOrbState}
+                                            volumeMode="manual"
+                                            manualInput={composerOrbInput}
+                                            manualOutput={composerOrbOutput}
+                                        />
+                                    </div>
+                                    <div className="relative min-w-0 flex-1">
+                                        <ComposerInlineReferenceInput
+                                            ref={textareaRef}
+                                            value={prompt}
+                                            onChange={handlePromptChange}
+                                            onSelectionChange={syncMentionState}
+                                            onReferenceClick={handleReferenceTokenClick}
+                                            onKeyDown={handleKeyDown}
+                                            placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
+                                            placeholderClassName="pr-2 py-1 leading-relaxed"
+                                            disabled={isGenerating}
+                                            allowScreen
+                                            screens={availableMentionScreens}
+                                            className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] overflow-y-auto outline-none pr-2 py-1 leading-relaxed"
+                                        />
+                                    </div>
                                 </div>
-                            )}
-                            <div className="flex items-start gap-2 px-1">
-                                <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] p-[2px]">
-                                    <Orb
-                                        className="h-full w-full"
-                                        colors={composerOrbColors}
-                                        seed={2401}
-                                        agentState={composerOrbState}
-                                        volumeMode="manual"
-                                        manualInput={composerOrbInput}
-                                        manualOutput={composerOrbOutput}
+                                {isMentionOpen && (
+                                    <ComposerReferenceMenu
+                                        activeIndex={mentionActiveIndex}
+                                        menuMode={referenceMenuMode}
+                                        menuRef={mentionMenuRef}
+                                        onCancel={closeMentionMenu}
+                                        onRootOptionHover={setMentionActiveIndex}
+                                        onScreenHover={setMentionActiveIndex}
+                                        onScreenQueryChange={setMentionQuery}
+                                        onSelectRootOption={(key) => {
+                                            if (key === 'url') openUrlReferenceInput();
+                                            if (key === 'screen') openScreenReferenceInput();
+                                        }}
+                                        onSelectScreen={selectMentionScreen}
+                                        onSubmitUrl={submitUrlReference}
+                                        rootOptions={rootReferenceOptions}
+                                        screenOptions={filteredMentionScreens}
+                                        screenQuery={referenceMenuMode === 'screen' ? mentionQuery : ''}
+                                        searchInputRef={mentionSearchInputRef}
+                                        urlDraft={referenceUrlDraft}
+                                        urlInputRef={referenceUrlInputRef}
+                                        onUrlDraftChange={setReferenceUrlDraft}
                                     />
-                                </div>
-                                <div className="relative min-w-0 flex-1">
-                                    <ComposerInlineReferenceInput
-                                        ref={textareaRef}
-                                        value={prompt}
-                                        onChange={handlePromptChange}
-                                        onSelectionChange={syncMentionState}
-                                        onReferenceClick={handleReferenceTokenClick}
-                                        onKeyDown={handleKeyDown}
-                                        placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
-                                        placeholderClassName="pr-2 py-1 leading-relaxed"
-                                        disabled={isGenerating}
-                                        allowScreen
-                                        screens={availableMentionScreens}
-                                        className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] overflow-y-auto outline-none pr-2 py-1 leading-relaxed"
-                                    />
-                                </div>
+                                )}
                             </div>
-                            {isMentionOpen && (
-                                <ComposerReferenceMenu
-                                    activeIndex={mentionActiveIndex}
-                                    menuMode={referenceMenuMode}
-                                    menuRef={mentionMenuRef}
-                                    onCancel={closeMentionMenu}
-                                    onRootOptionHover={setMentionActiveIndex}
-                                    onScreenHover={setMentionActiveIndex}
-                                    onScreenQueryChange={setMentionQuery}
-                                    onSelectRootOption={(key) => {
-                                        if (key === 'url') openUrlReferenceInput();
-                                        if (key === 'screen') openScreenReferenceInput();
-                                    }}
-                                    onSelectScreen={selectMentionScreen}
-                                    onSubmitUrl={submitUrlReference}
-                                    rootOptions={rootReferenceOptions}
-                                    screenOptions={filteredMentionScreens}
-                                    screenQuery={referenceMenuMode === 'screen' ? mentionQuery : ''}
-                                    searchInputRef={mentionSearchInputRef}
-                                    urlDraft={referenceUrlDraft}
-                                    urlInputRef={referenceUrlInputRef}
-                                    onUrlDraftChange={setReferenceUrlDraft}
-                                />
-                            )}
-                        </div>
 
-                        {/* Bottom Controls Row */}
-                        <div className="flex items-center justify-between pt-1">
+                            {/* Bottom Controls Row */}
+                            <div className="flex items-center justify-between pt-1">
 
                             {/* Left: Attach & Platform */}
                             <div className="flex items-center gap-2">
@@ -6868,6 +6862,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         accept="image/*"
                         multiple
                     />
+                    </div>
                     </>
                     ) : (
                         <div className="mx-4 mb-6 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3.5">
