@@ -379,7 +379,7 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                                 setAlpha(nextAlpha);
                                 onChange(rgbaToCss({ ...hsvToRgb(hsv), a: nextAlpha }));
                             }}
-                            className="w-full accent-indigo-400"
+                            className="w-full accent-[var(--ui-primary)]"
                         />
                     </div>
                 </div>
@@ -1094,7 +1094,7 @@ RULES:
                                         <button
                                             type="button"
                                             onClick={() => setAiImageGenEnabled((v) => !v)}
-                                            className={`w-full rounded-xl border px-3 py-2 text-xs flex items-center gap-2 transition-colors ${aiImageGenEnabled ? 'border-indigo-300/50 bg-indigo-500/15 text-indigo-100' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'}`}
+                                            className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors ${aiImageGenEnabled ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_15%,transparent)] text-[var(--ui-primary)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'}`}
                                             title="Enable image generation model"
                                         >
                                             <ImagePlus size={14} />
@@ -1110,7 +1110,7 @@ RULES:
                                             }
                                         }}
                                         placeholder="Describe the exact changes for this selected component..."
-                                        className="min-h-[120px] w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-indigo-400/60 resize-y"
+                                        className="min-h-[120px] w-full resize-y rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-[color:color-mix(in_srgb,var(--ui-primary)_52%,transparent)]"
                                     />
                                     <div className="flex items-center gap-2">
                                         <button
@@ -1166,7 +1166,7 @@ RULES:
                                                 <div className="text-[11px] text-[var(--ui-text-muted)]">{item.tagName} · {item.uid}</div>
                                                 <div className="mt-1 text-xs text-[var(--ui-text)] max-h-10 overflow-hidden">{item.prompt}</div>
                                                 {item.description && (
-                                                    <div className="mt-1 text-[11px] text-emerald-300/90 max-h-10 overflow-hidden">{item.description}</div>
+                                                    <div className="mt-1 max-h-10 overflow-hidden text-[11px] text-[var(--ui-primary)]">{item.description}</div>
                                                 )}
                                             </button>
                                         ))}
@@ -1298,7 +1298,7 @@ RULES:
                                                         const add = type === 'block' ? [] : [type];
                                                         applyPatch({ op: 'set_classes', uid: selected.uid, add, remove: DISPLAY_CLASSES.filter((c) => c !== type) });
                                                     }}
-                                                    className={`rounded-lg border px-2 py-2 text-xs capitalize ${display === type ? 'border-indigo-300/70 bg-indigo-500/20 text-indigo-100' : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
+                                                    className={`rounded-lg border px-2 py-2 text-xs capitalize ${display === type ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'}`}
                                                 >
                                                     {type}
                                                 </button>
@@ -1651,7 +1651,7 @@ RULES:
                                                     data-icon-index={index}
                                                     onMouseEnter={() => setIconActiveIndex(index)}
                                                     onClick={() => applyIconName(iconName)}
-                                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ${iconActiveIndex === index ? 'bg-indigo-500/25' : ''}`}
+                                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ${iconActiveIndex === index ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)]' : ''}`}
                                                 >
                                                     <span className="material-symbols-rounded text-base leading-none">{iconName}</span>
                                                     <span className="truncate">{iconName}</span>
@@ -1741,21 +1741,21 @@ RULES:
                                     <button
                                         onClick={() => applyElementAlign('left')}
                                         disabled={disableElementAlign}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'left' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Left
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('center')}
                                         disabled={disableElementAlign}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'center' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Center
                                     </button>
                                     <button
                                         onClick={() => applyElementAlign('right')}
                                         disabled={disableElementAlign}
-                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                        className={`rounded-lg px-2 py-2 text-xs ${elementAlign === 'right' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                     >
                                         Right
                                     </button>
@@ -1866,7 +1866,7 @@ RULES:
                                                         patchStyle({ 'align-self': alignSelfStartValue });
                                                     }}
                                                     disabled={disableTextFlexAlign}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'start' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Start
                                                 </button>
@@ -1877,7 +1877,7 @@ RULES:
                                                         patchStyle({ 'align-self': 'center' });
                                                     }}
                                                     disabled={disableTextFlexAlign}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'center' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Center
                                                 </button>
@@ -1888,7 +1888,7 @@ RULES:
                                                         patchStyle({ 'align-self': alignSelfEndValue });
                                                     }}
                                                     disabled={disableTextFlexAlign}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'end' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     End
                                                 </button>
@@ -1899,7 +1899,7 @@ RULES:
                                                         patchStyle({ 'align-self': 'stretch' });
                                                     }}
                                                     disabled={disableTextFlexAlign}
-                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-indigo-500/30 text-[var(--ui-text)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
+                                                    className={`rounded-lg px-2 py-2 text-xs ${textFlexAlign === 'stretch' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-45 disabled:cursor-not-allowed`}
                                                 >
                                                     Stretch
                                                 </button>
@@ -2011,7 +2011,7 @@ RULES:
                                                     type="button"
                                                     onClick={() => void generateImageForUid(image.uid)}
                                                     disabled={imageGenLoadingUid === image.uid || !(imageGenPromptByUid[image.uid] || '').trim()}
-                                                    className="rounded-md bg-indigo-500/20 border border-indigo-400/30 px-3 py-2 text-[10px] uppercase tracking-wide text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                                    className="flex items-center gap-1 rounded-md border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_15%,transparent)] px-3 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)] disabled:cursor-not-allowed disabled:opacity-50"
                                                     title="Generate and replace image"
                                                 >
                                                     <ImagePlus size={12} />

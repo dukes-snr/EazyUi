@@ -5634,15 +5634,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 : stylePreset === 'playful'
                     ? Smile
                     : CircleStar;
-    const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-[var(--ui-border-light)] hover:bg-[var(--ui-surface-4)]'
-        : stylePreset === 'vibrant'
-            ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
-            : stylePreset === 'luxury'
-                ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
-                : stylePreset === 'playful'
-                    ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-                : 'bg-indigo-400/15 text-indigo-200 ring-indigo-300/35 hover:bg-indigo-400/20';
+    const styleButtonTone = 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-surface-4))]';
     const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
     const designSystem = spec?.designSystem;
     const normalizedStoredDesignSystem = designSystem ? normalizeProjectDesignSystemModes(designSystem) : null;
@@ -5868,7 +5860,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         key={idx}
                                                         type="button"
                                                         onClick={() => setViewerImage({ src: img, alt: `attachment-${idx + 1}` })}
-                                                        className="relative w-20 h-20 rounded-xl overflow-hidden border border-[var(--ui-border)] shadow-sm group focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+                                                        className="group relative h-20 w-20 overflow-hidden rounded-xl border border-[var(--ui-border)] shadow-sm focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--ui-primary)_48%,transparent)]"
                                                         title="Open image"
                                                     >
                                                         <img src={img} alt="attached" className="w-full h-full object-cover" />
@@ -5955,7 +5947,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                             disabled={isGenerating || proceeded}
                                                             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-sm transition-colors ${(isGenerating || proceeded)
                                                                 ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] cursor-not-allowed'
-                                                                : 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                                                : 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
                                                                 }`}
                                                         >
                                                             <Sparkles size={12} />
@@ -5990,7 +5982,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                         {isDone ? (
                                                                             <Check size={13} className="text-emerald-400" />
                                                                         ) : isActive ? (
-                                                                            <Loader2 size={13} className="text-indigo-400 animate-spin" />
+                                                                            <Loader2 size={13} className="animate-spin text-[var(--ui-primary)]" />
                                                                         ) : (
                                                                             <span className="h-2.5 w-2.5 rounded-sm border border-[var(--ui-border-light)] bg-transparent" />
                                                                         )}
@@ -6139,7 +6131,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                 onClick={() => handlePlannerCta(item)}
                                                                 disabled={isGenerating}
                                                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-sm disabled:opacity-55 disabled:cursor-not-allowed transition-colors ${item.tone === 'primary'
-                                                                    ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                                                    ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
                                                                     : 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]'
                                                                     }`}
                                                                 title={`Generate ${item.screenNames.join(', ')}`}
@@ -6526,12 +6518,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <>
                     {/* Chat Input Container */}
-                    <div className="mx-4 mb-6 relative bg-[var(--ui-surface-1)] rounded-[20px] border border-[var(--ui-border)] p-3 shadow-2xl transition-all flex flex-col gap-2">
+                    <div className="relative mx-4 mb-6 flex flex-col gap-2 rounded-[20px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-1)),var(--ui-surface-1))] p-3 transition-all">
                         <button
                             type="button"
                             onClick={togglePlanMode}
-                            className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 shadow-lg transition-colors ${planMode
-                                ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                            className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${planMode
+                                ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
                                 : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
                                 }`}
                             title={planMode ? 'Disable plan mode' : 'Enable plan mode'}
@@ -6559,7 +6551,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 </div>
                             )}
                             <div className="flex items-start gap-2 px-1">
-                                <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-[2px]">
+                                <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] p-[2px]">
                                     <Orb
                                         className="h-full w-full"
                                         colors={composerOrbColors}
@@ -6619,7 +6611,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             <div className="flex items-center gap-2">
                                 {/* Attach Button */}
                                 <button
-                                    className="w-9 h-9 flex items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all ring-1 ring-[var(--ui-border)]"
+                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] text-[var(--ui-text-muted)] transition-all ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                                     onClick={() => fileInputRef.current?.click()}
                                     title="Add Image"
                                 >
@@ -6627,14 +6619,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 </button>
 
                                 {/* Platform Selector (Pill) */}
-                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
+                                <div className="flex items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] p-1 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
                                             onClick={() => setPlatform(p)}
                                             className={`p-1.5 rounded-full transition-all ${selectedPlatform === p
-                                                ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-sm'
-                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'
+                                                ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_26%,transparent)]'
+                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
@@ -6648,13 +6640,13 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
+                                <div className="flex items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] p-1 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))]">
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
-                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-3)]'
+                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]'
+                                            : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
                                             }`}
                                         title="Fast model"
                                     >
@@ -6664,8 +6656,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-indigo-500/20 text-[var(--ui-text)] ring-1 ring-indigo-300/40'
-                                            : 'text-indigo-400 hover:text-indigo-200 hover:bg-[var(--ui-surface-3)]'
+                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]'
+                                            : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
                                             }`}
                                         title="Quality model"
                                     >
@@ -6689,7 +6681,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         setStylePreset(preset);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-indigo-500/20 text-[var(--ui-text)]'
+                                                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)]'
                                                         : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
                                                         }`}
                                                 >
@@ -6740,7 +6732,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         : isRecording
                                             ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
                                             : showSendAction
-                                                ? 'bg-indigo-500 text-[var(--ui-text)] hover:bg-indigo-400 shadow-lg shadow-indigo-500/20'
+                                                ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]'
                                                 : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
                                         }`}
                                     title={isAwaitingAssistantDecision
@@ -6797,7 +6789,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     onClick={saveDesignSystemEdit}
                                     disabled={!hasDesignSystemDraftChanges}
                                     className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges
-                                        ? 'bg-indigo-600 text-indigo-100 ring-indigo-300/60 hover:bg-indigo-500'
+                                        ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
                                         : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
                                         }`}
                                 >

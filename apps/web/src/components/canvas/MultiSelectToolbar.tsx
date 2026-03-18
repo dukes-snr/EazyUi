@@ -145,7 +145,7 @@ export const MultiSelectToolbar = memo(() => {
     return (
         <div
             ref={containerRef}
-            className="flex items-center gap-1 p-1.5 bg-[var(--ui-surface-2)]/95 backdrop-blur-xl border border-[var(--ui-border)] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] pointer-events-auto ring-1 ring-[var(--ui-border)]"
+            className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-[color:color-mix(in_srgb,var(--ui-primary)_20%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] p-1.5 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-xl"
         >
             {!isWriting ? (
                 <button
@@ -167,12 +167,12 @@ export const MultiSelectToolbar = memo(() => {
                             if (e.key === 'Escape') setIsWriting(false);
                         }}
                         placeholder="Edit selected screens..."
-                        className="w-full h-9 pl-3 pr-3 bg-[var(--ui-surface-3)] rounded-xl text-[var(--ui-text)] text-[13px] outline-none placeholder:text-[var(--ui-text-subtle)]"
+                        className="h-9 w-full rounded-xl border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-3))] px-3 text-[13px] text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-subtle)]"
                     />
                     <button
                         onClick={handleBatchRefine}
                         disabled={!inputValue.trim() || isGenerating}
-                        className="p-2 bg-[var(--ui-primary)] text-white rounded-xl hover:bg-[var(--ui-primary-hover)] disabled:opacity-30 transition-all active:scale-90"
+                        className="rounded-xl bg-[var(--ui-primary)] p-2 text-white transition-all hover:bg-[var(--ui-primary-hover)] active:scale-90 disabled:opacity-30"
                     >
                         <ArrowUp size={16} />
                     </button>
@@ -185,7 +185,7 @@ export const MultiSelectToolbar = memo(() => {
                 </div>
             )}
 
-            <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
+            <div className="mx-1 h-4 w-[1px] bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))]" />
 
             {/* Alignment Tool */}
             <div className="relative">
@@ -249,7 +249,7 @@ export const MultiSelectToolbar = memo(() => {
                 title="Focus Selected"
             />
 
-            <div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
+            <div className="mx-1 h-4 w-[1px] bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))]" />
 
             {/* More Button */}
             <div className="relative">
@@ -281,8 +281,8 @@ const DropdownButton = ({ label, icon, active, onClick, hasChevron }: {
     <button
         onClick={onClick}
         className={`
-            flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all
-            ${active ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}
+            flex items-center gap-2 rounded-xl px-3 py-1.5 transition-all
+            ${active ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))]'}
         `}
     >
         {icon}
@@ -296,8 +296,8 @@ const IconButton = ({ icon, active, onClick, title }: { icon: React.ReactNode, a
         onClick={onClick}
         title={title}
         className={`
-            p-2 rounded-xl transition-all
-            ${active ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] shadow-inner' : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'}
+            rounded-xl p-2 transition-all
+            ${active ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] shadow-inner ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]' : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))]'}
         `}
     >
         {icon}
@@ -305,7 +305,7 @@ const IconButton = ({ icon, active, onClick, title }: { icon: React.ReactNode, a
 );
 
 const DropdownMenu = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-    <div className={`absolute z-[100] p-1.5 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-200 ${className}`}>
+    <div className={`absolute z-[100] rounded-2xl border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-popover))] p-1.5 shadow-2xl animate-in fade-in zoom-in duration-200 ${className}`}>
         {children}
     </div>
 );
@@ -313,10 +313,10 @@ const DropdownMenu = ({ children, className = "" }: { children: React.ReactNode,
 const MenuOption = ({ label, icon, onClick }: { label: string, icon?: React.ReactNode, onClick: () => void }) => (
     <button
         onClick={onClick}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-xl transition-all text-left group"
+        className="group flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[13px] text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-text)]"
     >
         <div className="flex items-center gap-2">
-            {icon && <span className="text-[var(--ui-text-subtle)] group-hover:text-indigo-400 transition-colors">{icon}</span>}
+            {icon && <span className="text-[var(--ui-text-subtle)] transition-colors group-hover:text-[var(--ui-primary)]">{icon}</span>}
             <span className="font-medium">{label}</span>
         </div>
     </button>

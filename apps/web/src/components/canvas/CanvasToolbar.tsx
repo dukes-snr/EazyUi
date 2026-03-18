@@ -34,13 +34,13 @@ export function CanvasToolbar() {
     };
 
     return (
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 bg-[var(--ui-surface-2)]/95 backdrop-blur-xl border border-[var(--ui-border)] rounded-full shadow-2xl z-50">
+        <div className="absolute bottom-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] p-1.5 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-xl">
             {/* History Group */}
-            <div className="flex items-center gap-1 pr-2 border-r border-[var(--ui-border)]">
+            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] pr-2">
                 <button
                     onClick={handleUndo}
                     disabled={!canUndo()}
-                    className="p-2.5 rounded-full text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     title="Undo"
                 >
                     <Undo2 size={20} />
@@ -48,7 +48,7 @@ export function CanvasToolbar() {
                 <button
                     onClick={handleRedo}
                     disabled={!canRedo()}
-                    className="p-2.5 rounded-full text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                     title="Redo"
                 >
                     <Redo2 size={20} />
@@ -56,12 +56,12 @@ export function CanvasToolbar() {
             </div>
 
             {/* Tools Group */}
-            <div className="flex items-center gap-1 pr-2 border-r border-[var(--ui-border)]">
+            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] pr-2">
                 <button
                     onClick={() => setActiveTool('select')}
                     className={`p-2.5 rounded-full transition-all ${activeTool === 'select'
-                        ? 'bg-[var(--ui-primary)] text-white shadow-md'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                        ? 'bg-[var(--ui-primary)] text-white'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]'
                         }`}
                     title="Select Tool (Shift+Drag to Select)"
                 >
@@ -70,8 +70,8 @@ export function CanvasToolbar() {
                 <button
                     onClick={() => setActiveTool('hand')}
                     className={`p-2.5 rounded-full transition-all ${activeTool === 'hand'
-                        ? 'bg-[var(--ui-primary)] text-white shadow-md'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                        ? 'bg-[var(--ui-primary)] text-white'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]'
                         }`}
                     title="Pan Tool (Drag to Move)"
                 >
@@ -83,24 +83,24 @@ export function CanvasToolbar() {
             <div className="flex items-center gap-1 pl-1">
                 <button
                     onClick={() => zoomOut()}
-                    className="p-2.5 rounded-full text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)] transition-all"
+                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                     title="Zoom Out"
                 >
                     <ZoomOut size={20} />
                 </button>
-                <span className="text-xs font-medium text-[var(--ui-text-subtle)] min-w-[32px] text-center select-none">
+                <span className="min-w-[32px] select-none text-center text-xs font-medium text-[var(--ui-text-subtle)]">
                     {Math.round(viewport.zoom * 100)}%
                 </span>
                 <button
                     onClick={() => zoomIn()}
-                    className="p-2.5 rounded-full text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)] transition-all"
+                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                     title="Zoom In"
                 >
                     <ZoomIn size={20} />
                 </button>
                 <button
                     onClick={() => fitView({ padding: 0.15, duration: 800 })}
-                    className="p-2.5 rounded-full text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)] transition-all"
+                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                     title="Fit to Screen"
                 >
                     <Maximize size={20} />

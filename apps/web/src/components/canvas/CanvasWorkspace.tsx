@@ -821,11 +821,11 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         <div className="canvas-workspace relative h-full w-full">
             {!isEditWorkspace && (
                 <div className="absolute left-4 top-4 z-50">
-                    <div className="inline-flex items-center ml-[50px] gap-1 text-[12px] text-[var(--ui-text-muted)]">
+                    <div className="ml-[50px] inline-flex items-center gap-1 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-2))] px-3 py-2 text-[12px] text-[var(--ui-text-muted)] shadow-[0_12px_30px_color-mix(in_srgb,var(--ui-primary)_10%,rgba(0,0,0,0.22))] backdrop-blur-md">
                         <button
                             type="button"
                             onClick={() => navigateTo('/app')}
-                            className="hover:text-[var(--ui-text)]"
+                            className="transition-colors hover:text-[var(--ui-primary)]"
                         >
                             Home
                         </button>
@@ -833,7 +833,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                         <button
                             type="button"
                             onClick={() => navigateTo('/app/projects')}
-                            className="hover:text-[var(--ui-text)]"
+                            className="transition-colors hover:text-[var(--ui-primary)]"
                         >
                             Projects
                         </button>
@@ -844,7 +844,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                                 if (!projectId) return;
                                 navigateTo(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
                             }}
-                            className="max-w-[170px] truncate text-[var(--ui-text)] hover:text-[var(--ui-text)]"
+                            className="max-w-[170px] truncate text-[var(--ui-text)] transition-colors hover:text-[var(--ui-primary)]"
                             title={spec?.name || 'Project'}
                         >
                             {spec?.name || 'Project'}

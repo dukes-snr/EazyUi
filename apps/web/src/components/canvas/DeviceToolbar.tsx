@@ -60,7 +60,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
 
     return (
         <div className="flex items-center gap-2 pointer-events-auto">
-            <div className={`flex items-center gap-1.5 p-2 bg-[var(--ui-surface-2)]/95 backdrop-blur-md rounded-full shadow-2xl ring-1 ring-[var(--ui-border)] transition-all duration-300 animate-fade-in-up ${isWriting ? 'min-w-[500px]' : 'min-w-[360px]'}`}>
+            <div className={`animate-fade-in-up flex items-center gap-1.5 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] p-2 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-md transition-all duration-300 ${isWriting ? 'min-w-[500px]' : 'min-w-[360px]'}`}>
                 {/* Left: Write Content Action */}
                 <div className={`flex items-center transition-all duration-300 flex-1`}>
                     {!isWriting ? (
@@ -83,13 +83,13 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                                         if (e.key === 'Escape') setIsWriting(false);
                                     }}
                                     placeholder="What style edit do you want?"
-                                    className="w-full h-9 pl-9 pr-3 bg-[var(--ui-surface-3)] rounded-3xl text-[var(--ui-text)] text-[13px] outline-none transition-all placeholder:text-[var(--ui-text-subtle)]"
+                                    className="h-9 w-full rounded-3xl border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-3))] pl-9 pr-3 text-[13px] text-[var(--ui-text)] outline-none transition-all placeholder:text-[var(--ui-text-subtle)]"
                                 />
-                                <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-300" />
+                                <Sparkles size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ui-primary)]" />
                             </div>
                             <button
                                 onClick={() => editFileInputRef.current?.click()}
-                                className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
+                                className="rounded-lg p-2 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                                 title="Attach reference image(s)"
                             >
                                 <Plus size={16} />
@@ -117,7 +117,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                                     setIsWriting(false);
                                     setEditImages([]);
                                 }}
-                                className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
+                                className="rounded-lg p-2 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                             >
                                 <X size={16} />
                             </button>
@@ -181,15 +181,15 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                 <button
                     onClick={() => setIsRegenOpen(true)}
                     title="Regenerate"
-                    className="h-12 w-12 shrink-0 rounded-full bg-[var(--ui-surface-2)]/95 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] backdrop-blur-md shadow-2xl flex items-center justify-center transition-all active:scale-95"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-md transition-all hover:text-[var(--ui-primary)] active:scale-95"
                 >
                     <RotateCcw size={16} />
                 </button>
             ) : (
-                <div className="h-12 pl-2 pr-1 rounded-full bg-[var(--ui-surface-2)]/95 ring-1 ring-[var(--ui-border)] backdrop-blur-md shadow-2xl flex items-center gap-1.5 transition-all duration-300 animate-in fade-in slide-in-from-right-2">
+                <div className="animate-in fade-in slide-in-from-right-2 flex h-12 items-center gap-1.5 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] pl-2 pr-1 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-md transition-all duration-300">
                     <button
                         onClick={() => regenFileInputRef.current?.click()}
-                        className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
+                        className="rounded-lg p-2 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                         title="Attach reference image(s)"
                     >
                         <Plus size={15} />
@@ -216,7 +216,7 @@ export const DeviceToolbar = memo(({ onAction }: DeviceToolbarProps) => {
                             setIsRegenOpen(false);
                             setRegenImages([]);
                         }}
-                        className="p-2 text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] rounded-lg transition-all"
+                        className="rounded-lg p-2 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
                         title="Close"
                     >
                         <X size={14} />

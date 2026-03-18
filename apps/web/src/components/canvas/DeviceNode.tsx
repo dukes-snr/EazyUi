@@ -710,14 +710,14 @@ function injectEditorScript(html: string, screenId: string) {
 
   const style = document.createElement('style');
   style.textContent = EDIT_SELECTOR + ' { cursor: pointer; }\\n' +
-    '.__eazyui-hover { position: absolute; border: 2px dashed rgba(99,102,241,.9); box-shadow: 0 0 0 1px rgba(99,102,241,.4); pointer-events: none; z-index: 999999; }\\n' +
-    '.__eazyui-selected { position: absolute; border: 2px solid rgba(16,185,129,.95); box-shadow: 0 0 0 1px rgba(16,185,129,.4); pointer-events: none; z-index: 999999; }\\n' +
+    '.__eazyui-hover { position: absolute; border: 2px dashed color-mix(in srgb, var(--ui-primary, #6366f1) 88%, white); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-primary, #6366f1) 36%, transparent); pointer-events: none; z-index: 999999; }\\n' +
+    '.__eazyui-selected { position: absolute; border: 2px solid var(--ui-primary, #6366f1); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-primary, #6366f1) 42%, transparent); pointer-events: none; z-index: 999999; }\\n' +
     '.__eazyui-selection-hud { position: absolute; display: none; align-items: center; justify-content: space-between; gap: 6px; padding: 0; background: transparent; border: none; transform: translateY(-100%); pointer-events: auto; z-index: 1000000; }\\n' +
-    '.__eazyui-selection-hud-tag { text-transform: lowercase; font-weight: 600; color: #f8fafc; border: 1px solid rgba(20,184,166,.45); border-radius: 6px; background: rgba(15,23,42,.96); padding: 4px 8px; }\\n' +
+    '.__eazyui-selection-hud-tag { text-transform: lowercase; font-weight: 600; color: #f8fafc; border: 1px solid color-mix(in srgb, var(--ui-primary, #6366f1) 42%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--ui-primary, #6366f1) 18%, rgba(15,23,42,.96)); padding: 4px 8px; }\\n' +
     '.__eazyui-selection-hud-btn { all: unset; cursor: pointer; color: #fecaca; font-size: 11px; font-weight: 600; line-height: 1; border: 1px solid rgba(248,113,113,.45); border-radius: 6px; background: rgba(127,29,29,.72); padding: 4px 8px; }\\n' +
     '.__eazyui-selection-hud-btn:hover { background: rgba(153,27,27,.85); color: #fee2e2; }\\n' +
-    '.__eazyui-hover-tag { position: absolute; display: none; transform: translateY(-100%); text-transform: lowercase; font-weight: 600; font-size: 11px; line-height: 1; color: #dbeafe; border: 1px solid rgba(59,130,246,.5); border-radius: 6px; background: rgba(30,58,138,.82); padding: 4px 8px; pointer-events: none; z-index: 1000000; }\\n' +
-    '.__eazyui-inline-editing { cursor: text !important; outline: 2px solid rgba(16,185,129,.8); outline-offset: 2px; }';
+    '.__eazyui-hover-tag { position: absolute; display: none; transform: translateY(-100%); text-transform: lowercase; font-weight: 600; font-size: 11px; line-height: 1; color: #eff6ff; border: 1px solid color-mix(in srgb, var(--ui-primary, #6366f1) 48%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--ui-primary, #6366f1) 32%, rgba(15,23,42,.9)); padding: 4px 8px; pointer-events: none; z-index: 1000000; }\\n' +
+    '.__eazyui-inline-editing { cursor: text !important; outline: 2px solid color-mix(in srgb, var(--ui-primary, #6366f1) 74%, white); outline-offset: 2px; }';
   document.head.appendChild(style);
 
   const hoverBox = document.createElement('div');
@@ -1901,7 +1901,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     type="button"
                     onClick={() => void handleGenerateScreenImages()}
                     disabled={isGeneratingImages}
-                    className="absolute -top-6 -right-6 z-20 w-9 h-9 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center shadow-md"
+                    className="absolute -top-6 -right-6 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] text-[var(--ui-text)] shadow-md transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                     title={selected && selectedCount > 1 ? 'Generate images for selected screens' : 'Generate images for this screen'}
                 >
                     <ImagePlus size={12} />

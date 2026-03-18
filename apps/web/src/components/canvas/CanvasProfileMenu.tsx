@@ -56,10 +56,10 @@ function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
 
 function heatClass(level: number): string {
     if (level <= 0) return 'bg-[#2a2d36]';
-    if (level === 1) return 'bg-emerald-700/70';
-    if (level === 2) return 'bg-emerald-500/75';
-    if (level === 3) return 'bg-emerald-400/90';
-    return 'bg-emerald-300';
+    if (level === 1) return 'bg-[color:color-mix(in_srgb,var(--ui-primary)_38%,#111827)]';
+    if (level === 2) return 'bg-[color:color-mix(in_srgb,var(--ui-primary)_56%,#0f172a)]';
+    if (level === 3) return 'bg-[color:color-mix(in_srgb,var(--ui-primary)_76%,#0f172a)]';
+    return 'bg-[var(--ui-primary)]';
 }
 
 export function CanvasProfileMenu() {
@@ -673,7 +673,7 @@ export function CanvasProfileMenu() {
                                 {settingsTab === 'profile' && (
                                     <div className="mx-auto w-full max-w-[900px] space-y-4">
                                         <p className="text-sm text-[var(--ui-text-subtle)]">This is your day {Math.max(1, Math.ceil((Date.now() - new Date(authUser.metadata.creationTime || Date.now()).getTime()) / (1000 * 60 * 60 * 24)))} of using EazyUI.</p>
-                                        <p className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold tracking-[0.08em] text-emerald-300">Power User</p>
+                                        <p className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] px-3 py-1 text-xs font-semibold tracking-[0.08em] text-[var(--ui-primary)]">Power User</p>
 
                                         <div className="rounded-xl border border-[var(--ui-border)] bg-[#10131b] p-4">
                                             <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-[var(--ui-text)]">Active Days</h3><span className="text-xs text-[var(--ui-text-subtle)]">{activityCells.filter((cell) => cell.level > 0).length} active days</span></div>
@@ -730,7 +730,7 @@ export function CanvasProfileMenu() {
                                             <SettingsRow label="Current plan" detail={billingSummary ? `Status: ${billingSummary.status}` : 'Loading plan status...'}><span className="text-3xl font-semibold text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free'}</span></SettingsRow>
                                             <SettingsRow label="Upgrade plan" detail={billingSummary ? `Cycle ends ${new Date(billingSummary.periodEndAt).toLocaleDateString()}` : 'Monthly credits with rollover on paid plans.'}>
                                                 <div className="flex flex-wrap items-center gap-2">
-                                                    <button type="button" onClick={() => void handleBillingCheckout('pro')} disabled={billingActionBusy !== null} className="h-9 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-black hover:bg-emerald-400 disabled:opacity-60">{billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade plan'}</button>
+                                                    <button type="button" onClick={() => void handleBillingCheckout('pro')} disabled={billingActionBusy !== null} className="h-9 rounded-md bg-[var(--ui-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--ui-primary-hover)] disabled:opacity-60">{billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade plan'}</button>
                                                     <button type="button" onClick={() => void handleBillingCheckout('team')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'team' ? 'Opening...' : 'Team'}</button>
                                                     <button type="button" onClick={() => void handleBillingCheckout('topup_1000')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy 1,000 credits'}</button>
                                                 </div>
@@ -764,8 +764,8 @@ export function CanvasProfileMenu() {
                                         <SectionCard title="Dollar Usage">
                                             <div className="space-y-3">
                                                 <div className="flex items-center justify-between"><p className="text-sm text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free plan'}</p><p className="text-sm font-semibold text-[var(--ui-text)]">{consumedThisCycle.toLocaleString()} / {planCreditCap.toLocaleString()} credits</p></div>
-                                                <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-surface-4)]"><div className="h-full rounded-full bg-emerald-400 transition-[width] duration-300" style={{ width: `${cycleUsagePct}%` }} /></div>
-                                                <div className="flex items-center justify-between text-xs text-[var(--ui-text-subtle)]"><span>Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'}</span><span>Rollover {billingSummary?.rolloverCredits ?? '--'}</span><span>Top-up {billingSummary?.topupCreditsRemaining ?? '--'}</span><span className="font-semibold text-emerald-300">Balance {billingSummary?.balanceCredits ?? '--'}</span></div>
+                                                <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-surface-4)]"><div className="h-full rounded-full bg-[var(--ui-primary)] transition-[width] duration-300" style={{ width: `${cycleUsagePct}%` }} /></div>
+                                                <div className="flex items-center justify-between text-xs text-[var(--ui-text-subtle)]"><span>Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'}</span><span>Rollover {billingSummary?.rolloverCredits ?? '--'}</span><span>Top-up {billingSummary?.topupCreditsRemaining ?? '--'}</span><span className="font-semibold text-[var(--ui-primary)]">Balance {billingSummary?.balanceCredits ?? '--'}</span></div>
                                             </div>
                                         </SectionCard>
                                         <SectionCard title="Usage Events">
@@ -831,7 +831,7 @@ export function CanvasProfileMenu() {
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
     return (
-        <button type="button" onClick={() => onChange(!checked)} className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'border-emerald-500/90 bg-emerald-500' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}>
+        <button type="button" onClick={() => onChange(!checked)} className={`h-7 w-12 rounded-full border transition-colors ${checked ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_72%,transparent)] bg-[var(--ui-primary)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]'}`}>
             <span className={`block h-5 w-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-[22px]' : 'translate-x-[2px]'}`} />
         </button>
     );
@@ -839,8 +839,8 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (next
 
 function SectionCard({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
     return (
-        <section className="rounded-xl border border-[var(--ui-border)] bg-[#10131b]">
-            <div className="flex items-center justify-between border-b border-[var(--ui-border)] px-4 py-3"><h3 className="text-[26px] font-semibold text-[var(--ui-text)]">{title}</h3>{action}</div>
+        <section className="rounded-xl border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,#10131b),#10131b)]">
+            <div className="flex items-center justify-between border-b border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] px-4 py-3"><h3 className="text-[26px] font-semibold text-[var(--ui-text)]">{title}</h3>{action}</div>
             <div className="divide-y divide-[var(--ui-border)]">{children}</div>
         </section>
     );
