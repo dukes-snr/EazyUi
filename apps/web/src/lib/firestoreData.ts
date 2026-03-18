@@ -662,6 +662,7 @@ async function renderScreenImageBase64(params: {
   fullPage?: boolean;
   format?: "png" | "jpeg";
   quality?: number;
+  fitToViewport?: boolean;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const response = await fetch("/api/render-screen-image", {
@@ -675,7 +676,7 @@ async function renderScreenImageBase64(params: {
         fullPage: params.fullPage,
         format: params.format,
         quality: params.quality,
-        fitToViewport: true,
+        fitToViewport: params.fitToViewport === true,
       }),
     });
     if (!response.ok) return null;
@@ -732,6 +733,7 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
       fullPage: false,
       format: "jpeg",
       quality: 68,
+      fitToViewport: false,
     });
     // Retry once with a smaller viewport for heavy/complex screens.
     if (!rendered) {
@@ -742,6 +744,7 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
         fullPage: false,
         format: "jpeg",
         quality: 60,
+        fitToViewport: false,
       });
     }
     // Final retry with stripped inline assets to avoid oversized payload/render failures.
@@ -753,6 +756,7 @@ async function buildProjectCoverDataUrls(screens: HtmlDesignSpec["screens"]): Pr
         fullPage: false,
         format: "jpeg",
         quality: 54,
+        fitToViewport: false,
       });
     }
     if (rendered) {
