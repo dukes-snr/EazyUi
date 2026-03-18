@@ -3,6 +3,8 @@ const FIRECRAWL_TIMEOUT_MS = Math.max(5_000, Number.parseInt(process.env.FIRECRA
 const MAX_REFERENCE_URLS = 3;
 const MAX_SOURCE_NOTES_CHARS = 900;
 const MAX_TOTAL_CONTEXT_CHARS = 3_600;
+const MAX_SOURCE_IMAGE_URLS = 4;
+const MAX_TOTAL_REFERENCE_IMAGE_URLS = 6;
 
 type FirecrawlSourceSummary = {
     requestedUrl: string;
@@ -11,12 +13,14 @@ type FirecrawlSourceSummary = {
     description?: string;
     notes: string;
     brandingPreview?: string;
+    imageUrls: string[];
 };
 
 export type FirecrawlReferenceContext = {
     promptContext: string;
     normalizedUrls: string[];
     sources: FirecrawlSourceSummary[];
+    referenceImageUrls: string[];
     warnings: string[];
     skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
 };
@@ -244,6 +248,46 @@ function buildBrandingPreview(data: Record<string, unknown>): string {
     return buildBrandingPreviewFromRecord(branding);
 }
 
+function normalizeImageUrl(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed || /^data:/i.test(trimmed)) return null;
+    try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return null;
+    }
+}
+
+function extractReferenceImageUrls(data: Record<string, unknown>): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    const pushValue = (value: unknown) => {
+        const normalized = normalizeImageUrl(value);
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        result.push(normalized);
+    };
+
+    if (Array.isArray(data.images)) {
+        for (const item of data.images) {
+            pushValue(item);
+            if (result.length >= MAX_SOURCE_IMAGE_URLS) return result;
+        }
+    }
+
+    const brandingImages = asRecord(asRecord(data.branding).images);
+    for (const key of ['ogImage', 'logo', 'favicon']) {
+        pushValue(brandingImages[key]);
+        if (result.length >= MAX_SOURCE_IMAGE_URLS) return result;
+    }
+
+    return result;
+}
+
 function pickFirstString(...values: unknown[]): string | undefined {
     for (const value of values) {
         if (typeof value === 'string' && value.trim()) return value.trim();
@@ -330,7 +374,7 @@ async function scrapeReferenceUrl(url: string, apiKey: string, options?: Firecra
                 onlyMainContent: false,
                 maxAge: 172800000,
                 parsers: ['pdf'],
-                formats: ['branding'],
+                formats: ['branding', 'images'],
             }),
             signal: controller.signal,
         });
@@ -350,6 +394,7 @@ async function scrapeReferenceUrl(url: string, apiKey: string, options?: Firecra
             throw new Error('No usable content returned');
         }
         const brandingPreview = buildBrandingPreview(content) || undefined;
+        const imageUrls = extractReferenceImageUrls(content);
 
         const resolvedUrl = pickFirstString(
             metadata.sourceURL,
@@ -373,6 +418,7 @@ async function scrapeReferenceUrl(url: string, apiKey: string, options?: Firecra
             ),
             notes,
             brandingPreview,
+            imageUrls,
         };
         options?.onEvent?.({
             level: 'info',
@@ -449,6 +495,7 @@ export async function buildFirecrawlReferenceContext(referenceUrls?: string[], o
             promptContext: '',
             normalizedUrls: [],
             sources: [],
+            referenceImageUrls: [],
             warnings: [],
             skippedReason: 'no_valid_urls',
         };
@@ -469,6 +516,7 @@ export async function buildFirecrawlReferenceContext(referenceUrls?: string[], o
             promptContext: '',
             normalizedUrls,
             sources: [],
+            referenceImageUrls: [],
             warnings: ['FIRECRAWL_API_KEY is not configured'],
             skippedReason: 'missing_api_key',
         };
@@ -504,6 +552,7 @@ export async function buildFirecrawlReferenceContext(referenceUrls?: string[], o
             promptContext: '',
             normalizedUrls,
             sources: [],
+            referenceImageUrls: [],
             warnings,
             skippedReason: 'all_failed',
         };
@@ -520,10 +569,15 @@ export async function buildFirecrawlReferenceContext(referenceUrls?: string[], o
         return result;
     }
 
+    const referenceImageUrls = Array.from(new Set(
+        sources.flatMap((source) => source.imageUrls || [])
+    )).slice(0, MAX_TOTAL_REFERENCE_IMAGE_URLS);
+
     const result = {
         promptContext: buildPromptContext(sources),
         normalizedUrls,
         sources,
+        referenceImageUrls,
         warnings,
     };
     options?.onEvent?.({

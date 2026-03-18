@@ -122,6 +122,7 @@ type ReferenceContextMeta = {
     warnings: string[];
     skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
     sourceCount: number;
+    referenceImageCount: number;
 };
 
 type ServerActivityItem = {
@@ -218,15 +219,54 @@ function previewText(value: unknown, max = LOG_PREVIEW_MAX): string {
     return text.length <= max ? text : `${text.slice(0, max)}...`;
 }
 
+function canonicalizeReferenceUrlForMatch(value: string): string {
+    try {
+        const url = new URL(value);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        if (/^www\./i.test(url.hostname)) {
+            url.hostname = url.hostname.replace(/^www\./i, '');
+        }
+        url.hash = '';
+        const serialized = url.toString();
+        return serialized.endsWith('/') ? serialized.slice(0, -1) : serialized;
+    } catch {
+        return '';
+    }
+}
+
+function normalizeReferenceImageSelectionUrls(referenceUrls?: string[]): string[] {
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const rawValue of referenceUrls || []) {
+        if (typeof rawValue !== 'string') continue;
+        const candidate = rawValue.trim();
+        if (!candidate) continue;
+        const serialized = canonicalizeReferenceUrlForMatch(candidate);
+        if (!serialized || seen.has(serialized)) continue;
+        seen.add(serialized);
+        normalized.push(serialized);
+    }
+    return normalized;
+}
+
+function mergeReferenceImages(baseImages?: string[], referenceImages?: string[]): string[] {
+    const merged = [...(Array.isArray(baseImages) ? baseImages : []), ...(Array.isArray(referenceImages) ? referenceImages : [])];
+    return Array.from(new Set(
+        merged.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    ));
+}
+
 async function applyReferenceUrlContext(
     text: string,
     referenceUrls: string[] | undefined,
+    referenceImageUrls: string[] | undefined,
     traceId: string,
     route: string,
 ): Promise<{
     text: string;
     normalizedUrls: string[];
     webContextApplied: boolean;
+    scrapedReferenceImages: string[];
     referenceContext: ReferenceContextMeta;
 }> {
     const baseText = typeof text === 'string' ? text : String(text || '');
@@ -242,7 +282,9 @@ async function applyReferenceUrlContext(
                 webContextApplied: false,
                 warnings: [],
                 sourceCount: 0,
+                referenceImageCount: 0,
             },
+            scrapedReferenceImages: [],
         };
     }
 
@@ -278,6 +320,18 @@ async function applyReferenceUrlContext(
             logTagged('Firecrawl', event.stage, payload);
         };
         const result = await buildFirecrawlReferenceContext(referenceUrls, { onEvent: logFirecrawlEvent });
+        const requestedReferenceImageSources = new Set(normalizeReferenceImageSelectionUrls(referenceImageUrls));
+        const scrapedReferenceImages = requestedReferenceImageSources.size > 0
+            ? Array.from(new Set(
+                result.sources.flatMap((source) => {
+                    const requestedUrl = canonicalizeReferenceUrlForMatch(source.requestedUrl);
+                    const resolvedUrl = canonicalizeReferenceUrlForMatch(source.resolvedUrl);
+                    const matchesSelection = requestedReferenceImageSources.has(requestedUrl)
+                        || requestedReferenceImageSources.has(resolvedUrl);
+                    return matchesSelection ? source.imageUrls : [];
+                })
+            ))
+            : [];
         const referenceContext: ReferenceContextMeta = {
             requestedUrls,
             normalizedUrls: result.normalizedUrls,
@@ -285,6 +339,7 @@ async function applyReferenceUrlContext(
             warnings: result.warnings,
             skippedReason: result.skippedReason,
             sourceCount: result.sources.length,
+            referenceImageCount: scrapedReferenceImages.length,
         };
         if (result.warnings.length) {
             fastify.log.warn({
@@ -301,6 +356,7 @@ async function applyReferenceUrlContext(
             requestedUrls: referenceContext.requestedUrls,
             normalizedUrls: referenceContext.normalizedUrls,
             sourceCount: referenceContext.sourceCount,
+            referenceImageCount: referenceContext.referenceImageCount,
             skippedReason: referenceContext.skippedReason,
             warnings: referenceContext.warnings.slice(0, 2),
             contextPreview: result.promptContext ? previewText(result.promptContext, 600) : undefined,
@@ -311,6 +367,7 @@ async function applyReferenceUrlContext(
                 text: baseText,
                 normalizedUrls: result.normalizedUrls,
                 webContextApplied: false,
+                scrapedReferenceImages,
                 referenceContext,
             };
         }
@@ -319,6 +376,7 @@ async function applyReferenceUrlContext(
             text: `${baseText.trim()}\n\n${result.promptContext}`,
             normalizedUrls: result.normalizedUrls,
             webContextApplied: true,
+            scrapedReferenceImages,
             referenceContext,
         };
     } catch (error) {
@@ -344,7 +402,9 @@ async function applyReferenceUrlContext(
                 warnings: [(error as Error).message || 'Failed to build web reference context.'],
                 skippedReason: 'all_failed',
                 sourceCount: 0,
+                referenceImageCount: 0,
             },
+            scrapedReferenceImages: [],
         };
     }
 }
@@ -1957,6 +2017,7 @@ fastify.post<{
         platform?: string;
         images?: string[];
         referenceUrls?: string[];
+        referenceImageUrls?: string[];
         expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
@@ -1965,7 +2026,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, referenceUrls, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, referenceUrls, referenceImageUrls, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2021,8 +2082,10 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            scrapedReferenceImages,
             referenceContext,
-        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate');
+        } = await applyReferenceUrlContext(prompt, referenceUrls, referenceImageUrls, traceId, '/api/generate');
+        const finalImages = mergeReferenceImages(images, scrapedReferenceImages);
         fastify.log.info({
             traceId,
             route: '/api/generate',
@@ -2031,6 +2094,8 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            scrapedReferenceImageCount: scrapedReferenceImages.length,
+            finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
@@ -2043,7 +2108,7 @@ fastify.post<{
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
-            images,
+            images: finalImages,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -2126,6 +2191,7 @@ fastify.post<{
         platform?: string;
         images?: string[];
         referenceUrls?: string[];
+        referenceImageUrls?: string[];
         preferredModel?: string;
         temperature?: number;
         projectDesignSystem?: ProjectDesignSystem;
@@ -2133,7 +2199,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/design-system', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, referenceUrls, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, referenceUrls, referenceImageUrls, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2188,8 +2254,10 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            scrapedReferenceImages,
             referenceContext,
-        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/design-system');
+        } = await applyReferenceUrlContext(prompt, referenceUrls, referenceImageUrls, traceId, '/api/design-system');
+        const finalImages = mergeReferenceImages(images, scrapedReferenceImages);
         fastify.log.info({
             traceId,
             route: '/api/design-system',
@@ -2198,6 +2266,8 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            scrapedReferenceImageCount: scrapedReferenceImages.length,
+            finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
@@ -2211,7 +2281,7 @@ fastify.post<{
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
-            images,
+            images: finalImages,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -2374,7 +2444,7 @@ fastify.post<{
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
             referenceContext,
-        } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit');
+        } = await applyReferenceUrlContext(instruction, referenceUrls, undefined, traceId, '/api/edit');
         fastify.log.info({
             traceId,
             route: '/api/edit',
@@ -2586,7 +2656,7 @@ fastify.post<{
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
             referenceContext,
-        } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit-stream');
+        } = await applyReferenceUrlContext(instruction, referenceUrls, undefined, traceId, '/api/edit-stream');
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
         const { editDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
@@ -3196,7 +3266,7 @@ fastify.post<{
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
             referenceContext,
-        } = await applyReferenceUrlContext(appPrompt, referenceUrls, traceId, '/api/plan');
+        } = await applyReferenceUrlContext(appPrompt, referenceUrls, undefined, traceId, '/api/plan');
         fastify.log.info({
             traceId,
             route: '/api/plan',
@@ -3530,6 +3600,7 @@ fastify.post<{
         platform?: string;
         images?: string[];
         referenceUrls?: string[];
+        referenceImageUrls?: string[];
         expectedScreenCount?: number;
         preferredModel?: string;
         temperature?: number;
@@ -3544,6 +3615,7 @@ fastify.post<{
         platform,
         images,
         referenceUrls,
+        referenceImageUrls,
         expectedScreenCount,
         preferredModel,
         temperature,
@@ -3638,8 +3710,10 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            scrapedReferenceImages,
             referenceContext,
-        } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate-stream');
+        } = await applyReferenceUrlContext(prompt, referenceUrls, referenceImageUrls, traceId, '/api/generate-stream');
+        const finalImages = mergeReferenceImages(images, scrapedReferenceImages);
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
         const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
@@ -3650,6 +3724,8 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            scrapedReferenceImageCount: scrapedReferenceImages.length,
+            finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
@@ -3663,7 +3739,7 @@ fastify.post<{
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
-            images,
+            images: finalImages,
             preferredModel,
             temperature,
             projectDesignSystem,

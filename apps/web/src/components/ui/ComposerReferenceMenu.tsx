@@ -6,7 +6,9 @@ type ComposerReferenceMenuProps = {
     activeIndex: number;
     menuMode: 'root' | 'url' | 'screen';
     menuRef?: Ref<HTMLDivElement>;
+    includeScrapedImages?: boolean;
     onCancel: () => void;
+    onIncludeScrapedImagesChange?: (value: boolean) => void;
     onRootOptionHover: (index: number) => void;
     onScreenHover: (index: number) => void;
     onScreenQueryChange?: (value: string) => void;
@@ -26,7 +28,9 @@ export function ComposerReferenceMenu({
     activeIndex,
     menuMode,
     menuRef,
+    includeScrapedImages = false,
     onCancel,
+    onIncludeScrapedImagesChange,
     onRootOptionHover,
     onScreenHover,
     onScreenQueryChange,
@@ -102,8 +106,34 @@ export function ComposerReferenceMenu({
                             onChange={(event) => onUrlDraftChange?.(event.target.value)}
                             placeholder="https://example.com"
                             className="w-full border-0 bg-transparent px-0 py-0 text-sm text-[var(--ui-text)] placeholder:text-[var(--ui-text-subtle)] focus:border-0 focus:outline-none focus:ring-0"
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    onSubmitUrl?.();
+                                }
+                                if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    onCancel();
+                                }
+                            }}
                         />
                     </div>
+                    {onIncludeScrapedImagesChange ? (
+                        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-[18px] border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_5%,transparent)] px-3 py-3">
+                            <input
+                                type="checkbox"
+                                checked={includeScrapedImages}
+                                onChange={(event) => onIncludeScrapedImagesChange(event.target.checked)}
+                                className="mt-0.5 h-4 w-4 rounded border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-primary)]"
+                            />
+                            <span className="min-w-0">
+                                <span className="block text-sm font-semibold text-[var(--ui-text)]">Include scraped site images</span>
+                                <span className="mt-0.5 block text-xs leading-5 text-[var(--ui-text-subtle)]">
+                                    Pull a few visual references from the page and send them with the prompt.
+                                </span>
+                            </span>
+                        </label>
+                    ) : null}
                     <div className="mt-3 flex items-center justify-end gap-2">
                         <button
                             type="button"

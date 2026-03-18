@@ -7,6 +7,7 @@ import {
     type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import {
+    normalizeComposerReferenceUrl,
     getComposerInlineReferenceSegments,
     removeComposerAtomicReferenceAtSelection,
     type ComposerScreenReferenceOption,
@@ -21,10 +22,18 @@ export type ComposerInlineReferenceInputHandle = {
     element: HTMLDivElement | null;
 };
 
+export type ComposerInlineReferenceClick = {
+    text: string;
+    kind: 'url' | 'screen';
+    range: { start: number; end: number };
+    url?: string;
+};
+
 type ComposerInlineReferenceInputProps = {
     value: string;
     onChange: (value: string, cursor: number) => void;
     onSelectionChange?: (value: string, cursor: number) => void;
+    onReferenceClick?: (reference: ComposerInlineReferenceClick) => void;
     onKeyDown?: (
         event: ReactKeyboardEvent<HTMLDivElement>,
         meta: { value: string; selectionStart: number; selectionEnd: number }
@@ -40,11 +49,11 @@ type ComposerInlineReferenceInputProps = {
 };
 
 const HIGHLIGHT_TONES = [
-    'bg-[rgba(251,191,36,0.48)] text-[#fff7db]',
-    'bg-[rgba(110,231,183,0.4)] text-[#ecfff7]',
-    'bg-[rgba(125,211,252,0.42)] text-[#eef9ff]',
-    'bg-[rgba(244,114,182,0.38)] text-[#fff2f8]',
-    'bg-[rgba(196,181,253,0.42)] text-[#f7f2ff]',
+    'bg-[rgba(251,191,36,0.36)] text-[var(--ui-text)]',
+    'bg-[rgba(110,231,183,0.28)] text-[var(--ui-text)]',
+    'bg-[rgba(125,211,252,0.3)] text-[var(--ui-text)]',
+    'bg-[rgba(244,114,182,0.26)] text-[var(--ui-text)]',
+    'bg-[rgba(196,181,253,0.3)] text-[var(--ui-text)]',
 ];
 const EMPTY_SCREEN_OPTIONS: ComposerScreenReferenceOption[] = [];
 
@@ -85,6 +94,11 @@ function getSelectionOffsets(root: HTMLDivElement): { start: number; end: number
 
 function isReferenceElement(node: Node): node is HTMLElement {
     return node instanceof HTMLElement && node.dataset.composerReference === 'true';
+}
+
+function getReferenceElement(node: EventTarget | null): HTMLElement | null {
+    if (!(node instanceof HTMLElement)) return null;
+    return node.closest('[data-composer-reference="true"]');
 }
 
 function resolvePointForOffset(root: HTMLDivElement, targetOffset: number): { node: Node; offset: number } {
@@ -183,19 +197,31 @@ function syncRootSegments(
     segments: ReturnType<typeof getComposerInlineReferenceSegments>
 ) {
     root.replaceChildren();
+    let cursor = 0;
 
     segments.forEach((segment) => {
         if (segment.kind === 'text') {
             root.append(document.createTextNode(segment.text));
+            cursor += segment.text.length;
             return;
         }
 
         const token = document.createElement('span');
         token.dataset.composerReference = 'true';
+        token.dataset.composerReferenceKind = segment.kind;
+        token.dataset.composerReferenceStart = String(cursor);
+        token.dataset.composerReferenceEnd = String(cursor + segment.text.length);
+        if (segment.kind === 'url') {
+            const normalizedUrl = normalizeComposerReferenceUrl(segment.text.slice(1));
+            if (normalizedUrl) {
+                token.dataset.composerReferenceUrl = normalizedUrl;
+            }
+        }
         token.contentEditable = 'false';
-        token.className = `inline rounded-[0.24em] px-[0.08em] py-0 font-semibold [box-decoration-break:clone] [-webkit-box-decoration-break:clone] ${getHighlightTone(segment.text)}`;
+        token.className = `inline cursor-pointer rounded-[0.24em] px-[0.08em] py-0 font-semibold [box-decoration-break:clone] [-webkit-box-decoration-break:clone] ${getHighlightTone(segment.text)}`;
         token.textContent = segment.text;
         root.append(token);
+        cursor += segment.text.length;
     });
 }
 
@@ -205,6 +231,7 @@ export const ComposerInlineReferenceInput = forwardRef<ComposerInlineReferenceIn
             value,
             onChange,
             onSelectionChange,
+            onReferenceClick,
             onKeyDown,
             onFocus,
             onBlur,
@@ -325,7 +352,26 @@ export const ComposerInlineReferenceInput = forwardRef<ComposerInlineReferenceIn
                     onFocus={onFocus}
                     onBlur={onBlur}
                     onInput={() => reconcileDomValue()}
-                    onClick={() => emitSelection()}
+                    onMouseDown={(event) => {
+                        const referenceElement = getReferenceElement(event.target);
+                        if (!referenceElement) return;
+                        const kind = referenceElement.dataset.composerReferenceKind;
+                        const start = Number(referenceElement.dataset.composerReferenceStart);
+                        const end = Number(referenceElement.dataset.composerReferenceEnd);
+                        if ((kind !== 'url' && kind !== 'screen') || !Number.isFinite(start) || !Number.isFinite(end)) return;
+                        event.preventDefault();
+                        pendingSelectionRef.current = { start, end };
+                        onReferenceClick?.({
+                            text: referenceElement.textContent || '',
+                            kind,
+                            range: { start, end },
+                            url: referenceElement.dataset.composerReferenceUrl,
+                        });
+                    }}
+                    onClick={(event) => {
+                        if (getReferenceElement(event.target)) return;
+                        emitSelection();
+                    }}
                     onKeyUp={() => emitSelection()}
                     onBeforeInput={(event: ReactFormEvent<HTMLDivElement>) => {
                         if (disabled) return;

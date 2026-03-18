@@ -390,7 +390,9 @@ THEME AWARENESS (MANDATORY):
 
 const IMAGE_WHITELIST = `
 IMAGES (WEB URL POLICY):
-- For non-map visuals, use Unsplash image URLs only (https://images.unsplash.com/photo-...).
+- If explicit scraped/reference image URLs are provided in the prompt, you may use those exact URLs directly for matching <img src> values.
+- Prefer scraped/reference image URLs over generic Unsplash substitutions when the request is based on a referenced site and the image matches the screen context.
+- If no explicit reference image URL is suitable for a non-map visual, then use Unsplash image URLs (https://images.unsplash.com/photo-...).
 - Do NOT use placeholder.net for non-map content.
 - Keep image choices tightly aligned to UI context (domain, component purpose, and nearby copy).
 - Prefer stable Unsplash photo URLs (not random endpoints) and include quality params like:
@@ -868,7 +870,9 @@ Current HTML:
 
 const FAST_UNSPLASH_IMAGE_RULES = `
 Fast image policy:
-- Use Unsplash image URLs only for non-map images (https://images.unsplash.com/photo-...).
+- If explicit scraped/reference image URLs are provided in the prompt, you may use those exact URLs directly for matching <img src> values.
+- Prefer scraped/reference image URLs over generic Unsplash substitutions when they fit the requested component/screen.
+- If no explicit reference image URL fits, use Unsplash image URLs for non-map images (https://images.unsplash.com/photo-...).
 - Ensure each chosen photo context matches the component purpose and alt text.
 - Prefer stable photo URLs with params like ?auto=format&fit=crop&w=1200&q=80.
 - Map placeholders:
@@ -927,6 +931,7 @@ export interface GenerateProjectDesignSystemOptions {
 }
 
 type InlineImagePart = { inlineData: { data: string; mimeType: string } };
+const MAX_REFERENCE_IMAGE_PARTS = 3;
 
 function extractInlineImageParts(images: string[]): InlineImagePart[] {
     const parts: InlineImagePart[] = [];
@@ -941,9 +946,77 @@ function extractInlineImageParts(images: string[]): InlineImagePart[] {
     return parts;
 }
 
+async function fetchRemoteImagePart(url: string): Promise<InlineImagePart | null> {
+    try {
+        const response = await fetch(url, {
+            headers: {
+                Accept: 'image/*',
+                'User-Agent': 'EazyUI/1.0 (+https://eazyui.app)',
+            },
+        });
+        if (!response.ok) return null;
+        const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim();
+        if (!/^image\//i.test(mimeType)) return null;
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return {
+            inlineData: {
+                data: buffer.toString('base64'),
+                mimeType,
+            }
+        };
+    } catch (error) {
+        console.warn('[Gemini] fetchRemoteImagePart failed', {
+            url,
+            error: (error as Error)?.message || String(error),
+        });
+        return null;
+    }
+}
+
+async function resolveImageParts(images: string[]): Promise<InlineImagePart[]> {
+    const inlineParts = extractInlineImageParts(images);
+    const remaining = Math.max(0, MAX_REFERENCE_IMAGE_PARTS - inlineParts.length);
+    if (remaining === 0) return inlineParts.slice(0, MAX_REFERENCE_IMAGE_PARTS);
+
+    const remoteUrls = images
+        .filter((img) => /^https?:\/\//i.test(String(img || '').trim()))
+        .slice(0, remaining);
+    if (remoteUrls.length === 0) return inlineParts.slice(0, MAX_REFERENCE_IMAGE_PARTS);
+
+    const remoteParts = (await Promise.all(remoteUrls.map((url) => fetchRemoteImagePart(url))))
+        .filter((part): part is InlineImagePart => Boolean(part));
+    return [...inlineParts, ...remoteParts].slice(0, MAX_REFERENCE_IMAGE_PARTS);
+}
+
+function getRemoteReferenceImageUrls(images: string[], limit = 8): string[] {
+    const seen = new Set<string>();
+    const urls: string[] = [];
+    for (const image of images) {
+        const value = String(image || '').trim();
+        if (!/^https?:\/\//i.test(value)) continue;
+        if (seen.has(value)) continue;
+        seen.add(value);
+        urls.push(value);
+        if (urls.length >= limit) break;
+    }
+    return urls;
+}
+
+function buildReferenceImageUrlGuidance(images: string[]): string {
+    const remoteUrls = getRemoteReferenceImageUrls(images);
+    if (!remoteUrls.length) return '';
+    return `REFERENCE IMAGE URLS (PREFER THESE EXACT URLS FOR MATCHING WEB REFERENCE VISUALS):
+${remoteUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}
+
+Rules:
+- These URLs came from the referenced site scrape and are approved to use directly in <img src> attributes.
+- When a screen needs hero art, supporting media, or character imagery that matches the referenced site, prefer these exact URLs first.
+- Only fall back to Unsplash when none of these reference image URLs fit the specific component context.`;
+}
+
 async function analyzeReferenceImages(images: string[]): Promise<string> {
     if (!images.length) return '';
-    const imageParts = extractInlineImageParts(images).slice(0, 3);
+    const imageParts = await resolveImageParts(images);
     if (!imageParts.length) return '';
 
     const analysisPrompt = `Analyze the attached UI reference image(s) for generation guidance.
@@ -980,7 +1053,15 @@ Return concise JSON only with fields:
         const raw = (result.response.text() || '').trim();
         if (!raw) return '';
         const compact = raw.replace(/```json|```/gi, '').trim();
-        return `IMAGE REFERENCE ANALYSIS (HARD GUIDANCE):\n${compact}\nUse this analysis to match palette, layout structure, spacing rhythm, component architecture, and visual hierarchy from the reference image(s).`;
+        try {
+            const parsed = JSON.parse(compact);
+            return `IMAGE REFERENCE ANALYSIS (HARD GUIDANCE):\n${JSON.stringify(parsed)}\nUse this analysis to match palette, layout structure, spacing rhythm, component architecture, and visual hierarchy from the reference image(s).`;
+        } catch {
+            console.warn('[Gemini] analyzeReferenceImages returned invalid JSON; using fallback guidance', {
+                preview: compact.slice(0, 240),
+            });
+            return 'Attached image(s) are PRIMARY reference. Prioritize matching their palette, art direction, layout hierarchy, and component structure over generic stock patterns.';
+        }
     } catch (error) {
         console.warn('[Gemini] analyzeReferenceImages failed; continuing without structured image analysis', error);
         return 'Attached image(s) are reference-first. Prioritize matching their palette, layout structure, component style, and visual hierarchy over generic patterns.';
@@ -1875,6 +1956,9 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
 
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
     const imageAnalysis = await analyzeReferenceImages(images);
+    const imageGuidance = images.length > 0
+        ? 'Attached image(s) are PRIMARY visual references. Match their brand cues, art direction, contrast, spacing feel, radius language, and typography tone unless they would clearly harm usability.'
+        : '';
     const colorPrompt = buildDesignSystemColorPrompt(prompt, stylePreset);
     const brandingPriorityPrompt = buildBrandingPriorityPrompt(prompt);
 
@@ -1931,6 +2015,7 @@ ${brandingPriorityPrompt ? `\n\n${brandingPriorityPrompt}` : ''}`;
     const userPrompt = `App request: "${prompt}"
 Style preset: ${stylePreset}
 Platform: ${platform}
+${imageGuidance}
 ${imageAnalysis || ''}
 Generate the design system that should be reused for this whole project.
 Infer and set a clean project/product name in systemName (not a sentence, not "Design System").
@@ -1973,7 +2058,7 @@ Choose typography that fits the brand personality instead of defaulting to the s
             const preferredGeminiModel = resolveDesignSystemPreferredModel(preferredModel);
             const defaultDesignSystemModelName = /gemini-3-pro-preview/i.test(modelName) ? 'gemini-2.5-pro' : modelName;
             const primaryGeminiModelName = preferredGeminiModel || defaultDesignSystemModelName;
-            const imageParts = extractInlineImageParts(images).slice(0, 3);
+            const imageParts = await resolveImageParts(images);
             const runGeminiDesignSystemAttempt = async (activeModelName: string, retry = false): Promise<unknown> => {
                 const designSystemModel = activeModelName === modelName ? model : getGenerativeModel(activeModelName).model;
                 const result = await designSystemModel.generateContent({
@@ -2077,6 +2162,7 @@ export async function generateDesign(options: GenerateOptions): Promise<{
         ? `Use the attached image(s) as PRIMARY reference. Match palette, typography mood, spacing density, component shapes, and layout hierarchy. Do not ignore reference cues.
 If the text request is ambiguous (e.g., "as seen", "like this"), preserve the same app domain and information architecture as the reference image(s).`
         : '';
+    const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(images);
     const noImageGuidance = images.length === 0 ? NO_IMAGE_REFERENCE_QUALITY_RULES : '';
 
     const baseUserPrompt = `
@@ -2087,6 +2173,7 @@ Generate a maximum of 4 complete screens.
 ${imageGuidance}
 ${noImageGuidance}
 ${imageAnalysis}
+${referenceImageUrlGuidance}
 ${designSystemGuidance}
 `;
 
@@ -2098,15 +2185,16 @@ Generate exactly 1 complete main screen.
 ${imageGuidance}
 ${noImageGuidance}
 ${imageAnalysis}
+${referenceImageUrlGuidance}
 ${designSystemGuidance}
 `;
 
     const buildParts = (userPrompt: string) => {
-        const parts: any[] = [{ text: GENERATE_HTML_PROMPT + '\n\n' + userPrompt }];
-
-        parts.push(...extractInlineImageParts(images));
-
-        return parts;
+        return resolveImageParts(images).then((imageParts) => {
+            const parts: any[] = [{ text: GENERATE_HTML_PROMPT + '\n\n' + userPrompt }];
+            parts.push(...imageParts);
+            return parts;
+        });
     };
 
     const isFastTextProviderModel = isGroqModel(preferredModel) || isNvidiaModel(preferredModel);
@@ -2171,7 +2259,7 @@ ${designSystemGuidance}
                 throw error;
             }
         }
-        return generateDesignOnce(buildParts(promptText), resolvedPreferredModel, generationConfig);
+        return generateDesignOnce(await buildParts(promptText), resolvedPreferredModel, generationConfig);
     };
 
     let initialResponse = await generateOnce(isFastTextProviderModel ? fastBaseUserPrompt : baseUserPrompt);
@@ -2247,6 +2335,7 @@ export function generateDesignStreamWithUsage(options: GenerateOptions): {
             const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
             const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
             const imageAnalysis = await analyzeReferenceImages(images);
+            const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(images);
             const designSystemResult = await generateProjectDesignSystem({
                 prompt,
                 stylePreset,
@@ -2264,10 +2353,10 @@ export function generateDesignStreamWithUsage(options: GenerateOptions): {
 ${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
 ${images.length ? '' : NO_IMAGE_REFERENCE_QUALITY_RULES}
 ${imageAnalysis}
+${referenceImageUrlGuidance}
 ${designSystemGuidance}`;
             const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
-
-            parts.push(...extractInlineImageParts(images));
+            parts.push(...await resolveImageParts(images));
 
             const preferredGeminiModel = (!isGroqModel(preferredModel) && !isNvidiaModel(preferredModel))
                 ? resolvePreferredModel(preferredModel)
@@ -2494,16 +2583,7 @@ ${designSystemGuidance}`.trim();
     const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
 
     const parts: any[] = [{ text: userPrompt }];
-    if (images.length > 0) {
-        images.forEach((img) => {
-            const matches = img.match(/^data:(.+);base64,(.+)$/);
-            if (matches) {
-                parts.push({
-                    inlineData: { data: matches[2], mimeType: matches[1] }
-                });
-            }
-        });
-    }
+    parts.push(...await resolveImageParts(images));
 
     const parseEditResponse = (raw: string): { html: string; description?: string } => {
         const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
@@ -2670,7 +2750,7 @@ ${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((s
 ${designSystemGuidance}`.trim();
             const streamPrompt = `${STREAM_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
             const parts: any[] = [{ text: streamPrompt }];
-            parts.push(...extractInlineImageParts(images));
+            parts.push(...await resolveImageParts(images));
 
             if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
                 const edited = await editDesign(options);

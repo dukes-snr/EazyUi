@@ -738,6 +738,7 @@ type DesignSystemProposalContext = {
     appPromptForPlanning: string;
     images?: string[];
     referenceUrls?: string[];
+    referenceImageUrls?: string[];
     platform: 'mobile' | 'tablet' | 'desktop';
     stylePreset: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
     modelProfile: DesignModelProfile;
@@ -2066,6 +2067,7 @@ type ChatPanelProps = {
         prompt: string;
         images?: string[];
         referenceUrls?: string[];
+        referenceImageUrls?: string[];
         platform?: 'mobile' | 'tablet' | 'desktop';
         stylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
         modelProfile?: DesignModelProfile;
@@ -3115,8 +3117,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     };
 
     const syncMentionState = (value: string, cursor: number) => {
-        if (referenceMenuMode !== 'root' && isMentionOpen) return;
         const match = findComposerReferenceTrigger(value, cursor);
+        if (referenceMenuMode !== 'root' && isMentionOpen) {
+            if (!match) {
+                closeMentionMenu();
+            }
+            return;
+        }
         if (!match) {
             closeMentionMenu();
             return;
@@ -3157,6 +3164,24 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             target.focus();
             target.setSelectionRange(result.cursor, result.cursor);
         }, 0);
+    };
+
+    const handleReferenceTokenClick = (reference: { kind: 'url' | 'screen'; range: { start: number; end: number }; url?: string }) => {
+        referenceTriggerRangeRef.current = reference.range;
+        if (reference.kind === 'url' && reference.url) {
+            setReferenceMenuMode('url');
+            setMentionActiveIndex(0);
+            setMentionQuery('');
+            setReferenceUrlDraft(reference.url);
+            setIsMentionOpen(true);
+            return;
+        }
+        if (reference.kind === 'screen') {
+            setReferenceMenuMode('screen');
+            setMentionActiveIndex(0);
+            setMentionQuery('');
+            setIsMentionOpen(true);
+        }
     };
 
     const selectMentionScreen = (screen: ComposerScreenReference) => {
@@ -3479,7 +3504,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             false,
             true,
             undefined,
-            context.referenceUrls || []
+            context.referenceUrls || [],
+            context.referenceImageUrls || []
         );
     };
 
@@ -3806,7 +3832,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         allowPlannerFlow?: boolean,
         skipDesignSystemStep?: boolean,
         incomingReferencePreviewMode?: 'screen' | 'palette',
-        incomingReferenceUrls?: string[]
+        incomingReferenceUrls?: string[],
+        incomingReferenceImageUrls?: string[]
     ) => {
         const resolvedComposerReferences = extractComposerInlineReferences(incomingPrompt ?? prompt, {
             allowScreen: true,
@@ -3827,6 +3854,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             && (!incomingTargetScreens || incomingTargetScreens.length === 0);
         const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer(resolvedComposerReferences.screenReferences);
         const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.urlReferences.map((item) => item.url);
+        const referenceImageUrls = Array.isArray(incomingReferenceImageUrls)
+            ? incomingReferenceImageUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
+            : [];
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
             ? `${requestPrompt}\n\n${referencePromptContext}`
@@ -3935,6 +3965,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         platform: platformToUse,
                         images: imagesToSend,
                         referenceUrls,
+                        referenceImageUrls,
                         preferredModel,
                         bundleWithFirstGeneration: shouldBundleDesignSystemWithFirstGeneration,
                         projectId: projectId || undefined,
@@ -3982,6 +4013,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             appPromptForPlanning,
                             images: imagesToSend,
                             referenceUrls,
+                            referenceImageUrls,
                             platform: platformToUse,
                             stylePreset: styleToUse,
                             modelProfile: modelProfileToUse,
@@ -4126,6 +4158,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     platform: platformToUse,
                     images: imagesToSend,
                     referenceUrls,
+                    referenceImageUrls,
                     expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
@@ -4255,6 +4288,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 platform: platformToUse,
                 images: imagesToSend,
                 referenceUrls,
+                referenceImageUrls,
                 expectedScreenCount: requestedScreenCount,
                 preferredModel,
                 projectDesignSystem: activeProjectDesignSystem,
@@ -4325,6 +4359,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     platform: platformToUse,
                     images: imagesToSend,
                     referenceUrls,
+                    referenceImageUrls,
                     expectedScreenCount: requestedScreenCount,
                     preferredModel,
                     projectDesignSystem: activeProjectDesignSystem,
@@ -4631,6 +4666,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         const nextReferenceUrls = Array.isArray(initialRequest?.referenceUrls)
             ? initialRequest.referenceUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
             : [];
+        const nextReferenceImageUrls = Array.isArray(initialRequest?.referenceImageUrls)
+            ? initialRequest.referenceImageUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
+            : [];
         const nextPlatform = initialRequest?.platform;
         const nextStylePreset = initialRequest?.stylePreset;
         const nextModelProfile = initialRequest?.modelProfile;
@@ -4649,7 +4687,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             apiClient.setComposerTemperature(safeTemperature);
         }
         pinToLatest('auto');
-        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, nextReferenceUrls);
+        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, nextReferenceUrls, nextReferenceImageUrls);
     }, [initialRequest, messages.length, isGenerating]);
 
     type EditExecutionOptions = {
@@ -6628,6 +6666,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         value={prompt}
                                         onChange={handlePromptChange}
                                         onSelectionChange={syncMentionState}
+                                        onReferenceClick={handleReferenceTokenClick}
                                         onKeyDown={handleKeyDown}
                                         placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
                                         placeholderClassName="pr-2 py-1 leading-relaxed"

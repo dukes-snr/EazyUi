@@ -20,6 +20,7 @@ import {
   type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
+import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { Orb } from '../ui/Orb';
@@ -107,12 +108,17 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [referenceRootQuery, setReferenceRootQuery] = useState('');
   const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
   const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
+  const [referenceIncludeScrapedImages, setReferenceIncludeScrapedImages] = useState(false);
+  const [referenceEditingUrl, setReferenceEditingUrl] = useState<string | null>(null);
+  const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const starterPromptRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
   const styleMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
   const isLight = theme === 'light';
@@ -232,15 +238,19 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     setReferenceRootQuery('');
     setReferenceActiveIndex(0);
     setReferenceUrlDraft('');
+    setReferenceIncludeScrapedImages(false);
+    setReferenceEditingUrl(null);
     referenceTriggerRangeRef.current = null;
+  };
+
+  const closeAddMenu = () => {
+    setIsAddMenuOpen(false);
   };
 
   const syncReferenceTrigger = (value: string, cursor: number) => {
     const match = findComposerReferenceTrigger(value, cursor);
     if (!match) {
-      if (referenceMenuMode === 'root') {
-        closeReferenceMenu();
-      }
+      closeReferenceMenu();
       return;
     }
     referenceTriggerRangeRef.current = match.range;
@@ -249,10 +259,19 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     setIsReferenceMenuOpen(true);
   };
 
-  const openUrlReferenceInput = () => {
+  const openUrlReferenceInput = (source: 'trigger' | 'append' = 'trigger') => {
+    if (source === 'append') {
+      const currentValue = starterPromptRef.current?.getValue() ?? starterPrompt;
+      referenceTriggerRangeRef.current = {
+        start: currentValue.length,
+        end: currentValue.length,
+      };
+    }
     setReferenceMenuMode('url');
     setReferenceActiveIndex(0);
     setReferenceUrlDraft('');
+    setReferenceIncludeScrapedImages(false);
+    setReferenceEditingUrl(null);
     setIsReferenceMenuOpen(true);
   };
 
@@ -264,6 +283,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     const source = starterPromptRef.current?.getValue() ?? starterPrompt;
     const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
     setStarterPrompt(result.value);
+    setReferenceImageUrls((prev) => {
+      const next = new Set(prev);
+      if (referenceEditingUrl) next.delete(referenceEditingUrl);
+      if (referenceIncludeScrapedImages) next.add(normalized);
+      else next.delete(normalized);
+      return Array.from(next);
+    });
     closeReferenceMenu();
     window.setTimeout(() => {
       const target = starterPromptRef.current;
@@ -271,6 +297,18 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
       target.focus();
       target.setSelectionRange(result.cursor, result.cursor);
     }, 0);
+  };
+
+  const handleReferenceTokenClick = (reference: { kind: 'url' | 'screen'; range: { start: number; end: number }; url?: string }) => {
+    if (reference.kind !== 'url' || !reference.url) return;
+    closeAddMenu();
+    referenceTriggerRangeRef.current = reference.range;
+    setReferenceMenuMode('url');
+    setReferenceActiveIndex(0);
+    setReferenceUrlDraft(reference.url);
+    setReferenceIncludeScrapedImages(referenceImageUrls.includes(reference.url));
+    setReferenceEditingUrl(reference.url);
+    setIsReferenceMenuOpen(true);
   };
 
   useEffect(() => {
@@ -344,6 +382,23 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
     referenceUrlInputRef.current?.focus();
   }, [isReferenceMenuOpen, referenceMenuMode]);
+
+  useEffect(() => {
+    if (!isAddMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (addMenuRef.current?.contains(event.target as Node)) return;
+      closeAddMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeAddMenu();
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAddMenuOpen]);
 
   useEffect(() => {
     apiClient.setComposerTemperature(modelTemperature);
@@ -456,6 +511,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         prompt: parsedReferences.cleanedText.trim(),
         images: starterImages,
         referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
+        referenceImageUrls: referenceImageUrls.filter((url) => parsedReferences.urlReferences.some((item) => item.url === url)),
         platform: deviceType,
         stylePreset,
         modelProfile,
@@ -850,6 +906,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     syncReferenceTrigger(nextValue, cursor);
                   }}
                   onSelectionChange={syncReferenceTrigger}
+                  onReferenceClick={handleReferenceTokenClick}
                   onKeyDown={(event) => {
                     if (isReferenceMenuOpen) {
                       if (referenceMenuMode === 'root' && rootReferenceOptions.length > 0) {
@@ -871,7 +928,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
                           const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                          if (choice?.key === 'url') openUrlReferenceInput();
+                          if (choice?.key === 'url') openUrlReferenceInput('trigger');
                           return;
                         }
                       }
@@ -914,16 +971,38 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
               )}
               <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
                 <div className="flex items-center gap-2">
-                  <motion.button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
-                    title="Add image"
-                    whileHover={shouldReduceMotion ? undefined : { y: -1 }}
-                    whileTap={shouldReduceMotion ? undefined : { scale: 0.97 }}
-                  >
-                    <Plus size={18} />
-                  </motion.button>
+                  <div className="relative">
+                    <motion.button
+                      type="button"
+                      onClick={() => {
+                        setIsReferenceMenuOpen(false);
+                        if (isAddMenuOpen) {
+                          closeAddMenu();
+                          return;
+                        }
+                        setIsAddMenuOpen(true);
+                      }}
+                      className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                      title="Add to prompt"
+                      whileHover={shouldReduceMotion ? undefined : { y: -1 }}
+                      whileTap={shouldReduceMotion ? undefined : { scale: 0.97 }}
+                    >
+                      <Plus size={18} />
+                    </motion.button>
+                    {isAddMenuOpen && (
+                      <ComposerAddMenu
+                        menuRef={addMenuRef}
+                        onAddFiles={() => {
+                          closeAddMenu();
+                          fileInputRef.current?.click();
+                        }}
+                        onAddUrl={() => {
+                          closeAddMenu();
+                          openUrlReferenceInput('append');
+                        }}
+                      />
+                    )}
+                  </div>
                   <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                       <button
@@ -1038,12 +1117,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   onRootOptionHover={setReferenceActiveIndex}
                   onScreenHover={setReferenceActiveIndex}
                   onSelectRootOption={(key) => {
-                    if (key === 'url') openUrlReferenceInput();
+                    if (key === 'url') openUrlReferenceInput('trigger');
                   }}
                   onSubmitUrl={submitUrlReference}
+                  includeScrapedImages={referenceIncludeScrapedImages}
                   rootOptions={rootReferenceOptions}
                   urlDraft={referenceUrlDraft}
                   urlInputRef={referenceUrlInputRef}
+                  onIncludeScrapedImagesChange={setReferenceIncludeScrapedImages}
                   onUrlDraftChange={setReferenceUrlDraft}
                 />
               )}

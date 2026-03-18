@@ -191,6 +191,7 @@ export interface GenerateRequest {
     platform?: string;
     images?: string[]; // Base64 encoded images
     referenceUrls?: string[];
+    referenceImageUrls?: string[];
     expectedScreenCount?: number;
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
@@ -213,6 +214,7 @@ export interface ReferenceContextMeta {
     warnings: string[];
     skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
     sourceCount: number;
+    referenceImageCount: number;
 }
 
 export interface EditRequest {
@@ -312,6 +314,7 @@ export interface GenerateDesignSystemRequest {
     platform?: string;
     images?: string[];
     referenceUrls?: string[];
+    referenceImageUrls?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
     bundleWithFirstGeneration?: boolean;

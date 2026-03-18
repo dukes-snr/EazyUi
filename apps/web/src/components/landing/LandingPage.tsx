@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Paperclip, Pause, Play, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
@@ -17,6 +17,7 @@ import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { Orb } from '../ui/Orb';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
+import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import TextType from '../ui/TextType';
 import { useUiStore } from '../../stores';
@@ -39,6 +40,7 @@ type LandingPageProps = {
         modelProfile: DesignModelProfile;
         modelTemperature?: number;
         referenceUrls?: string[];
+        referenceImageUrls?: string[];
     }) => void;
     onNavigate: (path: string) => void;
     userProfile?: {
@@ -303,6 +305,10 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
+    const [referenceIncludeScrapedImages, setReferenceIncludeScrapedImages] = useState(false);
+    const [referenceEditingUrl, setReferenceEditingUrl] = useState<string | null>(null);
+    const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
+    const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
     const [newsletterEmail, setNewsletterEmail] = useState('');
     const [newsletterBusy, setNewsletterBusy] = useState(false);
     const [newsletterStatus, setNewsletterStatus] = useState<string | null>(null);
@@ -317,6 +323,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const promptTextareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
+    const addMenuRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
@@ -384,6 +391,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             stylePreset,
             modelProfile,
             referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
+            referenceImageUrls: referenceImageUrls.filter((url) => parsedReferences.urlReferences.some((item) => item.url === url)),
         });
     };
 
@@ -410,15 +418,19 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         setReferenceRootQuery('');
         setReferenceActiveIndex(0);
         setReferenceUrlDraft('');
+        setReferenceIncludeScrapedImages(false);
+        setReferenceEditingUrl(null);
         referenceTriggerRangeRef.current = null;
+    };
+
+    const closeAddMenu = () => {
+        setIsAddMenuOpen(false);
     };
 
     const syncReferenceTrigger = (value: string, cursor: number) => {
         const match = findComposerReferenceTrigger(value, cursor);
         if (!match) {
-            if (referenceMenuMode === 'root') {
-                closeReferenceMenu();
-            }
+            closeReferenceMenu();
             return;
         }
         referenceTriggerRangeRef.current = match.range;
@@ -427,10 +439,19 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         setIsReferenceMenuOpen(true);
     };
 
-    const openUrlReferenceInput = () => {
+    const openUrlReferenceInput = (source: 'trigger' | 'append' = 'trigger') => {
+        if (source === 'append') {
+            const currentValue = promptTextareaRef.current?.getValue() ?? prompt;
+            referenceTriggerRangeRef.current = {
+                start: currentValue.length,
+                end: currentValue.length,
+            };
+        }
         setReferenceMenuMode('url');
         setReferenceActiveIndex(0);
         setReferenceUrlDraft('');
+        setReferenceIncludeScrapedImages(false);
+        setReferenceEditingUrl(null);
         setIsReferenceMenuOpen(true);
     };
 
@@ -442,6 +463,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         const source = promptTextareaRef.current?.getValue() ?? prompt;
         const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
         setPrompt(result.value);
+        setReferenceImageUrls((prev) => {
+            const next = new Set(prev);
+            if (referenceEditingUrl) next.delete(referenceEditingUrl);
+            if (referenceIncludeScrapedImages) next.add(normalized);
+            else next.delete(normalized);
+            return Array.from(next);
+        });
         closeReferenceMenu();
         window.setTimeout(() => {
             const target = promptTextareaRef.current;
@@ -449,6 +477,18 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             target.focus();
             target.setSelectionRange(result.cursor, result.cursor);
         }, 0);
+    };
+
+    const handleReferenceTokenClick = (reference: { kind: 'url' | 'screen'; range: { start: number; end: number }; url?: string }) => {
+        if (reference.kind !== 'url' || !reference.url) return;
+        closeAddMenu();
+        referenceTriggerRangeRef.current = reference.range;
+        setReferenceMenuMode('url');
+        setReferenceActiveIndex(0);
+        setReferenceUrlDraft(reference.url);
+        setReferenceIncludeScrapedImages(referenceImageUrls.includes(reference.url));
+        setReferenceEditingUrl(reference.url);
+        setIsReferenceMenuOpen(true);
     };
 
     const handlePromptChange = (value: string, cursor: number) => {
@@ -585,6 +625,23 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
         referenceUrlInputRef.current?.focus();
     }, [isReferenceMenuOpen, referenceMenuMode]);
+
+    useEffect(() => {
+        if (!isAddMenuOpen) return;
+        const handlePointerDown = (event: MouseEvent) => {
+            if (addMenuRef.current?.contains(event.target as Node)) return;
+            closeAddMenu();
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') closeAddMenu();
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isAddMenuOpen]);
 
     useEffect(() => {
         if (!showStyleMenu) return;
@@ -966,6 +1023,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         value={prompt}
                                         onChange={handlePromptChange}
                                         onSelectionChange={syncReferenceTrigger}
+                                        onReferenceClick={handleReferenceTokenClick}
                                         onFocus={() => setIsPromptFocused(true)}
                                         onBlur={() => setIsPromptFocused(false)}
                                         onKeyDown={(e) => {
@@ -989,7 +1047,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                     if (e.key === 'Enter' && !e.shiftKey) {
                                                         e.preventDefault();
                                                         const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
-                                                        if (choice?.key === 'url') openUrlReferenceInput();
+                                                        if (choice?.key === 'url') openUrlReferenceInput('trigger');
                                                         return;
                                                     }
                                                 }
@@ -1042,15 +1100,36 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     className="hidden"
                                     onChange={handleFileSelect}
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="h-8 rounded-md px-2.5 text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] transition-colors  flex items-center justify-center gap-1.5"
-                                    title="Attach images"
-                                >
-                                    <Paperclip size={17} />
-                                    {/* <span className="text-[12px]">Attach</span> */}
-                                </button>
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsReferenceMenuOpen(false);
+                                            if (isAddMenuOpen) {
+                                                closeAddMenu();
+                                                return;
+                                            }
+                                            setIsAddMenuOpen(true);
+                                        }}
+                                        className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                                        title="Add to prompt"
+                                    >
+                                        <Plus size={18} />
+                                    </button>
+                                    {isAddMenuOpen && (
+                                        <ComposerAddMenu
+                                            menuRef={addMenuRef}
+                                            onAddFiles={() => {
+                                                closeAddMenu();
+                                                fileInputRef.current?.click();
+                                            }}
+                                            onAddUrl={() => {
+                                                closeAddMenu();
+                                                openUrlReferenceInput('append');
+                                            }}
+                                        />
+                                    )}
+                                </div>
                                 {/* <button
                                     type="button"
                                     className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
@@ -1172,12 +1251,14 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 onRootOptionHover={setReferenceActiveIndex}
                                 onScreenHover={setReferenceActiveIndex}
                                 onSelectRootOption={(key) => {
-                                    if (key === 'url') openUrlReferenceInput();
+                                    if (key === 'url') openUrlReferenceInput('trigger');
                                 }}
                                 onSubmitUrl={submitUrlReference}
+                                includeScrapedImages={referenceIncludeScrapedImages}
                                 rootOptions={rootReferenceOptions}
                                 urlDraft={referenceUrlDraft}
                                 urlInputRef={referenceUrlInputRef}
+                                onIncludeScrapedImagesChange={setReferenceIncludeScrapedImages}
                                 onUrlDraftChange={setReferenceUrlDraft}
                             />
                         )}
