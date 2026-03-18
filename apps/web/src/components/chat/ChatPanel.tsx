@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
-import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory } from '../../api/client';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
@@ -15,6 +15,7 @@ import {
     extractComposerInlineReferences,
     findComposerReferenceTrigger,
     formatComposerScreenReferenceToken,
+    getComposerReferenceHostname,
     formatComposerUrlReferenceToken,
     getFilteredComposerReferenceRootOptions,
     normalizeComposerReferenceUrl,
@@ -2227,6 +2228,32 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         notifyWhenInBackground(title, composed);
     };
 
+    const applyReferenceContextFeedback = useCallback((messageId: string, referenceUrls: string[], referenceContext?: ReferenceContextMeta) => {
+        if (referenceUrls.length === 0) return;
+        const existingMeta = useChatStore.getState().messages.find((message) => message.id === messageId)?.meta || {};
+        updateMessage(messageId, {
+            meta: {
+                ...existingMeta,
+                referenceUrls,
+                ...(referenceContext ? { referenceContext } : {}),
+            },
+        });
+
+        if (!referenceContext) return;
+        const firstLabel = getComposerReferenceHostname(referenceContext.normalizedUrls[0] || referenceUrls[0] || 'web reference');
+        if (referenceContext.webContextApplied) {
+            notifyInfo('Web context applied', `Scraped ${firstLabel} and added page context to this request.`);
+            return;
+        }
+        const reason = referenceContext.warnings[0]
+            || (referenceContext.skippedReason === 'missing_api_key'
+                ? 'FIRECRAWL_API_KEY is not configured.'
+                : referenceContext.skippedReason === 'no_valid_urls'
+                    ? 'No valid URLs were detected.'
+                    : 'Firecrawl could not build context from that page.');
+        notifyError('Web context skipped', `${firstLabel}: ${reason}`);
+    }, [notifyError, notifyInfo, updateMessage]);
+
     const clearFastFallbackTimers = () => {
         fastFallbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
         fastFallbackTimersRef.current = [];
@@ -3912,6 +3939,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         bundleWithFirstGeneration: shouldBundleDesignSystemWithFirstGeneration,
                         projectId: projectId || undefined,
                     });
+                    applyReferenceContextFeedback(userMsgId, referenceUrls, designSystemResponse.referenceContext);
                     captureBillingTokens(designSystemResponse.billing);
                     activeProjectDesignSystem = designSystemResponse.designSystem;
                     applyProjectDesignSystem(activeProjectDesignSystem);
@@ -3990,6 +4018,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         referenceUrls,
                         preferredModel: modelProfileToUse === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
                     }));
+                    applyReferenceContextFeedback(userMsgId, referenceUrls, discoveryPlan.referenceContext);
                     captureBillingTokens((discoveryPlan as any)?.billing);
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
@@ -4103,6 +4132,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
                     projectId: projectId || undefined,
                 }, controller.signal);
+                applyReferenceContextFeedback(userMsgId, referenceUrls, regen.referenceContext);
                 captureBillingTokens(regen.billing);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
@@ -4253,6 +4283,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     }
                 }
             }, controller.signal);
+            applyReferenceContextFeedback(userMsgId, referenceUrls, streamResult.referenceContext);
             captureBillingTokens(streamResult.billing);
 
             const finalizeEvents = finalizeStream(parserState);
@@ -4300,6 +4331,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     bundleIncludesDesignSystem: shouldBundleDesignSystemWithFirstGeneration,
                     projectId: projectId || undefined,
                 }, controller.signal);
+                applyReferenceContextFeedback(userMsgId, referenceUrls, regen.referenceContext);
                 captureBillingTokens(regen.billing);
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
 
@@ -4792,11 +4824,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                         setActiveScreen(targetScreen.screenId, normalizedPreview);
                     }
                 }, controller.signal);
+                applyReferenceContextFeedback(userMsgId, referenceUrls, streamResponse.referenceContext);
                 captureBillingTokens(streamResponse.billing);
                 const finalized = finalizeEditStream(parserState);
                 editedHtml = finalized.html;
             } else {
                 const response = await apiClient.edit(editRequest, controller.signal);
+                applyReferenceContextFeedback(userMsgId, referenceUrls, response.referenceContext);
                 captureBillingTokens(response.billing);
                 editedHtml = response.html;
                 responseDescription = response.description?.trim() || '';
@@ -5005,6 +5039,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 projectDesignSystem: currentDesignSystem,
                 preferredModel: resolvedModelProfile === 'fast' ? 'llama-3.1-8b-instant' : undefined,
             }, controller.signal);
+            applyReferenceContextFeedback(userMessageId, referenceUrls, response.referenceContext);
             captureBillingTokens(response.billing);
             const normalizedDraft = normalizeProjectDesignSystemModes(response.designSystem);
             const previousDesignSystem = normalizeProjectDesignSystemModes(currentDesignSystem);
@@ -5825,10 +5860,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     <div className="flex flex-col items-end gap-2 max-w-[90%]">
                                         {(() => {
                                             const userReferenceIds = message.screenRef ? [message.screenRef.id] : ((message.meta?.screenIds as string[]) || []);
+                                            const userReferenceUrls = Array.isArray((message.meta as any)?.referenceUrls)
+                                                ? (((message.meta as any)?.referenceUrls as string[]).filter((item) => typeof item === 'string' && item.trim().length > 0))
+                                                : [];
+                                            const referenceContext = ((message.meta as any)?.referenceContext || null) as ReferenceContextMeta | null;
                                             const referencePreviewMode = String((message.meta as any)?.referencePreviewMode || 'screen');
                                             const hasReferenceStrip = userReferenceIds.length > 0 && referencePreviewMode === 'palette';
                                             const hasReferenceThumbs = userReferenceIds.length > 0 && referencePreviewMode !== 'palette';
-                                            if (!hasReferenceStrip && !hasReferenceThumbs && !(message.images && message.images.length > 0)) return null;
+                                            if (!hasReferenceStrip && !hasReferenceThumbs && userReferenceUrls.length === 0 && !(message.images && message.images.length > 0)) return null;
                                             return (
                                             <div className="flex flex-wrap items-end gap-2 justify-end mb-1 w-full">
                                                 {hasReferenceStrip && (
@@ -5866,6 +5905,27 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         <img src={img} alt="attached" className="w-full h-full object-cover" />
                                                     </button>
                                                 ))}
+                                                {userReferenceUrls.slice(0, 3).map((url) => (
+                                                    <div
+                                                        key={`${message.id}-${url}`}
+                                                        className="inline-flex h-9 items-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[12px] font-medium text-[var(--ui-text)]"
+                                                        title={url}
+                                                    >
+                                                        {getComposerReferenceHostname(url)}
+                                                    </div>
+                                                ))}
+                                                {userReferenceUrls.length > 0 && referenceContext && (
+                                                    <div
+                                                        className={`inline-flex h-9 items-center rounded-full border px-3 text-[12px] font-medium ${
+                                                            referenceContext.webContextApplied
+                                                                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+                                                                : 'border-amber-400/30 bg-amber-500/10 text-amber-200'
+                                                        }`}
+                                                        title={referenceContext.warnings[0] || (referenceContext.webContextApplied ? 'Web page context applied.' : 'Web page context was skipped.')}
+                                                    >
+                                                        {referenceContext.webContextApplied ? 'Web context applied' : 'Web context skipped'}
+                                                    </div>
+                                                )}
                                             </div>
                                             );
                                         })()}

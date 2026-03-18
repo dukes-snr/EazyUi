@@ -203,6 +203,16 @@ export interface GenerateResponse {
     designSpec: HtmlDesignSpec;
     versionId: string;
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
+}
+
+export interface ReferenceContextMeta {
+    requestedUrls: string[];
+    normalizedUrls: string[];
+    webContextApplied: boolean;
+    warnings: string[];
+    skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
+    sourceCount: number;
 }
 
 export interface EditRequest {
@@ -232,6 +242,7 @@ export interface EditResponse {
     description?: string;
     versionId: string;
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface GenerateImageRequest {
@@ -311,6 +322,7 @@ export interface GenerateDesignSystemRequest {
 export interface GenerateDesignSystemResponse {
     designSystem: ProjectDesignSystem;
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface TranscribeAudioRequest {
@@ -534,6 +546,8 @@ export interface SaveRequest {
 export interface SaveResponse {
     projectId: string;
     savedAt: string;
+    coverRefreshQueued?: boolean;
+    coverRefreshToken?: string;
 }
 
 export type PlannerPhase = 'discovery' | 'plan' | 'postgen' | 'route';
@@ -576,6 +590,7 @@ export interface PlannerPlanResponse {
     };
     generatorPrompt: string;
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface PlannerPostgenResponse {
@@ -588,6 +603,7 @@ export interface PlannerPostgenResponse {
         secondary?: { label: string; screenNames: string[] };
     };
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface PlannerRouteResponse {
@@ -608,6 +624,7 @@ export interface PlannerRouteResponse {
     recommendNextScreens?: boolean;
     nextScreenSuggestions?: Array<{ name: string; why: string; priority?: number; details?: string }>;
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export type PlannerResponse = PlannerPlanResponse | PlannerPostgenResponse | PlannerRouteResponse;
@@ -657,10 +674,12 @@ export interface CompleteScreenResponse {
 
 export interface GenerateStreamResponse {
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface EditStreamResponse {
     billing?: BillingUsageMeta;
+    referenceContext?: ReferenceContextMeta;
 }
 
 export interface ProjectResponse {
@@ -677,6 +696,7 @@ const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const STREAM_BILLING_SAFE_TAIL = Math.max(16, STREAM_BILLING_MARKER_PREFIX.length - 1);
 const BILLING_UPDATED_EVENT = 'eazyui:billing-updated';
+const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
 
 function notifyBillingUpdated(billing?: BillingUsageMeta): void {
     if (!billing || typeof window === 'undefined') return;
@@ -702,6 +722,19 @@ function tryParseStreamBillingPayload(payload: string): BillingUsageMeta | undef
         const parsed = JSON.parse(decoded);
         if (!parsed || typeof parsed !== 'object') return undefined;
         return parsed as BillingUsageMeta;
+    } catch {
+        return undefined;
+    }
+}
+
+function tryParseReferenceContextHeader(response: Response): ReferenceContextMeta | undefined {
+    const raw = response.headers.get(REFERENCE_CONTEXT_HEADER);
+    if (!raw) return undefined;
+    try {
+        const decoded = decodeBase64Utf8(raw.trim());
+        const parsed = JSON.parse(decoded);
+        if (!parsed || typeof parsed !== 'object') return undefined;
+        return parsed as ReferenceContextMeta;
     } catch {
         return undefined;
     }
@@ -862,6 +895,7 @@ class ApiClient {
             });
         }
         if (!response.body) throw new Error('No response body');
+        const referenceContext = tryParseReferenceContextHeader(response);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -931,7 +965,7 @@ class ApiClient {
         }
 
         notifyBillingUpdated(billing);
-        return { billing };
+        return { billing, referenceContext };
     }
 
 
@@ -974,6 +1008,7 @@ class ApiClient {
             });
         }
         if (!response.body) throw new Error('No response body');
+        const referenceContext = tryParseReferenceContextHeader(response);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -1043,7 +1078,7 @@ class ApiClient {
         }
 
         notifyBillingUpdated(billing);
-        return { billing };
+        return { billing, referenceContext };
     }
 
     async generateImage(request: GenerateImageRequest, signal?: AbortSignal): Promise<GenerateImageResponse> {

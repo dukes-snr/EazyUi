@@ -103,6 +103,16 @@ const LOG_PREVIEW_MAX = 220;
 const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const SERVER_ACTIVITY_LIMIT = 60;
+const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
+
+type ReferenceContextMeta = {
+    requestedUrls: string[];
+    normalizedUrls: string[];
+    webContextApplied: boolean;
+    warnings: string[];
+    skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
+    sourceCount: number;
+};
 
 type ServerActivityItem = {
     id: string;
@@ -136,6 +146,10 @@ function compactServerActivities() {
         const staleId = serverActivityOrder.pop();
         if (staleId) serverActivityById.delete(staleId);
     }
+}
+
+function encodeReferenceContextHeader(value: ReferenceContextMeta): string {
+    return Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
 }
 
 function upsertServerActivity(id: string, patch: Partial<ServerActivityItem>) {
@@ -203,18 +217,35 @@ async function applyReferenceUrlContext(
     text: string;
     normalizedUrls: string[];
     webContextApplied: boolean;
+    referenceContext: ReferenceContextMeta;
 }> {
     const baseText = typeof text === 'string' ? text : String(text || '');
+    const requestedUrls = (referenceUrls || []).filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
     if (!referenceUrls?.length) {
         return {
             text: baseText,
             normalizedUrls: [],
             webContextApplied: false,
+            referenceContext: {
+                requestedUrls: [],
+                normalizedUrls: [],
+                webContextApplied: false,
+                warnings: [],
+                sourceCount: 0,
+            },
         };
     }
 
     try {
         const result = await buildFirecrawlReferenceContext(referenceUrls);
+        const referenceContext: ReferenceContextMeta = {
+            requestedUrls,
+            normalizedUrls: result.normalizedUrls,
+            webContextApplied: Boolean(result.promptContext),
+            warnings: result.warnings,
+            skippedReason: result.skippedReason,
+            sourceCount: result.sources.length,
+        };
         if (result.warnings.length) {
             fastify.log.warn({
                 traceId,
@@ -231,6 +262,7 @@ async function applyReferenceUrlContext(
                 text: baseText,
                 normalizedUrls: result.normalizedUrls,
                 webContextApplied: false,
+                referenceContext,
             };
         }
 
@@ -238,6 +270,7 @@ async function applyReferenceUrlContext(
             text: `${baseText.trim()}\n\n${result.promptContext}`,
             normalizedUrls: result.normalizedUrls,
             webContextApplied: true,
+            referenceContext,
         };
     } catch (error) {
         fastify.log.warn({
@@ -250,6 +283,14 @@ async function applyReferenceUrlContext(
             text: baseText,
             normalizedUrls: [],
             webContextApplied: false,
+            referenceContext: {
+                requestedUrls,
+                normalizedUrls: [],
+                webContextApplied: false,
+                warnings: [(error as Error).message || 'Failed to build web reference context.'],
+                skippedReason: 'all_failed',
+                sourceCount: 0,
+            },
         };
     }
 }
@@ -1896,6 +1937,7 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate');
         fastify.log.info({
             traceId,
@@ -1973,6 +2015,7 @@ fastify.post<{
                 usage,
                 usageQuote: usageCharge.usageQuote,
             },
+            referenceContext,
         };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
@@ -2061,6 +2104,7 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/design-system');
         fastify.log.info({
             traceId,
@@ -2149,7 +2193,7 @@ fastify.post<{
             balanceCredits: billingMeta.creditsRemaining,
             tokensUsed: usage ? usage.totalTokens : 0,
         });
-        return { designSystem, billing: billingMeta };
+        return { designSystem, billing: billingMeta, referenceContext };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
             return sendInsufficientCredits(reply, error);
@@ -2245,6 +2289,7 @@ fastify.post<{
             text: instructionWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit');
         fastify.log.info({
             traceId,
@@ -2325,6 +2370,7 @@ fastify.post<{
                 usage: edited.usage,
                 usageQuote: usageCharge.usageQuote,
             },
+            referenceContext,
         };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
@@ -2455,7 +2501,9 @@ fastify.post<{
             text: instructionWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(instruction, referenceUrls, traceId, '/api/edit-stream');
+        reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
         const { editDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
@@ -3063,6 +3111,7 @@ fastify.post<{
             text: appPromptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(appPrompt, referenceUrls, traceId, '/api/plan');
         fastify.log.info({
             traceId,
@@ -3175,6 +3224,7 @@ fastify.post<{
                 usage,
                 usageQuote: usageCharge.usageQuote,
             },
+            referenceContext,
         };
     } catch (error) {
         if (error instanceof InsufficientCreditsError) {
@@ -3504,7 +3554,9 @@ fastify.post<{
             text: promptWithReferenceContext,
             normalizedUrls: normalizedReferenceUrls,
             webContextApplied,
+            referenceContext,
         } = await applyReferenceUrlContext(prompt, referenceUrls, traceId, '/api/generate-stream');
+        reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
         const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
