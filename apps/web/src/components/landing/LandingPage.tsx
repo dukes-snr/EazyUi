@@ -7,6 +7,7 @@ import featureSlide3 from '../../assets/Slide3.png';
 import featureSlide4 from '../../assets/Slide4.png';
 import videodemoimg from '../../assets/videodemoimg.png';
 import appLogo from '../../assets/Ui-logo.png';
+import mascotComposer from '../../assets/mascot-composer.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import { apiClient } from '../../api/client';
@@ -866,9 +867,15 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 />
                             </span>
                         </h1>
-                        <p className="mt-2 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
+                        <p className="mt-2 mb-12 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
 
                         <div className="relative mx-auto mt-7 w-full max-w-[780px] rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_3%,var(--ui-surface-1))] p-3 shadow-[0_20px_65px_color-mix(in_srgb,var(--ui-primary)_10%,transparent)] md:p-4 text-left">
+                            <img
+                                src={mascotComposer}
+                                alt=""
+                                aria-hidden="true"
+                                className="pointer-events-none absolute right-1 top-[-6.5rem] z-10 w-[4.7rem] select-none sm:right-3 sm:top-[-8.2rem] sm:w-[5.8rem] md:right-5 md:top-[-8.4rem] md:w-[6rem]"
+                            />
                             <div className="relative">
                                 {!prompt.trim() && !isPromptFocused && (
                                     <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
@@ -1120,7 +1127,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                     </div>
 
-                    <div className="relative z-10 mt-5 flex flex-wrap items-center justify-center gap-2 text-[var(--ui-text-subtle)]">
+                    <div className="relative z-10 -mt-5 flex flex-wrap items-center justify-center gap-2 text-[var(--ui-text-subtle)]">
                         {APP_SUGGESTIONS.map((chip) => (
                             <button
                                 key={chip}
