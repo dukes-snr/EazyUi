@@ -1,12 +1,7 @@
-const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-2.5-pro';
+const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3-pro-preview';
 const DEFAULT_GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
-const LEGACY_GEMINI_TEXT_MODEL_FALLBACKS: Record<string, string> = {
-    'gemini-3-pro-preview': DEFAULT_GEMINI_TEXT_MODEL,
-    'gemini-3-pro-preview-customtools': DEFAULT_GEMINI_TEXT_MODEL,
-    'gemini-3.1-pro-preview': DEFAULT_GEMINI_TEXT_MODEL,
-    'gemini-3.1-pro-preview-customtools': DEFAULT_GEMINI_TEXT_MODEL,
-};
+const GEMINI_TEXT_FALLBACK_MODEL = 'gemini-2.5-pro';
 
 export function getDefaultGeminiTextModel(): string {
     return DEFAULT_GEMINI_TEXT_MODEL;
@@ -19,7 +14,7 @@ export function getDefaultGeminiImageModel(): string {
 export function normalizeGeminiTextModel(input?: string | null): string {
     const requested = String(input || '').trim();
     if (!requested) return DEFAULT_GEMINI_TEXT_MODEL;
-    return LEGACY_GEMINI_TEXT_MODEL_FALLBACKS[requested] || requested;
+    return requested;
 }
 
 export function normalizeGeminiImageModel(input?: string | null): string {
@@ -30,7 +25,7 @@ export function normalizeGeminiImageModel(input?: string | null): string {
 
 export function resolveGeminiTextFallbackModel(input?: string | null): string {
     const normalized = normalizeGeminiTextModel(input);
-    return normalized === DEFAULT_GEMINI_TEXT_MODEL ? DEFAULT_GEMINI_TEXT_MODEL : DEFAULT_GEMINI_TEXT_MODEL;
+    return normalized === GEMINI_TEXT_FALLBACK_MODEL ? GEMINI_TEXT_FALLBACK_MODEL : GEMINI_TEXT_FALLBACK_MODEL;
 }
 
 export function isGeminiModelResolutionError(error: unknown): boolean {

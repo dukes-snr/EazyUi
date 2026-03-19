@@ -160,7 +160,6 @@ function getGenerationConfig(hasReferenceImages: boolean, temperature?: number) 
 function resolveDesignSystemPreferredModel(preferredModel?: string): string | undefined {
     const resolved = resolvePreferredModel(preferredModel);
     if (!resolved) return undefined;
-    if (/gemini-3-pro-preview/i.test(resolved)) return 'gemini-2.5-pro';
     return resolved;
 }
 
@@ -2064,8 +2063,7 @@ Choose typography that fits the brand personality instead of defaulting to the s
             raw = parseJsonSafe(cleanJsonResponse(completion.text));
         } else {
             const preferredGeminiModel = resolveDesignSystemPreferredModel(preferredModel);
-            const defaultDesignSystemModelName = /gemini-3-pro-preview/i.test(modelName) ? 'gemini-2.5-pro' : modelName;
-            const primaryGeminiModelName = preferredGeminiModel || defaultDesignSystemModelName;
+            const primaryGeminiModelName = preferredGeminiModel || modelName;
             const imageParts = await resolveImageParts(images);
             const runGeminiDesignSystemAttempt = async (activeModelName: string, retry = false): Promise<unknown> => {
                 const designSystemModel = activeModelName === modelName ? model : getGenerativeModel(activeModelName).model;

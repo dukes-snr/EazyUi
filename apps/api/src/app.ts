@@ -196,6 +196,8 @@ function shouldTrackServerActivity(url: string): boolean {
     const cleanUrl = String(url || '').split('?')[0];
     return !(
         cleanUrl === '/'
+        || cleanUrl === '/dashboard'
+        || cleanUrl.startsWith('/dashboard/')
         || cleanUrl === '/api/server/activity'
         || cleanUrl === '/api/health'
         || cleanUrl === '/api/models'
@@ -1030,7 +1032,31 @@ fastify.addHook('onResponse', async (request, reply) => {
 // ============================================================================
 
 fastify.get('/', async (_request, reply) => {
-    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml());
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('overview'));
+});
+
+fastify.get('/dashboard', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('overview'));
+});
+
+fastify.get('/dashboard/health', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('health'));
+});
+
+fastify.get('/dashboard/activity', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('activity'));
+});
+
+fastify.get('/dashboard/models', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('models'));
+});
+
+fastify.get('/dashboard/users', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('users'));
+});
+
+fastify.get('/dashboard/settings', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('settings'));
 });
 
 fastify.get<{
