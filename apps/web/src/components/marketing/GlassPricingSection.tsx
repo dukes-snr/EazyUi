@@ -30,7 +30,7 @@ const TIER_CONTENT: Record<TierKey, {
         label: 'Best for trying the workflow',
         description: 'A clean starting point for testing prompts, comparing screen directions, and getting a real feel for the product.',
         features: [
-            '100 monthly credits',
+            '300 monthly credits',
             'Mobile, tablet, and desktop targets',
             'Prompt composer with references',
             'Fast first-pass generation',

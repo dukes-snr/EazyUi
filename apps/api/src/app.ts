@@ -1333,7 +1333,7 @@ fastify.get('/api/billing/catalog', async (request, reply) => {
                 free: {
                     productKey: 'free',
                     label: 'Free',
-                    monthlyCredits: 100,
+                    monthlyCredits: 300,
                 },
                 pro: {
                     productKey: 'pro',

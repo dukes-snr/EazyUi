@@ -16,6 +16,7 @@
     "dev:mcp": "npm run dev --workspace=apps/mcp-server",
     "build": "npm run build --workspaces --if-present",
     "build:mcp": "npm run build --workspace=apps/mcp-server",
+    "billing:reset-free-credits": "node ./scripts/reset-free-credits.mjs",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },

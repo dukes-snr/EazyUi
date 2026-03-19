@@ -273,7 +273,7 @@ export function ProjectSettingsPage({
         onNavigate('/app/projects/new');
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 100;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
     const monthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const usedCredits = Math.max(0, planCreditCap - monthlyCredits);
     const usagePct = Math.max(0, Math.min(100, Math.round((usedCredits / Math.max(planCreditCap, 1)) * 100)));

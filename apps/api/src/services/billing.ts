@@ -231,7 +231,7 @@ type BillingPurchaseRow = {
 type BillingExecutor = Pool | PoolClient;
 
 const PLAN_DEFINITIONS: Record<BillingPlanId, PlanDefinition> = {
-    free: { id: 'free', label: 'Free', monthlyCredits: 100, paid: false },
+    free: { id: 'free', label: 'Free', monthlyCredits: 300, paid: false },
     pro: { id: 'pro', label: 'Pro', monthlyCredits: 3000, paid: true },
     team: { id: 'team', label: 'Team', monthlyCredits: 15000, paid: true },
 };

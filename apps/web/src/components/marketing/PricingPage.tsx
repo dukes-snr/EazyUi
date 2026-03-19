@@ -37,7 +37,7 @@ const PLAN_CARDS: PlanCard[] = [
         description: 'A clean starting point for testing prompts, comparing directions, and understanding the product before upgrading.',
         buttonLabel: 'Get Started',
         features: [
-            '100 monthly credits',
+            '300 monthly credits',
             'Web, mobile, and tablet targets',
             'Prompt composer with references',
             'Fast first-pass generation',
@@ -75,7 +75,7 @@ const PLAN_CARDS: PlanCard[] = [
 const COMPARISON_ROWS: Array<{ label: string; values: Record<CorePlanKey, ComparisonValue> }> = [
     {
         label: 'Monthly credits',
-        values: { free: '100', pro: '3,000', team: '15,000' },
+        values: { free: '300', pro: '3,000', team: '15,000' },
     },
     {
         label: 'Platform targets',

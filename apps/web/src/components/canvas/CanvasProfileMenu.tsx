@@ -358,7 +358,7 @@ export function CanvasProfileMenu() {
         usage: { title: 'Usage', subtitle: 'Track credit consumption and recent billing events.' },
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 100;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
     const currentMonthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const consumedThisCycle = Math.max(0, planCreditCap - currentMonthlyCredits);
     const cycleUsagePct = Math.max(0, Math.min(100, Math.round((consumedThisCycle / Math.max(planCreditCap, 1)) * 100)));
