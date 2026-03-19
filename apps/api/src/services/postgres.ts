@@ -170,10 +170,20 @@ export async function ensurePersistenceSchema(): Promise<void> {
                     invoice_number TEXT,
                     invoice_url TEXT,
                     invoice_pdf_url TEXT,
+                    fulfillment_status TEXT NOT NULL DEFAULT 'pending',
+                    credits_applied_at TEXT,
                     metadata TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+            `);
+            await db.query(`
+                ALTER TABLE billing_purchases
+                ADD COLUMN IF NOT EXISTS fulfillment_status TEXT NOT NULL DEFAULT 'pending';
+            `);
+            await db.query(`
+                ALTER TABLE billing_purchases
+                ADD COLUMN IF NOT EXISTS credits_applied_at TEXT;
             `);
             await db.query(`
                 CREATE INDEX IF NOT EXISTS idx_billing_purchases_uid_created_at

@@ -42,6 +42,8 @@ import {
     attachStripeCustomer,
     findUidByStripeCustomerId,
     listBillingPurchases,
+    listRecentBillingPurchases,
+    listRecentStripeWebhookEvents,
     getBillingPurchaseBySource,
     type BillingOperation,
     type BillingSummary,
@@ -199,6 +201,7 @@ function shouldTrackServerActivity(url: string): boolean {
         || cleanUrl === '/dashboard'
         || cleanUrl.startsWith('/dashboard/')
         || cleanUrl === '/api/server/activity'
+        || cleanUrl === '/api/server/stripe'
         || cleanUrl === '/api/health'
         || cleanUrl === '/api/models'
     );
@@ -671,6 +674,7 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
             ? 'topup'
             : 'other';
     const existingPurchase = await getBillingPurchaseBySource(sourceType, sourceId);
+    const topupAlreadyApplied = existingPurchase?.purchaseKind === 'topup' && existingPurchase.fulfillmentStatus === 'applied';
 
     await upsertBillingPurchase({
         uid,
@@ -696,6 +700,12 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
         invoiceNumber: sourceInvoice?.number || undefined,
         invoiceUrl: sourceInvoice?.hosted_invoice_url || undefined,
         invoicePdfUrl: sourceInvoice?.invoice_pdf || undefined,
+        fulfillmentStatus: planId
+            ? 'applied'
+            : topupCredits > 0
+                ? (topupAlreadyApplied ? 'applied' : 'pending')
+                : 'applied',
+        creditsAppliedAt: topupAlreadyApplied ? (existingPurchase?.creditsAppliedAt || new Date().toISOString()) : null,
         metadata: {
             ...(eventId ? { stripeEventId: eventId } : {}),
             checkoutSessionId: session.id,
@@ -715,7 +725,7 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
     }
 
     if (topupCredits > 0) {
-        if (existingPurchase) {
+        if (topupAlreadyApplied) {
             return { uid, applied: false, summary: await buildBillingSummaryForApi(uid) };
         }
         const summary = await grantTopupCredits({
@@ -726,6 +736,39 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
                 sessionId: session.id,
                 priceId: linePrice,
             },
+        });
+        await upsertBillingPurchase({
+            uid,
+            sourceType,
+            sourceId,
+            purchaseKind,
+            productKey: productKey || undefined,
+            planId: planId || undefined,
+            stripeCustomerId: customerId || undefined,
+            stripeSubscriptionId: (typeof session.subscription === 'string'
+                ? session.subscription
+                : session.subscription?.id) || undefined,
+            stripeInvoiceId: invoiceRef || undefined,
+            stripePaymentIntentId: (typeof session.payment_intent === 'string'
+                ? session.payment_intent
+                : session.payment_intent?.id) || undefined,
+            stripePriceId: linePrice || undefined,
+            amountTotal: Number(session.amount_total || session.amount_subtotal || 0),
+            currency: String(session.currency || 'usd'),
+            quantity,
+            status: String(session.payment_status || session.status || 'paid'),
+            description: String(lineItem?.description || lineItem?.price?.nickname || productKey || 'Checkout purchase'),
+            invoiceNumber: sourceInvoice?.number || undefined,
+            invoiceUrl: sourceInvoice?.hosted_invoice_url || undefined,
+            invoicePdfUrl: sourceInvoice?.invoice_pdf || undefined,
+            fulfillmentStatus: 'applied',
+            creditsAppliedAt: new Date().toISOString(),
+            metadata: {
+                ...(eventId ? { stripeEventId: eventId } : {}),
+                checkoutSessionId: session.id,
+                topupCreditsGranted: topupCredits,
+            },
+            createdAt: new Date((Number(session.created || 0) || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
         });
         return { uid, applied: true, summary };
     }
@@ -1055,6 +1098,10 @@ fastify.get('/dashboard/users', async (_request, reply) => {
     return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('users'));
 });
 
+fastify.get('/dashboard/stripe', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('stripe'));
+});
+
 fastify.get('/dashboard/settings', async (_request, reply) => {
     return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('settings'));
 });
@@ -1066,6 +1113,51 @@ fastify.get<{
 }>('/api/server/activity', async (request, reply) => {
     const limit = Math.max(25, Math.min(1000, Number(request.query.limit || 250) || 250));
     return reply.send(await getRequestActivitySnapshot(limit));
+});
+
+fastify.get('/api/server/stripe', async (_request, reply) => {
+    const stripePublishableKeyPresent = Boolean(getStripePublishableKey());
+    const stripeWebhookSecretPresent = Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || '').trim());
+    const [activity, webhookEvents, purchases, catalog] = await Promise.all([
+        getRequestActivitySnapshot(500),
+        listRecentStripeWebhookEvents(40),
+        listRecentBillingPurchases(40),
+        getStripePricingCatalog().catch(() => null),
+    ]);
+    const stripeItems = activity.items.filter((item) => item.route.startsWith('/api/billing') || item.route.startsWith('/api/stripe/'));
+    const stripeErrors = stripeItems.filter((item) => item.status === 'error');
+    const successfulPayments = purchases.filter((item) => item.status === 'paid' || item.status === 'complete' || item.status === 'succeeded');
+    const pendingFulfillment = purchases.filter((item) => item.purchaseKind === 'topup' && item.fulfillmentStatus !== 'applied');
+    const grossUsd = purchases.reduce((sum, item) => sum + (Number(item.amountTotal || 0) / 100), 0);
+
+    return reply.send({
+        timestamp: new Date().toISOString(),
+        help: {
+            localCliForwardingRequired: false,
+            productionWebhookPath: '/api/stripe/webhook',
+            note: 'Use stripe listen only for local development. Production Stripe should post directly to the Render webhook endpoint.',
+        },
+        config: {
+            configured: isStripeConfigured(),
+            publishableKeyPresent: stripePublishableKeyPresent,
+            webhookSecretPresent: stripeWebhookSecretPresent,
+            priceCatalog: catalog,
+        },
+        summary: {
+            retainedStripeRequests: stripeItems.length,
+            retainedStripeErrors: stripeErrors.length,
+            retainedStripeRunning: stripeItems.filter((item) => item.status === 'running').length,
+            recentPurchases: purchases.length,
+            successfulPayments: successfulPayments.length,
+            pendingFulfillment: pendingFulfillment.length,
+            webhookEvents: webhookEvents.length,
+            grossUsd,
+        },
+        recentErrors: stripeErrors.slice(0, 12),
+        recentRequests: stripeItems.slice(0, 20),
+        recentPayments: purchases,
+        recentWebhookEvents: webhookEvents,
+    });
 });
 
 // Health check
@@ -1553,6 +1645,15 @@ fastify.post<{
 
     try {
         const { productKey, successUrl, cancelUrl } = request.body;
+        annotateServerBillingActivity(request.id, {
+            requestPreview: `checkout ${productKey}`,
+            metadata: {
+                stage: 'checkout_session_create',
+                productKey,
+                successUrl,
+                cancelUrl,
+            },
+        });
         const planPriceId = productKey === 'pro'
             ? resolveStripePriceIdForPlan('pro')
             : productKey === 'team'
@@ -1620,11 +1721,26 @@ fastify.post<{
             uid: user.uid,
             productKey,
         });
+        annotateServerBillingActivity(request.id, {
+            metadata: {
+                stage: 'checkout_session_ready',
+                productKey,
+                mode,
+                stripeSessionId: session.id,
+                priceId: planPriceId,
+            },
+        });
         return {
             id: session.id,
             url: session.url,
         };
     } catch (error) {
+        annotateServerBillingActivity(request.id, {
+            errorMessage: (error as Error).message,
+            metadata: {
+                stage: 'checkout_session_failed',
+            },
+        });
         fastify.log.error({ traceId: request.id, route: '/api/billing/checkout-session', err: error }, 'checkout session failed');
         return reply.status(500).send({
             error: 'Failed to create checkout session',
@@ -1672,6 +1788,13 @@ fastify.get<{
 
     try {
         const sessionId = String(request.query?.sessionId || '').trim();
+        annotateServerBillingActivity(request.id, {
+            requestPreview: sessionId ? `checkout session ${sessionId}` : 'checkout session lookup',
+            metadata: {
+                stage: 'checkout_status_lookup',
+                sessionId: sessionId || null,
+            },
+        });
         if (!sessionId) {
             return reply.status(400).send({
                 error: 'sessionId is required',
@@ -1696,6 +1819,17 @@ fastify.get<{
             || (typeof session.mode === 'string' && session.mode === 'subscription');
         if (paid) {
             const result = await reconcileCompletedCheckoutSession(session, null);
+            annotateServerBillingActivity(request.id, {
+                balanceCredits: result.summary?.balanceCredits,
+                metadata: {
+                    stage: 'checkout_status_completed',
+                    sessionId,
+                    stripeStatus: session.status || null,
+                    paymentStatus: session.payment_status || null,
+                    applied: result.applied,
+                    mode: session.mode || null,
+                },
+            });
             return {
                 status: 'completed',
                 applied: result.applied,
@@ -1703,12 +1837,28 @@ fastify.get<{
             };
         }
 
+        annotateServerBillingActivity(request.id, {
+            metadata: {
+                stage: 'checkout_status_pending',
+                sessionId,
+                stripeStatus: session.status || null,
+                paymentStatus: session.payment_status || null,
+                mode: session.mode || null,
+            },
+        });
         return {
             status: String(session.status || session.payment_status || 'open'),
             applied: false,
             summary: await buildBillingSummaryForApi(user.uid),
         };
     } catch (error) {
+        annotateServerBillingActivity(request.id, {
+            errorMessage: (error as Error).message,
+            metadata: {
+                stage: 'checkout_status_failed',
+                sessionId: String(request.query?.sessionId || '').trim() || null,
+            },
+        });
         fastify.log.error({ traceId: request.id, route: '/api/billing/checkout-status', err: error }, 'checkout status failed');
         return reply.status(500).send({
             error: 'Failed to confirm checkout session',
@@ -1824,12 +1974,26 @@ fastify.post<{
 }, async (request, reply) => {
     const traceId = request.id;
     const signature = String(request.headers['stripe-signature'] || '').trim();
+    annotateServerBillingActivity(traceId, {
+        requestPreview: 'stripe webhook delivery',
+        metadata: {
+            stage: 'stripe_webhook_received',
+        },
+    });
     if (!signature) {
         return reply.status(400).send({ error: 'Missing Stripe signature header' });
     }
     try {
         const raw = ((request as any).rawBody as Buffer | undefined) || Buffer.from(JSON.stringify(request.body || {}));
         const event = constructStripeWebhookEvent(raw, signature);
+        annotateServerBillingActivity(traceId, {
+            requestPreview: `stripe webhook ${event.type}`,
+            metadata: {
+                stage: 'stripe_webhook_verified',
+                eventId: event.id,
+                eventType: event.type,
+            },
+        });
         const firstSeen = await recordStripeWebhookEvent(event.id, event.type);
         if (!firstSeen) {
             fastify.log.info({
@@ -1920,6 +2084,12 @@ fastify.post<{
 
         return reply.send({ received: true });
     } catch (error) {
+        annotateServerBillingActivity(traceId, {
+            errorMessage: (error as Error).message,
+            metadata: {
+                stage: 'stripe_webhook_failed',
+            },
+        });
         fastify.log.error({ traceId, route: '/api/stripe/webhook', err: error }, 'stripe webhook failed');
         return reply.status(400).send({
             error: 'Webhook processing failed',

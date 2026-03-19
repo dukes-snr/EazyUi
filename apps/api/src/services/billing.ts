@@ -86,11 +86,24 @@ export type BillingPurchase = {
     invoiceNumber?: string;
     invoiceUrl?: string;
     invoicePdfUrl?: string;
+    stripePriceId?: string;
+    stripeCustomerId?: string;
+    stripeSubscriptionId?: string;
+    stripeInvoiceId?: string;
+    stripePaymentIntentId?: string;
+    fulfillmentStatus: 'pending' | 'applied' | 'failed';
+    creditsAppliedAt?: string;
     sourceType: 'checkout' | 'invoice';
     sourceId: string;
     metadata?: Record<string, unknown> | null;
     createdAt: string;
     updatedAt: string;
+};
+
+export type StripeWebhookEventRecord = {
+    id: string;
+    eventType: string;
+    receivedAt: string;
 };
 
 export type BillingSummary = {
@@ -223,9 +236,17 @@ type BillingPurchaseRow = {
     invoice_number: string | null;
     invoice_url: string | null;
     invoice_pdf_url: string | null;
+    fulfillment_status: string | null;
+    credits_applied_at: string | null;
     metadata: string | null;
     created_at: string;
     updated_at: string;
+};
+
+type StripeWebhookEventRow = {
+    id: string;
+    event_type: string;
+    received_at: string;
 };
 
 type BillingExecutor = Pool | PoolClient;
@@ -358,9 +379,21 @@ function mapPurchaseRow(row: BillingPurchaseRow): BillingPurchase {
         invoiceNumber: row.invoice_number || undefined,
         invoiceUrl: row.invoice_url || undefined,
         invoicePdfUrl: row.invoice_pdf_url || undefined,
+        stripePriceId: row.stripe_price_id || undefined,
+        stripeCustomerId: row.stripe_customer_id || undefined,
+        stripeSubscriptionId: row.stripe_subscription_id || undefined,
+        stripeInvoiceId: row.stripe_invoice_id || undefined,
+        stripePaymentIntentId: row.stripe_payment_intent_id || undefined,
+        fulfillmentStatus: row.fulfillment_status === 'applied' || row.fulfillment_status === 'failed'
+            ? row.fulfillment_status
+            : 'pending',
+        creditsAppliedAt: row.credits_applied_at || undefined,
         sourceType: row.source_type === 'invoice' ? 'invoice' : 'checkout',
         sourceId: row.source_id,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        metadata: (() => {
+            const parsed = parseMetadataObject(row.metadata);
+            return Object.keys(parsed).length ? parsed : undefined;
+        })(),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -1380,6 +1413,8 @@ export async function upsertBillingPurchase(input: {
     invoiceNumber?: string | null;
     invoiceUrl?: string | null;
     invoicePdfUrl?: string | null;
+    fulfillmentStatus?: 'pending' | 'applied' | 'failed';
+    creditsAppliedAt?: string | null;
     metadata?: Record<string, unknown>;
     createdAt?: string;
 }): Promise<BillingPurchase> {
@@ -1398,6 +1433,11 @@ export async function upsertBillingPurchase(input: {
         );
         const id = existing?.id || uuidv4();
         const createdAt = input.createdAt || existing?.created_at || nowAt;
+        const existingMetadata = parseMetadataObject(existing?.metadata);
+        const mergedMetadata = {
+            ...existingMetadata,
+            ...(input.metadata || {}),
+        };
 
         const row = await queryOne<BillingPurchaseRow>(
             client,
@@ -1406,12 +1446,14 @@ export async function upsertBillingPurchase(input: {
                 id, uid, source_key, source_type, source_id, purchase_kind, product_key, plan_id,
                 stripe_customer_id, stripe_subscription_id, stripe_invoice_id, stripe_payment_intent_id, stripe_price_id,
                 amount_total, currency, quantity, status, description, invoice_number, invoice_url, invoice_pdf_url,
+                fulfillment_status, credits_applied_at,
                 metadata, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8,
                 $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18, $19, $20, $21,
-                $22, $23, $24
+                $22, $23,
+                $24, $25, $26
             )
             ON CONFLICT(source_key) DO UPDATE SET
                 uid = EXCLUDED.uid,
@@ -1433,6 +1475,8 @@ export async function upsertBillingPurchase(input: {
                 invoice_number = EXCLUDED.invoice_number,
                 invoice_url = EXCLUDED.invoice_url,
                 invoice_pdf_url = EXCLUDED.invoice_pdf_url,
+                fulfillment_status = EXCLUDED.fulfillment_status,
+                credits_applied_at = EXCLUDED.credits_applied_at,
                 metadata = EXCLUDED.metadata,
                 updated_at = EXCLUDED.updated_at
             RETURNING *
@@ -1459,7 +1503,9 @@ export async function upsertBillingPurchase(input: {
                 input.invoiceNumber || null,
                 input.invoiceUrl || null,
                 input.invoicePdfUrl || null,
-                input.metadata ? JSON.stringify(input.metadata) : null,
+                input.fulfillmentStatus || existing?.fulfillment_status || (input.purchaseKind === 'topup' ? 'pending' : 'applied'),
+                input.creditsAppliedAt ?? existing?.credits_applied_at ?? null,
+                Object.keys(mergedMetadata).length > 0 ? JSON.stringify(mergedMetadata) : null,
                 createdAt,
                 nowAt,
             ],
@@ -1496,6 +1542,32 @@ export async function listBillingPurchases(uid: string, limit = 40): Promise<Bil
         [uid, size],
     );
     return rows.map(mapPurchaseRow);
+}
+
+export async function listRecentBillingPurchases(limit = 40): Promise<BillingPurchase[]> {
+    await ensurePersistenceSchema();
+    const size = Math.max(1, Math.min(200, Math.floor(limit)));
+    const rows = await queryRows<BillingPurchaseRow>(
+        getDbPool(),
+        'SELECT * FROM billing_purchases ORDER BY created_at DESC LIMIT $1',
+        [size],
+    );
+    return rows.map(mapPurchaseRow);
+}
+
+export async function listRecentStripeWebhookEvents(limit = 40): Promise<StripeWebhookEventRecord[]> {
+    await ensurePersistenceSchema();
+    const size = Math.max(1, Math.min(200, Math.floor(limit)));
+    const rows = await queryRows<StripeWebhookEventRow>(
+        getDbPool(),
+        'SELECT id, event_type, received_at FROM stripe_webhook_events ORDER BY received_at DESC LIMIT $1',
+        [size],
+    );
+    return rows.map((row) => ({
+        id: row.id,
+        eventType: row.event_type,
+        receivedAt: row.received_at,
+    }));
 }
 
 export async function getBillingPurchase(uid: string, purchaseId: string): Promise<BillingPurchase | null> {
