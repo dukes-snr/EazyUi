@@ -9,6 +9,14 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
 import { groqChatCompletion, isGroqModel } from './groq.provider.js';
 import { isNvidiaModel, nvidiaChatCompletion } from './nvidia.provider.js';
+import {
+    getDefaultGeminiImageModel,
+    getDefaultGeminiTextModel,
+    isGeminiModelResolutionError,
+    normalizeGeminiImageModel,
+    normalizeGeminiTextModel,
+    resolveGeminiTextFallbackModel,
+} from './modelConfig.js';
 import { summarizeTokenUsage, type TokenUsageEntry, type TokenUsageSummary } from './tokenUsage.js';
 
 const envCandidates = [
@@ -28,7 +36,7 @@ if (envPath) {
 // Initialize the Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const envModel = (process.env.GEMINI_MODEL || '').trim();
-const modelName = envModel.length > 0 ? envModel : 'gemini-2.5-pro';
+const modelName = normalizeGeminiTextModel(envModel || getDefaultGeminiTextModel());
 const model = genAI.getGenerativeModel({
     model: modelName,
 });
@@ -36,7 +44,7 @@ console.info(`[Gemini] Using model: ${modelName} (env: ${envModel || 'unset'})`)
 
 function getGenerativeModel(preferredModel?: string) {
     const requested = (preferredModel || '').trim();
-    const resolved = requested.length > 0 ? requested : modelName;
+    const resolved = requested.length > 0 ? normalizeGeminiTextModel(requested) : modelName;
     return {
         name: resolved,
         model: genAI.getGenerativeModel({ model: resolved }),
@@ -57,8 +65,8 @@ function isQuotaOrRateLimitError(error: unknown): boolean {
 
 const imagePrimaryEnvModel = (process.env.GEMINI_IMAGE_MODEL || '').trim();
 const imageFallbackEnvModel = (process.env.GEMINI_IMAGE_FALLBACK_MODEL || '').trim();
-const IMAGE_PRIMARY_MODEL = imagePrimaryEnvModel || 'gemini-3-pro-image-preview';
-const IMAGE_FALLBACK_MODEL = imageFallbackEnvModel || 'gemini-2.5-flash-image';
+const IMAGE_PRIMARY_MODEL = normalizeGeminiImageModel(imagePrimaryEnvModel || 'gemini-3-pro-image-preview');
+const IMAGE_FALLBACK_MODEL = normalizeGeminiImageModel(imageFallbackEnvModel || getDefaultGeminiImageModel());
 console.info(`[Gemini] Image edit model: ${IMAGE_PRIMARY_MODEL} (env: ${imagePrimaryEnvModel || 'unset'})`);
 console.info(`[Gemini] Image fallback model: ${IMAGE_FALLBACK_MODEL} (env: ${imageFallbackEnvModel || 'unset'})`);
 
@@ -3182,26 +3190,49 @@ async function generateDesignOnce(
     generationConfig = GENERATION_CONFIG
 ): Promise<ParsedDesign & { usage?: TokenUsageSummary }> {
     console.info('[Gemini] generateDesignOnce: start');
-    const activeModelName = preferredModelName || modelName;
-    const activeModel = preferredModelName ? getGenerativeModel(preferredModelName).model : model;
-    const result = await activeModel.generateContent({
-        contents: [{ role: 'user', parts }],
-        generationConfig,
-    });
-    const responseText = result.response.text();
-    console.info(`[Gemini] generateDesignOnce: received ${responseText.length} chars`);
+    const activeModelName = normalizeGeminiTextModel(preferredModelName || modelName);
+    const fallbackModelName = resolveGeminiTextFallbackModel(activeModelName);
+
+    const runAttempt = async (candidateModelName: string) => {
+        const activeModel = candidateModelName === modelName ? model : getGenerativeModel(candidateModelName).model;
+        const result = await activeModel.generateContent({
+            contents: [{ role: 'user', parts }],
+            generationConfig,
+        });
+        const responseText = result.response.text();
+        console.info(`[Gemini] generateDesignOnce: received ${responseText.length} chars`);
+        return {
+            modelUsed: candidateModelName,
+            result,
+            responseText,
+        };
+    };
+
+    let attempt;
+    try {
+        attempt = await runAttempt(activeModelName);
+    } catch (error) {
+        const shouldFallback = activeModelName !== fallbackModelName && isGeminiModelResolutionError(error);
+        if (!shouldFallback) throw error;
+        console.warn('[Gemini] generateDesignOnce: falling back to stable model', {
+            requestedModel: activeModelName,
+            fallbackModel: fallbackModelName,
+            message: (error as Error)?.message || String(error),
+        });
+        attempt = await runAttempt(fallbackModelName);
+    }
 
     let parsedResponse: ParsedDesign;
     try {
-        const cleanedJson = cleanJsonResponse(responseText);
+        const cleanedJson = cleanJsonResponse(attempt.responseText);
         parsedResponse = {
             ...(parseJsonSafe(cleanedJson) as { description?: string; screens: { name: string; html: string }[] }),
             parsedOk: true,
         };
     } catch (e) {
         console.error('Failed to parse JSON, attempting fallback:', e);
-        if (responseText.includes('<!DOCTYPE html>')) {
-            const html = cleanHtmlResponse(responseText);
+        if (attempt.responseText.includes('<!DOCTYPE html>')) {
+            const html = cleanHtmlResponse(attempt.responseText);
             parsedResponse = { screens: [{ name: 'Generated Screen', html }], parsedOk: false };
         } else {
             parsedResponse = { screens: [], parsedOk: false };
@@ -3220,7 +3251,7 @@ async function generateDesignOnce(
             };
         }),
         parsedOk: parsedResponse.parsedOk,
-        usage: summarizeTokenUsage([parseGeminiUsageFromResponse(result.response, activeModelName)]),
+        usage: summarizeTokenUsage([parseGeminiUsageFromResponse(attempt.result.response, attempt.modelUsed)]),
     };
 }
 

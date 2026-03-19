@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Pool, PoolClient } from 'pg';
 import type { TokenUsageEntry, TokenUsageSummary } from './tokenUsage.js';
 import { ensurePersistenceSchema, getDbPool, queryOne, queryRows, withTransaction } from './postgres.js';
+import { getDefaultGeminiImageModel, getDefaultGeminiTextModel, normalizeGeminiImageModel, normalizeGeminiTextModel } from './modelConfig.js';
 
 export type BillingPlanId = 'free' | 'pro' | 'team';
 export type BillingOperation =
@@ -259,8 +260,8 @@ const USAGE_BILLING_MARKUP_MULTIPLIER = Number(process.env.BILLING_USAGE_MARKUP_
 const USAGE_BILLING_MIN_CREDITS = Number(process.env.BILLING_USAGE_MIN_CREDITS || '1');
 const USAGE_BILLING_FALLBACK_INPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_INPUT_USD_PER_1M || '0.8');
 const USAGE_BILLING_FALLBACK_OUTPUT_USD_PER_1M = Number(process.env.BILLING_USAGE_FALLBACK_OUTPUT_USD_PER_1M || '2.4');
-const DEFAULT_TEXT_BILLING_MODEL = String(process.env.GEMINI_MODEL || 'gemini-3-pro-preview').trim() || 'gemini-3-pro-preview';
-const DEFAULT_IMAGE_BILLING_MODEL = String(process.env.GEMINI_IMAGE_MODEL || process.env.GEMINI_IMAGE_FALLBACK_MODEL || 'gemini-2.5-flash-image').trim() || 'gemini-2.5-flash-image';
+const DEFAULT_TEXT_BILLING_MODEL = normalizeGeminiTextModel(String(process.env.GEMINI_MODEL || getDefaultGeminiTextModel()).trim());
+const DEFAULT_IMAGE_BILLING_MODEL = normalizeGeminiImageModel(String(process.env.GEMINI_IMAGE_MODEL || process.env.GEMINI_IMAGE_FALLBACK_MODEL || getDefaultGeminiImageModel()).trim());
 
 const TOKEN_PRICING_CATALOG_USD_PER_1M: Record<string, TokenPricingRate> = {
     'gemini-3.1-pro-preview': { inputUsdPer1M: 2, outputUsdPer1M: 12 },

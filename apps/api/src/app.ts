@@ -15,9 +15,12 @@ import { saveProject, getProject, listProjects, deleteProject } from './services
 import { ensurePersistenceSchema } from './services/postgres.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
+import { getDefaultGeminiTextModel, normalizeGeminiTextModel } from './services/modelConfig.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
+import { renderRequestActivityDashboardHtml } from './services/requestActivityDashboard.js';
+import { getRequestActivitySnapshot, upsertRequestActivity, type RequestActivityItem as ServerActivityItem } from './services/requestActivity.js';
 import {
     buildBillingSummaryForApi,
     estimateCredits,
@@ -112,7 +115,7 @@ type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
 const LOG_PREVIEW_MAX = 220;
 const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
-const SERVER_ACTIVITY_LIMIT = 60;
+const SERVER_ACTIVITY_LIMIT = 250;
 const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
 
 type ReferenceContextMeta = {
@@ -123,30 +126,6 @@ type ReferenceContextMeta = {
     skippedReason?: 'missing_api_key' | 'no_valid_urls' | 'all_failed';
     sourceCount: number;
     referenceImageCount: number;
-};
-
-type ServerActivityItem = {
-    id: string;
-    route: string;
-    method: string;
-    status: 'running' | 'success' | 'error';
-    startedAt: string;
-    completedAt?: string;
-    durationMs?: number;
-    ip?: string;
-    operation?: string;
-    requestPreview?: string;
-    preferredModel?: string;
-    expectedScreenCount?: number;
-    expectedImageCount?: number;
-    estimatedCredits?: number;
-    reserveCredits?: number;
-    minimumFloorCredits?: number;
-    finalCredits?: number;
-    balanceCredits?: number;
-    tokensUsed?: number;
-    metadata?: Record<string, unknown>;
-    errorMessage?: string;
 };
 
 const serverActivityById = new Map<string, ServerActivityItem>();
@@ -167,10 +146,15 @@ function upsertServerActivity(id: string, patch: Partial<ServerActivityItem>) {
     const existing = serverActivityById.get(id);
     if (existing) {
         serverActivityById.set(id, { ...existing, ...patch, metadata: { ...(existing.metadata || {}), ...(patch.metadata || {}) } });
+        void persistServerActivity(id);
         return;
     }
     const next: ServerActivityItem = {
         id,
+        ...(patch.requestKey ? { requestKey: patch.requestKey } : {}),
+        ...(patch.uid ? { uid: patch.uid } : {}),
+        ...(patch.userEmail ? { userEmail: patch.userEmail } : {}),
+        ...(patch.authType ? { authType: patch.authType } : {}),
         route: patch.route || '',
         method: patch.method || 'GET',
         status: patch.status || 'running',
@@ -195,12 +179,27 @@ function upsertServerActivity(id: string, patch: Partial<ServerActivityItem>) {
     serverActivityById.set(id, next);
     serverActivityOrder.unshift(id);
     compactServerActivities();
+    void persistServerActivity(id);
 }
 
-function listServerActivities(): ServerActivityItem[] {
-    return serverActivityOrder
-        .map((id) => serverActivityById.get(id))
-        .filter((item): item is ServerActivityItem => Boolean(item));
+async function persistServerActivity(id: string): Promise<void> {
+    const item = serverActivityById.get(id);
+    if (!item) return;
+    try {
+        await upsertRequestActivity(item);
+    } catch (error) {
+        fastify.log.warn({ traceId: id, err: error }, 'request activity persistence failed');
+    }
+}
+
+function shouldTrackServerActivity(url: string): boolean {
+    const cleanUrl = String(url || '').split('?')[0];
+    return !(
+        cleanUrl === '/'
+        || cleanUrl === '/api/server/activity'
+        || cleanUrl === '/api/health'
+        || cleanUrl === '/api/models'
+    );
 }
 
 function normalizePlatform(input?: string): PlatformKind | undefined {
@@ -491,6 +490,10 @@ async function requireAuthenticatedUser(
                 userAgent: resolveHeaderString(request.headers, 'user-agent'),
             });
             if (resolved) {
+                upsertServerActivity(request.id, {
+                    uid: resolved.uid,
+                    authType: 'mcp',
+                });
                 return { uid: resolved.uid };
             }
         } catch (error) {
@@ -505,11 +508,20 @@ async function requireAuthenticatedUser(
 
     const internalUser = resolveInternalApiUser(request.headers);
     if (internalUser) {
+        upsertServerActivity(request.id, {
+            uid: internalUser.uid,
+            authType: 'internal',
+        });
         return internalUser;
     }
     try {
         const header = resolveAuthHeader(request);
         const user = await verifyAuthHeader(header);
+        upsertServerActivity(request.id, {
+            uid: user.uid,
+            userEmail: user.email,
+            authType: 'firebase',
+        });
         return user;
     } catch (error) {
         fastify.log.warn({
@@ -968,16 +980,19 @@ await fastify.register(fastifyRawBody, {
 });
 
 fastify.addHook('preHandler', async (request) => {
+    if (!shouldTrackServerActivity(request.url)) return;
     const body = (request.body && typeof request.body === 'object' && !Array.isArray(request.body))
         ? request.body as Record<string, unknown>
         : {};
     upsertServerActivity(request.id, {
         id: request.id,
+        requestKey: resolveBillingRequestId(request),
         route: request.routeOptions?.url || request.url,
         method: request.method,
         status: 'running',
         startedAt: new Date().toISOString(),
         ip: request.ip,
+        authType: 'anonymous',
         operation: typeof body.operation === 'string'
             ? body.operation
             : typeof body.screenId === 'string'
@@ -998,6 +1013,7 @@ fastify.addHook('preHandler', async (request) => {
 });
 
 fastify.addHook('onResponse', async (request, reply) => {
+    if (!shouldTrackServerActivity(request.url)) return;
     const existing = serverActivityById.get(request.id);
     if (!existing) return;
     const startedMs = new Date(existing.startedAt).getTime();
@@ -1014,180 +1030,45 @@ fastify.addHook('onResponse', async (request, reply) => {
 // ============================================================================
 
 fastify.get('/', async (_request, reply) => {
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EazyUI API Activity</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f16; color: #e5e7eb; margin: 0; }
-    .wrap { max-width: 1180px; margin: 32px auto 64px; padding: 0 20px; }
-    .hero { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:18px; }
-    .hero h1 { margin:0; font-size:32px; }
-    .muted { color: #94a3b8; }
-    .grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:14px; }
-    .card { background: #121824; border: 1px solid #263043; border-radius: 14px; padding: 16px; }
-    .metric { font-size: 28px; font-weight: 800; margin-top: 8px; }
-    .links { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 18px; }
-    a { color: #93c5fd; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code { color: #bfdbfe; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { text-align:left; padding:12px 10px; border-bottom:1px solid #243041; vertical-align: top; }
-    th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color:#94a3b8; }
-    .status { display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
-    .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
-    .running { color:#fde68a; }
-    .running .dot { background:#f59e0b; }
-    .success { color:#86efac; }
-    .success .dot { background:#22c55e; }
-    .error { color:#fca5a5; }
-    .error .dot { background:#ef4444; }
-    .request { max-width: 340px; white-space: normal; word-break: break-word; color:#dbeafe; }
-    .detail { margin-top:6px; font-size:12px; color:#94a3b8; line-height:1.45; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:#cbd5e1; }
-    .table-card { margin-top:14px; overflow:hidden; }
-    .empty { padding:26px; text-align:center; color:#94a3b8; }
-    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-    @media (max-width: 720px) { .hero { flex-direction:column; align-items:flex-start; } .grid { grid-template-columns: 1fr; } th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { display:none; } }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="hero">
-      <div>
-        <h1>EazyUI API Activity</h1>
-        <p class="muted">Live server activity for requests hitting this API instance.</p>
-      </div>
-      <div class="mono">Polling <code>/api/server/activity</code> every 2s</div>
-    </div>
-    <div class="links">
-      <a href="/api/health">/api/health</a>
-      <a href="/api/models">/api/models</a>
-      <a href="/api/server/activity">/api/server/activity</a>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="muted">Recent Requests</div><div id="metric-total" class="metric">0</div></div>
-      <div class="card"><div class="muted">Running</div><div id="metric-running" class="metric">0</div></div>
-      <div class="card"><div class="muted">Errors</div><div id="metric-errors" class="metric">0</div></div>
-      <div class="card"><div class="muted">Avg Duration</div><div id="metric-duration" class="metric">--</div></div>
-    </div>
-    <div class="card table-card">
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Route</th>
-            <th>Request</th>
-            <th>Model</th>
-            <th>Credits</th>
-            <th>Tokens</th>
-            <th>Time</th>
-            <th>Trace</th>
-          </tr>
-        </thead>
-        <tbody id="activity-body">
-          <tr><td colspan="8" class="empty">Waiting for activity...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  <script>
-    const bodyEl = document.getElementById('activity-body');
-    const totalEl = document.getElementById('metric-total');
-    const runningEl = document.getElementById('metric-running');
-    const errorsEl = document.getElementById('metric-errors');
-    const durationEl = document.getElementById('metric-duration');
-
-    function esc(value) {
-      return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', \"'\":'&#39;' }[char] || char));
-    }
-
-    function fmtDuration(value) {
-      const n = Number(value);
-      if (!Number.isFinite(n) || n < 0) return '--';
-      if (n < 1000) return n + ' ms';
-      return (n / 1000).toFixed(2) + ' s';
-    }
-
-    function fmtCredits(item) {
-      const parts = [];
-      if (Number.isFinite(item.reserveCredits)) parts.push('reserve ' + item.reserveCredits);
-      if (Number.isFinite(item.minimumFloorCredits)) parts.push('floor ' + item.minimumFloorCredits);
-      if (Number.isFinite(item.finalCredits)) parts.push('final ' + item.finalCredits);
-      if (Number.isFinite(item.balanceCredits)) parts.push('bal ' + item.balanceCredits);
-      return parts.length ? parts.join(' · ') : '-';
-    }
-
-    function render(items) {
-      totalEl.textContent = String(items.length);
-      runningEl.textContent = String(items.filter((item) => item.status === 'running').length);
-      errorsEl.textContent = String(items.filter((item) => item.status === 'error').length);
-      const durations = items.map((item) => Number(item.durationMs)).filter((value) => Number.isFinite(value) && value >= 0);
-      durationEl.textContent = durations.length ? fmtDuration(Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length)) : '--';
-
-      if (!items.length) {
-        bodyEl.innerHTML = '<tr><td colspan="8" class="empty">No recent activity.</td></tr>';
-        return;
-      }
-
-      bodyEl.innerHTML = items.map((item) => {
-        const detailBits = [
-          item.operation ? 'op ' + esc(item.operation) : '',
-          Number.isFinite(item.expectedScreenCount) && item.expectedScreenCount > 0 ? 'screens ' + item.expectedScreenCount : '',
-          Number.isFinite(item.expectedImageCount) && item.expectedImageCount > 0 ? 'images ' + item.expectedImageCount : '',
-          item.pricingMode ? esc(String(item.pricingMode).replace(/_/g, ' ')) : '',
-          item.errorMessage ? 'error ' + esc(item.errorMessage) : ''
-        ].filter(Boolean).join(' · ');
-        return '<tr>'
-          + '<td><span class="status ' + esc(item.status) + '"><span class="dot"></span>' + esc(item.status) + '</span></td>'
-          + '<td><div>' + esc(item.method) + ' ' + esc(item.route) + '</div><div class="detail">' + (detailBits || '&nbsp;') + '</div></td>'
-          + '<td><div class="request">' + esc(item.requestPreview || '-') + '</div></td>'
-          + '<td><div class="mono">' + esc(item.preferredModel || '-') + '</div></td>'
-          + '<td><div class="detail">' + esc(fmtCredits(item)) + '</div></td>'
-          + '<td><div class="mono">' + (Number.isFinite(item.tokensUsed) ? esc(item.tokensUsed.toLocaleString()) : '-') + '</div></td>'
-          + '<td><div>' + esc(new Date(item.startedAt).toLocaleTimeString()) + '</div><div class="detail">' + esc(fmtDuration(item.durationMs)) + '</div></td>'
-          + '<td><div class="mono">' + esc(item.id) + '</div></td>'
-          + '</tr>';
-      }).join('');
-    }
-
-    async function refresh() {
-      try {
-        const response = await fetch('/api/server/activity', { headers: { 'Accept': 'application/json' } });
-        const payload = await response.json();
-        render(Array.isArray(payload.items) ? payload.items : []);
-      } catch (error) {
-        bodyEl.innerHTML = '<tr><td colspan="8" class="empty">Failed to load activity.</td></tr>';
-      }
-    }
-
-    refresh();
-    setInterval(refresh, 2000);
-  </script>
-</body>
-</html>`;
-    return reply.type('text/html; charset=utf-8').send(html);
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml());
 });
 
-fastify.get('/api/server/activity', async (_request, reply) => {
-    return reply.send({ items: listServerActivities() });
+fastify.get<{
+    Querystring: {
+        limit?: string;
+    };
+}>('/api/server/activity', async (request, reply) => {
+    const limit = Math.max(25, Math.min(1000, Number(request.query.limit || 250) || 250));
+    return reply.send(await getRequestActivitySnapshot(limit));
 });
 
 // Health check
 fastify.get('/api/health', async (request, reply) => {
     const apiKey = process.env.GEMINI_API_KEY || '';
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
+    const model = normalizeGeminiTextModel(process.env.GEMINI_MODEL || getDefaultGeminiTextModel());
     const groqModels = Object.keys(GROQ_MODELS);
     const nvidiaModels = Object.keys(NVIDIA_MODELS);
+    const firebaseServiceAccountPresent = Boolean(
+        String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim()
+        || String(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '').trim()
+        || String(process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim()
+    );
+    const databaseUrlPresent = Boolean(String(process.env.DATABASE_URL || '').trim());
+    const stripeWebhookSecretPresent = Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || '').trim());
+    const stripePublishableKeyPresent = Boolean(getStripePublishableKey());
 
     const payload = {
         status: 'ok',
         timestamp: new Date().toISOString(),
+        frontendUrlConfigured: Boolean(String(process.env.FRONTEND_URL || '').trim()),
         internalAuthConfigured: Boolean(String(process.env.INTERNAL_API_KEY || '').trim()),
         mcpApiKeyPepperConfigured: Boolean(String(process.env.MCP_API_KEY_PEPPER || '').trim() || String(process.env.INTERNAL_API_KEY || '').trim()),
+        database: {
+            configured: databaseUrlPresent,
+        },
+        firebase: {
+            serviceAccountPresent: firebaseServiceAccountPresent,
+        },
         gemini: {
             model,
             apiKeyPresent: Boolean(apiKey),
@@ -1199,6 +1080,18 @@ fastify.get('/api/health', async (request, reply) => {
         nvidia: {
             apiKeyPresent: Boolean((process.env.NVIDIA_API_KEY || '').trim()),
             models: nvidiaModels,
+        },
+        firecrawl: {
+            apiKeyPresent: Boolean(String(process.env.FIRECRAWL_API_KEY || '').trim()),
+        },
+        posthog: {
+            apiKeyPresent: Boolean(String(process.env.POSTHOG_API_KEY || process.env.VITE_POSTHOG_KEY || '').trim()),
+            host: String(process.env.POSTHOG_HOST || process.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com').trim(),
+        },
+        stripe: {
+            configured: isStripeConfigured(),
+            publishableKeyPresent: stripePublishableKeyPresent,
+            webhookSecretPresent: stripeWebhookSecretPresent,
         },
         resend: getResendConfigSummary(),
     };
@@ -2176,6 +2069,12 @@ fastify.post<{
                 error: (error as Error).message,
             });
         }
+        annotateServerBillingActivity(traceId, {
+            operation: 'generate',
+            preferredModel,
+            requestPreview,
+            errorMessage: (error as Error).message,
+        });
         fastify.log.error({ traceId, route: '/api/generate', durationMs: Date.now() - startedAt, err: error }, 'generate: failed');
         return reply.status(500).send({
             error: 'Failed to generate design',
@@ -2358,6 +2257,12 @@ fastify.post<{
                 error: (error as Error).message,
             });
         }
+        annotateServerBillingActivity(traceId, {
+            operation: 'design_system',
+            preferredModel,
+            requestPreview,
+            errorMessage: (error as Error).message,
+        });
         fastify.log.error({ traceId, route: '/api/design-system', durationMs: Date.now() - startedAt, err: error }, 'design-system: failed');
         return reply.status(500).send({
             error: 'Failed to generate project design system',
@@ -2537,6 +2442,12 @@ fastify.post<{
                 screenId,
             });
         }
+        annotateServerBillingActivity(traceId, {
+            operation: 'edit',
+            preferredModel,
+            requestPreview,
+            errorMessage: (error as Error).message,
+        });
         fastify.log.error({ traceId, route: '/api/edit', durationMs: Date.now() - startedAt, screenId, err: error }, 'edit: failed');
         return reply.status(500).send({
             error: 'Failed to edit design',
@@ -3182,7 +3093,7 @@ fastify.get('/api/models', async () => {
         groq: Object.keys(GROQ_MODELS),
         nvidia: Object.keys(NVIDIA_MODELS),
         planner: getPlannerModels(),
-        defaultTextModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
+        defaultTextModel: normalizeGeminiTextModel(process.env.GEMINI_MODEL || getDefaultGeminiTextModel()),
     };
 });
 
@@ -3840,6 +3751,12 @@ fastify.post<{
                 }
             );
         }
+        annotateServerBillingActivity(traceId, {
+            operation: 'generate_stream',
+            preferredModel,
+            requestPreview,
+            errorMessage: (error as Error).message,
+        });
         fastify.log.error({ traceId, route: '/api/generate-stream', durationMs: Date.now() - startedAt, err: error }, 'generate-stream: failed');
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
     } finally {

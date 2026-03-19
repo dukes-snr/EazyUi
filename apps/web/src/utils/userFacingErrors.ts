@@ -89,7 +89,7 @@ function mapGeminiLikeError(message: string, input?: unknown): UserFacingError {
         };
     }
 
-    if (contains(lower, /\b404\b|not_found/)) {
+    if (contains(lower, /\b404\b|not[_ ]found|unknown model|unsupported model|model .* not available|does not exist/)) {
         return {
             title: 'Requested resource not found',
             summary: 'A model, file, or endpoint parameter in the request could not be found.',

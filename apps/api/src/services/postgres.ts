@@ -179,6 +179,52 @@ export async function ensurePersistenceSchema(): Promise<void> {
                 CREATE INDEX IF NOT EXISTS idx_billing_purchases_uid_created_at
                 ON billing_purchases(uid, created_at DESC);
             `);
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS api_request_activity (
+                    id TEXT PRIMARY KEY,
+                    request_key TEXT,
+                    uid TEXT,
+                    user_email TEXT,
+                    auth_type TEXT,
+                    route TEXT NOT NULL,
+                    method TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    duration_ms INTEGER,
+                    ip TEXT,
+                    operation TEXT,
+                    request_preview TEXT,
+                    preferred_model TEXT,
+                    expected_screen_count INTEGER,
+                    expected_image_count INTEGER,
+                    estimated_credits INTEGER,
+                    reserve_credits INTEGER,
+                    minimum_floor_credits INTEGER,
+                    final_credits INTEGER,
+                    balance_credits INTEGER,
+                    tokens_used INTEGER,
+                    metadata TEXT,
+                    error_message TEXT,
+                    updated_at TEXT NOT NULL
+                );
+            `);
+            await db.query(`
+                CREATE INDEX IF NOT EXISTS idx_api_request_activity_started_at
+                ON api_request_activity(started_at DESC);
+            `);
+            await db.query(`
+                CREATE INDEX IF NOT EXISTS idx_api_request_activity_uid_started_at
+                ON api_request_activity(uid, started_at DESC);
+            `);
+            await db.query(`
+                CREATE INDEX IF NOT EXISTS idx_api_request_activity_status_started_at
+                ON api_request_activity(status, started_at DESC);
+            `);
+            await db.query(`
+                CREATE INDEX IF NOT EXISTS idx_api_request_activity_route_started_at
+                ON api_request_activity(route, started_at DESC);
+            `);
         })().catch((error) => {
             schemaReadyPromise = null;
             throw error;
