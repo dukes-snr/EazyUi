@@ -565,10 +565,10 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     <div className="h-screen w-screen text-[var(--ui-text)]">
       <div className="workspace-shell-frame flex h-full overflow-hidden p-2 md:p-3">
         <aside
-          className="flex shrink-0 flex-col rounded-[28px] transition-[width] duration-300 ease-out"
+          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[28px] transition-[width] duration-300 ease-out"
           style={{ width: sidebarWidth }}
         >
-          <div className={`flex items-center ${sidebarExpanded ? 'justify-between gap-3' : 'flex-col gap-2'}`}>
+          <div className={`flex shrink-0 items-center ${sidebarExpanded ? 'justify-between gap-3' : 'flex-col gap-2'}`}>
             <button
               type="button"
               onClick={() => onNavigate('/')}
@@ -616,37 +616,39 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             </button>
           )} */}
 
-          <div className="mt-5 flex flex-1 flex-col overflow-visible">
+          <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden">
             {sidebarExpanded && (
               <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
             )}
-            <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2'}`}>
-              {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={onClick}
-                  className={`group flex items-center transition-all duration-300 ${sidebarExpanded
-                    ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
-                      ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_12px_30px_rgba(0,0,0,0.08)]'
-                      : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
-                    : `h-12 w-12 justify-center rounded-2xl ${active
-                      ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_10px_24px_rgba(0,0,0,0.08)]'
-                      : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
-                  title={label}
-                >
-                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
-                    <Icon size={16} className={iconClassName} />
-                  </span>
-                  <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
-                    <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
-                    <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
-                  </span>
-                </button>
-              ))}
-            </nav>
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2'}`}>
+                {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={onClick}
+                    className={`group flex items-center transition-all duration-300 ${sidebarExpanded
+                      ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
+                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_12px_30px_rgba(0,0,0,0.08)]'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
+                      : `h-12 w-12 justify-center rounded-2xl ${active
+                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_10px_24px_rgba(0,0,0,0.08)]'
+                        : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
+                    title={label}
+                  >
+                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
+                      <Icon size={16} className={iconClassName} />
+                    </span>
+                    <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
+                      <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
+                      <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                    </span>
+                  </button>
+                ))}
+              </nav>
+            </div>
 
-            <div className="mt-auto flex flex-col gap-3 pt-5">
+            <div className="mt-auto flex shrink-0 flex-col gap-3 pb-3 pt-5">
               {sidebarExpanded ? (
                 <>
 

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Menu, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
@@ -298,6 +298,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
     const [isNavScrolled, setIsNavScrolled] = useState(false);
+    const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
     const [isDemoHovered, setIsDemoHovered] = useState(false);
     const [isDemoPlaying, setIsDemoPlaying] = useState(false);
     const [featureShowcaseOffset, setFeatureShowcaseOffset] = useState(0);
@@ -651,6 +652,20 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     }, [isAddMenuOpen]);
 
     useEffect(() => {
+        setIsMobileNavOpen(false);
+    }, [currentPath, userProfile?.email]);
+
+    useEffect(() => {
+        const onResize = () => {
+            if (window.innerWidth >= 1024) {
+                setIsMobileNavOpen(false);
+            }
+        };
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+
+    useEffect(() => {
         if (!showStyleMenu) return;
 
         const handlePointerDown = (event: MouseEvent) => {
@@ -863,110 +878,235 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         style={{ scaleX: shouldReduceMotion ? scrollYProgress : easedScrollProgress }}
                     />
                     <div className="mx-auto flex h-14 max-w-[1160px] items-center justify-between px-4 sm:px-6">
-                    <button
-                        type="button"
-                        onClick={() => onNavigate('/')}
-                        className="inline-flex items-center gap-2 text-left"
-                    >
-                        <img src={appLogo} alt="EazyUI logo" className="h-6 w-6 object-contain" />
-                        <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-[var(--ui-text)]">EazyUI</span>
-                    </button>
-                    <div className="hidden lg:flex items-center gap-2">
-                        {MARKETING_NAV_LINKS.map((item) => (
-                            <button
-                                key={item.label}
-                                type="button"
-                                onClick={() => onNavigate(item.path)}
-                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] transition-colors ${currentPath === item.path ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
-                            >
-                                {item.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex items-center gap-2">
                         <button
                             type="button"
-                            onClick={toggleTheme}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)]"
-                            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-                            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                            onClick={() => {
+                                setIsMobileNavOpen(false);
+                                onNavigate('/');
+                            }}
+                            className="inline-flex items-center gap-2 text-left"
                         >
-                            {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
+                            <img src={appLogo} alt="EazyUI logo" className="h-6 w-6 object-contain" />
+                            <span className="text-[12px] font-semibold tracking-[0.08em] uppercase text-[var(--ui-text)]">EazyUI</span>
                         </button>
-                        {userProfile ? (
-                            <>
-                                <div className="hidden sm:flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5">
-                                    {userProfile.photoUrl ? (
-                                        <img
-                                            src={userProfile.photoUrl}
-                                            alt={userProfile.name}
-                                            className="h-6 w-6 rounded-full object-cover border border-[var(--ui-border)]"
-                                            onError={(e) => {
-                                                const fallbackName = userProfile.name || userProfile.email || 'User';
-                                                const img = e.currentTarget;
-                                                img.onerror = null;
-                                                img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
-                                            }}
-                                        />
-                                    ) : (
-                                        <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-[11px] font-semibold text-[var(--ui-text)]">
-                                            {(userProfile.name || userProfile.email || 'U').slice(0, 1).toUpperCase()}
+                        <div className="hidden lg:flex items-center gap-2">
+                            {MARKETING_NAV_LINKS.map((item) => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => onNavigate(item.path)}
+                                    className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] transition-colors ${currentPath === item.path ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={toggleTheme}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)]"
+                                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                                aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                            >
+                                {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
+                            </button>
+                            <div className="hidden lg:flex items-center gap-2">
+                                {userProfile ? (
+                                    <>
+                                        <div className="flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5">
+                                            {userProfile.photoUrl ? (
+                                                <img
+                                                    src={userProfile.photoUrl}
+                                                    alt={userProfile.name}
+                                                    className="h-6 w-6 rounded-full border border-[var(--ui-border)] object-cover"
+                                                    onError={(e) => {
+                                                        const fallbackName = userProfile.name || userProfile.email || 'User';
+                                                        const img = e.currentTarget;
+                                                        img.onerror = null;
+                                                        img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-[11px] font-semibold text-[var(--ui-text)]">
+                                                    {(userProfile.name || userProfile.email || 'U').slice(0, 1).toUpperCase()}
+                                                </div>
+                                            )}
+                                            <div className="leading-tight">
+                                                <p className="max-w-[170px] truncate text-[11px] text-[var(--ui-text)]">{userProfile.name}</p>
+                                                <p className="max-w-[170px] truncate text-[10px] text-[var(--ui-text-muted)]">{userProfile.email}</p>
+                                            </div>
                                         </div>
-                                    )}
-                                    <div className="leading-tight">
-                                        <p className="max-w-[170px] truncate text-[11px] text-[var(--ui-text)]">{userProfile.name}</p>
-                                        <p className="max-w-[170px] truncate text-[10px] text-[var(--ui-text-muted)]">{userProfile.email}</p>
-                                    </div>
-                                </div>
-                                {!userProfile.emailVerified && (
-                                    <button
-                                        type="button"
-                                        onClick={onSendVerification}
-                                        disabled={verificationBusy}
-                                        className="hidden sm:inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-primary)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] disabled:opacity-60"
-                                    >
-                                        {verificationBusy ? 'Sending...' : 'Verify email'}
-                                    </button>
+                                        {!userProfile.emailVerified && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onSendVerification?.()}
+                                                disabled={verificationBusy}
+                                                className="inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-primary)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] disabled:opacity-60"
+                                            >
+                                                {verificationBusy ? 'Sending...' : 'Verify email'}
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigate('/app')}
+                                            className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
+                                        >
+                                            Open app
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onSignOut?.()}
+                                            className="h-8 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
+                                        >
+                                            Sign out
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigate('/login')}
+                                            className="inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
+                                        >
+                                            Log in
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigate('/login')}
+                                            className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
+                                        >
+                                            Sign up
+                                        </button>
+                                    </>
                                 )}
-                                <button
-                                    type="button"
-                                    onClick={() => onNavigate('/app')}
-                                    className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
-                                >
-                                    Open app
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={onSignOut}
-                                    className="h-8 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
-                                >
-                                    Sign out
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button
-                                    type="button"
-                                    onClick={() => onNavigate('/login')}
-                                    className="hidden sm:inline-flex h-8 items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:text-[var(--ui-primary)]"
-                                >
-                                    Log in
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => onNavigate('/login')}
-                                    className="h-8 rounded-full bg-[var(--ui-primary)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
-                                >
-                                    Sign up
-                                </button>
-                            </>
-                        )}
-                    </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsMobileNavOpen((open) => !open)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] text-[var(--ui-text-muted)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-surface-3))] hover:text-[var(--ui-primary)] lg:hidden"
+                                aria-label={isMobileNavOpen ? 'Close menu' : 'Open menu'}
+                                aria-expanded={isMobileNavOpen}
+                            >
+                                {isMobileNavOpen ? <X size={15} /> : <Menu size={15} />}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </header>
+            {isMobileNavOpen && (
+                <div className="fixed inset-0 z-[90] bg-[var(--ui-surface-1)] lg:hidden">
+                    <button
+                        type="button"
+                        onClick={() => setIsMobileNavOpen(false)}
+                        className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] text-[var(--ui-text)]"
+                        aria-label="Close menu"
+                    >
+                        <X size={18} />
+                    </button>
+                    <div className="flex h-full flex-col overflow-y-auto px-5 pb-8 pt-20">
+                        <div className="flex flex-col gap-2">
+                            {MARKETING_NAV_LINKS.map((item) => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => {
+                                        setIsMobileNavOpen(false);
+                                        onNavigate(item.path);
+                                    }}
+                                    className={`flex min-h-14 items-center rounded-[22px] px-4 text-left text-base font-medium transition-colors ${currentPath === item.path ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]' : 'text-[var(--ui-text)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)]'}`}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-6 border-t border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] pt-6">
+                            {userProfile ? (
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center gap-3 rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-4">
+                                        {userProfile.photoUrl ? (
+                                            <img
+                                                src={userProfile.photoUrl}
+                                                alt={userProfile.name}
+                                                className="h-12 w-12 rounded-full border border-[var(--ui-border)] object-cover"
+                                                onError={(e) => {
+                                                    const fallbackName = userProfile.name || userProfile.email || 'User';
+                                                    const img = e.currentTarget;
+                                                    img.onerror = null;
+                                                    img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=111827&color=ffffff&size=128&rounded=true`;
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[var(--ui-surface-3)] text-sm font-semibold text-[var(--ui-text)]">
+                                                {(userProfile.name || userProfile.email || 'U').slice(0, 1).toUpperCase()}
+                                            </div>
+                                        )}
+                                        <div className="min-w-0">
+                                            <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{userProfile.name}</p>
+                                            <p className="truncate text-xs text-[var(--ui-text-muted)]">{userProfile.email}</p>
+                                        </div>
+                                    </div>
+                                    {!userProfile.emailVerified && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSendVerification?.()}
+                                            disabled={verificationBusy}
+                                            className="inline-flex min-h-12 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-4 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-primary)] disabled:opacity-60"
+                                        >
+                                            {verificationBusy ? 'Sending...' : 'Verify email'}
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsMobileNavOpen(false);
+                                            onNavigate('/app');
+                                        }}
+                                        className="inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--ui-primary)] px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)]"
+                                    >
+                                        Open app
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsMobileNavOpen(false);
+                                            onSignOut?.();
+                                        }}
+                                        className="inline-flex min-h-12 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-4 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)]"
+                                    >
+                                        Sign out
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsMobileNavOpen(false);
+                                            onNavigate('/login');
+                                        }}
+                                        className="inline-flex min-h-12 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-4 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)]"
+                                    >
+                                        Log in
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsMobileNavOpen(false);
+                                            onNavigate('/login');
+                                        }}
+                                        className="inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--ui-primary)] px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-white shadow-[0_10px_28px_color-mix(in_srgb,var(--ui-primary)_24%,transparent)]"
+                                    >
+                                        Sign up
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
-            <main className="relative z-10 px-4 md:px-[0%] lg:px-[0%] pt-8 md:pt-12 pb-0">
+            <main className="relative z-10 px-0 pt-8 md:pt-12 pb-0">
                 {/*Hero section*/}
                 <motion.section
                     className="landing-hero-section relative w-full overflow-hidden"

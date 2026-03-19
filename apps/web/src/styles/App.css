@@ -14,6 +14,94 @@
         var(--color-bg);
 }
 
+.app-mobile-canvas-guard {
+    display: grid;
+    width: 100vw;
+    height: 100vh;
+    place-items: center;
+    padding: 24px;
+    background:
+        radial-gradient(60% 60% at 50% 0%, color-mix(in srgb, var(--ui-primary) 18%, transparent), transparent 58%),
+        var(--ui-bg);
+}
+
+.app-mobile-canvas-guard__panel {
+    width: min(100%, 420px);
+    border-radius: 28px;
+    border: 1px solid color-mix(in srgb, var(--ui-primary) 18%, var(--ui-border));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--ui-primary) 6%, var(--ui-surface-2)) 0%, var(--ui-surface-1) 100%);
+    padding: 28px 22px;
+    text-align: center;
+    box-shadow: 0 28px 60px color-mix(in srgb, var(--ui-primary) 10%, transparent);
+}
+
+.app-mobile-canvas-guard__logo {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 18px;
+    object-fit: contain;
+}
+
+.app-mobile-canvas-guard__eyebrow {
+    color: var(--ui-primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.app-mobile-canvas-guard__title {
+    margin-top: 12px;
+    color: var(--ui-text);
+    font-size: clamp(1.9rem, 8vw, 2.6rem);
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+}
+
+.app-mobile-canvas-guard__copy {
+    margin-top: 14px;
+    color: var(--ui-text-muted);
+    font-size: 14px;
+    line-height: 1.65;
+}
+
+.app-mobile-canvas-guard__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.app-mobile-canvas-guard__button {
+    min-height: 46px;
+    border-radius: 999px;
+    padding: 0 18px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.app-mobile-canvas-guard__button--primary {
+    background: var(--ui-primary);
+    color: #fff;
+}
+
+.app-mobile-canvas-guard__button--primary:hover {
+    background: var(--ui-primary-hover);
+}
+
+.app-mobile-canvas-guard__button--secondary {
+    border: 1px solid color-mix(in srgb, var(--ui-primary) 18%, var(--ui-border));
+    background: color-mix(in srgb, var(--ui-primary) 6%, var(--ui-surface-2));
+    color: var(--ui-text);
+}
+
+.app-mobile-canvas-guard__button--secondary:hover {
+    background: color-mix(in srgb, var(--ui-primary) 10%, var(--ui-surface-3));
+}
+
 .app-layout.project-settings-active {
     position: relative;
 }

@@ -1,10 +1,10 @@
-- [ ] no mobile devices allowed (with message suggesting to use desktop)
+- [x] no mobile devices allowed into the canvas due to display inconvinences (with message suggesting to use desktop)
 - [ ] make a new branch other than main
-- [ ] sidebar scroll/fit vh
-- [ ] remove landing page padding overall
-- [ ] add hamburger menu
+- [x] make the sidebar on the project workspace scroll/fit vh. 
+- [x] remove landing page padding overall
+- [x] add hamburger menu
 - [ ] sticky cards horizontal scroll section
-- [ ] larger brand text on footer
+- [x] larger brand text on footer
 - [ ] slightly more height for the composer landing
 - [ ] chat panel top tab redesign and addition of new tab (assets)
 - [ ] make the site/screen referenced in the chat panel to remain in the message bubble
@@ -26,6 +26,3 @@
 <br />
 
 codex resume 019d0251-a1b6-75c1-b1dd-408ec3ee1ac3
-
-<br />
-

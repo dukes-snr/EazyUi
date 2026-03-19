@@ -1563,7 +1563,7 @@ textarea::placeholder {
   }
 
   .landing-footer-wordmark {
-    font-size: clamp(4.5rem, 21vw, 7rem);
+    font-size: clamp(8rem, 42vw, 14rem);
     line-height: 0.84;
   }
 

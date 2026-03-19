@@ -149,6 +149,7 @@ function App() {
     const [authReady, setAuthReady] = useState(false);
     const [authUser, setAuthUser] = useState<User | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
+    const [isMobileCanvasViewport, setIsMobileCanvasViewport] = useState(false);
     const hydratedProjectIdRef = useRef<string | null>(null);
     const hydrationRunRef = useRef(0);
     const lastSavedFingerprintRef = useRef<string>('');
@@ -639,6 +640,15 @@ function App() {
     }, [theme]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const mediaQuery = window.matchMedia('(max-width: 767px)');
+        const syncViewport = () => setIsMobileCanvasViewport(mediaQuery.matches);
+        syncViewport();
+        mediaQuery.addEventListener('change', syncViewport);
+        return () => mediaQuery.removeEventListener('change', syncViewport);
+    }, []);
+
+    useEffect(() => {
         if (!authReady || !authUser) return;
         const currentUrl = new URL(window.location.href);
         const checkoutState = currentUrl.searchParams.get('billing_checkout');
@@ -797,6 +807,38 @@ function App() {
             return <ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
         return <LearnPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+    }
+
+    if (route.kind === 'app-project-canvas' && isMobileCanvasViewport) {
+        return (
+            <div className="app-mobile-canvas-guard">
+                <div className="app-mobile-canvas-guard__panel">
+                    <img src={logo} alt="EazyUI logo" className="app-mobile-canvas-guard__logo" />
+                    <p className="app-mobile-canvas-guard__eyebrow">Canvas unavailable on mobile</p>
+                    <h1 className="app-mobile-canvas-guard__title">We Recommend Using a Desktop</h1>
+                    <p className="app-mobile-canvas-guard__copy">
+                        The canvas needs a larger display for layout editing, drag interactions, and multi-panel controls.
+                        Use a desktop or laptop browser for the full workspace.
+                    </p>
+                    <div className="app-mobile-canvas-guard__actions">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/app/projects')}
+                            className="app-mobile-canvas-guard__button app-mobile-canvas-guard__button--secondary"
+                        >
+                            Back to Projects
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => navigate('/')}
+                            className="app-mobile-canvas-guard__button app-mobile-canvas-guard__button--primary"
+                        >
+                            Go Home
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     return (
