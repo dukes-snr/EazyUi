@@ -653,7 +653,12 @@ function App() {
         const currentUrl = new URL(window.location.href);
         const checkoutState = currentUrl.searchParams.get('billing_checkout');
         const productKey = currentUrl.searchParams.get('billing_product') || '';
-        const sessionId = currentUrl.searchParams.get('session_id') || '';
+        const stripeSessionId = currentUrl.searchParams.get('session_id') || '';
+        const providerCheckoutId = currentUrl.searchParams.get('checkout_id') || '';
+        const hasResolvedStripeSessionId = stripeSessionId.length > 0
+            && !stripeSessionId.includes('{')
+            && !stripeSessionId.includes('CHECKOUT_SESSION_ID');
+        const sessionId = hasResolvedStripeSessionId ? stripeSessionId : providerCheckoutId || stripeSessionId;
         const handledKey = `${checkoutState}:${productKey}:${sessionId}`;
         if (!checkoutState || handledBillingReturnRef.current === handledKey) return;
         handledBillingReturnRef.current = handledKey;
@@ -663,6 +668,7 @@ function App() {
             nextUrl.searchParams.delete('billing_checkout');
             nextUrl.searchParams.delete('billing_product');
             nextUrl.searchParams.delete('session_id');
+            nextUrl.searchParams.delete('checkout_id');
             window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
         };
 

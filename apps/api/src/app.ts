@@ -64,6 +64,19 @@ import {
     retrieveCheckoutSessionWithLineItems,
 } from './services/stripeBilling.js';
 import {
+    constructPolarWebhookEvent,
+    createPolarCheckoutSession,
+    createPolarCustomerPortalSession,
+    getPolarPricingCatalog,
+    isPolarConfigured,
+    resolveBillingProviderName,
+    resolvePlanFromPolarProductId,
+    resolvePolarProductId,
+    resolveTopupCreditsForPolarProductId,
+    retrievePolarCheckoutSession,
+    WebhookVerificationError as PolarWebhookVerificationError,
+} from './services/polarBilling.js';
+import {
     createMcpApiKey,
     listMcpApiKeys,
     resolveMcpApiKey,
@@ -119,6 +132,93 @@ const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const SERVER_ACTIVITY_LIMIT = 250;
 const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
+
+function getActiveBillingProvider() {
+    return resolveBillingProviderName(isStripeConfigured());
+}
+
+async function buildBillingOperationsSnapshot() {
+    const provider = getActiveBillingProvider();
+    const stripeWebhookSecretPresent = Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || '').trim());
+    const stripePublishableKeyPresent = Boolean(getStripePublishableKey());
+    const polarWebhookSecretPresent = Boolean(String(process.env.POLAR_WEBHOOK_SECRET || '').trim());
+    const [activity, purchases, stripeWebhookEvents, stripeCatalog, polarCatalog] = await Promise.all([
+        getRequestActivitySnapshot(500),
+        listRecentBillingPurchases(40),
+        provider === 'stripe' ? listRecentStripeWebhookEvents(40) : Promise.resolve([]),
+        provider === 'stripe' ? getStripePricingCatalog().catch(() => null) : Promise.resolve(null),
+        provider === 'polar' ? getPolarPricingCatalog().catch(() => null) : Promise.resolve(null),
+    ]);
+
+    const billingItems = activity.items.filter((item) => item.route.startsWith('/api/billing') || item.route.startsWith('/api/stripe/') || item.route.startsWith('/api/polar/'));
+    const providerItems = billingItems.filter((item) => {
+        if (provider === 'polar') return item.route.startsWith('/api/billing') || item.route.startsWith('/api/polar/');
+        if (provider === 'stripe') return item.route.startsWith('/api/billing') || item.route.startsWith('/api/stripe/');
+        return item.route.startsWith('/api/billing');
+    });
+    const billingErrors = providerItems.filter((item) => item.status === 'error');
+    const successfulPayments = purchases.filter((item) => item.status === 'paid' || item.status === 'complete' || item.status === 'succeeded');
+    const pendingFulfillment = purchases.filter((item) => item.purchaseKind === 'topup' && item.fulfillmentStatus !== 'applied');
+    const grossUsd = purchases.reduce((sum, item) => sum + (Number(item.amountTotal || 0) / 100), 0);
+    const recentWebhookEvents = provider === 'polar'
+        ? providerItems
+            .filter((item) => item.route === '/api/polar/webhook')
+            .slice(0, 40)
+            .map((item) => ({
+                id: item.id,
+                eventType: String(item.metadata?.eventType || item.metadata?.stage || 'polar.webhook'),
+                receivedAt: item.startedAt,
+                status: item.status,
+            }))
+        : stripeWebhookEvents;
+
+    return {
+        timestamp: new Date().toISOString(),
+        provider: {
+            name: provider,
+            configured: provider === 'polar' ? isPolarConfigured() : provider === 'stripe' ? isStripeConfigured() : false,
+        },
+        help: {
+            localCliForwardingRequired: false,
+            productionWebhookPath: provider === 'polar' ? '/api/polar/webhook' : provider === 'stripe' ? '/api/stripe/webhook' : null,
+            note: provider === 'polar'
+                ? 'Polar should post directly to the deployed webhook endpoint. Stripe can remain disabled.'
+                : provider === 'stripe'
+                    ? 'Use stripe listen only for local development. Production Stripe should post directly to the deployed webhook endpoint.'
+                    : 'No billing provider is currently configured.',
+        },
+        config: {
+            activeProvider: provider,
+            stripeConfigured: isStripeConfigured(),
+            polarConfigured: isPolarConfigured(),
+            configured: provider === 'polar' ? isPolarConfigured() : provider === 'stripe' ? isStripeConfigured() : false,
+            publishableKeyPresent: provider === 'stripe' ? stripePublishableKeyPresent : false,
+            webhookSecretPresent: provider === 'polar' ? polarWebhookSecretPresent : stripeWebhookSecretPresent,
+            productIdsConfigured: provider === 'polar'
+                ? {
+                    pro: Boolean(resolvePolarProductId('pro')),
+                    team: Boolean(resolvePolarProductId('team')),
+                    topup_1000: Boolean(resolvePolarProductId('topup_1000')),
+                }
+                : undefined,
+            priceCatalog: provider === 'polar' ? polarCatalog : stripeCatalog,
+        },
+        summary: {
+            retainedBillingRequests: providerItems.length,
+            retainedBillingErrors: billingErrors.length,
+            retainedBillingRunning: providerItems.filter((item) => item.status === 'running').length,
+            recentPurchases: purchases.length,
+            successfulPayments: successfulPayments.length,
+            pendingFulfillment: pendingFulfillment.length,
+            webhookEvents: recentWebhookEvents.length,
+            grossUsd,
+        },
+        recentErrors: billingErrors.slice(0, 12),
+        recentRequests: providerItems.slice(0, 20),
+        recentPayments: purchases,
+        recentWebhookEvents,
+    };
+}
 
 type ReferenceContextMeta = {
     requestedUrls: string[];
@@ -201,6 +301,7 @@ function shouldTrackServerActivity(url: string): boolean {
         || cleanUrl === '/dashboard'
         || cleanUrl.startsWith('/dashboard/')
         || cleanUrl === '/api/server/activity'
+        || cleanUrl === '/api/server/billing'
         || cleanUrl === '/api/server/stripe'
         || cleanUrl === '/api/health'
         || cleanUrl === '/api/models'
@@ -776,6 +877,207 @@ async function reconcileCompletedCheckoutSession(session: any, eventId?: string 
     return { uid, applied: !existingPurchase, summary: await buildBillingSummaryForApi(uid) };
 }
 
+async function reconcileCompletedPolarCheckout(checkout: any, eventId?: string | null): Promise<{ uid: string | null; applied: boolean; summary?: BillingSummary }> {
+    const uid = String(checkout.externalCustomerId || checkout.metadata?.uid || '').trim();
+    if (!uid) return { uid: null, applied: false };
+
+    const productId = String(checkout.productId || checkout.product?.id || '').trim() || null;
+    const planId = resolvePlanFromPolarProductId(productId);
+    const topupCredits = resolveTopupCreditsForPolarProductId(productId);
+    const productKey = String(checkout.metadata?.productKey || '').trim();
+    const purchaseKind: 'subscription' | 'topup' | 'other' = planId
+        ? 'subscription'
+        : topupCredits > 0
+            ? 'topup'
+            : 'other';
+    const existingPurchase = await getBillingPurchaseBySource('checkout', checkout.id);
+    const topupAlreadyApplied = existingPurchase?.purchaseKind === 'topup' && existingPurchase.fulfillmentStatus === 'applied';
+
+    await upsertBillingPurchase({
+        uid,
+        sourceType: 'checkout',
+        sourceId: checkout.id,
+        purchaseKind,
+        productKey: productKey || undefined,
+        planId: planId || undefined,
+        amountTotal: Number(checkout.totalAmount || checkout.amount || 0),
+        currency: String(checkout.currency || 'usd'),
+        quantity: 1,
+        status: String(checkout.status || 'succeeded'),
+        description: String(checkout.product?.name || productKey || 'Polar checkout purchase'),
+        fulfillmentStatus: planId
+            ? 'applied'
+            : topupCredits > 0
+                ? (topupAlreadyApplied ? 'applied' : 'pending')
+                : 'applied',
+        creditsAppliedAt: topupAlreadyApplied ? (existingPurchase?.creditsAppliedAt || new Date().toISOString()) : null,
+        metadata: {
+            provider: 'polar',
+            ...(eventId ? { polarEventType: eventId } : {}),
+            polarCheckoutId: checkout.id,
+            polarProductId: productId,
+            polarCustomerId: checkout.customerId || null,
+            polarPaymentProcessor: checkout.paymentProcessor || null,
+        },
+        createdAt: new Date(checkout.createdAt || Date.now()).toISOString(),
+    });
+
+    if (planId) {
+        const summary = await setUserPlan({
+            uid,
+            planId,
+            reason: eventId ? 'polar_checkout_completed' : 'polar_checkout_return',
+        });
+        return { uid, applied: !existingPurchase, summary };
+    }
+
+    if (topupCredits > 0) {
+        if (topupAlreadyApplied) {
+            return { uid, applied: false, summary: await buildBillingSummaryForApi(uid) };
+        }
+        const summary = await grantTopupCredits({
+            uid,
+            credits: topupCredits,
+            reason: eventId ? 'polar_topup_purchase' : 'polar_topup_return',
+            metadata: {
+                checkoutId: checkout.id,
+                productId,
+            },
+        });
+        await upsertBillingPurchase({
+            uid,
+            sourceType: 'checkout',
+            sourceId: checkout.id,
+            purchaseKind,
+            productKey: productKey || undefined,
+            planId: planId || undefined,
+            amountTotal: Number(checkout.totalAmount || checkout.amount || 0),
+            currency: String(checkout.currency || 'usd'),
+            quantity: 1,
+            status: String(checkout.status || 'succeeded'),
+            description: String(checkout.product?.name || productKey || 'Polar checkout purchase'),
+            fulfillmentStatus: 'applied',
+            creditsAppliedAt: new Date().toISOString(),
+            metadata: {
+                provider: 'polar',
+                ...(eventId ? { polarEventType: eventId } : {}),
+                polarCheckoutId: checkout.id,
+                polarProductId: productId,
+                polarCustomerId: checkout.customerId || null,
+                polarPaymentProcessor: checkout.paymentProcessor || null,
+                topupCreditsGranted: topupCredits,
+            },
+            createdAt: new Date(checkout.createdAt || Date.now()).toISOString(),
+        });
+        return { uid, applied: true, summary };
+    }
+
+    return { uid, applied: !existingPurchase, summary: await buildBillingSummaryForApi(uid) };
+}
+
+async function reconcilePolarPaidOrder(order: any, eventType: string): Promise<{ uid: string | null; applied: boolean; summary?: BillingSummary }> {
+    const uid = String(order.customer?.externalId || order.metadata?.uid || '').trim();
+    if (!uid) return { uid: null, applied: false };
+
+    const productId = String(order.productId || order.product?.id || '').trim() || null;
+    const planId = resolvePlanFromPolarProductId(productId);
+    const topupCredits = resolveTopupCreditsForPolarProductId(productId);
+    const sourceId = String(order.checkoutId || order.id || '').trim();
+    if (!sourceId) return { uid, applied: false, summary: await buildBillingSummaryForApi(uid) };
+    const productKey = String(order.metadata?.productKey || '').trim();
+    const purchaseKind: 'subscription' | 'topup' | 'other' = planId
+        ? 'subscription'
+        : topupCredits > 0
+            ? 'topup'
+            : 'other';
+    const existingPurchase = await getBillingPurchaseBySource('checkout', sourceId);
+    const topupAlreadyApplied = existingPurchase?.purchaseKind === 'topup' && existingPurchase.fulfillmentStatus === 'applied';
+
+    await upsertBillingPurchase({
+        uid,
+        sourceType: 'checkout',
+        sourceId,
+        purchaseKind,
+        productKey: productKey || undefined,
+        planId: planId || undefined,
+        amountTotal: Number(order.totalAmount || order.netAmount || 0),
+        currency: String(order.currency || 'usd'),
+        quantity: Math.max(1, Number(order.items?.[0]?.quantity || 1)),
+        status: String(order.status || (order.paid ? 'paid' : 'pending')),
+        description: String(order.description || order.product?.name || productKey || 'Polar order'),
+        invoiceNumber: String(order.invoiceNumber || '').trim() || undefined,
+        fulfillmentStatus: planId
+            ? 'applied'
+            : topupCredits > 0
+                ? (topupAlreadyApplied ? 'applied' : 'pending')
+                : 'applied',
+        creditsAppliedAt: topupAlreadyApplied ? (existingPurchase?.creditsAppliedAt || new Date().toISOString()) : null,
+        metadata: {
+            provider: 'polar',
+            polarEventType: eventType,
+            polarOrderId: order.id,
+            polarCheckoutId: order.checkoutId || null,
+            polarProductId: productId,
+            polarSubscriptionId: order.subscriptionId || null,
+        },
+        createdAt: new Date(order.createdAt || Date.now()).toISOString(),
+    });
+
+    if (planId) {
+        const summary = await setUserPlan({
+            uid,
+            planId,
+            reason: eventType === 'subscription.active' ? 'polar_subscription_active' : 'polar_order_paid',
+        });
+        return { uid, applied: !existingPurchase, summary };
+    }
+
+    if (topupCredits > 0) {
+        if (topupAlreadyApplied) {
+            return { uid, applied: false, summary: await buildBillingSummaryForApi(uid) };
+        }
+        const summary = await grantTopupCredits({
+            uid,
+            credits: topupCredits,
+            reason: 'polar_order_paid',
+            metadata: {
+                orderId: order.id,
+                checkoutId: order.checkoutId || null,
+                productId,
+            },
+        });
+        await upsertBillingPurchase({
+            uid,
+            sourceType: 'checkout',
+            sourceId,
+            purchaseKind,
+            productKey: productKey || undefined,
+            planId: planId || undefined,
+            amountTotal: Number(order.totalAmount || order.netAmount || 0),
+            currency: String(order.currency || 'usd'),
+            quantity: Math.max(1, Number(order.items?.[0]?.quantity || 1)),
+            status: String(order.status || (order.paid ? 'paid' : 'pending')),
+            description: String(order.description || order.product?.name || productKey || 'Polar order'),
+            invoiceNumber: String(order.invoiceNumber || '').trim() || undefined,
+            fulfillmentStatus: 'applied',
+            creditsAppliedAt: new Date().toISOString(),
+            metadata: {
+                provider: 'polar',
+                polarEventType: eventType,
+                polarOrderId: order.id,
+                polarCheckoutId: order.checkoutId || null,
+                polarProductId: productId,
+                polarSubscriptionId: order.subscriptionId || null,
+                topupCreditsGranted: topupCredits,
+            },
+            createdAt: new Date(order.createdAt || Date.now()).toISOString(),
+        });
+        return { uid, applied: true, summary };
+    }
+
+    return { uid, applied: !existingPurchase, summary: await buildBillingSummaryForApi(uid) };
+}
+
 const KNOWN_BILLING_OPERATIONS: BillingOperation[] = [
     'design_system',
     'generate',
@@ -1098,8 +1400,12 @@ fastify.get('/dashboard/users', async (_request, reply) => {
     return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('users'));
 });
 
+fastify.get('/dashboard/billing', async (_request, reply) => {
+    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('billing'));
+});
+
 fastify.get('/dashboard/stripe', async (_request, reply) => {
-    return reply.type('text/html; charset=utf-8').send(renderRequestActivityDashboardHtml('stripe'));
+    return reply.redirect('/dashboard/billing');
 });
 
 fastify.get('/dashboard/settings', async (_request, reply) => {
@@ -1115,49 +1421,12 @@ fastify.get<{
     return reply.send(await getRequestActivitySnapshot(limit));
 });
 
-fastify.get('/api/server/stripe', async (_request, reply) => {
-    const stripePublishableKeyPresent = Boolean(getStripePublishableKey());
-    const stripeWebhookSecretPresent = Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || '').trim());
-    const [activity, webhookEvents, purchases, catalog] = await Promise.all([
-        getRequestActivitySnapshot(500),
-        listRecentStripeWebhookEvents(40),
-        listRecentBillingPurchases(40),
-        getStripePricingCatalog().catch(() => null),
-    ]);
-    const stripeItems = activity.items.filter((item) => item.route.startsWith('/api/billing') || item.route.startsWith('/api/stripe/'));
-    const stripeErrors = stripeItems.filter((item) => item.status === 'error');
-    const successfulPayments = purchases.filter((item) => item.status === 'paid' || item.status === 'complete' || item.status === 'succeeded');
-    const pendingFulfillment = purchases.filter((item) => item.purchaseKind === 'topup' && item.fulfillmentStatus !== 'applied');
-    const grossUsd = purchases.reduce((sum, item) => sum + (Number(item.amountTotal || 0) / 100), 0);
+fastify.get('/api/server/billing', async (_request, reply) => {
+    return reply.send(await buildBillingOperationsSnapshot());
+});
 
-    return reply.send({
-        timestamp: new Date().toISOString(),
-        help: {
-            localCliForwardingRequired: false,
-            productionWebhookPath: '/api/stripe/webhook',
-            note: 'Use stripe listen only for local development. Production Stripe should post directly to the Render webhook endpoint.',
-        },
-        config: {
-            configured: isStripeConfigured(),
-            publishableKeyPresent: stripePublishableKeyPresent,
-            webhookSecretPresent: stripeWebhookSecretPresent,
-            priceCatalog: catalog,
-        },
-        summary: {
-            retainedStripeRequests: stripeItems.length,
-            retainedStripeErrors: stripeErrors.length,
-            retainedStripeRunning: stripeItems.filter((item) => item.status === 'running').length,
-            recentPurchases: purchases.length,
-            successfulPayments: successfulPayments.length,
-            pendingFulfillment: pendingFulfillment.length,
-            webhookEvents: webhookEvents.length,
-            grossUsd,
-        },
-        recentErrors: stripeErrors.slice(0, 12),
-        recentRequests: stripeItems.slice(0, 20),
-        recentPayments: purchases,
-        recentWebhookEvents: webhookEvents,
-    });
+fastify.get('/api/server/stripe', async (_request, reply) => {
+    return reply.send(await buildBillingOperationsSnapshot());
 });
 
 // Health check
@@ -1174,10 +1443,13 @@ fastify.get('/api/health', async (request, reply) => {
     const databaseUrlPresent = Boolean(String(process.env.DATABASE_URL || '').trim());
     const stripeWebhookSecretPresent = Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || '').trim());
     const stripePublishableKeyPresent = Boolean(getStripePublishableKey());
+    const polarWebhookSecretPresent = Boolean(String(process.env.POLAR_WEBHOOK_SECRET || '').trim());
+    const billingProvider = getActiveBillingProvider();
 
     const payload = {
         status: 'ok',
         timestamp: new Date().toISOString(),
+        billingProvider,
         frontendUrlConfigured: Boolean(String(process.env.FRONTEND_URL || '').trim()),
         internalAuthConfigured: Boolean(String(process.env.INTERNAL_API_KEY || '').trim()),
         mcpApiKeyPepperConfigured: Boolean(String(process.env.MCP_API_KEY_PEPPER || '').trim() || String(process.env.INTERNAL_API_KEY || '').trim()),
@@ -1210,6 +1482,15 @@ fastify.get('/api/health', async (request, reply) => {
             configured: isStripeConfigured(),
             publishableKeyPresent: stripePublishableKeyPresent,
             webhookSecretPresent: stripeWebhookSecretPresent,
+        },
+        polar: {
+            configured: isPolarConfigured(),
+            webhookSecretPresent: polarWebhookSecretPresent,
+            productIdsConfigured: {
+                pro: Boolean(resolvePolarProductId('pro')),
+                team: Boolean(resolvePolarProductId('team')),
+                topup_1000: Boolean(resolvePolarProductId('topup_1000')),
+            },
         },
         resend: getResendConfigSummary(),
     };
@@ -1397,11 +1678,12 @@ fastify.get('/api/billing/summary', async (request, reply) => {
     if (!user) return;
     try {
         const summary = await buildBillingSummaryForApi(user.uid);
+        const provider = getActiveBillingProvider();
         return {
             summary,
-            stripe: {
-                configured: isStripeConfigured(),
-                publishableKeyPresent: Boolean(getStripePublishableKey()),
+            provider: {
+                name: provider,
+                configured: provider === 'polar' ? isPolarConfigured() : provider === 'stripe' ? isStripeConfigured() : false,
             },
         };
     } catch (error) {
@@ -1415,11 +1697,53 @@ fastify.get('/api/billing/summary', async (request, reply) => {
 
 fastify.get('/api/billing/catalog', async (request, reply) => {
     try {
-        const prices = await getStripePricingCatalog();
+        const provider = getActiveBillingProvider();
+        const prices = provider === 'polar'
+            ? await getPolarPricingCatalog()
+            : provider === 'stripe'
+                ? await getStripePricingCatalog()
+                : {
+                    pro: {
+                        productKey: 'pro' as const,
+                        productId: null,
+                        priceId: null,
+                        configured: false,
+                        active: false,
+                        currency: null,
+                        unitAmount: null,
+                        type: null,
+                        interval: null,
+                        intervalCount: null,
+                    },
+                    team: {
+                        productKey: 'team' as const,
+                        productId: null,
+                        priceId: null,
+                        configured: false,
+                        active: false,
+                        currency: null,
+                        unitAmount: null,
+                        type: null,
+                        interval: null,
+                        intervalCount: null,
+                    },
+                    topup_1000: {
+                        productKey: 'topup_1000' as const,
+                        productId: null,
+                        priceId: null,
+                        configured: false,
+                        active: false,
+                        currency: null,
+                        unitAmount: null,
+                        type: null,
+                        interval: null,
+                        intervalCount: null,
+                    },
+                };
         return {
-            stripe: {
-                configured: isStripeConfigured(),
-                publishableKeyPresent: Boolean(getStripePublishableKey()),
+            provider: {
+                name: provider,
+                configured: provider === 'polar' ? isPolarConfigured() : provider === 'stripe' ? isStripeConfigured() : false,
             },
             plans: {
                 free: {
@@ -1578,8 +1902,8 @@ fastify.get<{
       </table>
       <div class="total">Total: ${amount}</div>
       <p class="muted">Invoice source: ${purchase.sourceType} / ${purchase.sourceId}</p>
-      ${purchase.invoiceUrl ? `<p class="muted">Stripe invoice: <a href="${purchase.invoiceUrl}" target="_blank" rel="noreferrer">Open hosted invoice</a></p>` : ''}
-      ${purchase.invoicePdfUrl ? `<p class="muted">Stripe PDF: <a href="${purchase.invoicePdfUrl}" target="_blank" rel="noreferrer">Open PDF</a></p>` : ''}
+      ${purchase.invoiceUrl ? `<p class="muted">Hosted invoice: <a href="${purchase.invoiceUrl}" target="_blank" rel="noreferrer">Open hosted invoice</a></p>` : ''}
+      ${purchase.invoicePdfUrl ? `<p class="muted">Invoice PDF: <a href="${purchase.invoicePdfUrl}" target="_blank" rel="noreferrer">Open PDF</a></p>` : ''}
     </div>
   </div>
 </body>
@@ -1645,15 +1969,63 @@ fastify.post<{
 
     try {
         const { productKey, successUrl, cancelUrl } = request.body;
+        const billingProvider = getActiveBillingProvider();
+        if (billingProvider === 'none') {
+            return reply.status(503).send({
+                error: 'Billing unavailable',
+                message: 'No billing provider is configured on the server.',
+            });
+        }
         annotateServerBillingActivity(request.id, {
             requestPreview: `checkout ${productKey}`,
             metadata: {
                 stage: 'checkout_session_create',
+                billingProvider,
                 productKey,
                 successUrl,
                 cancelUrl,
             },
         });
+        if (billingProvider === 'polar') {
+            const productId = resolvePolarProductId(productKey);
+            if (!productId) {
+                return reply.status(400).send({
+                    error: 'Polar product id missing',
+                    message: `Polar product id for ${productKey} is not configured.`,
+                });
+            }
+            if (!isPolarConfigured()) {
+                return reply.status(503).send({
+                    error: 'Billing unavailable',
+                    message: 'Polar is not configured on the server.',
+                });
+            }
+
+            const session = await createPolarCheckoutSession({
+                productId,
+                successUrl,
+                cancelUrl,
+                uid: user.uid,
+                email: user.email || undefined,
+                name: user.email || user.uid,
+                ipAddress: String(request.ip || '').trim() || undefined,
+                productKey,
+            });
+            annotateServerBillingActivity(request.id, {
+                metadata: {
+                    stage: 'checkout_session_ready',
+                    billingProvider,
+                    productKey,
+                    polarCheckoutId: session.id,
+                    productId,
+                },
+            });
+            return {
+                id: session.id,
+                url: session.url,
+            };
+        }
+
         const planPriceId = productKey === 'pro'
             ? resolveStripePriceIdForPlan('pro')
             : productKey === 'team'
@@ -1724,6 +2096,7 @@ fastify.post<{
         annotateServerBillingActivity(request.id, {
             metadata: {
                 stage: 'checkout_session_ready',
+                billingProvider,
                 productKey,
                 mode,
                 stripeSessionId: session.id,
@@ -1757,6 +2130,20 @@ fastify.post<{
     const user = await requireAuthenticatedUser(request, reply, '/api/billing/portal-session');
     if (!user) return;
     try {
+        const billingProvider = getActiveBillingProvider();
+        if (billingProvider === 'none') {
+            return reply.status(503).send({
+                error: 'Billing unavailable',
+                message: 'No billing provider is configured on the server.',
+            });
+        }
+        if (billingProvider === 'polar') {
+            const session = await createPolarCustomerPortalSession({
+                uid: user.uid,
+                returnUrl: request.body.returnUrl,
+            });
+            return { url: session.customerPortalUrl };
+        }
         const customerId = await getStripeCustomerId(user.uid);
         if (!customerId) {
             return reply.status(400).send({
@@ -1781,25 +2168,81 @@ fastify.post<{
 fastify.get<{
     Querystring: {
         sessionId?: string;
+        checkoutId?: string;
     };
 }>('/api/billing/checkout-status', async (request, reply) => {
     const user = await requireAuthenticatedUser(request, reply, '/api/billing/checkout-status');
     if (!user) return;
 
     try {
-        const sessionId = String(request.query?.sessionId || '').trim();
+        const billingProvider = getActiveBillingProvider();
+        if (billingProvider === 'none') {
+            return reply.status(503).send({
+                error: 'Billing unavailable',
+                message: 'No billing provider is configured on the server.',
+            });
+        }
+        const sessionId = String(request.query?.sessionId || request.query?.checkoutId || '').trim();
         annotateServerBillingActivity(request.id, {
             requestPreview: sessionId ? `checkout session ${sessionId}` : 'checkout session lookup',
             metadata: {
                 stage: 'checkout_status_lookup',
+                billingProvider,
                 sessionId: sessionId || null,
             },
         });
         if (!sessionId) {
             return reply.status(400).send({
                 error: 'sessionId is required',
-                message: 'Provide the Stripe checkout session id returned by Stripe.',
+                message: 'Provide the checkout session id returned by the active billing provider.',
             });
+        }
+
+        if (billingProvider === 'polar') {
+            const checkout = await retrievePolarCheckoutSession(sessionId);
+            const sessionUid = String(checkout.externalCustomerId || checkout.metadata?.uid || '').trim();
+            if (!sessionUid || sessionUid !== user.uid) {
+                return reply.status(403).send({
+                    error: 'Forbidden',
+                    message: 'This checkout session does not belong to the current user.',
+                });
+            }
+
+            const paid = checkout.status === 'succeeded' || checkout.status === 'confirmed';
+            if (paid) {
+                const result = await reconcileCompletedPolarCheckout(checkout, null);
+                annotateServerBillingActivity(request.id, {
+                    balanceCredits: result.summary?.balanceCredits,
+                    metadata: {
+                        stage: 'checkout_status_completed',
+                        billingProvider,
+                        sessionId,
+                        polarStatus: checkout.status || null,
+                        applied: result.applied,
+                        productId: checkout.productId || null,
+                    },
+                });
+                return {
+                    status: 'completed',
+                    applied: result.applied,
+                    summary: result.summary || await buildBillingSummaryForApi(user.uid),
+                };
+            }
+
+            annotateServerBillingActivity(request.id, {
+                metadata: {
+                    stage: 'checkout_status_pending',
+                    billingProvider,
+                    sessionId,
+                    polarStatus: checkout.status || null,
+                    productId: checkout.productId || null,
+                },
+            });
+            return {
+                status: String(checkout.status || 'open'),
+                applied: false,
+                summary: await buildBillingSummaryForApi(user.uid),
+            };
         }
 
         const session = await retrieveCheckoutSessionWithLineItems(sessionId);
@@ -1823,6 +2266,7 @@ fastify.get<{
                 balanceCredits: result.summary?.balanceCredits,
                 metadata: {
                     stage: 'checkout_status_completed',
+                    billingProvider,
                     sessionId,
                     stripeStatus: session.status || null,
                     paymentStatus: session.payment_status || null,
@@ -1840,6 +2284,7 @@ fastify.get<{
         annotateServerBillingActivity(request.id, {
             metadata: {
                 stage: 'checkout_status_pending',
+                billingProvider,
                 sessionId,
                 stripeStatus: session.status || null,
                 paymentStatus: session.payment_status || null,
@@ -1856,6 +2301,7 @@ fastify.get<{
             errorMessage: (error as Error).message,
             metadata: {
                 stage: 'checkout_status_failed',
+                billingProvider: getActiveBillingProvider(),
                 sessionId: String(request.query?.sessionId || '').trim() || null,
             },
         });
@@ -1967,11 +2413,94 @@ fastify.post<{
 
 fastify.post<{
     Body: unknown;
+}>('/api/polar/webhook', {
+    config: {
+        rawBody: true,
+    },
+}, async (request, reply) => {
+    if (getActiveBillingProvider() !== 'polar') {
+        return reply.status(404).send({
+            error: 'Not found',
+            message: 'Polar webhook ingestion is disabled for the active billing provider.',
+        });
+    }
+    const traceId = request.id;
+    annotateServerBillingActivity(traceId, {
+        requestPreview: 'polar webhook delivery',
+        metadata: {
+            stage: 'polar_webhook_received',
+        },
+    });
+    try {
+        const raw = ((request as any).rawBody as Buffer | undefined) || Buffer.from(JSON.stringify(request.body || {}));
+        const event = constructPolarWebhookEvent(raw, request.headers as Record<string, unknown>);
+        annotateServerBillingActivity(traceId, {
+            requestPreview: `polar webhook ${event.type}`,
+            metadata: {
+                stage: 'polar_webhook_verified',
+                eventType: event.type,
+            },
+        });
+
+        if (event.type === 'checkout.updated' && event.data?.status === 'succeeded') {
+            await reconcileCompletedPolarCheckout(event.data, event.type);
+        } else if (event.type === 'order.paid') {
+            await reconcilePolarPaidOrder(event.data, event.type);
+        } else if (event.type === 'subscription.active' || event.type === 'subscription.updated') {
+            const subscription = event.data;
+            const uid = String(subscription.customer?.externalId || subscription.metadata?.uid || '').trim();
+            const planId = resolvePlanFromPolarProductId(subscription.productId || subscription.product?.id);
+            if (uid && planId) {
+                await setUserPlan({
+                    uid,
+                    planId,
+                    status: 'active',
+                    reason: event.type === 'subscription.active' ? 'polar_subscription_active' : 'polar_subscription_update',
+                });
+            }
+        } else if (event.type === 'subscription.canceled' || event.type === 'subscription.revoked') {
+            const subscription = event.data;
+            const uid = String(subscription.customer?.externalId || subscription.metadata?.uid || '').trim();
+            if (uid) {
+                await setUserPlan({
+                    uid,
+                    planId: 'free',
+                    status: 'cancelled',
+                    reason: 'polar_subscription_cancelled',
+                });
+            }
+        }
+
+        return reply.send({ received: true });
+    } catch (error) {
+        annotateServerBillingActivity(traceId, {
+            errorMessage: (error as Error).message,
+            metadata: {
+                stage: 'polar_webhook_failed',
+            },
+        });
+        const statusCode = error instanceof PolarWebhookVerificationError ? 403 : 400;
+        fastify.log.error({ traceId, route: '/api/polar/webhook', err: error }, 'polar webhook failed');
+        return reply.status(statusCode).send({
+            error: 'Webhook processing failed',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: unknown;
 }>('/api/stripe/webhook', {
     config: {
         rawBody: true,
     },
 }, async (request, reply) => {
+    if (getActiveBillingProvider() !== 'stripe') {
+        return reply.status(404).send({
+            error: 'Not found',
+            message: 'Stripe webhook ingestion is disabled for the active billing provider.',
+        });
+    }
     const traceId = request.id;
     const signature = String(request.headers['stripe-signature'] || '').trim();
     annotateServerBillingActivity(traceId, {

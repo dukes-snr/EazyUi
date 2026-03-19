@@ -186,6 +186,7 @@ export function ProjectSettingsPage({
             successUrl.searchParams.set('billing_checkout', 'success');
             successUrl.searchParams.set('billing_product', productKey);
             successUrl.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+            successUrl.searchParams.set('checkout_id', '{CHECKOUT_ID}');
             const cancelUrl = new URL(window.location.href);
             cancelUrl.searchParams.set('billing_checkout', 'cancel');
             cancelUrl.searchParams.set('billing_product', productKey);
@@ -196,11 +197,11 @@ export function ProjectSettingsPage({
             });
             if (session.url) {
                 redirecting = true;
-                setBillingBlockingMessage('Redirecting to Stripe...');
+                setBillingBlockingMessage('Redirecting to checkout...');
                 window.location.href = session.url;
                 return;
             }
-            pushToast({ kind: 'error', title: 'Checkout failed', message: 'Stripe checkout URL was not returned.' });
+            pushToast({ kind: 'error', title: 'Checkout failed', message: 'Billing checkout URL was not returned.' });
         } catch (error) {
             pushToast({ kind: 'error', title: 'Checkout failed', message: (error as Error).message || 'Unable to open checkout.' });
         } finally {

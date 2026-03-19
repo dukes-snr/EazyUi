@@ -136,7 +136,7 @@ function getDisplayPrice(productKey: Exclude<TierKey, 'free'>, price: BillingCat
         return {
             amount: formatMoney(monthlyAmount, price.currency),
             cadenceLabel: '/mo',
-            note: 'Live Stripe price',
+            note: 'Live billing price',
         };
     }
 
@@ -215,7 +215,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                 every stage of output.
                             </h3>
                             <p className="mx-auto mt-4 max-w-[620px] text-[14px] leading-7 text-[var(--ui-text-muted)] md:text-[15px]">
-                                Paid plan amounts come from live Stripe pricing. Annual totals are calculated from the current monthly billing price.
+                                Paid plan amounts come from the active billing provider when available. Annual totals are calculated from the current monthly billing price.
                             </p>
 
                             <div className="mt-7 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1">
@@ -243,7 +243,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                 ) : loadError ? (
                                     <span>{loadError}</span>
                                 ) : (
-                                    <span>{catalog?.stripe?.configured ? 'Using live billing prices where available.' : 'Showing standard pricing.'}</span>
+                                    <span>{catalog?.provider?.configured ? 'Using live billing prices where available.' : 'Showing standard pricing.'}</span>
                                 )}
                             </div>
                         </div>

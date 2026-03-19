@@ -429,9 +429,9 @@ export interface BillingPurchaseItem {
 
 export interface BillingSummaryResponse {
     summary: BillingSummary;
-    stripe?: {
+    provider?: {
+        name: 'polar' | 'stripe' | 'none';
         configured: boolean;
-        publishableKeyPresent: boolean;
     };
 }
 
@@ -448,9 +448,9 @@ export interface BillingCatalogPrice {
 }
 
 export interface BillingCatalogResponse {
-    stripe?: {
+    provider?: {
+        name: 'polar' | 'stripe' | 'none';
         configured: boolean;
-        publishableKeyPresent: boolean;
     };
     plans: {
         free: {
