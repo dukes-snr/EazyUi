@@ -132,7 +132,8 @@ const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const SERVER_ACTIVITY_LIMIT = 250;
 const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
-const DEFAULT_FRONTEND_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const STREAM_KEEPALIVE_INTERVAL_MS = 15000;
+const DEFAULT_FRONTEND_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://eazyui.vercel.app'];
 
 function parseAllowedFrontendOrigins(rawValue: string | undefined): string[] {
     const parts = String(rawValue || '')
@@ -177,6 +178,34 @@ function isAllowedCorsOrigin(origin: string | undefined): boolean {
     }
 
     return false;
+}
+
+function prepareStreamingResponse(reply: any): void {
+    reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('Transfer-Encoding', 'chunked');
+    reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+    if (typeof reply.raw.flushHeaders === 'function') {
+        reply.raw.flushHeaders();
+    }
+
+    // Send an initial SSE comment so upstream proxies flush the response immediately.
+    reply.raw.write(': stream-open\n\n');
+}
+
+function startStreamKeepalive(reply: any): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+        if (reply.raw.writableEnded || reply.raw.destroyed) return;
+        reply.raw.write(': keepalive\n\n');
+    }, STREAM_KEEPALIVE_INTERVAL_MS);
+}
+
+function stopStreamKeepalive(timer: ReturnType<typeof setInterval> | null | undefined): void {
+    if (timer) {
+        clearInterval(timer);
+    }
 }
 
 function getActiveBillingProvider() {
@@ -3339,8 +3368,7 @@ fastify.post<{
         });
     }
 
-    reply.raw.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    reply.raw.setHeader('Transfer-Encoding', 'chunked');
+    let streamKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
     try {
         const {
@@ -3350,6 +3378,8 @@ fastify.post<{
             referenceContext,
         } = await applyReferenceUrlContext(instruction, referenceUrls, undefined, traceId, '/api/edit-stream');
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
+        prepareStreamingResponse(reply);
+        streamKeepaliveTimer = startStreamKeepalive(reply);
         const { editDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
@@ -3385,6 +3415,10 @@ fastify.post<{
         for await (const chunk of stream) {
             if (clientAborted) {
                 break;
+            }
+            if (chunkCount === 0) {
+                stopStreamKeepalive(streamKeepaliveTimer);
+                streamKeepaliveTimer = null;
             }
             chunkCount += 1;
             charCount += chunk.length;
@@ -3440,6 +3474,8 @@ fastify.post<{
             charCount,
         }, 'edit-stream: complete');
     } catch (error) {
+        stopStreamKeepalive(streamKeepaliveTimer);
+        streamKeepaliveTimer = null;
         if (reservation) {
             await settleForOutcome(
                 user.uid,
@@ -3459,6 +3495,7 @@ fastify.post<{
         fastify.log.error({ traceId, route: '/api/edit-stream', durationMs: Date.now() - startedAt, screenId, err: error }, 'edit-stream: failed');
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
     } finally {
+        stopStreamKeepalive(streamKeepaliveTimer);
         reply.raw.end();
     }
 });
@@ -4394,8 +4431,7 @@ fastify.post<{
         });
     }
 
-    reply.raw.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    reply.raw.setHeader('Transfer-Encoding', 'chunked');
+    let streamKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
     try {
         const {
@@ -4407,6 +4443,8 @@ fastify.post<{
         } = await applyReferenceUrlContext(prompt, referenceUrls, referenceImageUrls, traceId, '/api/generate-stream');
         const finalImages = mergeReferenceImages(images, scrapedReferenceImages);
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
+        prepareStreamingResponse(reply);
+        streamKeepaliveTimer = startStreamKeepalive(reply);
         const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
             traceId,
@@ -4438,6 +4476,10 @@ fastify.post<{
         });
 
         for await (const chunk of stream) {
+            if (chunkCount === 0) {
+                stopStreamKeepalive(streamKeepaliveTimer);
+                streamKeepaliveTimer = null;
+            }
             chunkCount += 1;
             charCount += chunk.length;
             const matchCount = (chunk.match(/<\/screen>/gi) || []).length;
@@ -4516,6 +4558,8 @@ fastify.post<{
             completedScreens,
         }, 'generate-stream: complete');
     } catch (error) {
+        stopStreamKeepalive(streamKeepaliveTimer);
+        streamKeepaliveTimer = null;
         if (reservation) {
             await settleForOutcome(
                 user.uid,
@@ -4541,6 +4585,7 @@ fastify.post<{
         fastify.log.error({ traceId, route: '/api/generate-stream', durationMs: Date.now() - startedAt, err: error }, 'generate-stream: failed');
         reply.raw.write(`\nERROR: ${(error as Error).message}\n`);
     } finally {
+        stopStreamKeepalive(streamKeepaliveTimer);
         reply.raw.end();
     }
 });
