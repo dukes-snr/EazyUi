@@ -2186,6 +2186,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
     const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url' | 'screen'>('root');
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
+    const [referenceIncludeScrapedImages, setReferenceIncludeScrapedImages] = useState(false);
+    const [referenceEditingUrl, setReferenceEditingUrl] = useState<string | null>(null);
+    const [composerReferenceImageUrls, setComposerReferenceImageUrls] = useState<string[]>([]);
     const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_MESSAGE_RENDER_COUNT);
     const [isTitleEditing, setIsTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState('');
@@ -3196,6 +3199,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         setMentionQuery('');
         setMentionActiveIndex(0);
         setReferenceUrlDraft('');
+        setReferenceIncludeScrapedImages(false);
+        setReferenceEditingUrl(null);
         referenceTriggerRangeRef.current = null;
     };
 
@@ -3222,6 +3227,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         setMentionActiveIndex(0);
         setMentionQuery('');
         setReferenceUrlDraft('');
+        setReferenceIncludeScrapedImages(false);
+        setReferenceEditingUrl(null);
         setIsMentionOpen(true);
     };
 
@@ -3240,6 +3247,13 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const source = textareaRef.current?.getValue() ?? prompt;
         const result = replaceComposerReferenceTrigger(source, range, formatComposerUrlReferenceToken(normalized));
         setPrompt(result.value);
+        setComposerReferenceImageUrls((prev) => {
+            const next = new Set(prev);
+            if (referenceEditingUrl) next.delete(referenceEditingUrl);
+            if (referenceIncludeScrapedImages) next.add(normalized);
+            else next.delete(normalized);
+            return Array.from(next);
+        });
         closeMentionMenu();
         window.setTimeout(() => {
             const target = textareaRef.current;
@@ -3256,6 +3270,8 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             setMentionActiveIndex(0);
             setMentionQuery('');
             setReferenceUrlDraft(reference.url);
+            setReferenceIncludeScrapedImages(composerReferenceImageUrls.includes(reference.url));
+            setReferenceEditingUrl(reference.url);
             setIsMentionOpen(true);
             return;
         }
@@ -3296,9 +3312,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             allowScreen: true,
             screens: availableMentionScreens,
         });
+        const referenceUrls = parsed.urlReferences.map((item) => item.url);
         return {
             prompt: parsed.cleanedText.trim(),
-            referenceUrls: parsed.urlReferences.map((item) => item.url),
+            referenceUrls,
+            referenceImageUrls: composerReferenceImageUrls.filter((url) => referenceUrls.includes(url)),
             referenceScreens: getScreenReferencesFromComposer(parsed.screenReferences),
         };
     };
@@ -3945,7 +3963,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.urlReferences.map((item) => item.url);
         const referenceImageUrls = Array.isArray(incomingReferenceImageUrls)
             ? incomingReferenceImageUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
-            : [];
+            : composerReferenceImageUrls.filter((url) => referenceUrls.includes(url));
         const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
         const requestPromptWithReferences = referencePromptContext
             ? `${requestPrompt}\n\n${referencePromptContext}`
@@ -7002,7 +7020,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         activeIndex={mentionActiveIndex}
                                         menuMode={referenceMenuMode}
                                         menuRef={mentionMenuRef}
+                                        includeScrapedImages={referenceIncludeScrapedImages}
                                         onCancel={closeMentionMenu}
+                                        onIncludeScrapedImagesChange={setReferenceIncludeScrapedImages}
                                         onRootOptionHover={setMentionActiveIndex}
                                         onScreenHover={setMentionActiveIndex}
                                         onScreenQueryChange={setMentionQuery}

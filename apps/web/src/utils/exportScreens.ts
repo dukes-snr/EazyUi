@@ -15,6 +15,8 @@ type ExportSelection = {
 type SelectionScope = 'selected' | 'all';
 
 const textEncoder = new TextEncoder();
+const RENDER_IMAGE_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api';
+const IMAGE_PROXY_API_BASE = `${RENDER_IMAGE_API_BASE}/proxy-image`;
 
 function toBytes(input: string): Uint8Array {
     return textEncoder.encode(input);
@@ -178,14 +180,14 @@ function proxiedImageUrl(raw: string): string {
     const input = (raw || '').trim();
     if (!input) return '';
     if (input.startsWith('data:') || input.startsWith('blob:')) return input;
-    if (input.startsWith('/api/proxy-image')) {
+    if (input.startsWith(IMAGE_PROXY_API_BASE) || input.startsWith('/api/proxy-image')) {
         return input.includes('?url=') ? input : '';
     }
     if (/^https?:\/\//i.test(input)) {
-        return `/api/proxy-image?url=${encodeURIComponent(input)}`;
+        return `${IMAGE_PROXY_API_BASE}?url=${encodeURIComponent(input)}`;
     }
     if (/^\/\//.test(input)) {
-        return `/api/proxy-image?url=${encodeURIComponent(`https:${input}`)}`;
+        return `${IMAGE_PROXY_API_BASE}?url=${encodeURIComponent(`https:${input}`)}`;
     }
     if (/^(javascript:|about:|file:)/i.test(input)) return '';
     return input;
@@ -510,7 +512,7 @@ async function svgToPngBytes(svg: string, width: number, height: number, scale =
 
 async function renderScreenPngViaApi(screen: ExportScreen, scale = 2): Promise<Uint8Array | null> {
     try {
-        const response = await fetch('/api/render-screen-image', {
+        const response = await fetch(`${RENDER_IMAGE_API_BASE}/render-screen-image`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -626,6 +628,9 @@ export async function exportScreensAsImagesZip(
 
     const zip = createZipBlob(entries);
     const zipName = `${root}.zip`;
+    if (pngCount === 0 && svgFallbackCount > 0) {
+        throw new Error('Image export rasterization failed. The API renderer did not produce PNGs, so export was stopped instead of silently saving only SVG fallbacks.');
+    }
     downloadBlob(zip, zipName);
     return { filename: zipName, pngCount, svgFallbackCount };
 }

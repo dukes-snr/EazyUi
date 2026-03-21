@@ -17,6 +17,7 @@ import type { HtmlDesignSpec, ProjectMemory, ReferenceContextMeta } from "@/api/
 import { db, storage } from "./firebase";
 
 const IS_LOCAL_DEV_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+const RENDER_IMAGE_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "/api";
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1"
   || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0");
 const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1"
@@ -761,7 +762,7 @@ async function renderScreenImageBase64(params: {
   fitToViewport?: boolean;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
-    const response = await fetch("/api/render-screen-image", {
+    const response = await fetch(`${RENDER_IMAGE_API_BASE}/render-screen-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

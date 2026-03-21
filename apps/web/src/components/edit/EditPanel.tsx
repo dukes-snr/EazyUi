@@ -16,6 +16,7 @@ type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
 type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
 type ScreenImageItem = { uid: string; src: string; alt: string };
+const MAX_UPLOADED_IMAGE_DATA_URL_LENGTH = 350_000;
 
 function defaultImagePromptFromAlt(alt?: string, appName?: string, screenName?: string): string {
     const cleaned = (alt || '').trim();
@@ -98,6 +99,51 @@ function spacingSummary(value: PaddingValues): string {
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
+}
+
+async function optimizeUploadedImageFile(file: File): Promise<string> {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const nextImage = new Image();
+            nextImage.onload = () => resolve(nextImage);
+            nextImage.onerror = () => reject(new Error('Failed to load image file.'));
+            nextImage.src = objectUrl;
+        });
+
+        let width = Math.max(1, image.naturalWidth || image.width || 1);
+        let height = Math.max(1, image.naturalHeight || image.height || 1);
+        const maxDimension = 1600;
+        if (Math.max(width, height) > maxDimension) {
+            const scale = maxDimension / Math.max(width, height);
+            width = Math.max(1, Math.round(width * scale));
+            height = Math.max(1, Math.round(height * scale));
+        }
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas context unavailable.');
+
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+            canvas.width = width;
+            canvas.height = height;
+            context.clearRect(0, 0, width, height);
+            context.drawImage(image, 0, 0, width, height);
+
+            const quality = Math.max(0.45, 0.9 - attempt * 0.1);
+            const dataUrl = canvas.toDataURL('image/webp', quality);
+            if (dataUrl.length <= MAX_UPLOADED_IMAGE_DATA_URL_LENGTH || attempt === 5) {
+                return dataUrl;
+            }
+
+            width = Math.max(320, Math.round(width * 0.82));
+            height = Math.max(320, Math.round(height * 0.82));
+        }
+
+        throw new Error('Failed to optimize image upload.');
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
 }
 
 function hexToRgb(hex: string): RGB | null {
@@ -1928,13 +1974,15 @@ RULES:
                                 onChange={(event) => {
                                     const file = event.target.files?.[0];
                                     if (!file || !uploadTargetUid) return;
-                                    const reader = new FileReader();
-                                    reader.onload = () => {
-                                        const result = typeof reader.result === 'string' ? reader.result : '';
-                                        if (!result) return;
-                                        applyImageSourceForUid(uploadTargetUid, result);
-                                    };
-                                    reader.readAsDataURL(file);
+                                    setImagesTabError('');
+                                    void optimizeUploadedImageFile(file)
+                                        .then((result) => {
+                                            if (!result) return;
+                                            applyImageSourceForUid(uploadTargetUid, result);
+                                        })
+                                        .catch((error) => {
+                                            setImagesTabError((error as Error).message || 'Image upload failed.');
+                                        });
                                     event.currentTarget.value = '';
                                     setUploadTargetUid(null);
                                 }}
