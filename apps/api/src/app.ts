@@ -180,7 +180,17 @@ function isAllowedCorsOrigin(origin: string | undefined): boolean {
     return false;
 }
 
-function prepareStreamingResponse(reply: any): void {
+function applyStreamingCorsHeaders(request: any, reply: any): void {
+    const origin = typeof request.headers?.origin === 'string' ? request.headers.origin : undefined;
+    if (!origin || !isAllowedCorsOrigin(origin)) return;
+
+    reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+    reply.raw.setHeader('Vary', 'Origin');
+    reply.raw.setHeader('Access-Control-Expose-Headers', REFERENCE_CONTEXT_HEADER);
+}
+
+function prepareStreamingResponse(request: any, reply: any): void {
+    applyStreamingCorsHeaders(request, reply);
     reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
@@ -3378,7 +3388,7 @@ fastify.post<{
             referenceContext,
         } = await applyReferenceUrlContext(instruction, referenceUrls, undefined, traceId, '/api/edit-stream');
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
-        prepareStreamingResponse(reply);
+        prepareStreamingResponse(request, reply);
         streamKeepaliveTimer = startStreamKeepalive(reply);
         const { editDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
@@ -4443,7 +4453,7 @@ fastify.post<{
         } = await applyReferenceUrlContext(prompt, referenceUrls, referenceImageUrls, traceId, '/api/generate-stream');
         const finalImages = mergeReferenceImages(images, scrapedReferenceImages);
         reply.raw.setHeader(REFERENCE_CONTEXT_HEADER, encodeReferenceContextHeader(referenceContext));
-        prepareStreamingResponse(reply);
+        prepareStreamingResponse(request, reply);
         streamKeepaliveTimer = startStreamKeepalive(reply);
         const { generateDesignStreamWithUsage } = await import('./services/gemini.js');
         fastify.log.info({
