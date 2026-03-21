@@ -132,6 +132,52 @@ const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
 const SERVER_ACTIVITY_LIMIT = 250;
 const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
+const DEFAULT_FRONTEND_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+function parseAllowedFrontendOrigins(rawValue: string | undefined): string[] {
+    const parts = String(rawValue || '')
+        .split(/[,\n\r\t ]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const normalized = new Set<string>();
+
+    for (const value of [...DEFAULT_FRONTEND_ORIGINS, ...parts]) {
+        try {
+            normalized.add(new URL(value).origin.toLowerCase());
+        } catch {
+            warnTagged('API', `Ignoring invalid FRONTEND_URL origin: ${value}`);
+        }
+    }
+
+    return Array.from(normalized);
+}
+
+const allowedFrontendOrigins = parseAllowedFrontendOrigins(process.env.FRONTEND_URL);
+const allowVercelPreviewOrigins = /^(1|true|yes)$/i.test(String(process.env.FRONTEND_ALLOW_VERCEL_PREVIEWS || '').trim());
+
+function isAllowedCorsOrigin(origin: string | undefined): boolean {
+    if (!origin) return true;
+
+    let normalizedOrigin: string;
+    let hostname = '';
+    try {
+        const parsed = new URL(origin);
+        normalizedOrigin = parsed.origin.toLowerCase();
+        hostname = parsed.hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+
+    if (allowedFrontendOrigins.includes(normalizedOrigin)) {
+        return true;
+    }
+
+    if (allowVercelPreviewOrigins && hostname.endsWith('.vercel.app')) {
+        return true;
+    }
+
+    return false;
+}
 
 function getActiveBillingProvider() {
     return resolveBillingProviderName(isStripeConfigured());
@@ -1316,8 +1362,16 @@ function isBlockedProxyHost(hostname: string): boolean {
 
 // Register CORS
 await fastify.register(cors, {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    origin: (origin, callback) => {
+        if (isAllowedCorsOrigin(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error(`Origin not allowed by CORS: ${origin || 'unknown'}`), false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: [REFERENCE_CONTEXT_HEADER],
 });
 await fastify.register(fastifyRawBody, {
     field: 'rawBody',
@@ -1451,6 +1505,8 @@ fastify.get('/api/health', async (request, reply) => {
         timestamp: new Date().toISOString(),
         billingProvider,
         frontendUrlConfigured: Boolean(String(process.env.FRONTEND_URL || '').trim()),
+        frontendOrigins: allowedFrontendOrigins,
+        vercelPreviewOriginsAllowed: allowVercelPreviewOrigins,
         internalAuthConfigured: Boolean(String(process.env.INTERNAL_API_KEY || '').trim()),
         mcpApiKeyPepperConfigured: Boolean(String(process.env.MCP_API_KEY_PEPPER || '').trim() || String(process.env.INTERNAL_API_KEY || '').trim()),
         database: {

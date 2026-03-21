@@ -743,6 +743,23 @@ function tryParseReferenceContextHeader(response: Response): ReferenceContextMet
     }
 }
 
+function toStreamFetchError(error: unknown): ApiRequestError | DOMException {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return error;
+    }
+    if (error instanceof ApiRequestError) {
+        return error;
+    }
+    const message = error instanceof Error && error.message
+        ? error.message
+        : 'Unable to reach the API server. Check VITE_API_BASE_URL and API CORS settings.';
+    return new ApiRequestError({
+        message,
+        status: 0,
+        code: 'NETWORK_ERROR',
+    });
+}
+
 class ApiClient {
     private composerTemperature: number | null = null;
 
@@ -877,15 +894,20 @@ class ApiClient {
     ): Promise<GenerateStreamResponse> {
         const payload = this.withComposerTemperature(request);
         const authHeader = await this.getAuthHeaderValue();
-        const response = await fetch(`${API_BASE}/generate-stream`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': authHeader,
-            },
-            body: JSON.stringify(payload),
-            signal,
-        });
+        let response: Response;
+        try {
+            response = await fetch(`${API_BASE}/generate-stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': authHeader,
+                },
+                body: JSON.stringify(payload),
+                signal,
+            });
+        } catch (error) {
+            throw toStreamFetchError(error);
+        }
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
@@ -990,15 +1012,20 @@ class ApiClient {
     ): Promise<EditStreamResponse> {
         const payload = this.withComposerTemperature(request);
         const authHeader = await this.getAuthHeaderValue();
-        const response = await fetch(`${API_BASE}/edit-stream`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': authHeader,
-            },
-            body: JSON.stringify(payload),
-            signal,
-        });
+        let response: Response;
+        try {
+            response = await fetch(`${API_BASE}/edit-stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': authHeader,
+                },
+                body: JSON.stringify(payload),
+                signal,
+            });
+        } catch (error) {
+            throw toStreamFetchError(error);
+        }
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));

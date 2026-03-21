@@ -18,6 +18,8 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      - key: FRONTEND_ALLOW_VERCEL_PREVIEWS
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
       - key: FIRECRAWL_API_KEY

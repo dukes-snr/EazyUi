@@ -2534,8 +2534,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const normalized = normalizeProjectDesignSystemModes(effective);
         applyProjectDesignSystem(normalized);
         setDesignSystemDraft(cloneDesignSystem(normalized));
-        const tokenKeys = Object.keys(normalized.tokens || {}) as DesignTokenKey[];
-        setActiveTokenEditor(tokenKeys[0] || null);
+        setActiveTokenEditor(null);
         setIsDesignSystemEditing(true);
         setDesignSystemInspectorTab('colors');
         setOpenFontDropdown(null);
@@ -2548,8 +2547,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!current) return;
         const normalized = normalizeProjectDesignSystemModes(current);
         setDesignSystemDraft(cloneDesignSystem(normalized));
-        const tokenKeys = Object.keys(normalized.tokens || {}) as DesignTokenKey[];
-        setActiveTokenEditor(tokenKeys[0] || null);
+        setActiveTokenEditor(null);
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
     };
@@ -2819,8 +2817,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (spec?.designSystem && !designSystemDraft) {
             const cloned = cloneDesignSystem(normalizeProjectDesignSystemModes(spec.designSystem));
             setDesignSystemDraft(cloned);
-            const tokenKeys = Object.keys(cloned.tokens || {}) as DesignTokenKey[];
-            setActiveTokenEditor((current) => current || tokenKeys[0] || null);
+            setActiveTokenEditor((current) => current ?? null);
         }
         if (!isDesignSystemEditing) {
             setIsDesignSystemEditing(true);
