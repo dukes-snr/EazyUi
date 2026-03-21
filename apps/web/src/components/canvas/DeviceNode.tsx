@@ -7,6 +7,7 @@ import Grainient from '../ui/Grainient';
 import { DeviceToolbar } from './DeviceToolbar';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
 import { getPreferredTextModel } from '../../constants/designModels';
+import type { EditorPrefs } from '@eazyui/shared';
 import '../../styles/DeviceFrames.css';
 
 // Streaming preview tuning:
@@ -1301,6 +1302,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const setFocusNodeId = useCanvasStore((state) => state.setFocusNodeId);
     const setFocusNodeIds = useCanvasStore((state) => state.setFocusNodeIds);
     const selectedNodeIds = useCanvasStore((state) => state.doc.selection.selectedNodeIds);
+    const deviceDisplayMode = useCanvasStore((state) => ((state.doc.editorPrefs as EditorPrefs & { deviceDisplayMode?: 'framed' | 'clean' }).deviceDisplayMode || 'framed'));
     const isEditMode = useEditStore((state) => state.isEditMode);
     const editScreenId = useEditStore((state) => state.screenId);
     const enterEdit = useEditStore((state) => state.enterEdit);
@@ -1876,10 +1878,21 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         borderWidth = 8;
     }
 
+    const isFramedDisplay = deviceDisplayMode !== 'clean';
     const frameWidth = width + (isDesktop ? 0 : borderWidth * 2);
     const frameHeight = displayHeight + (isDesktop ? 40 : borderWidth * 2); // 40px for browser header
-    const screenRadius = isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)';
-    const contentClipRadius = isDesktop ? '0 0 12px 12px' : screenRadius;
+    const shellWidth = isFramedDisplay ? frameWidth : width;
+    const shellHeight = isFramedDisplay ? frameHeight : displayHeight;
+    const shellRadius = isFramedDisplay ? (isDesktop ? '16px' : '44px') : (isDesktop ? '18px' : '20px');
+    const screenRadius = isFramedDisplay ? (isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)') : shellRadius;
+    const contentClipRadius = isFramedDisplay
+        ? (isDesktop ? '0 0 12px 12px' : screenRadius)
+        : screenRadius;
+    const screenInsetTop = isFramedDisplay ? borderWidth : 0;
+    const screenInsetBottom = isFramedDisplay ? borderWidth : 0;
+    const screenInsetLeft = isFramedDisplay ? borderWidth : 0;
+    const screenInsetRight = isFramedDisplay ? borderWidth : 0;
+    const contentOffsetTop = isFramedDisplay && isDesktop && showBrowserHeader ? 40 : 0;
 
     // Unified premium frame
 
@@ -1910,16 +1923,29 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
 
             {/* Premium iPhone/Desktop/Tablet Frame */}
             <div
-                className={`iphone-frame ${selected ? 'selected' : ''}`}
+                className={isFramedDisplay ? `iphone-frame ${selected ? 'selected' : ''}` : ''}
                 style={{
-                    width: frameWidth,
-                    height: frameHeight,
-                    ['--custom-radius' as any]: isDesktop ? '16px' : '44px',
+                    width: shellWidth,
+                    height: shellHeight,
+                    ['--custom-radius' as any]: shellRadius,
                     ['--device-bezel-width' as any]: `${borderWidth}px`,
+                    ...(isFramedDisplay
+                        ? {}
+                        : {
+                            borderRadius: shellRadius,
+                            border: selected
+                                ? '1px solid color-mix(in srgb, var(--ui-primary) 44%, var(--ui-border))'
+                                : '1px solid var(--ui-border)',
+                            background: 'color-mix(in srgb, var(--ui-surface-2) 92%, transparent)',
+                            boxShadow: selected
+                                ? '0 0 0 2px color-mix(in srgb, var(--ui-primary) 28%, transparent), 0 26px 60px rgba(0, 0, 0, 0.24)'
+                                : '0 24px 54px rgba(0, 0, 0, 0.22)',
+                            overflow: 'hidden',
+                        }),
                 }}
             >
                 {/* Hardware Buttons (Mobile/Tablet only) */}
-                {!isDesktop && (
+                {isFramedDisplay && !isDesktop && (
                     <div className="iphone-buttons">
                         <div className="iphone-button iphone-button-silent" />
                         <div className="iphone-button iphone-button-vol-up" />
@@ -1929,7 +1955,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 )}
 
                 {/* Outer Bezel (Black area) */}
-                <div className="iphone-bezel" />
+                {isFramedDisplay && <div className="iphone-bezel" />}
 
                 {/* Dynamic Notch (Mobile/Tablet only) */}
                 {/* {!isDesktop && <div className="iphone-notch" />} */}
@@ -1938,10 +1964,10 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 <div
                     className="iphone-screen"
                     style={{
-                        top: borderWidth,
-                        bottom: borderWidth,
-                        left: borderWidth,
-                        right: borderWidth,
+                        top: screenInsetTop,
+                        bottom: screenInsetBottom,
+                        left: screenInsetLeft,
+                        right: screenInsetRight,
                         borderRadius: screenRadius,
                         overflow: 'hidden',
                         isolation: 'isolate',
@@ -1950,7 +1976,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     }}
                 >
                     {/* Desktop Browser Header */}
-                    {isDesktop && showBrowserHeader && (
+                    {isFramedDisplay && isDesktop && showBrowserHeader && (
                         <div
                             className="absolute top-0 left-0 w-full h-10 bg-[var(--ui-surface-2)] flex items-center px-4 gap-2 border-b border-[var(--ui-border)] z-10"
                             style={{ borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}
@@ -1969,7 +1995,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                     <div
                         style={{
                             position: 'absolute',
-                            top: isDesktop && showBrowserHeader ? 40 : 0,
+                            top: contentOffsetTop,
                             left: 0,
                             right: 0,
                             bottom: 0,

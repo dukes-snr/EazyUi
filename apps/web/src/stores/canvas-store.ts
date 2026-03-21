@@ -101,7 +101,8 @@ const createDefaultDoc = (): CanvasDoc => ({
         showGrid: true,
         showGuides: true,
         showBoardLabels: true,
-    },
+        deviceDisplayMode: 'framed',
+    } as EditorPrefs & { deviceDisplayMode: 'framed' },
     history: {
         specPatches: [],
         specPatchIndex: -1,

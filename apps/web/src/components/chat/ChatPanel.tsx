@@ -2,11 +2,11 @@
 // Chat Panel Component - Streaming Version
 // ============================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react';
+import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, ChevronDown, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -256,6 +256,12 @@ const DESIGN_FONT_STACK_PRESETS = [
 ];
 
 const DESIGN_RADIUS_PRESETS = ['8px', '10px', '12px', '14px', '16px', '20px', '24px', '999px'];
+const DESIGN_RADIUS_STYLE_PRESETS = [
+    { key: 'sharp', label: 'Sharp edge', value: '0px' },
+    { key: 'slight', label: 'Slight radius', value: '8px' },
+    { key: 'normal', label: 'Normal radius', value: '16px' },
+    { key: 'full', label: 'Full radius', value: '999px' },
+] as const;
 
 const GENERIC_FONT_FAMILIES = new Set([
     'sans-serif',
@@ -278,6 +284,85 @@ function normalizeFontStackValue(value: string | undefined): string {
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizePickerHexColor(value: string | undefined, fallback = '#F9A825'): string {
+    const raw = String(value || '').trim();
+    if (/^#([0-9a-f]{6})$/i.test(raw)) return raw.toUpperCase();
+    if (/^#([0-9a-f]{3})$/i.test(raw)) {
+        const [, short] = raw.match(/^#([0-9a-f]{3})$/i) || [];
+        if (short) {
+            return `#${short.split('').map((char) => `${char}${char}`).join('')}`.toUpperCase();
+        }
+    }
+    return fallback;
+}
+
+function hexToPickerRgb(value: string): { r: number; g: number; b: number } {
+    const normalized = normalizePickerHexColor(value);
+    return {
+        r: Number.parseInt(normalized.slice(1, 3), 16),
+        g: Number.parseInt(normalized.slice(3, 5), 16),
+        b: Number.parseInt(normalized.slice(5, 7), 16),
+    };
+}
+
+function rgbToPickerHex(r: number, g: number, b: number): string {
+    return `#${[r, g, b]
+        .map((channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, '0'))
+        .join('')}`.toUpperCase();
+}
+
+function rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
+    const red = r / 255;
+    const green = g / 255;
+    const blue = b / 255;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const delta = max - min;
+    let hue = 0;
+
+    if (delta > 0) {
+        if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+        else if (max === green) hue = 60 * (((blue - red) / delta) + 2);
+        else hue = 60 * (((red - green) / delta) + 4);
+    }
+
+    return {
+        h: hue < 0 ? hue + 360 : hue,
+        s: max === 0 ? 0 : delta / max,
+        v: max,
+    };
+}
+
+function hexToPickerHsv(value: string): { h: number; s: number; v: number } {
+    const { r, g, b } = hexToPickerRgb(value);
+    return rgbToHsv(r, g, b);
+}
+
+function hsvToPickerHex(h: number, s: number, v: number): string {
+    const hue = ((h % 360) + 360) % 360;
+    const saturation = clamp(s, 0, 1);
+    const brightness = clamp(v, 0, 1);
+    const chroma = brightness * saturation;
+    const x = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const match = brightness - chroma;
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+
+    if (hue < 60) [red, green, blue] = [chroma, x, 0];
+    else if (hue < 120) [red, green, blue] = [x, chroma, 0];
+    else if (hue < 180) [red, green, blue] = [0, chroma, x];
+    else if (hue < 240) [red, green, blue] = [0, x, chroma];
+    else if (hue < 300) [red, green, blue] = [x, 0, chroma];
+    else [red, green, blue] = [chroma, 0, x];
+
+    return rgbToPickerHex((red + match) * 255, (green + match) * 255, (blue + match) * 255);
 }
 
 function areFontStacksEquivalent(left: string | undefined, right: string | undefined): boolean {
@@ -2106,7 +2191,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [titleDraft, setTitleDraft] = useState('');
     const [isTitleSaving, setIsTitleSaving] = useState(false);
     const [showScrollToLatest, setShowScrollToLatest] = useState(false);
-    const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system'>('chat');
+    const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system' | 'assets'>('chat');
     const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
     const [activeTokenEditor, setActiveTokenEditor] = useState<DesignTokenKey | null>(null);
@@ -5734,101 +5819,174 @@ Return a polished, consistent screen without introducing a new navigation patter
         ? (Object.entries(designSystemForPanel.tokens) as Array<[DesignTokenKey, string]>)
         : [];
     const selectedDesignTokenEntry = designTokenEntries.find(([tokenName]) => tokenName === activeTokenEditor)
-        || designTokenEntries[0]
         || null;
     const selectedDesignTokenName = selectedDesignTokenEntry?.[0] || null;
-    const selectedDesignTokenValue = selectedDesignTokenEntry?.[1] || '';
+    const handleDesignColorPlaneDrag = useCallback((
+        event: ReactPointerEvent<HTMLDivElement>,
+        tokenName: DesignTokenKey,
+        hue: number
+    ) => {
+        event.preventDefault();
+        const target = event.currentTarget;
+        const updateFromPoint = (clientX: number, clientY: number) => {
+            const rect = target.getBoundingClientRect();
+            const saturation = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+            const value = clamp(1 - ((clientY - rect.top) / Math.max(rect.height, 1)), 0, 1);
+            updateDesignSystemTokenDraft(tokenName, hsvToPickerHex(hue, saturation, value));
+        };
+
+        updateFromPoint(event.clientX, event.clientY);
+        const handleMove = (pointerEvent: PointerEvent) => updateFromPoint(pointerEvent.clientX, pointerEvent.clientY);
+        const handleEnd = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleEnd);
+        };
+
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleEnd);
+    }, [updateDesignSystemTokenDraft]);
+    const handleDesignHueDrag = useCallback((
+        event: ReactPointerEvent<HTMLDivElement>,
+        tokenName: DesignTokenKey,
+        saturation: number,
+        value: number
+    ) => {
+        event.preventDefault();
+        const target = event.currentTarget;
+        const updateFromPoint = (clientX: number) => {
+            const rect = target.getBoundingClientRect();
+            const ratio = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+            updateDesignSystemTokenDraft(tokenName, hsvToPickerHex(ratio * 360, saturation, value));
+        };
+
+        updateFromPoint(event.clientX);
+        const handleMove = (pointerEvent: PointerEvent) => updateFromPoint(pointerEvent.clientX);
+        const handleEnd = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleEnd);
+        };
+
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleEnd);
+    }, [updateDesignSystemTokenDraft]);
+    const chatPanelTabs = [
+        { key: 'chat' as const, label: 'Chat', icon: Sparkles, disabled: false },
+        { key: 'design-system' as const, label: 'Design System', icon: Palette, disabled: !hasDesignSystem },
+        { key: 'assets' as const, label: 'Assets', icon: Copy, disabled: false },
+    ];
 
     return (
         <>
             <div
-                className={`group flex flex-col h-full text-[var(--ui-text)] font-sans transition-all duration-300 ease-in-out relative bg-transparent ${isCollapsed ? 'w-0' : 'w-[var(--chat-width)]'
+                className={`group relative flex h-full shrink-0 flex-col overflow-visible bg-transparent font-sans text-[var(--ui-text)] transition-all duration-300 ease-in-out ${isCollapsed ? 'w-0' : 'w-[var(--chat-width)]'
                     }`}
             >
+                {!isEditMode && isCollapsed && (
+                    <button
+                        type="button"
+                        onClick={() => setIsCollapsed(false)}
+                        className="fixed left-4 top-4 z-[90] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-4)] text-[var(--ui-text-muted)] shadow-xl transition-colors hover:text-[var(--ui-text)]"
+                        title="Expand Sidebar"
+                    >
+                        <PanelLeftOpen size={18} />
+                    </button>
+                )}
                 {/* Collapse Button Header */}
-                {!isEditMode && (
+                {!isEditMode && !isCollapsed && (
                     <div className="absolute top-4 -right-12 z-20">
                         <button
-                            onClick={() => setIsCollapsed(!isCollapsed)}
-                            className={`p-2 rounded-lg bg-[var(--ui-surface-4)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] shadow-xl transition-all ${isCollapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                                }`}
-                            title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                            onClick={() => setIsCollapsed(true)}
+                            className="rounded-lg bg-[var(--ui-surface-4)] p-2 text-[var(--ui-text-muted)] shadow-xl transition-all hover:text-[var(--ui-text)] opacity-0 group-hover:opacity-100"
+                            title="Collapse Sidebar"
                         >
-                            {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+                            <PanelLeftClose size={18} />
                         </button>
                     </div>
                 )}
 
                 <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                     {/* Header / Date */}
-                    <div className="py-4 px-5 flex items-center justify-between sticky top-0 z-10 bg-transparent">
-                        <div className="leading-tight group/title">
-                            <div className="inline-flex items-center gap-2">
-                                <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                                {isTitleEditing ? (
-                                    <input
-                                        autoFocus
-                                        value={titleDraft}
-                                        onChange={(event) => setTitleDraft(event.target.value)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter') {
-                                                event.preventDefault();
-                                                void commitProjectTitle();
-                                            }
-                                            if (event.key === 'Escape') {
-                                                setIsTitleEditing(false);
-                                                setTitleDraft(spec?.name?.trim() || '');
-                                            }
-                                        }}
-                                        onBlur={() => void commitProjectTitle()}
-                                        className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold tracking-wide text-[var(--ui-text)] outline-none"
-                                        placeholder="Project name"
-                                        disabled={isTitleSaving}
-                                    />
-                                ) : (
-                                    <>
-                                        <p className="text-[13px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setTitleDraft(spec?.name?.trim() || '');
-                                                setIsTitleEditing(true);
+                    <div className="sticky top-0 z-10 bg-transparent px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="leading-tight group/title">
+                                <div className="inline-flex items-center gap-2">
+                                    <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
+                                    {isTitleEditing ? (
+                                        <input
+                                            autoFocus
+                                            value={titleDraft}
+                                            onChange={(event) => setTitleDraft(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    void commitProjectTitle();
+                                                }
+                                                if (event.key === 'Escape') {
+                                                    setIsTitleEditing(false);
+                                                    setTitleDraft(spec?.name?.trim() || '');
+                                                }
                                             }}
-                                            className="p-1 rounded-md text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] opacity-0 group-hover/title:opacity-100 transition-opacity"
-                                            title="Edit project name"
-                                        >
-                                            <Pencil size={12} />
-                                        </button>
-                                    </>
-                                )}
+                                            onBlur={() => void commitProjectTitle()}
+                                            className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold tracking-wide text-[var(--ui-text)] outline-none"
+                                            placeholder="Project name"
+                                            disabled={isTitleSaving}
+                                        />
+                                    ) : (
+                                        <>
+                                            <p className="text-[12px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setTitleDraft(spec?.name?.trim() || '');
+                                                    setIsTitleEditing(true);
+                                                }}
+                                                className="p-1 rounded-md text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] opacity-0 group-hover/title:opacity-100 transition-opacity"
+                                                title="Edit project name"
+                                            >
+                                                <Pencil size={12} />
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                                <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                                    {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                </p>
                             </div>
-                            <p className="text-[10px] font-medium text-[var(--ui-text-subtle)] uppercase tracking-[0.12em]">
-                                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setChatPanelView((current) => current === 'chat' ? 'design-system' : 'chat')}
-                                disabled={!hasDesignSystem}
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${isDesignSystemView
-                                    ? 'bg-[var(--ui-primary)] text-white ring-[var(--ui-primary)] hover:bg-[var(--ui-primary-hover)]'
-                                    : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
-                                    } ${!hasDesignSystem ? 'opacity-60 cursor-not-allowed hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text-muted)]' : ''}`}
-                                title={hasDesignSystem ? (isDesignSystemView ? 'Switch to chat view' : 'Show generated design system') : 'Generate a screen first to create a design system'}
-                            >
-                                <Palette size={12} />
-                                <span>{isDesignSystemView ? 'Chat' : 'Design System'}</span>
-                            </button>
                             {!isEditMode && (
                                 <button
                                     onClick={() => setIsCollapsed(true)}
-                                    className="p-2 rounded-lg hover:bg-[var(--ui-surface-3)] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] transition-colors"
+                                    className="rounded-lg p-2 text-[var(--ui-text-subtle)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text-muted)]"
                                     title="Collapse Sidebar"
                                 >
                                     <ChevronLeft size={16} />
                                 </button>
                             )}
+                        </div>
+                        <div className="mt-2">
+                            <div className="inline-flex w-full items-center gap-0.5 rounded-[14px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_94%,transparent)] p-[3px]">
+                                {chatPanelTabs.map((tab) => {
+                                    const Icon = tab.icon;
+                                    const active = chatPanelView === tab.key;
+                                    return (
+                                        <button
+                                            key={tab.key}
+                                            type="button"
+                                            onClick={() => setChatPanelView(tab.key)}
+                                            disabled={tab.disabled}
+                                            className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[11px] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${active
+                                                ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
+                                                } ${tab.disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-[var(--ui-text-muted)]' : ''}`}
+                                            title={tab.disabled ? 'Generate a screen first to create a design system' : undefined}
+                                        >
+                                            <span className={`inline-flex h-5 w-5 items-center justify-center rounded-[7px] ${active ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
+                                                <Icon size={12} />
+                                            </span>
+                                            <span className="truncate">{tab.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
 
@@ -6281,53 +6439,60 @@ Return a polished, consistent screen without introducing a new navigation patter
                         )}
                         <div ref={messagesEndRef} />
                     </div>
-                    ) : (
-                        <div className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-4 scrollbar-hide">
+                    ) : chatPanelView === 'design-system' ? (
+                        <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 scrollbar-hide">
                             {!designSystemForPanel ? (
-                                <div className="h-full flex items-center justify-center text-center px-5">
-                                    <div className="max-w-[300px] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-                                        <h3 className="text-sm font-semibold text-[var(--ui-text)]">No design system yet</h3>
-                                        <p className="mt-2 text-xs text-[var(--ui-text-muted)] leading-relaxed">
-                                            Generate your first screen and EazyUI will create a reusable project design system here.
+                                <div className="flex h-full items-center justify-center px-2">
+                                    <div className="w-full rounded-[28px] border border-[var(--ui-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-surface-2)_96%,transparent),var(--ui-surface-1))] p-5 text-left">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Design System</p>
+                                        <h3 className="mt-3 text-[20px] font-semibold leading-[1.05] text-[var(--ui-text)]">No design system yet</h3>
+                                        <p className="mt-2 max-w-[280px] text-[12px] leading-relaxed text-[var(--ui-text-muted)]">
+                                            Generate your first screen and EazyUI will assemble the project palette, typography and radius rules here.
                                         </p>
                                     </div>
                                 </div>
                             ) : (
                                 <>
-                                    <div className="relative overflow-hidden rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-5">
-                                        <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full blur-3xl opacity-35" style={{ background: designSystemForPanel.tokens.accent }} />
-                                        <div className="pointer-events-none absolute -left-12 -bottom-16 h-36 w-36 rounded-full blur-3xl opacity-30" style={{ background: designSystemForPanel.tokens.accent2 }} />
-                                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Design DNA</p>
-                                        <div className="relative mt-2 flex items-start justify-between gap-3">
+                                    <div className="overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-surface-2)_96%,transparent),var(--ui-surface-1))]">
+                                        <div className="border-b border-[var(--ui-border)] px-4 py-4">
+                                        <div className="relative flex items-start justify-between gap-3">
                                             <div className="min-w-0">
-                                                <h3 className="text-[28px] leading-[1.05] tracking-[-0.02em] font-semibold text-[var(--ui-text)] break-words" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>
+                                                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-primary)]" />
+                                                    Live Inspector
+                                                </div>
+                                                <h3 className="mt-3 text-[24px] leading-[1.02] tracking-[-0.03em] font-semibold text-[var(--ui-text)] break-words" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>
                                                     {designSystemForPanel.systemName}
                                                 </h3>
-                                                <p className="mt-2 text-[12px] text-[var(--ui-text-muted)] leading-relaxed max-w-[280px]">{designSystemForPanel.intentSummary}</p>
-                                                <div className="mt-3 flex flex-wrap gap-1.5">
-                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                        {designSystemForPanel.stylePreset}
-                                                    </span>
-                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                        {designSystemForPanel.platform}
-                                                    </span>
-                                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)]">
-                                                        {designSystemForPanel.themeMode}
-                                                    </span>
-                                                </div>
+                                                <p className="mt-2 text-[12px] text-[var(--ui-text-muted)] leading-relaxed max-w-[300px]">{designSystemForPanel.intentSummary}</p>
                                             </div>
-                                            <div className="text-right shrink-0">
-                                                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Typography</p>
-                                                <p className="text-[44px] leading-[0.9] text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>Aa</p>
-                                                <p className="text-[30px] leading-[0.95] text-[var(--ui-text-muted)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>Aa</p>
+                                            <div className="text-right shrink-0 rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2">
+                                                <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Type Stack</p>
+                                                <p className="mt-2 text-[32px] leading-none text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>Aa</p>
+                                                <p className="mt-1 text-[20px] leading-none text-[var(--ui-text-muted)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>Aa</p>
                                             </div>
                                         </div>
-                                        <div className="relative mt-4 text-[11px] text-[var(--ui-text-muted)]">
-                                            Live editing mode is on. Changes are staged until you save and apply.
+                                        <div className="mt-4 grid grid-cols-3 gap-2">
+                                            {[
+                                                { label: 'Preset', value: designSystemForPanel.stylePreset },
+                                                { label: 'Platform', value: designSystemForPanel.platform },
+                                                { label: 'Theme', value: designSystemForPanel.themeMode },
+                                            ].map((item) => (
+                                                <div key={`design-meta-${item.label}`} className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2.5">
+                                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">{item.label}</p>
+                                                    <p className="mt-1 text-[12px] font-medium capitalize text-[var(--ui-text)]">{item.value}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        </div>
+                                        <div className="px-3 py-3">
+                                            <p className="text-[11px] text-[var(--ui-text-muted)]">
+                                                Live editing mode is on. Changes are staged until you save and apply.
+                                            </p>
                                         </div>
                                     </div>
 
-                                    <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5">
+                                    <div className="rounded-[22px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5">
                                         <div className="grid grid-cols-3 gap-1">
                                             {([
                                                 ['colors', 'Colors'],
@@ -6342,7 +6507,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         setOpenFontDropdown(null);
                                                         setOpenRadiusDropdown(null);
                                                     }}
-                                                    className={`h-8 rounded-lg text-[11px] font-semibold transition-colors ${designSystemInspectorTab === tabKey
+                                                    className={`h-9 rounded-[14px] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${designSystemInspectorTab === tabKey
                                                         ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border-light)]'
                                                         : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
                                                         }`}
@@ -6354,91 +6519,181 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     </div>
 
                                     {designSystemInspectorTab === 'colors' && (
-                                    <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
-                                        <div className="flex items-start justify-between gap-2">
+                                    <div className="rounded-[24px]">
+                                        <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Color Constellation</p>
-                                                <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">
-                                                    Click any color planet to edit it live.
+                                                <p className="text-[10px] uppercase tracking-[0.16em] font-semibold text-[var(--ui-text-subtle)]">Mode</p>
+                                                <p className="mt-1 text-[12px] text-[var(--ui-text-muted)]">
+                                                    Switch the live palette between light and dark variants.
                                                 </p>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={toggleDesignSystemThemeVariant}
-                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-semibold bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
-                                                title="Toggle light/dark variant tokens"
-                                            >
-                                                {designSystemForPanel.themeMode === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
-                                                <span>{designSystemForPanel.themeMode === 'dark' ? 'Light Variant' : 'Dark Variant'}</span>
-                                            </button>
-                                        </div>
-                                        <div className="mt-4 grid grid-cols-2 gap-2.5">
-                                            {designTokenEntries.map(([tokenName, tokenValue]) => {
-                                                const isActive = selectedDesignTokenName === tokenName;
-                                                return (
-                                                    <button
-                                                        key={tokenName}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            if (!isDesignSystemEditable) return;
-                                                            setActiveTokenEditor(tokenName);
-                                                        }}
-                                                        className={`rounded-2xl bg-[var(--ui-surface-3)] p-3 text-left ring-1 transition-all ${isDesignSystemEditable ? 'hover:bg-[var(--ui-surface-4)] cursor-pointer' : 'cursor-default'} ${isActive ? 'ring-[var(--ui-primary)] shadow-lg shadow-[var(--ui-primary)]/10' : 'ring-[var(--ui-border)]'}`}
-                                                    >
-                                                        <div className="mx-auto relative h-14 w-14">
-                                                            <span className="absolute inset-0 rounded-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)]" />
-                                                            <span className="absolute inset-[4px] rounded-full ring-2 ring-black/10" style={{ background: tokenValue }} />
-                                                        </div>
-                                                        <p className="mt-2 text-[11px] font-semibold text-[var(--ui-text)] capitalize">{tokenName}</p>
-                                                        <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{tokenValue}</p>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        {isDesignSystemEditable && selectedDesignTokenName && (
-                                            <div className="mt-4 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <p className="text-[11px] font-semibold text-[var(--ui-text)] capitalize">{selectedDesignTokenName}</p>
-                                                    <p className="text-[10px] text-[var(--ui-text-muted)]">Active token</p>
-                                                </div>
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    <input
-                                                        type="color"
-                                                        value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(selectedDesignTokenValue) ? selectedDesignTokenValue : '#000000'}
-                                                        onChange={(event) => updateDesignSystemTokenDraft(selectedDesignTokenName, event.target.value)}
-                                                        className="h-9 w-11 rounded border border-[var(--ui-border)] bg-transparent p-0.5 cursor-pointer"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        value={selectedDesignTokenValue}
-                                                        onChange={(event) => updateDesignSystemTokenDraft(selectedDesignTokenName, event.target.value)}
-                                                        className="flex-1 h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[11px] text-[var(--ui-text)] outline-none"
-                                                    />
-                                                </div>
+                                            <div className="inline-flex items-center gap-0.5 rounded-[14px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_94%,transparent)] p-[3px]">
+                                                {([
+                                                    { key: 'light', label: 'Light', icon: Sun },
+                                                    { key: 'dark', label: 'Dark', icon: Moon },
+                                                ] as const).map((mode) => {
+                                                    const active = designSystemForPanel.themeMode === mode.key;
+                                                    const Icon = mode.icon;
+                                                    return (
+                                                        <button
+                                                            key={`design-mode-${mode.key}`}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (!active) toggleDesignSystemThemeVariant();
+                                                            }}
+                                                            className={`inline-flex items-center gap-1.5 rounded-[11px] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${active
+                                                                ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
+                                                                }`}
+                                                        >
+                                                            <span className={`inline-flex h-5 w-5 items-center justify-center rounded-[7px] ${active ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
+                                                                <Icon size={12} />
+                                                            </span>
+                                                            <span>{mode.label}</span>
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
-                                        )}
+                                        </div>
+                                        <div className="mt-4 rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Color Theme</p>
+                                            <div className="mt-3 flex items-center gap-3 rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
+                                                <span className="h-10 w-10 shrink-0 rounded-full" style={{ background: `conic-gradient(from 220deg, ${designSystemForPanel.tokens.accent}, ${designSystemForPanel.tokens.accent2}, ${designSystemForPanel.tokens.surface2}, ${designSystemForPanel.tokens.accent})` }} />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-[12px] font-semibold capitalize text-[var(--ui-text)]">{designSystemForPanel.stylePreset}</p>
+                                                    <p className="text-[11px] text-[var(--ui-text-muted)]">Custom</p>
+                                                </div>
+                                                <ChevronDown size={16} className="text-[var(--ui-text-subtle)]" />
+                                            </div>
+                                        </div>
+                                        <div className="mt-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Color Palette</p>
+                                            <div className="mt-3 space-y-2.5">
+                                                {designTokenEntries.map(([tokenName, tokenValue]) => {
+                                                    const isActive = selectedDesignTokenName === tokenName;
+                                                    const normalizedTokenHex = normalizePickerHexColor(tokenValue, '#F9A825');
+                                                    const tokenHsv = hexToPickerHsv(normalizedTokenHex);
+                                                    const tokenMeta = {
+                                                        bg: { label: 'Background', note: 'Canvas and shell base' },
+                                                        surface: { label: 'Surface', note: 'Cards and primary panes' },
+                                                        surface2: { label: 'Tertiary', note: 'Elevated content and hovers' },
+                                                        text: { label: 'Text', note: 'Primary typography' },
+                                                        muted: { label: 'Neutral', note: 'Muted labels and meta' },
+                                                        stroke: { label: 'Stroke', note: 'Borders and separators' },
+                                                        accent: { label: 'Primary', note: 'Main emphasis color' },
+                                                        accent2: { label: 'Secondary', note: 'Support accent color' },
+                                                    }[tokenName];
+                                                    return (
+                                                        <div
+                                                            key={tokenName}
+                                                            className={`overflow-hidden rounded-[18px] border bg-[var(--ui-surface-1)] transition-colors ${isActive
+                                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_36%,var(--ui-border))]'
+                                                                : 'border-[var(--ui-border)]'
+                                                                }`}
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!isDesignSystemEditable) return;
+                                                                    setActiveTokenEditor(isActive ? null : tokenName);
+                                                                }}
+                                                                className="flex w-full items-center gap-3 px-3 py-3 text-left"
+                                                            >
+                                                                <span className="h-10 w-10 shrink-0 rounded-full border border-white/10" style={{ background: normalizedTokenHex }} />
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="text-[12px] font-medium text-[var(--ui-text)]">{tokenMeta?.label || tokenName}</p>
+                                                                    <p className="text-[11px] text-[var(--ui-text-muted)] truncate">{tokenMeta?.note || normalizedTokenHex}</p>
+                                                                </div>
+                                                                <ChevronDown
+                                                                    size={16}
+                                                                    className={`shrink-0 text-[var(--ui-text-subtle)] transition-transform ${isActive ? 'rotate-180' : ''}`}
+                                                                />
+                                                            </button>
+                                                            {isActive && (
+                                                                <div className="border-t border-[var(--ui-border)] px-3 pb-3 pt-2">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="h-11 w-11 shrink-0 rounded-full border border-white/10" style={{ background: normalizedTokenHex }} />
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <p className="text-[12px] font-semibold text-[var(--ui-text)]">{tokenMeta?.label || tokenName}</p>
+                                                                            <p className="text-[11px] text-[var(--ui-text-muted)] truncate">{normalizedTokenHex}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div
+                                                                        className="relative mt-3 aspect-square overflow-hidden rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] touch-none"
+                                                                        onPointerDown={(event) => handleDesignColorPlaneDrag(event, tokenName, tokenHsv.h)}
+                                                                    >
+                                                                        <div
+                                                                            className="absolute inset-0"
+                                                                            style={{ background: `linear-gradient(90deg,#ffffff 0%, ${hsvToPickerHex(tokenHsv.h, 1, 1)} 100%)` }}
+                                                                        />
+                                                                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0)_0%,rgba(0,0,0,0.98)_100%)]" />
+                                                                        <span
+                                                                            className="pointer-events-none absolute h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+                                                                            style={{
+                                                                                left: `${tokenHsv.s * 100}%`,
+                                                                                top: `${(1 - tokenHsv.v) * 100}%`,
+                                                                                background: normalizedTokenHex,
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                    <div
+                                                                        className="relative mt-3 h-5 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[linear-gradient(90deg,#ff6436,#f9d423,#36d96d,#2f82ff,#7248ff,#ff3bbf)] touch-none"
+                                                                        onPointerDown={(event) => handleDesignHueDrag(event, tokenName, tokenHsv.s, tokenHsv.v)}
+                                                                    >
+                                                                        <span
+                                                                            className="pointer-events-none absolute top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+                                                                            style={{
+                                                                                left: `${(tokenHsv.h / 360) * 100}%`,
+                                                                                background: normalizedTokenHex,
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                    <div className="mt-3 flex items-center gap-2">
+                                                                        <input
+                                                                            type="color"
+                                                                            value={normalizedTokenHex}
+                                                                            onChange={(event) => updateDesignSystemTokenDraft(tokenName, normalizePickerHexColor(event.target.value))}
+                                                                            className="h-11 w-14 rounded-[14px] border border-[var(--ui-border)] bg-transparent p-1 cursor-pointer"
+                                                                        />
+                                                                        <input
+                                                                            type="text"
+                                                                            value={tokenValue}
+                                                                            onChange={(event) => updateDesignSystemTokenDraft(tokenName, event.target.value)}
+                                                                            className="h-11 flex-1 rounded-[14px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[12px] text-[var(--ui-text)] outline-none"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     </div>
                                     )}
 
                                     {designSystemInspectorTab === 'fonts' && (
-                                        <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
-                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Typography Stage</p>
+                                        <div className="rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Font</p>
                                             <div className="grid grid-cols-1 gap-2.5">
-                                                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
+                                                <div className="rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Display</p>
+                                                        <div>
+                                                            <p className="text-[12px] font-semibold text-[var(--ui-text)]">Headline</p>
+                                                            <p className="text-[11px] text-[var(--ui-text-muted)]">Titles and hero-sized emphasis.</p>
+                                                        </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => setOpenFontDropdown((current) => (current === 'display' ? null : 'display'))}
-                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                            className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                                                         >
-                                                            Choose font
+                                                            Change
                                                         </button>
                                                     </div>
                                                     <p className="mt-1 text-[34px] leading-[0.95] text-[var(--ui-text)] break-words" style={{ fontFamily: designSystemForPanel.typography.displayFont }}>Aa</p>
                                                     <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{designSystemForPanel.typography.displayFont}</p>
                                                     {openFontDropdown === 'display' && (
-                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
+                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
                                                             {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
                                                                 <button
                                                                     key={`dropdown-display-${fontStack}`}
@@ -6447,7 +6702,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                         updateDesignSystemTypographyDraft('displayFont', fontStack);
                                                                         setOpenFontDropdown(null);
                                                                     }}
-                                                                    className="w-full rounded-md px-2 py-1.5 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                                    className="w-full rounded-[12px] px-3 py-2 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
                                                                     style={{ fontFamily: fontStack }}
                                                                 >
                                                                     {extractPrimaryFontFamily(fontStack)}
@@ -6456,21 +6711,24 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-3">
+                                                <div className="rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--ui-text-subtle)]">Body</p>
+                                                        <div>
+                                                            <p className="text-[12px] font-semibold text-[var(--ui-text)]">Body</p>
+                                                            <p className="text-[11px] text-[var(--ui-text-muted)]">UI copy, descriptions and helper text.</p>
+                                                        </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => setOpenFontDropdown((current) => (current === 'body' ? null : 'body'))}
-                                                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
+                                                            className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                                                         >
-                                                            Choose font
+                                                            Change
                                                         </button>
                                                     </div>
                                                     <p className="mt-1 text-[16px] leading-[1.25] text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>The quick brown fox jumps.</p>
                                                     <p className="text-[10px] text-[var(--ui-text-muted)] truncate">{designSystemForPanel.typography.bodyFont}</p>
                                                     {openFontDropdown === 'body' && (
-                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
+                                                        <div className="mt-2 max-h-44 overflow-y-auto rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1.5 space-y-1">
                                                             {DESIGN_FONT_STACK_PRESETS.map((fontStack) => (
                                                                 <button
                                                                     key={`dropdown-body-${fontStack}`}
@@ -6479,7 +6737,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                         updateDesignSystemTypographyDraft('bodyFont', fontStack);
                                                                         setOpenFontDropdown(null);
                                                                     }}
-                                                                    className="w-full rounded-md px-2 py-1.5 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
+                                                                    className="w-full rounded-[12px] px-3 py-2 text-left text-[13px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
                                                                     style={{ fontFamily: fontStack }}
                                                                 >
                                                                     {extractPrimaryFontFamily(fontStack)}
@@ -6488,11 +6746,17 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         </div>
                                                     )}
                                                 </div>
+                                                <div className="rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                                    <p className="text-[12px] font-semibold text-[var(--ui-text)]">Label</p>
+                                                    <p className="text-[11px] text-[var(--ui-text-muted)]">Compact metadata and control labels.</p>
+                                                    <p className="mt-3 text-[13px] uppercase tracking-[0.08em] text-[var(--ui-text)]" style={{ fontFamily: designSystemForPanel.typography.bodyFont }}>Inter Label</p>
+                                                    <p className="mt-1 text-[10px] text-[var(--ui-text-muted)] truncate">{designSystemForPanel.typography.bodyFont}</p>
+                                                </div>
                                             </div>
                                             <div className="space-y-3">
                                                 <div>
-                                                    <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">Display Presets</p>
-                                                    <div className="mt-1.5 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                                                    <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.16em]">Display Presets</p>
+                                                    <div className="mt-1.5 grid grid-cols-2 gap-2">
                                                         {DESIGN_FONT_STACK_PRESETS.map((fontStack) => {
                                                             const isSelected = areFontStacksEquivalent(designSystemForPanel.typography.displayFont, fontStack);
                                                             return (
@@ -6500,12 +6764,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                     key={`display-font-stack-${fontStack}`}
                                                                     type="button"
                                                                     onClick={() => updateDesignSystemTypographyDraft('displayFont', fontStack)}
-                                                                    className={`shrink-0 rounded-xl border p-2.5 text-left transition-all ${isSelected
-                                                                        ? 'min-w-[184px] scale-[1.03] border-[var(--ui-primary)] bg-[var(--ui-primary)]/15 shadow-lg shadow-[var(--ui-primary)]/15'
-                                                                        : 'min-w-[128px] border-[var(--ui-border)] bg-[var(--ui-surface-3)] hover:bg-[var(--ui-surface-4)]'
+                                                                    className={`rounded-[18px] border p-3 text-left transition-all ${isSelected
+                                                                        ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_36%,var(--ui-border))] bg-[var(--ui-surface-1)]'
+                                                                        : 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] hover:bg-[var(--ui-surface-3)]'
                                                                         }`}
                                                                 >
-                                                                    <span className={`block leading-none text-[var(--ui-text)] ${isSelected ? 'text-[32px]' : 'text-[20px]'}`} style={{ fontFamily: fontStack }}>Aa</span>
+                                                                    <span className="block leading-none text-[24px] text-[var(--ui-text)]" style={{ fontFamily: fontStack }}>Aa</span>
                                                                     <span className="mt-1 block text-[10px] font-semibold text-[var(--ui-text-muted)] truncate">
                                                                         {extractPrimaryFontFamily(fontStack)}
                                                                     </span>
@@ -6519,49 +6783,99 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     )}
 
                                     {designSystemInspectorTab === 'corners' && (
-                                        <div className="rounded-3xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
-                                            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Corners, Spacing & Motion</p>
-                                            <p className="text-[11px] text-[var(--ui-text-muted)]">
-                                                <span className="text-[var(--ui-text)] font-semibold">Spacing:</span> {designSystemForPanel.spacing.baseUnit}px base, {designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}
-                                            </p>
-                                            <div className="grid grid-cols-3 gap-2">
+                                        <div className="rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 space-y-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Corner Radius</p>
+                                            <div className="space-y-3">
                                                 {(['card', 'control', 'pill'] as const).map((radiusKey) => (
-                                                    <div key={`radius-preview-${radiusKey}`} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-3)] p-2">
-                                                        <div className="flex items-center justify-between gap-1">
-                                                            <p className="text-[10px] font-semibold text-[var(--ui-text-muted)] uppercase tracking-[0.08em]">{radiusKey}</p>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setOpenRadiusDropdown((current) => (current === radiusKey ? null : radiusKey))}
-                                                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] ring-1 ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]"
-                                                            >
-                                                                Set
-                                                            </button>
-                                                        </div>
-                                                        <div className="mt-2 h-8 w-full border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)]" style={{ borderRadius: designSystemForPanel.radius[radiusKey] }} />
-                                                        <p className="mt-2 text-[10px] text-[var(--ui-text-muted)]">{designSystemForPanel.radius[radiusKey]}</p>
-                                                        {openRadiusDropdown === radiusKey && (
-                                                            <div className="mt-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 space-y-1">
-                                                                {DESIGN_RADIUS_PRESETS.map((radiusPreset) => (
-                                                                    <button
-                                                                        key={`radius-preset-${radiusKey}-${radiusPreset}`}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            updateDesignSystemRadiusDraft(radiusKey, radiusPreset);
-                                                                            setOpenRadiusDropdown(null);
-                                                                        }}
-                                                                        className="w-full rounded px-2 py-1 text-left text-[10px] text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)]"
-                                                                    >
-                                                                        {radiusPreset}
-                                                                    </button>
-                                                                ))}
+                                                    <div key={`radius-preview-${radiusKey}`} className="rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div>
+                                                                <p className="text-[12px] font-semibold capitalize text-[var(--ui-text)]">{radiusKey}</p>
+                                                                <p className="text-[11px] text-[var(--ui-text-muted)]">Current radius: {designSystemForPanel.radius[radiusKey]}</p>
                                                             </div>
-                                                        )}
+                                                            <div className="h-12 w-12 border border-[var(--ui-border-light)] bg-[var(--ui-surface-2)]" style={{ borderRadius: designSystemForPanel.radius[radiusKey] }} />
+                                                        </div>
+                                                        <div className="mt-4">
+                                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Presets</p>
+                                                            <div className="mt-2 grid grid-cols-4 gap-2">
+                                                                {DESIGN_RADIUS_STYLE_PRESETS.map((preset) => {
+                                                                    const isSelected = designSystemForPanel.radius[radiusKey] === preset.value;
+                                                                    return (
+                                                                        <button
+                                                                            key={`radius-preset-${radiusKey}-${preset.key}`}
+                                                                            type="button"
+                                                                            onClick={() => updateDesignSystemRadiusDraft(radiusKey, preset.value)}
+                                                                            className={`rounded-[16px] border px-2 py-2 transition-colors ${isSelected
+                                                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_36%,var(--ui-border))] bg-[var(--ui-surface-3)]'
+                                                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'
+                                                                                }`}
+                                                                            title={preset.label}
+                                                                        >
+                                                                            <span className="flex h-8 items-center justify-center">
+                                                                                <span
+                                                                                    className="block h-5 w-5 border-2 border-[var(--ui-text-muted)] border-r-0 border-b-0"
+                                                                                    style={{ borderTopLeftRadius: preset.value }}
+                                                                                />
+                                                                            </span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-4">
+                                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Manual Setting</p>
+                                                            <div className="mt-2 flex items-center gap-2">
+                                                                <input
+                                                                    type="text"
+                                                                    value={designSystemForPanel.radius[radiusKey]}
+                                                                    onChange={(event) => updateDesignSystemRadiusDraft(radiusKey, event.target.value)}
+                                                                    className="h-11 flex-1 rounded-[14px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[12px] text-[var(--ui-text)] outline-none"
+                                                                    placeholder="e.g. 12px"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setOpenRadiusDropdown((current) => (current === radiusKey ? null : radiusKey))}
+                                                                    className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                                                >
+                                                                    More
+                                                                </button>
+                                                            </div>
+                                                            {openRadiusDropdown === radiusKey && (
+                                                                <div className="mt-2 grid grid-cols-4 gap-2 rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-2">
+                                                                    {DESIGN_RADIUS_PRESETS.map((radiusPreset) => (
+                                                                        <button
+                                                                            key={`radius-manual-preset-${radiusKey}-${radiusPreset}`}
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                updateDesignSystemRadiusDraft(radiusKey, radiusPreset);
+                                                                                setOpenRadiusDropdown(null);
+                                                                            }}
+                                                                            className={`rounded-[10px] px-2 py-1.5 text-[10px] font-semibold transition-colors ${designSystemForPanel.radius[radiusKey] === radiusPreset
+                                                                                ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'
+                                                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
+                                                                                }`}
+                                                                        >
+                                                                            {radiusPreset}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
-                                            <p className="text-[11px] text-[var(--ui-text-muted)]">
-                                                <span className="text-[var(--ui-text)] font-semibold">Motion:</span> {designSystemForPanel.motion.style} ({designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms)
-                                            </p>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Spacing</p>
+                                                    <p className="mt-2 text-[14px] font-semibold text-[var(--ui-text)]">{designSystemForPanel.spacing.baseUnit}px</p>
+                                                    <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">{designSystemForPanel.spacing.density}, {designSystemForPanel.spacing.rhythm}</p>
+                                                </div>
+                                                <div className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
+                                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Motion</p>
+                                                    <p className="mt-2 text-[14px] font-semibold text-[var(--ui-text)] capitalize">{designSystemForPanel.motion.style}</p>
+                                                    <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">{designSystemForPanel.motion.durationFastMs}ms / {designSystemForPanel.motion.durationBaseMs}ms</p>
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
 
@@ -6606,6 +6920,21 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     </div> */}
                                 </>
                             )}
+                        </div>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto px-4 py-4">
+                            <div className="flex min-h-full items-center">
+                                <div className="w-full rounded-[28px] p-5">
+                                    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-primary)]" />
+                                        Assets
+                                    </div>
+                                    <h3 className="mt-4 text-[24px] font-semibold leading-[1.02] tracking-[-0.03em] text-[var(--ui-text)]">Coming soon</h3>
+                                    <p className="mt-2 max-w-[290px] text-[12px] leading-relaxed text-[var(--ui-text-muted)]">
+                                        The project asset space will live here once uploads, saved snippets and reusable media are ready.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -6864,7 +7193,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     />
                     </div>
                     </>
-                    ) : (
+                    ) : chatPanelView === 'design-system' ? (
                         <div className="mx-4 mb-6 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3.5">
                             <div className="flex items-center justify-end gap-2">
                                 <button
@@ -6891,7 +7220,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 </button>
                             </div>
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </div>
             {viewerImage && (

@@ -4,11 +4,13 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
+import type { EditorPrefs } from '@eazyui/shared';
 import {
     buildBillingUsageActivityRows,
 } from '../../utils/billingUsage';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
+type DeviceDisplayMode = 'framed' | 'clean';
 
 const ACCOUNT_NAV: Array<{ key: SettingsTab; label: string; icon: typeof UserIcon }> = [
     { key: 'profile', label: 'Profile', icon: UserIcon },
@@ -43,12 +45,12 @@ export function ProjectSettingsPage({
     onNavigate: (path: string) => void;
 }) {
     const { theme, setTheme, pushToast, requestConfirmation } = useUiStore();
-    const { reset: resetDesign } = useDesignStore();
-    const { reset: resetCanvas } = useCanvasStore();
-    const { clearMessages } = useChatStore();
+    const { spec, reset: resetDesign } = useDesignStore();
+    const { doc, setEditorPrefs, reset: resetCanvas } = useCanvasStore();
+    const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
     const { clearHistory } = useHistoryStore();
-    const { dirty, resetProjectState } = useProjectStore();
+    const { dirty, markSaved, setSaving, resetProjectState } = useProjectStore();
 
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
     const [settingsTab, setSettingsTab] = useState<SettingsTab>(normalizeTab(initialTab));
@@ -75,6 +77,7 @@ export function ProjectSettingsPage({
 
     const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'You';
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
+    const deviceDisplayMode = ((doc.editorPrefs as EditorPrefs & { deviceDisplayMode?: DeviceDisplayMode }).deviceDisplayMode || 'framed') as DeviceDisplayMode;
 
     useEffect(() => {
         setSettingsTab(normalizeTab(initialTab));
@@ -272,6 +275,39 @@ export function ProjectSettingsPage({
         clearHistory();
         resetProjectState();
         onNavigate('/app/projects/new');
+    };
+
+    const handleDeviceDisplayModeChange = async (nextMode: DeviceDisplayMode) => {
+        const previousMode = (((useCanvasStore.getState().doc.editorPrefs as EditorPrefs & { deviceDisplayMode?: DeviceDisplayMode }).deviceDisplayMode) || 'framed') as DeviceDisplayMode;
+        if (previousMode === nextMode) return;
+
+        setEditorPrefs({ deviceDisplayMode: nextMode } as any);
+
+        if (!spec) {
+            pushToast({ kind: 'success', title: 'Canvas display updated', message: nextMode === 'framed' ? 'Device frames are enabled.' : 'Clean screen display is enabled.' });
+            return;
+        }
+
+        try {
+            setSaving(true);
+            const saved = await apiClient.save({
+                projectId: projectId || undefined,
+                designSpec: spec as any,
+                canvasDoc: useCanvasStore.getState().doc,
+                chatState: { messages },
+            });
+            markSaved(saved.projectId, saved.savedAt);
+            pushToast({
+                kind: 'success',
+                title: 'Canvas display updated',
+                message: nextMode === 'framed' ? 'Device frames are enabled.' : 'Clean screen display is enabled.',
+            });
+        } catch (error) {
+            setEditorPrefs({ deviceDisplayMode: previousMode } as any);
+            pushToast({ kind: 'error', title: 'Update failed', message: (error as Error).message || 'Could not update canvas display mode.' });
+        } finally {
+            setSaving(false);
+        }
     };
 
     const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
@@ -651,6 +687,33 @@ export function ProjectSettingsPage({
                                             </div>
                                         )}
                                     />
+                                </SectionCard>
+
+                                <SectionCard title="Workspace Preferences">
+                                    <Row
+                                        label="Canvas screen display"
+                                        value={(
+                                            <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleDeviceDisplayModeChange('framed')}
+                                                    className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${deviceDisplayMode === 'framed' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)]'}`}
+                                                >
+                                                    Framed
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleDeviceDisplayModeChange('clean')}
+                                                    className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${deviceDisplayMode === 'clean' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)]'}`}
+                                                >
+                                                    Clean
+                                                </button>
+                                            </div>
+                                        )}
+                                    />
+                                    <p className="mt-2 text-sm text-[var(--ui-text-subtle)]">
+                                        `Framed` keeps the current physical device chrome. `Clean` removes bezels, hardware buttons, and browser/device shell while preserving the screen dimensions.
+                                    </p>
                                 </SectionCard>
 
                                 <SectionCard title="MCP API Keys">

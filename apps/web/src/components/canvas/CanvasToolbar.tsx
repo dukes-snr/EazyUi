@@ -34,48 +34,54 @@ export function CanvasToolbar() {
     };
 
     return (
-        <div className="absolute bottom-3 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] p-1.5 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] backdrop-blur-xl">
+        <div className="absolute bottom-1 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-surface-1)_92%,transparent)] px-2.5 py-2 backdrop-blur-xl">
             {/* History Group */}
-            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] pr-2">
+            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] pr-2">
                 <button
                     onClick={handleUndo}
                     disabled={!canUndo()}
-                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] disabled:cursor-not-allowed disabled:opacity-35"
                     title="Undo"
                 >
-                    <Undo2 size={20} />
+                    <Undo2 size={18} />
                 </button>
                 <button
                     onClick={handleRedo}
                     disabled={!canRedo()}
-                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] disabled:cursor-not-allowed disabled:opacity-35"
                     title="Redo"
                 >
-                    <Redo2 size={20} />
+                    <Redo2 size={18} />
                 </button>
             </div>
 
             {/* Tools Group */}
-            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] pr-2">
+            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] pr-2">
                 <button
                     onClick={() => setActiveTool('select')}
-                    className={`p-2.5 rounded-full transition-all ${activeTool === 'select'
-                        ? 'bg-[var(--ui-primary)] text-white'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]'
+                    className={`inline-flex h-10 items-center gap-2 rounded-[14px] px-3 transition-colors ${activeTool === 'select'
+                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
                         }`}
                     title="Select Tool (Shift+Drag to Select)"
                 >
-                    <MousePointer2 size={20} />
+                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-[10px] ${activeTool === 'select' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
+                        <MousePointer2 size={15} />
+                    </span>
+                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Select</span>
                 </button>
                 <button
                     onClick={() => setActiveTool('hand')}
-                    className={`p-2.5 rounded-full transition-all ${activeTool === 'hand'
-                        ? 'bg-[var(--ui-primary)] text-white'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]'
+                    className={`inline-flex h-10 items-center gap-2 rounded-[14px] px-3 transition-colors ${activeTool === 'hand'
+                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
                         }`}
                     title="Pan Tool (Drag to Move)"
                 >
-                    <Hand size={20} />
+                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-[10px] ${activeTool === 'hand' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
+                        <Hand size={15} />
+                    </span>
+                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Pan</span>
                 </button>
             </div>
 
@@ -83,27 +89,30 @@ export function CanvasToolbar() {
             <div className="flex items-center gap-1 pl-1">
                 <button
                     onClick={() => zoomOut()}
-                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                     title="Zoom Out"
                 >
-                    <ZoomOut size={20} />
+                    <ZoomOut size={18} />
                 </button>
-                <span className="min-w-[32px] select-none text-center text-xs font-medium text-[var(--ui-text-subtle)]">
+                <span className="min-w-[52px] select-none text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
                     {Math.round(viewport.zoom * 100)}%
                 </span>
                 <button
                     onClick={() => zoomIn()}
-                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                     title="Zoom In"
                 >
-                    <ZoomIn size={20} />
+                    <ZoomIn size={18} />
                 </button>
                 <button
                     onClick={() => fitView({ padding: 0.15, duration: 800 })}
-                    className="rounded-full p-2.5 text-[var(--ui-text-muted)] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                    className="inline-flex h-10 items-center gap-2 rounded-[14px] px-3 text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                     title="Fit to Screen"
                 >
-                    <Maximize size={20} />
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]">
+                        <Maximize size={15} />
+                    </span>
+                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Fit</span>
                 </button>
             </div>
         </div>

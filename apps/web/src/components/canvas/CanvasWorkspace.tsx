@@ -16,6 +16,7 @@ import {
     BackgroundVariant,
     SelectionMode,
     useReactFlow,
+    useViewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ChevronRight } from 'lucide-react';
@@ -91,6 +92,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const { pushToast, requestConfirmation } = useUiStore();
     const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
+    const viewport = useViewport();
     const isEditWorkspace = mode === 'edit-workspace';
     const autoFocusedProjectIdRef = useRef<string | null>(null);
     const editWorkspaceFocusedScreenRef = useRef<string | null>(null);
@@ -816,12 +818,21 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const panOnDrag = activeTool === 'hand' ? true : [1, 2]; // Middle/Right click always pans
     const selectionOnDrag = activeTool === 'select';
     const panActivationKeyCode = activeTool === 'select' ? 'Space' : undefined;
+    const gridGap = useMemo(() => {
+        const zoom = viewport.zoom || 1;
+        if (zoom <= 0.3) return 120;
+        if (zoom <= 0.5) return 96;
+        if (zoom <= 0.75) return 72;
+        if (zoom <= 1.15) return 48;
+        if (zoom <= 1.6) return 32;
+        return 24;
+    }, [viewport.zoom]);
 
     return (
         <div className="canvas-workspace relative h-full w-full">
             {!isEditWorkspace && (
                 <div className="absolute left-4 top-4 z-50">
-                    <div className="ml-[50px] inline-flex items-center gap-1 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-2))] px-3 py-2 text-[12px] text-[var(--ui-text-muted)] shadow-[0_12px_30px_color-mix(in_srgb,var(--ui-primary)_10%,rgba(0,0,0,0.22))] backdrop-blur-md">
+                    <div className="ml-[50px] inline-flex items-center gap-1 px-3 py-2 text-[12px] text-[var(--ui-text-muted)]  backdrop-blur-md">
                         <button
                             type="button"
                             onClick={() => navigateTo('/app')}
@@ -886,10 +897,10 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 proOptions={{ hideAttribution: true }}
             >
                 <Background
-                    variant={BackgroundVariant.Dots}
-                    gap={10}
-                    size={2}
-                    color="var(--ui-canvas-dot)"
+                    variant={BackgroundVariant.Lines}
+                    gap={gridGap}
+                    size={1}
+                    color="color-mix(in srgb, var(--ui-canvas-dot) 34%, transparent)"
                 />
                 <Controls
                     className="canvas-controls-hidden hidden" // Hide default controls

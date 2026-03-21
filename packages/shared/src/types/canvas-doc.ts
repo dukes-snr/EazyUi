@@ -71,6 +71,10 @@ export const SelectionSchema = z.object({
 
 export type Selection = z.infer<typeof SelectionSchema>;
 
+export const DeviceDisplayModeSchema = z.enum(['framed', 'clean']);
+
+export type DeviceDisplayMode = z.infer<typeof DeviceDisplayModeSchema>;
+
 // Editor Preferences
 export const EditorPrefsSchema = z.object({
     snapToGrid: z.boolean().default(true),
@@ -79,6 +83,7 @@ export const EditorPrefsSchema = z.object({
     showGrid: z.boolean().default(true),
     showGuides: z.boolean().default(true),
     showBoardLabels: z.boolean().default(true),
+    deviceDisplayMode: DeviceDisplayModeSchema.default('framed'),
 });
 
 export type EditorPrefs = z.infer<typeof EditorPrefsSchema>;
@@ -129,6 +134,7 @@ export function createDefaultCanvasDoc(docId: string): CanvasDoc {
             showGrid: true,
             showGuides: true,
             showBoardLabels: true,
+            deviceDisplayMode: 'framed',
         },
         history: {
             specPatches: [],

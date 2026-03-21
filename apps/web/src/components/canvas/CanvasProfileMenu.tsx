@@ -447,7 +447,7 @@ export function CanvasProfileMenu() {
                         </div>
                     </button>
                     {openExport && (
-                        <div className="canvas-profile-menu w-[260px]">
+                        <div className="canvas-profile-menu w-[336px]">
                             <div className="px-2 pb-2 text-[11px] text-[var(--ui-text-subtle)]">
                                 Export scope: <span className="font-semibold text-[var(--ui-text)]">{selectionLabel}</span>
                             </div>
@@ -518,7 +518,7 @@ export function CanvasProfileMenu() {
                         <Bell size={16} />
                     </button>
                     {openNotifications && (
-                        <div className="canvas-profile-menu w-[300px]">
+                        <div className="canvas-profile-menu w-[368px]">
                             <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
                                 Notifications
                             </div>
@@ -557,7 +557,7 @@ export function CanvasProfileMenu() {
                         <ChevronDown size={13} className={`transition-transform ${openCredits ? 'rotate-180' : ''}`} />
                     </button>
                     {openCredits && (
-                        <div className="canvas-profile-menu w-[260px]">
+                        <div className="canvas-profile-menu w-[332px]">
                             <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
                                 <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">Available Credits</div>
                                 <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
@@ -594,13 +594,16 @@ export function CanvasProfileMenu() {
                             setOpenNotifications(false);
                             setOpenCredits(false);
                         }}
-                        className="h-11 w-11 rounded-full border border-[var(--ui-canvas-profile-border)] bg-[var(--ui-canvas-profile-bg)] inline-flex items-center justify-center shadow-[0_18px_30px_rgba(0,0,0,0.2)] hover:bg-[var(--ui-canvas-profile-hover)] transition-colors"
+                        className="canvas-profile-trigger min-w-[16px] rounded-[22px] px-1.5 pr-1.5"
                         title="Profile and settings"
                     >
-                        <div className="canvas-profile-avatar canvas-profile-avatar-lg">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full rounded-full object-cover" /> : <UserCircle2 size={16} />}</div>
+                        <div className="canvas-profile-avatar canvas-profile-avatar-lg">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full rounded-[12px] object-cover" /> : <UserCircle2 size={18} />}</div>
+                        <div className="inline-flex h-8 w-8 items-center justify-center text-[var(--ui-text)]">
+                            <ChevronDown size={15} className={`transition-transform ${openProfile ? 'rotate-180' : ''}`} />
+                        </div>
                     </button>
                     {openProfile && (
-                        <div className="canvas-profile-menu w-[320px]">
+                        <div className="canvas-profile-menu w-[392px]">
                             <div className="mb-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
                                 <div className="text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</div>
                                 <div className="mt-0.5 text-xs text-[var(--ui-text-subtle)]">{authUser?.email || 'No email'}</div>

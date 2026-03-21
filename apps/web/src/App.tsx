@@ -59,10 +59,20 @@ function resolveUserPhotoUrl(user: User | null): string | null {
 }
 
 function ensureCanvasDocFromProject(canvasDoc: unknown, designSpec: { screens: Array<{ screenId: string; width: number; height: number }> }): CanvasDoc {
+    const defaultDoc = createDefaultCanvasDoc(`doc-${Date.now()}`);
     if (canvasDoc && typeof canvasDoc === 'object' && Array.isArray((canvasDoc as CanvasDoc).boards)) {
-        return canvasDoc as CanvasDoc;
+        const incoming = canvasDoc as CanvasDoc;
+        return {
+            ...defaultDoc,
+            ...incoming,
+            viewport: { ...defaultDoc.viewport, ...(incoming.viewport || {}) },
+            selection: { ...defaultDoc.selection, ...(incoming.selection || {}) },
+            editorPrefs: { ...defaultDoc.editorPrefs, ...(incoming.editorPrefs || {}) },
+            history: { ...defaultDoc.history, ...(incoming.history || {}) },
+            boards: Array.isArray(incoming.boards) ? incoming.boards : [],
+        };
     }
-    const doc = createDefaultCanvasDoc(`doc-${Date.now()}`);
+    const doc = defaultDoc;
     const boards = designSpec.screens.map((screen, index) => ({
         boardId: `board-${screen.screenId}`,
         screenId: screen.screenId,

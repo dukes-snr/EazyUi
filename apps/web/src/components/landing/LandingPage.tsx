@@ -5,7 +5,6 @@ import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
 import featureSlide4 from '../../assets/Slide4.png';
-import videodemoimg from '../../assets/videodemoimg.png';
 import appLogo from '../../assets/Ui-logo.png';
 import mascotComposer from '../../assets/mascot-composer.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
@@ -217,7 +216,7 @@ const MARKETING_NAV_LINKS = [
     { label: "What's New", path: '/changelog' },
 ] as const;
 
-const DEMO_VIDEO_URL = 'https://lf16-web-neutral.traecdn.ai/obj/trae-ai-static/trae_website/static/media/solo-introduce.d2d26c5b.mp4';
+const DEMO_VIDEO_EMBED_BASE_URL = 'https://www.youtube.com/embed/euv60ydI54c?enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
 function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
     const opacity = useTransform(progress, [0.05, 0.18, 0.34], [0.2, 1, 1]);
     const x = useTransform(progress, [0.05, 0.22], [64, 0]);
@@ -316,7 +315,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [newsletterStatus, setNewsletterStatus] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-    const demoVideoRef = useRef<HTMLVideoElement | null>(null);
+    const demoVideoRef = useRef<HTMLIFrameElement | null>(null);
     const demoScreensSectionRef = useRef<HTMLElement | null>(null);
     const featureShowcaseSectionRef = useRef<HTMLElement | null>(null);
     const featureShowcaseViewportRef = useRef<HTMLDivElement | null>(null);
@@ -332,6 +331,10 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
     const shouldReduceMotion = useReducedMotion();
     const { scrollY, scrollYProgress } = useScroll({ container: scrollContainerRef });
+    const demoVideoEmbedUrl = useMemo(() => {
+        if (typeof window === 'undefined') return DEMO_VIDEO_EMBED_BASE_URL;
+        return `${DEMO_VIDEO_EMBED_BASE_URL}&origin=${encodeURIComponent(window.location.origin)}`;
+    }, []);
     const { scrollYProgress: featureSectionProgressRaw } = useScroll({
         container: scrollContainerRef,
         target: featureShowcaseSectionRef,
@@ -748,22 +751,52 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     }, []);
 
     useEffect(() => {
-        const video = demoVideoRef.current;
-        if (!video) return;
+        const iframe = demoVideoRef.current;
+        if (!iframe || typeof window === 'undefined') return;
 
-        const syncPlayingState = () => setIsDemoPlaying(!video.paused && !video.ended);
+        const postCommand = (func: string, args: unknown[] = []) => {
+            iframe.contentWindow?.postMessage(JSON.stringify({
+                event: 'command',
+                func,
+                args,
+            }), 'https://www.youtube.com');
+        };
 
-        syncPlayingState();
-        video.addEventListener('play', syncPlayingState);
-        video.addEventListener('pause', syncPlayingState);
-        video.addEventListener('ended', syncPlayingState);
+        const registerStateListener = () => {
+            postCommand('addEventListener', ['onStateChange']);
+        };
+
+        const handleMessage = (event: MessageEvent) => {
+            if (!String(event.origin).includes('youtube.com')) return;
+
+            let payload: any = event.data;
+            if (typeof payload === 'string') {
+                try {
+                    payload = JSON.parse(payload);
+                } catch {
+                    return;
+                }
+            }
+
+            const nextState = typeof payload?.info === 'number'
+                ? payload.info
+                : typeof payload?.info?.playerState === 'number'
+                    ? payload.info.playerState
+                    : null;
+
+            if (nextState === null) return;
+            setIsDemoPlaying(nextState === 1 || nextState === 3);
+        };
+
+        iframe.addEventListener('load', registerStateListener);
+        window.addEventListener('message', handleMessage);
+        registerStateListener();
 
         return () => {
-            video.removeEventListener('play', syncPlayingState);
-            video.removeEventListener('pause', syncPlayingState);
-            video.removeEventListener('ended', syncPlayingState);
+            iframe.removeEventListener('load', registerStateListener);
+            window.removeEventListener('message', handleMessage);
         };
-    }, []);
+    }, [demoVideoEmbedUrl]);
 
     const patternCards = useMemo<PatternCard[]>(() => {
         if (SHOWCASE_SCREEN_IMAGES.length === 0) {
@@ -785,7 +818,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         })),
         [patternCards]
     );
-    const demoVideoPoster = videodemoimg;
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
     const actionIsStop = isRecording;
@@ -794,23 +826,26 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const { agentState: landingOrbState, colors: landingOrbColors } = useOrbVisuals(landingOrbActivity);
     const landingOrbInput = isRecording ? 0.9 : isTranscribing ? 0.58 : showSendAction ? 0.45 : 0.2;
     const landingOrbOutput = (showSendAction || isRecording || isTranscribing) ? 0.5 : 0.2;
+    const postDemoVideoCommand = (func: string, args: unknown[] = []) => {
+        demoVideoRef.current?.contentWindow?.postMessage(JSON.stringify({
+            event: 'command',
+            func,
+            args,
+        }), 'https://www.youtube.com');
+    };
     const toggleDemoPlayback = () => {
-        const video = demoVideoRef.current;
-        if (!video) return;
-
-        if (video.paused || video.ended) {
-            void video.play();
+        if (isDemoPlaying) {
+            setIsDemoPlaying(false);
+            postDemoVideoCommand('pauseVideo');
             return;
         }
-
-        video.pause();
+        setIsDemoPlaying(true);
+        postDemoVideoCommand('playVideo');
     };
     const restartDemoVideo = () => {
-        const video = demoVideoRef.current;
-        if (!video) return;
-
-        video.currentTime = 0;
-        void video.play();
+        setIsDemoPlaying(true);
+        postDemoVideoCommand('seekTo', [0, true]);
+        postDemoVideoCommand('playVideo');
     };
     const StyleIcon = stylePreset === 'minimal'
         ? LineSquiggle
@@ -1572,16 +1607,16 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             onMouseEnter={() => setIsDemoHovered(true)}
                             onMouseLeave={() => setIsDemoHovered(false)}
                         >
-                            <video
+                            <iframe
                                 ref={demoVideoRef}
                                 className="landing-demo-video"
-                                poster={demoVideoPoster}
-                                playsInline
-                                preload="metadata"
-                                onClick={toggleDemoPlayback}
-                            >
-                                <source src={DEMO_VIDEO_URL} type="video/mp4" />
-                            </video>
+                                src={demoVideoEmbedUrl}
+                                title="EazyUI demo video"
+                                loading="lazy"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                referrerPolicy="strict-origin-when-cross-origin"
+                                allowFullScreen
+                            />
                             <button
                                 type="button"
                                 onClick={toggleDemoPlayback}
