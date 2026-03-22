@@ -593,90 +593,103 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           onClick={() => setIsMobileSidebarOpen(false)}
         >
           <div
-            className="flex h-full w-full max-w-[22rem] flex-col bg-[var(--ui-surface-1)] px-4 pb-5 pt-4"
+            className="flex h-full w-full max-w-[23rem] flex-col border-r border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] px-3 pb-4 pt-3"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileSidebarOpen(false);
-                  onNavigate('/');
-                }}
-                className="flex items-center gap-3 rounded-[20px] px-2 py-2 text-left"
-              >
-                <span className="grid h-10 w-10 place-items-center">
-                  <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
-                </span>
-                <span>
-                  <span className="block text-base font-semibold text-[var(--ui-text)]">EazyUI</span>
-                  <span className="block text-[11px] text-[var(--ui-text-subtle)]">Project workspace</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsMobileSidebarOpen(false)}
-                className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)]"
-                aria-label="Close menu"
-              >
-                <X size={18} />
-              </button>
+            <div className="rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_62%,transparent)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileSidebarOpen(false);
+                    onNavigate('/');
+                  }}
+                  className="flex items-center gap-3 rounded-[20px] text-left transition-colors hover:bg-[var(--workspace-soft)]"
+                >
+                  <span className="grid h-11 w-11 place-items-center rounded-[18px] bg-[var(--workspace-soft)]">
+                    <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+                  </span>
+                  <span>
+                    <span className="block text-base font-semibold tracking-[-0.03em] text-[var(--ui-text)]">EazyUI</span>
+                    <span className="block text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Project workspace</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileSidebarOpen(false)}
+                  className="grid h-11 w-11 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text)]"
+                  aria-label="Close menu"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between rounded-[20px] bg-[var(--workspace-soft)] px-3 py-2">
+                <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Library</span>
+                <span className="text-sm font-semibold text-[var(--ui-text)]">{projects.length} projects</span>
+              </div>
             </div>
 
-            <div className="mt-6 flex flex-1 flex-col overflow-hidden">
+            <div className="mt-4 flex flex-1 flex-col overflow-hidden">
               <div className="overflow-y-auto pr-1">
-                <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
-                <nav className="flex flex-col gap-2">
-                  {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
+                <div className="rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] p-2">
+                  <p className="px-2 pb-2 pt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
+                  <nav className="flex flex-col gap-1.5">
+                    {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setIsMobileSidebarOpen(false);
+                          onClick();
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-[22px] px-3 py-3 text-left transition-all ${active
+                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                          : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}
+                      >
+                        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-[18px] ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
+                          <Icon size={16} className={iconClassName} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
+                          <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2.5">
+                  {workspaceSignals.map(({ id, title, detail, actionLabel, accentClassName, iconClassName, Icon, path }) => (
                     <button
                       key={id}
                       type="button"
                       onClick={() => {
                         setIsMobileSidebarOpen(false);
-                        onClick();
+                        onNavigate(path);
                       }}
-                      className={`flex w-full items-center gap-3 rounded-[22px] px-3 py-3 text-left transition-all ${active
-                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)]'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}
+                      className={`rounded-[24px] border px-3 py-3 text-left transition-colors ${accentClassName}`}
                     >
-                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
-                        <Icon size={16} className={iconClassName} />
+                      <span className={`grid h-9 w-9 place-items-center rounded-[16px] border ${iconClassName}`}>
+                        <Icon size={15} />
                       </span>
-                      <span>
-                        <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
-                        <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                      <span className="mt-3 block text-sm font-semibold text-[var(--ui-text)]">{title}</span>
+                      <span className="mt-1 block text-[11px] leading-5 text-[var(--ui-text-muted)]">{detail}</span>
+                      <span className="mt-3 inline-flex text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text)]">
+                        {actionLabel}
                       </span>
                     </button>
                   ))}
-                </nav>
-
-                <div className="mt-6 rounded-[24px] border border-[var(--workspace-upgrade-border)] bg-[var(--workspace-upgrade-bg)] p-4">
-                  <div className="flex items-start gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--ui-bg)] text-[var(--color-text)]">
-                      <Sparkles size={16} />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Upgrade plan</p>
-                      <p className="mt-1 text-base font-semibold text-[var(--ui-text)]">Pro Plan</p>
-                      <p className="mt-2 text-[12px] leading-5 text-[var(--ui-text-muted)]">
-                        Unlock faster queues, larger credit caps, and premium workspace tools.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMobileSidebarOpen(false);
-                      onNavigate('/pricing');
-                    }}
-                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/30 bg-[var(--color-accent)] px-4 text-sm font-semibold text-[var(--workspace-upgrade-button-text)] transition-colors hover:bg-white"
-                  >
-                    View plans
-                  </button>
                 </div>
 
-                <div className="mt-6 rounded-[22px]">
-                  <p className="pl-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
+                <div className="mt-4 rounded-[24px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_54%,transparent)] p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
+                      <p className="mt-1 text-sm font-medium text-[var(--ui-text)]">Choose your workspace tone</p>
+                    </div>
+                    {theme === 'light' ? <Sun size={15} className="text-[var(--ui-text-subtle)]" /> : <Moon size={15} className="text-[var(--ui-text-subtle)]" />}
+                  </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--workspace-soft-strong)] p-1">
                     <button
                       type="button"
@@ -702,7 +715,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </div>
               </div>
 
-              <div className="mt-6 border-t border-[var(--workspace-sidebar-border)] pt-4">
+              <div className="mt-4 rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] p-3">
                 <div className="flex items-center gap-3 rounded-[22px] bg-[var(--workspace-soft)] px-3 py-3 text-left">
                   <span className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
                     <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
@@ -742,249 +755,241 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
       )}
       <div className="workspace-shell-frame flex h-full overflow-hidden p-2 md:p-3">
         <aside
-          className="hidden h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[28px] bg-[var(--ui-surface-1)] transition-[width] duration-300 ease-out lg:flex"
+          className="hidden h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[28px] bg-transparent transition-[width] duration-300 ease-out lg:flex"
           style={{ width: sidebarWidth }}
         >
-          <div className={`flex shrink-0 items-center ${sidebarExpanded ? 'justify-between gap-3' : 'flex-col gap-2'}`}>
-            <button
-              type="button"
-              onClick={() => onNavigate('/')}
-              className={`group flex items-center rounded-[22px] transition-colors ${sidebarExpanded ? 'gap-3 px-2 py-2 hover:bg-[var(--workspace-soft)]' : 'h-12 w-12 justify-center hover:bg-[var(--workspace-soft)]'}`}
-              title="Go to home"
-            >
-              <span className="grid h-10 w-10 shrink-0 place-items-center">
-                <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
-              </span>
-              <span className={`overflow-hidden whitespace-nowrap text-left transition-all duration-300 ${sidebarLabelClassName}`}>
-                <span className="block text-lg font-semibold text-[var(--ui-text)]">EazyUI</span>
-              </span>
-            </button>
+          <div className={`flex h-full min-h-0 flex-col ${sidebarExpanded ? 'gap-3' : 'items-center gap-3'}`}>
+            <div className={`rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_58%,transparent)] ${sidebarExpanded ? 'p-3.5' : 'px-2 py-3'}`}>
+              <div className={`flex ${sidebarExpanded ? 'items-start justify-between gap-3' : 'flex-col items-center gap-3'}`}>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('/')}
+                  className={`group flex items-center rounded-[22px] text-left transition-colors ${sidebarExpanded ? 'gap-3' : 'flex-col gap-2'}`}
+                  title="Go to home"
+                >
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[18px] bg-[var(--workspace-soft)]">
+                    <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+                  </span>
+                  <span className={`overflow-hidden whitespace-nowrap text-left transition-all duration-300 ${sidebarLabelClassName}`}>
+                    <span className="block text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Workspace</span>
+                    <span className="mt-1 block text-lg font-semibold tracking-[-0.03em] text-[var(--ui-text)]">EazyUI</span>
+                    <span className="block text-[11px] text-[var(--ui-text-muted)]">Project control center</span>
+                  </span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setSidebarExpanded((expanded) => !expanded)}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-[var(--ui-text-subtle)] transition-colors hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)]"
-              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-              title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-            >
-              {sidebarExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-            </button>
-          </div>
-
-          {/* {sidebarExpanded && (
-            <button
-              type="button"
-              onClick={focusComposer}
-              className="mt-4 flex h-16 items-center justify-between rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-4 text-left transition-colors hover:bg-[var(--workspace-soft-strong)]"
-            >
-              <div className="inline-flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--workspace-soft-strong)] text-[var(--ui-text-subtle)]">
-                  <Search size={16} />
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-[var(--ui-text)]">Search</p>
-                  <p className="text-[11px] text-[var(--ui-text-subtle)]">Jump to your next build idea</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setSidebarExpanded((expanded) => !expanded)}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-subtle)] transition-colors hover:text-[var(--ui-text)]"
+                  aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+                  title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+                >
+                  {sidebarExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+                </button>
               </div>
-              <span className={`inline-flex items-center gap-2 rounded-2xl border px-2.5 py-2 text-[11px] font-semibold ${shellBadgeClassName}`}>
-                <Search size={12} />
-                Ctrl K
-              </span>
-            </button>
-          )} */}
 
-          <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden">
-            {sidebarExpanded && (
-              <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
-            )}
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2'}`}>
-                {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={onClick}
-                    className={`group flex items-center transition-all duration-300 ${sidebarExpanded
-                      ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
-                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_12px_30px_rgba(0,0,0,0.08)]'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
-                      : `h-12 w-12 justify-center rounded-2xl ${active
-                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)] shadow-[0_10px_24px_rgba(0,0,0,0.08)]'
-                        : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
-                    title={label}
-                  >
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
-                      <Icon size={16} className={iconClassName} />
-                    </span>
-                    <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
-                      <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
-                      <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
-                    </span>
-                  </button>
-                ))}
-              </nav>
+              {sidebarExpanded ? (
+                <div className="mt-3 flex items-center justify-between rounded-[20px] bg-[var(--workspace-soft)] px-3 py-2">
+                  <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Projects</span>
+                  <span className="text-sm font-semibold text-[var(--ui-text)]">{projects.length}</span>
+                </div>
+              ) : null}
             </div>
 
-            <div className="mt-auto flex shrink-0 flex-col gap-3 pb-3 pt-5">
+            <div className={`flex min-h-0 flex-1 flex-col rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_52%,transparent)] ${sidebarExpanded ? 'p-3' : 'px-2 py-3'}`}>
               {sidebarExpanded ? (
-                <>
-
-                  <button
-                    type="button"
-                    onClick={() => onNavigate('/changelog')}
-                    className="flex items-center gap-3 rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-3 py-3 text-left transition-colors hover:bg-[var(--workspace-soft-strong)]"
-                  >
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-indigo-300/20 bg-indigo-400/12 text-indigo-300">
-                      <Gem size={16} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-[var(--ui-text)]">New feature</span>
-                      <span className="block text-[11px] leading-4 text-[var(--ui-text-subtle)]">Project-aware planning is live.</span>
-                    </span>
-                  </button>
-
-                  <div className="rounded-[24px] border border-[var(--workspace-upgrade-border)] bg-[var(--workspace-upgrade-bg)] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.08)]">
-                    <div className="flex items-start gap-3">
-                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--ui-bg)] text-[var(--color-text)]">
-                        <Sparkles size={16} />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">upgrade plan</p>
-                        <p className="mt-1 text-base font-semibold text-[var(--ui-text)]">Pro Plan</p>
-                        <p className="mt-2 text-[12px] leading-5 text-[var(--ui-text-muted)]">
-                          Upgrade to Pro to get the latest and exclusive workspace features.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('/pricing')}
-                      className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/30 bg-[var(--color-accent)] px-4 text-sm font-semibold text-[var(--workspace-upgrade-button-text)] transition-colors hover:bg-white"
-                    >
-                      Upgrade to Pro
-                    </button>
-                  </div>
-
-                  <div className="rounded-[22px]">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)] pl-3">Appearance</p>
-                    <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--workspace-soft-strong)] p-1">
-                      <button
-                        type="button"
-                        onClick={() => setTheme('light')}
-                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'light'
-                          ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]'
-                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
-                      >
-                        <Sun size={14} />
-                        Light
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTheme('dark')}
-                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'dark'
-                          ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]'
-                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
-                      >
-                        <Moon size={14} />
-                        Dark
-                      </button>
-                    </div>
-                  </div>
-                </>
+                <p className="px-2 pb-2 pt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
               ) : (
-                <div className="flex flex-col items-center gap-2">
-                  {workspaceSignals.map(({ id, title, Icon, path }) => (
+                <div className="mx-auto mb-3 h-6 w-px rounded-full bg-[var(--workspace-sidebar-border)]" />
+              )}
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2.5'}`}>
+                  {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
                     <button
                       key={id}
                       type="button"
-                      onClick={() => onNavigate(path)}
-                      className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--workspace-soft-strong)] hover:text-[var(--ui-text)]"
-                      title={title}
+                      onClick={onClick}
+                      className={`group flex items-center transition-all duration-300 ${sidebarExpanded
+                        ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
+                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                          : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
+                        : `h-12 w-12 justify-center rounded-[18px] ${active
+                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                          : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
+                      title={label}
                     >
-                      <Icon size={16} />
+                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-[16px] ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
+                        <Icon size={16} className={iconClassName} />
+                      </span>
+                      <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
+                        <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
+                        <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                      </span>
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                    className="grid h-12 w-12 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--workspace-soft-strong)] hover:text-[var(--ui-text)]"
-                    title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-                  >
-                    {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-                  </button>
-                </div>
-              )}
+                </nav>
+              </div>
 
-              <div className="relative z-20" ref={avatarMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setOpenAvatarMenu((open) => !open)}
-                  className={`flex w-full items-center overflow-hidden text-[12px] font-medium text-[var(--ui-text)] transition-all hover:bg-[var(--workspace-soft-strong)] ${sidebarExpanded ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)]  gap-3 rounded-[22px] px-2.5 py-2.5 text-left' : 'h-12 w-12 justify-center rounded-2xl'}`}
-                  title="Account"
-                >
-                  <span className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
-                    <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-                  </span>
-                  <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
-                    <span className="block text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
-                    <span className="block text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
-                  </span>
-                </button>
-                {openAvatarMenu && (
-                  <div className={`absolute bottom-0 z-30 ${avatarMenuPositionClassName} w-[260px] ml-5 mb-2 rounded-[24px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-popover)_94%,transparent)] p-3 backdrop-blur-xl`}>
-                    <div className="flex items-center gap-2">
-                      <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
-                        <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+              <div className="mt-6 flex shrink-0 flex-col gap-3">
+                {sidebarExpanded ? (
+                  <>
+                    <div className="rounded-[24px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft)_92%,transparent)] p-3">
+                      <div className="flex items-start gap-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[18px] border border-amber-300/20 bg-amber-400/10 text-amber-200">
+                          <Sparkles size={16} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Workspace signals</p>
+                          <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">Keep plans and updates close.</p>
+                          <p className="mt-1 text-[12px] leading-5 text-[var(--ui-text-muted)]">
+                            Jump to pricing or the changelog without breaking your flow.
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
-                        <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {workspaceSignals.map(({ id, title, path, Icon, iconClassName }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => onNavigate(path)}
+                            className="flex items-center gap-2 rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-3 py-2 text-left transition-colors hover:bg-[var(--ui-surface-1)]"
+                          >
+                            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-[14px] border ${iconClassName}`}>
+                              <Icon size={14} />
+                            </span>
+                            <span className="min-w-0 text-[12px] font-medium text-[var(--ui-text)]">{title}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <div className="mt-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)]/80 px-3 py-3">
-                      <div className="flex items-start justify-between gap-3">
+
+                    <div className="rounded-[24px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft)_88%,transparent)] p-3">
+                      <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Current plan</p>
-                          <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditPlanLabel}</p>
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
+                          <p className="mt-1 text-sm font-medium text-[var(--ui-text)]">Theme</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Balance</p>
-                          <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditBalanceLabel}</p>
-                        </div>
+                        {theme === 'light' ? <Sun size={15} className="text-[var(--ui-text-subtle)]" /> : <Moon size={15} className="text-[var(--ui-text-subtle)]" />}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--workspace-soft-strong)] p-1">
+                        <button
+                          type="button"
+                          onClick={() => setTheme('light')}
+                          className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'light'
+                            ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                            : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                        >
+                          <Sun size={14} />
+                          Light
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTheme('dark')}
+                          className={`inline-flex h-10 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'dark'
+                            ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                            : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                        >
+                          <Moon size={14} />
+                          Dark
+                        </button>
                       </div>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    {workspaceSignals.map(({ id, title, Icon, path }) => (
                       <button
+                        key={id}
                         type="button"
-                        onClick={() => {
-                          setOpenAvatarMenu(false);
-                          onNavigate('/pricing');
-                        }}
-                        className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                        onClick={() => onNavigate(path)}
+                        className="grid h-12 w-12 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-text)]"
+                        title={title}
                       >
-                        Billing
+                        <Icon size={16} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void loadBillingSummary();
-                        }}
-                        className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
-                      >
-                        Refresh
-                      </button>
-                    </div>
+                    ))}
                     <button
                       type="button"
-                      onClick={() => void handleSignOut()}
-                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 transition-colors hover:bg-rose-500/20"
+                      onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                      className="grid h-12 w-12 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-text)]"
+                      title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
                     >
-                      <LogOut size={13} />
-                      Logout
+                      {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
                     </button>
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="relative z-20" ref={avatarMenuRef}>
+              <button
+                type="button"
+                onClick={() => setOpenAvatarMenu((open) => !open)}
+                className={`flex w-full items-center overflow-hidden border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] text-[12px] font-medium text-[var(--ui-text)] transition-all hover:bg-[var(--workspace-soft)] ${sidebarExpanded ? 'gap-3 rounded-[24px] px-2.5 py-2.5 text-left' : 'h-14 w-14 justify-center rounded-[22px]'}`}
+                title="Account"
+              >
+                <span className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
+                  <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                </span>
+                <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${sidebarLabelClassName}`}>
+                  <span className="block text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
+                  <span className="block text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
+                </span>
+              </button>
+              {openAvatarMenu && (
+                <div className={`absolute bottom-0 z-30 ${avatarMenuPositionClassName} w-[260px] ml-5 mb-2 rounded-[24px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-popover)_94%,transparent)] p-3 backdrop-blur-xl`}>
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                      <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
+                      <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)]/80 px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Current plan</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditPlanLabel}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Balance</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditBalanceLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenAvatarMenu(false);
+                        onNavigate('/pricing');
+                      }}
+                      className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                    >
+                      Billing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void loadBillingSummary();
+                      }}
+                      className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleSignOut()}
+                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 transition-colors hover:bg-rose-500/20"
+                  >
+                    <LogOut size={13} />
+                    Logout
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </aside>
@@ -1376,7 +1381,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           )}
 
           {!loading && projects.length > 0 && (
-            <section className="mt-6 grid grid-cols-2 gap-3">
+            <section className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-3">
               {projects.map((project, index) => (
                 <motion.article
                   key={project.id}
