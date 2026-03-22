@@ -1,11 +1,12 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowRight, ArrowUp, CircleStar, Gem, Instagram, LineSquiggle, Linkedin, Mail, Menu, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
+import { motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
+import { ArrowRight, ArrowUp, CircleStar, Gem, LineSquiggle, Linkedin, Menu, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
 import featureSlide4 from '../../assets/Slide4.png';
 import appLogo from '../../assets/Ui-logo.png';
+import heroBackdropImage from '../../assets/hero-bg2.jpg';
 import mascotComposer from '../../assets/mascot-composer.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
@@ -15,7 +16,10 @@ import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
+import { AnimatedGridPattern } from '../ui/animated-grid-pattern';
+import { CallToAction } from '../ui/cta-3';
 import { Orb } from '../ui/Orb';
+import { StaggerTestimonials, type StaggerTestimonial } from '../ui/stagger-testimonials';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
@@ -62,9 +66,8 @@ const LANDING_SUGGESTION_TABS = [
         label: 'Suggested',
         icon: CircleStar,
         prompts: [
-            'A developer portfolio with dark theme, project cards, and contact form.',
-            'A modern SaaS landing page for a time-tracking app.',
-            'An e-commerce homepage for a skincare brand.',
+            'Design a cinematic landing page for an AI design copilot called EazyUI with a premium dark theme, a refined product hero, trust indicators, animated showcase panels, a pricing section, and crisp call-to-action moments that make the product feel advanced, polished, and ready for serious teams.',
+            'Create a conversion-focused website for a boutique digital studio that builds apps for startups, with a bold editorial hero, featured case studies, founder credibility, service breakdowns, testimonials, and a contact flow that feels premium rather than corporate.',
         ],
     },
     {
@@ -72,9 +75,8 @@ const LANDING_SUGGESTION_TABS = [
         label: 'Wireframe',
         icon: Square,
         prompts: [
-            'A low-fidelity onboarding wireframe with three intro screens and a sign-up CTA.',
-            'A dashboard wireframe with KPI tiles, chart blocks, and a recent activity section.',
-            'A mobile checkout wireframe with address, payment, and order summary steps.',
+            'Generate a clean low-fidelity wireframe for a fintech onboarding flow with a welcome screen, account setup, identity verification, card linking, and a clear final success state, keeping the layout practical, realistic, and easy for a product team to review.',
+            'Create a product planning dashboard wireframe with sidebar navigation, KPI modules, roadmap cards, workload charts, recent team activity, and a project status table, designed to feel structurally sound and presentation-ready for stakeholder feedback.',
         ],
     },
     {
@@ -82,9 +84,8 @@ const LANDING_SUGGESTION_TABS = [
         label: 'Apps',
         icon: Smartphone,
         prompts: [
-            'A fintech mobile app with cards, budgets, transfers, and spending insights.',
-            'A fitness tracking app with workout plans, progress charts, and coach messaging.',
-            'A travel planning app with itinerary cards, map previews, and booking actions.',
+            'Design a mobile app for personal finance that includes account balances, smart budgeting, recurring bills, savings goals, recent transactions, and helpful insight cards, using a modern layout that feels trustworthy, clean, and genuinely useful day to day.',
+            'Create a wellness coaching app with daily check-ins, guided sessions, streak tracking, progress milestones, coach messaging, and motivational summaries, with a calm interface that feels premium, human, and designed for long-term engagement.',
         ],
     },
     {
@@ -92,9 +93,8 @@ const LANDING_SUGGESTION_TABS = [
         label: 'Websites',
         icon: Monitor,
         prompts: [
-            'A premium agency website with bold typography, case studies, and service sections.',
-            'A product marketing site for an AI note-taking tool with testimonials and pricing.',
-            'A restaurant website with menu highlights, reservation CTA, and location details.',
+            'Build a high-end SaaS marketing site for a workflow automation platform with a layered hero, integration logos, product feature storytelling, interactive UI previews, customer proof, a pricing comparison, and a final CTA section that feels sharp and deliberate.',
+            'Design a striking website for a modern hospitality brand with a large immersive hero, curated room highlights, dining and wellness sections, local experiences, elegant booking prompts, and a visual style that feels calm, elevated, and memorable.',
         ],
     },
     {
@@ -102,18 +102,17 @@ const LANDING_SUGGESTION_TABS = [
         label: 'Prototype',
         icon: Sparkles,
         prompts: [
-            'An interactive prototype concept for a team workspace with side navigation and live panels.',
-            'A prototype-ready mobile shopping flow with discovery, product detail, and cart screens.',
-            'A prototype concept for a creator dashboard with analytics, content queue, and quick actions.',
+            'Create a prototype-ready collaboration workspace with a command bar, contextual side panels, live activity feed, document cards, threaded comments, and polished interaction states so a product team can immediately imagine the click flow.',
+            'Design a prototype concept for an AI shopping assistant that includes discovery, saved collections, product comparisons, detailed product views, conversational recommendations, and checkout preparation, with transitions and layout structure that feel ready for motion design.',
         ],
     },
 ] as const;
 type LandingSuggestionTabKey = (typeof LANDING_SUGGESTION_TABS)[number]['key'];
 const TYPED_PLACEHOLDER_SUGGESTIONS = [
-    'Design a modern fintech dashboard with spending analytics, cards, and transfers...',
-    'Build a SaaS admin panel with analytics, billing, and team permissions...',
-    'Create an ecommerce home screen with search, categories, and recommendations...',
-    'Generate a travel planner app with itinerary, maps, and booking cards...',
+    'Design a premium AI workspace landing page with a dark editorial hero, product storytelling, polished dashboard previews, customer proof, and a pricing section that feels ready to launch...',
+    'Create a mobile finance app with intelligent budgeting, savings goals, transaction insights, recurring bills, and a trustworthy visual language that feels modern but grounded...',
+    'Build a prototype-ready team collaboration dashboard with command search, live activity, document modules, project views, and interaction states that feel realistic enough to test...',
+    'Generate a luxury hospitality website with cinematic imagery, room highlights, wellness experiences, booking prompts, and a refined layout that feels calm, elevated, and premium...',
 ];
 type PatternCard = {
     title: string;
@@ -187,28 +186,56 @@ const FEATURE_SCROLL_ITEMS = [
     },
 ] as const;
 
-const SOCIAL_PROOF = [
+const LANDING_TESTIMONIALS: StaggerTestimonial[] = [
     {
-        quote: 'We replaced 2 weeks of rough wireframing with a single afternoon and shipped faster.',
-        author: 'Product Lead',
-        company: 'B2B SaaS',
+        tempId: 0,
+        testimonial: 'We replaced two weeks of rough wireframing with one afternoon of focused prompting, and the first pass was already good enough to review seriously.',
+        by: 'Amara, Product Lead at Fluxboard',
+        imgSrc: 'https://i.pravatar.cc/150?img=12',
     },
     {
-        quote: 'The generated flows already respect interaction patterns. We focus on polish, not rescue.',
-        author: 'Senior Designer',
-        company: 'Fintech',
+        tempId: 1,
+        testimonial: 'EazyUI gives us stronger first drafts, which means our design reviews start at refinement instead of trying to rescue weak structure.',
+        by: 'David, Senior Designer at Northstar Fintech',
+        imgSrc: 'https://i.pravatar.cc/150?img=15',
     },
     {
-        quote: 'Our team uses EazyUI as the first draft engine for every new feature now.',
-        author: 'Founder',
-        company: 'Consumer App',
+        tempId: 2,
+        testimonial: 'The reference-aware workflow is the part that changed everything for us. We can finally steer output toward our actual product taste instead of generic UI.',
+        by: 'Leila, Design Director at Pivotal Health',
+        imgSrc: 'https://i.pravatar.cc/150?img=25',
     },
     {
-        quote: 'The screens already arrive with structure, so our reviews start at refinement instead of rescue.',
-        author: 'Frontend Lead',
-        company: 'Healthtech',
+        tempId: 3,
+        testimonial: 'We use EazyUI as a first-draft engine for nearly every new feature now. It is fast enough for exploration and structured enough to keep.',
+        by: 'Marcus, Founder at Layer Studio',
+        imgSrc: 'https://i.pravatar.cc/150?img=33',
     },
-] as const;
+    {
+        tempId: 4,
+        testimonial: 'Switching between mobile, tablet, and desktop before generation saves us from a lot of avoidable redesign work later in the process.',
+        by: 'Nina, Product Manager at Atlas Suite',
+        imgSrc: 'https://i.pravatar.cc/150?img=36',
+    },
+    {
+        tempId: 5,
+        testimonial: 'Voice prompting sounded minor at first, but it made ideation much faster for our team. We capture rough thoughts immediately and shape them after.',
+        by: 'Jordan, UX Lead at Studio Relay',
+        imgSrc: 'https://i.pravatar.cc/150?img=41',
+    },
+    {
+        tempId: 6,
+        testimonial: 'The output feels grounded in interface logic, not just visual styling. That is why our engineers trust it enough to start building from it.',
+        by: 'Tomi, Frontend Lead at Beacon Cloud',
+        imgSrc: 'https://i.pravatar.cc/150?img=49',
+    },
+    {
+        tempId: 7,
+        testimonial: 'It helps founders get to something credible quickly. Instead of describing a product vision abstractly, we can react to a strong UI direction right away.',
+        by: 'Sofia, CEO at Branch Labs',
+        imgSrc: 'https://i.pravatar.cc/150?img=52',
+    },
+];
 const MARKETING_NAV_LINKS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
@@ -216,7 +243,88 @@ const MARKETING_NAV_LINKS = [
     { label: "What's New", path: '/changelog' },
 ] as const;
 
+type LandingFooterLinkItem = {
+    label: string;
+    path?: string;
+    href?: string;
+};
+
+type LandingFooterColumn = {
+    title: string;
+    items: LandingFooterLinkItem[];
+};
+
+const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
+    {
+        title: 'Product',
+        items: [
+            { label: 'Create', path: '/app' },
+            { label: 'Templates', path: '/templates' },
+            { label: 'Components', path: '/learn' },
+            { label: 'Assets', path: '/learn' },
+            { label: 'Pricing', path: '/pricing' },
+            { label: 'Changelog', path: '/changelog' },
+        ],
+    },
+    {
+        title: 'Resources',
+        items: [
+            { label: 'Introduction', path: '/learn' },
+            { label: 'How to Prompt', path: '/learn' },
+            { label: 'How to Edit', path: '/learn' },
+            { label: 'Sell Templates', path: '/templates' },
+            { label: 'Affiliates', path: '/contact' },
+            { label: 'FAQ', path: '/learn' },
+        ],
+    },
+    {
+        title: 'What We Use',
+        items: [
+            { label: 'Mobbin', href: 'https://mobbin.com' },
+            { label: 'Screen Studio', href: 'https://www.screen.studio' },
+            { label: 'Courses', path: '/learn' },
+            { label: 'UI Kit', path: '/templates' },
+            { label: 'Video Editor', href: 'https://www.adobe.com/products/premiere.html' },
+            { label: 'Mockups', path: '/templates' },
+        ],
+    },
+    {
+        title: 'Connect',
+        items: [
+            { label: 'Privacy', path: '/learn' },
+            { label: 'Terms', path: '/learn' },
+            { label: 'Support', path: '/contact' },
+            { label: 'Report Issue', path: '/contact' },
+            { label: 'LinkedIn', href: 'https://linkedin.com' },
+            { label: 'X', href: 'https://x.com' },
+        ],
+    },
+] as const;
+
+const LANDING_FOOTER_SOCIALS = [
+    { label: 'X', href: 'https://x.com', icon: X },
+    { label: 'YouTube', href: 'https://youtube.com', icon: Youtube },
+    { label: 'LinkedIn', href: 'https://linkedin.com', icon: Linkedin },
+] as const;
+
 const DEMO_VIDEO_EMBED_BASE_URL = 'https://www.youtube.com/embed/euv60ydI54c?enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
+
+type HeroBackgroundMode = 'animated' | 'image';
+
+// Switch `mode` between 'animated' and 'image'.
+// To use another image, replace `imageSrc` with a different imported asset.
+const HERO_BACKGROUND_CONFIG: {
+    mode: HeroBackgroundMode;
+    imageSrc: string;
+    imageAlt: string;
+    imagePosition: string;
+} = {
+    mode: 'animated',
+    imageSrc: heroBackdropImage,
+    imageAlt: 'Abstract hero background',
+    imagePosition: 'center center',
+};
+
 function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
     const opacity = useTransform(progress, [0.05, 0.18, 0.34], [0.2, 1, 1]);
     const x = useTransform(progress, [0.05, 0.22], [64, 0]);
@@ -284,6 +392,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
     const heroWordmark = theme === 'light' ? eazyuiWordmarkLight : eazyuiWordmark;
+    const heroBackgroundMode = HERO_BACKGROUND_CONFIG.mode;
+    const useDarkHeroForeground = heroBackgroundMode === 'animated' || heroBackgroundMode === 'image';
     const [prompt, setPrompt] = useState('');
     const [activeSuggestionTab, setActiveSuggestionTab] = useState<LandingSuggestionTabKey | null>(null);
     const [activeSuggestionPrompt, setActiveSuggestionPrompt] = useState<string>(LANDING_SUGGESTION_TABS[0].prompts[1]);
@@ -310,9 +420,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const [referenceEditingUrl, setReferenceEditingUrl] = useState<string | null>(null);
     const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
     const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
-    const [newsletterEmail, setNewsletterEmail] = useState('');
-    const [newsletterBusy, setNewsletterBusy] = useState(false);
-    const [newsletterStatus, setNewsletterStatus] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const demoVideoRef = useRef<HTMLIFrameElement | null>(null);
@@ -371,10 +478,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
     const backgroundScale = useTransform(easedScrollProgress, [0, 1], [1, 1.085]);
     const heroY = useTransform(easedScrollY, [0, 420], [0, -58]);
     const heroOpacity = useTransform(easedScrollY, [0, 300], [1, 0.66]);
-    const heroSpotlightX = useMotionValue(0);
-    const heroSpotlightY = useMotionValue(0);
-    const heroSpotlightOpacity = useMotionValue(0);
-    const heroSpotlightMask = useMotionTemplate`radial-gradient(circle 280px at ${heroSpotlightX}px ${heroSpotlightY}px, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 1) 28%, rgba(0, 0, 0, 0.78) 52%, rgba(0, 0, 0, 0.36) 74%, transparent 100%)`;
 
     const rootReferenceOptions = useMemo(
         () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
@@ -398,23 +501,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
             referenceImageUrls: referenceImageUrls.filter((url) => parsedReferences.urlReferences.some((item) => item.url === url)),
         });
-    };
-
-    const handleNewsletterSignup = async () => {
-        const cleanEmail = newsletterEmail.trim();
-        if (!cleanEmail || newsletterBusy) return;
-
-        try {
-            setNewsletterBusy(true);
-            setNewsletterStatus(null);
-            await apiClient.subscribeToNewsletter(cleanEmail);
-            setNewsletterStatus('Thanks. Check your inbox soon.');
-            setNewsletterEmail('');
-        } catch (error) {
-            setNewsletterStatus((error as Error).message || 'Could not send email.');
-        } finally {
-            setNewsletterBusy(false);
-        }
     };
 
     const closeReferenceMenu = () => {
@@ -718,8 +804,19 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             const scrollableDistance = Math.max(sectionRect.height - viewportHeight, 1);
             const progress = Math.min(Math.max((-sectionTopInViewport) / scrollableDistance, 0), 1);
             const maxOffset = Math.max(track.scrollWidth - viewport.clientWidth, 0);
-            const nextOffset = maxOffset * progress;
-            const nextScrollSpan = Math.max(viewportHeight + maxOffset + 240, viewportHeight * 1.8);
+            const snapOffsets = Array.from(track.children)
+                .map((child) => {
+                    const element = child as HTMLElement;
+                    const centeredOffset = element.offsetLeft + (element.offsetWidth / 2) - (viewport.clientWidth / 2);
+                    return Math.min(Math.max(centeredOffset, 0), maxOffset);
+                });
+            const snapCount = Math.max(snapOffsets.length, 1);
+            const snapIndex = snapCount === 1 ? 0 : Math.min(
+                Math.round(progress * (snapCount - 1)),
+                snapCount - 1,
+            );
+            const nextOffset = snapOffsets[snapIndex] ?? 0;
+            const nextScrollSpan = Math.max(viewportHeight * (snapCount + 0.6), viewportHeight * 2.4);
 
             setFeatureShowcaseOffset((current) => (Math.abs(current - nextOffset) < 1 ? current : nextOffset));
             setFeatureShowcaseScrollSpan((current) => (Math.abs(current - nextScrollSpan) < 2 ? current : nextScrollSpan));
@@ -811,13 +908,6 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
         });
     }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
-    const testimonialWallCards = useMemo(
-        () => Array.from({ length: 8 }, (_, index) => ({
-            ...SOCIAL_PROOF[index % SOCIAL_PROOF.length],
-            preview: patternCards[(index + 1) % patternCards.length],
-        })),
-        [patternCards]
-    );
     const hasPromptText = prompt.trim().length > 0;
     const showSendAction = hasPromptText;
     const actionIsStop = isRecording;
@@ -857,56 +947,55 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     ? Smile
                     : CircleStar;
     const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))]'
+        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[var(--ui-surface-1)]'
         : stylePreset === 'vibrant'
-            ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
+            ? 'bg-[var(--ui-surface-1)] text-emerald-300 ring-emerald-300/35 hover:bg-[var(--ui-surface-1)]'
             : stylePreset === 'luxury'
-                ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
+                ? 'bg-[var(--ui-surface-1)] text-amber-300 ring-amber-300/35 hover:bg-[var(--ui-surface-1)]'
                 : stylePreset === 'playful'
-                    ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-                    : 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[color:color-mix(in_srgb,var(--ui-primary)_62%,white)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)]';
+                    ? 'bg-[var(--ui-surface-1)] text-fuchsia-300 ring-fuchsia-300/35 hover:bg-[var(--ui-surface-1)]'
+                    : 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[var(--ui-surface-1)]';
 
     return (
         <div
             ref={scrollContainerRef}
             className="landing-scroll-shell h-screen w-full overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)] relative"
-            onPointerMove={(event) => {
-                if (event.pointerType === 'touch') return;
-                const container = scrollContainerRef.current;
-                if (!container) return;
-                const rect = container.getBoundingClientRect();
-                const pointerX = event.clientX - rect.left;
-                const pointerY = event.clientY - rect.top + container.scrollTop;
-                const spotlightLimit = demoScreensSectionRef.current
-                    ? demoScreensSectionRef.current.offsetTop + demoScreensSectionRef.current.offsetHeight
-                    : 0;
-                heroSpotlightX.set(pointerX);
-                heroSpotlightY.set(pointerY);
-                heroSpotlightOpacity.set(pointerY <= spotlightLimit ? 1 : 0);
-            }}
-            onPointerLeave={() => {
-                heroSpotlightOpacity.set(0);
-            }}
         >
-            <div className="landing-background-stack pointer-events-none absolute inset-0">
+            <div className="landing-background-stack pointer-events-none absolute inset-x-0 top-0">
                 <motion.div
-                    className="landing-hero-backdrop absolute inset-0"
+                    className={`landing-hero-backdrop absolute inset-0 ${heroBackgroundMode === 'image' ? 'is-image' : 'is-animated'}`}
                     style={{
                         y: shouldReduceMotion ? 0 : backgroundY,
                         scale: shouldReduceMotion ? 1 : backgroundScale,
                     }}
-                />
-                <motion.div
-                    className="landing-hero-dot-spotlight absolute inset-0"
-                    style={{
-                        opacity: heroSpotlightOpacity,
-                        WebkitMaskImage: heroSpotlightMask,
-                        maskImage: heroSpotlightMask,
-                    }}
-                />
+                >
+                    {heroBackgroundMode === 'image' ? (
+                        <div className="landing-hero-image-shell">
+                            <img
+                                src={HERO_BACKGROUND_CONFIG.imageSrc}
+                                alt={HERO_BACKGROUND_CONFIG.imageAlt}
+                                className="landing-hero-image"
+                                style={{ objectPosition: HERO_BACKGROUND_CONFIG.imagePosition }}
+                            />
+                        </div>
+                    ) : (
+                        <div className="landing-hero-animated-scene" aria-hidden="true">
+                            <AnimatedGridPattern
+                                width={86}
+                                height={86}
+                                numSquares={34}
+                                maxOpacity={1}
+                                duration={1.2}
+                                repeatDelay={0.65}
+                                className="landing-hero-animated-grid"
+                            />
+                            <div className="landing-hero-animated-fade" />
+                        </div>
+                    )}
+                </motion.div>
             </div>
 
-            <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''}`}>
+            <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''} ${useDarkHeroForeground ? 'landing-top-stage-dark' : ''}`}>
                 <div className="landing-nav-frame">
                     <motion.div
                         className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left bg-gradient-to-r from-cyan-300 via-blue-400 to-indigo-500"
@@ -1144,13 +1233,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
             <main className="relative z-10 px-0 pt-8 md:pt-12 pb-0">
                 {/*Hero section*/}
                 <motion.section
-                    className="landing-hero-section relative w-full overflow-hidden"
+                    className={`landing-hero-section relative w-full overflow-hidden ${useDarkHeroForeground ? 'landing-top-stage-dark' : ''}`}
                     style={{
                         y: shouldReduceMotion ? 0 : heroY,
                         opacity: shouldReduceMotion ? 1 : heroOpacity,
                     }}
                 >
-                    <div className="relative z-10 mx-auto flex min-h-[55vh] w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
+                    <div className="landing-hero-section-inner relative z-10 mx-auto -mt-15 flex w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
                         <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
                             Design better UI with{' '}
                             <span className="relative inline-flex align-baseline">
@@ -1170,7 +1259,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                 images={images}
                                 onRemove={(index) => setImages((prev) => prev.filter((_, idx) => idx !== index))}
                             />
-                            <div className="relative z-10 rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_3%,var(--ui-surface-1))] p-3 text-left shadow-[0_20px_65px_color-mix(in_srgb,var(--ui-primary)_10%,transparent)] md:p-4">
+                            <div className="relative z-10 rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[var(--ui-surface-1)] p-3 text-left md:p-4">
                                 <img
                                     src={mascotComposer}
                                     alt=""
@@ -1194,7 +1283,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         </div>
                                     )}
                                     <div className="flex items-start gap-2 px-1">
-                                        <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
+                                        <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[var(--ui-surface-1)] p-[2px]">
                                             <Orb
                                                 className="h-full w-full"
                                                 colors={landingOrbColors}
@@ -1276,7 +1365,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                     }
                                                     setIsAddMenuOpen(true);
                                                 }}
-                                                className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                                                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
                                                 title="Add to prompt"
                                             >
                                                 <Plus size={18} />
@@ -1302,7 +1391,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                     <Figma size={13} />
                                     <span className="text-[12px]">Import</span>
                                 </button> */}
-                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
+                                <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
@@ -1310,7 +1399,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                             onClick={() => setPlatform(p)}
                                             className={`p-1.5 rounded-full transition-all ${platform === p
                                                 ? 'bg-[var(--ui-primary)] text-[var(--ui-text)] shadow-sm'
-                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)]'
+                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
@@ -1325,13 +1414,13 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                             </div>
 
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center bg-[var(--ui-surface-3)] rounded-full p-1 ring-1 ring-[var(--ui-border)]">
+                                <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
                                     <button
                                         type="button"
                                         onClick={() => setModelProfile('fast')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
-                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-3)]'
+                                            ? 'bg-[var(--ui-surface-1)] text-amber-400 ring-1 ring-amber-400/40'
+                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-1)]'
                                             }`}
                                         title="Fast model"
                                     >
@@ -1341,8 +1430,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         type="button"
                                         onClick={() => setModelProfile('quality')}
                                         className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] text-[var(--ui-text)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
-                                            : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-3)]'
+                                            ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
+                                            : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)]'
                                             }`}
                                         title="Quality model"
                                     >
@@ -1359,7 +1448,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         <StyleIcon size={14} />
                                     </button>
                                     {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 w-40 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
+                                        <div className="absolute bottom-12 right-0 z-50 w-40 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2 shadow-2xl">
                                             {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
                                                 <button
                                                     key={preset}
@@ -1369,8 +1458,8 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                                         setShowStyleMenu(false);
                                                     }}
                                                     className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]'
-                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]'
+                                                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)]'
+                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
                                                         }`}
                                                 >
                                                     {preset}
@@ -1398,7 +1487,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                         ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
                                         : showSendAction
                                             ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)] shadow-lg shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_30%,transparent)]'
-                                            : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
+                                            : 'bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-1)] ring-1 ring-[var(--ui-border)]'
                                         } ${actionDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     title={isRecording ? 'Stop recording' : showSendAction ? 'Send prompt' : isTranscribing ? 'Transcribing...' : 'Record voice'}
                                 >
@@ -1430,9 +1519,9 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                     </div>
 
-                    <div className="relative z-10 mx-auto mt-12 w-full max-w-[780px] px-2 sm:px-0">
-                        <div className="rounded-[28px]  bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-surface-1)),color-mix(in_srgb,var(--ui-primary)_1%,var(--ui-surface-1)))] p-3 text-left">
-                            <div className="flex flex-wrap gap-2">
+                    <div className="relative z-10 mx-auto  w-full max-w-[780px] px-2 sm:px-0">
+                        <div className="rounded-[28px] p-3 text-left">
+                            <div className="flex flex-wrap justify-center gap-2">
                                 {LANDING_SUGGESTION_TABS.map((tab) => {
                                     const TabIcon = tab.icon;
                                     const isActive = activeSuggestionTab === tab.key;
@@ -1515,7 +1604,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                 {/*Screens demo section*/}
                 <motion.section
                     ref={demoScreensSectionRef}
-                    className="landing-page-section relative w-full max-w-none"
+                    className={`landing-page-section landing-screens-overlap-section relative z-20 w-full max-w-none${activeLandingSuggestionTab ? ' is-expanded' : ''}`}
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 36, scale: 0.985 }}
                     whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                     viewport={{ once: true, amount: 0.2 }}
@@ -1639,6 +1728,20 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
                 </section>
 
+                {/*Feature accordion section*/}
+                {/* <section className="landing-surface-band landing-surface-band-1 landing-page-section">
+                    <div className="landing-page-section-inner landing-page-section-inner-full">
+                        <motion.div
+                            initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
+                            whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                            viewport={{ once: true, amount: 0.2 }}
+                            transition={{ duration: 0.82, ease: [0.22, 1, 0.36, 1] }}
+                        >
+                            <FeatureAccordionSection features={LANDING_APP_FEATURES} />
+                        </motion.div>
+                    </div>
+                </section> */}
+
                 {/*Horizontal scroll section*/}
                 <section
                     ref={featureShowcaseSectionRef}
@@ -1699,53 +1802,29 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                     </div>
 
                     <motion.div
-                        className="landing-testimonial-wall mt-14"
+                        className="mx-auto mt-14 w-full max-w-[1480px] px-4 md:px-8"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 52 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                         viewport={{ once: true, amount: 0.18 }}
                         transition={{ duration: 0.9, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
                     >
-                        {[
-                            testimonialWallCards.slice(0, 4),
-                            testimonialWallCards.slice(4, 8),
-                        ].map((row, rowIndex) => {
-                            const repeated = [...row, ...row];
-                            return (
-                                <div
-                                    key={`testimonial-row-${rowIndex}`}
-                                    className={`landing-testimonial-row ${rowIndex === 1 ? 'is-reverse' : ''}`}
-                                >
-                                    <div
-                                        className={`infinite-scroll-track flex w-max gap-5 ${rowIndex === 1 ? 'landing-scroll-track-reverse' : ''}`}
-                                        style={{ ['--marquee-duration' as any]: `${rowIndex === 0 ? 42 : 48}s` }}
-                                    >
-                                        {repeated.map((item, index) => (
-                                            <article
-                                                key={`${item.quote}-${rowIndex}-${index}`}
-                                                className="landing-testimonial-wall-card"
-                                            >
-                                                <p className="text-[21px] leading-[1.55] tracking-[-0.025em] text-[var(--ui-text)]">
-                                                    {item.quote}
-                                                </p>
-                                                <div className="mt-8 flex items-center gap-3">
-                                                    <div className="landing-testimonial-avatar">
-                                                        {item.preview.image ? (
-                                                            <img src={item.preview.image} alt={`${item.author} preview`} className="h-full w-full object-cover" />
-                                                        ) : (
-                                                            <div className={`h-full w-full bg-gradient-to-br ${item.preview.accent}`} />
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-[14px] font-semibold text-[var(--ui-text)]">{item.author}</p>
-                                                        <p className="text-[13px] text-[var(--ui-text-muted)]">{item.company}</p>
-                                                    </div>
-                                                </div>
-                                            </article>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        <StaggerTestimonials testimonials={LANDING_TESTIMONIALS} />
+                    </motion.div>
+                </section>
+
+                {/*cta section*/}
+                <section className="landing-surface-band landing-surface-band-1 landing-page-section pt-6 md:pt-10">
+                    <motion.div
+                        className="px-4 md:px-6"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
+                        whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.35 }}
+                        transition={{ duration: 0.78, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                        <CallToAction
+                            onContactSales={() => onNavigate('/contact')}
+                            onGetStarted={() => onNavigate('/app')}
+                        />
                     </motion.div>
                 </section>
 
@@ -1758,100 +1837,98 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                         viewport={{ once: true, amount: 0.2 }}
                         transition={{ duration: 0.88, ease: [0.22, 1, 0.36, 1] }}
                     >
-                        <div className="landing-footer-top-half">
-                            <div className="landing-footer-top-row">
-                                <div className="landing-footer-newsletter">
-                                    <h2 className="landing-footer-newsletter-title">Subscribe to our newsletter</h2>
-                                    <p className="landing-footer-newsletter-copy">
-                                        Product updates, design drops, and new generation workflows from EazyUI.
-                                    </p>
-                                    <div className="landing-footer-newsletter-form">
-                                        <label className="landing-footer-email-field">
-                                            <Mail size={15} />
-                                            <input
-                                                type="email"
-                                                placeholder="name@email.com"
-                                                aria-label="Email address"
-                                                value={newsletterEmail}
-                                                onChange={(event) => setNewsletterEmail(event.target.value)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        void handleNewsletterSignup();
-                                                    }
-                                                }}
-                                            />
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleNewsletterSignup()}
-                                            className="landing-footer-signup-button"
-                                            disabled={newsletterBusy || !newsletterEmail.trim()}
-                                        >
-                                            {newsletterBusy ? 'Sending...' : 'Sign up'}
-                                        </button>
+                        <div className="landing-footer-panel">
+                            <button
+                                type="button"
+                                className="landing-footer-scrolltop"
+                                onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: shouldReduceMotion ? 'auto' : 'smooth' })}
+                                aria-label="Scroll to top"
+                            >
+                                <ArrowUp size={14} />
+                            </button>
+
+                            <div className="landing-footer-main-grid">
+                                <div className="landing-footer-brand-column">
+                                    <div className="landing-footer-brand-mark" aria-hidden="true">
+                                        <img src={appLogo} alt="" className="landing-footer-brand-logo" />
                                     </div>
-                                    {newsletterStatus ? (
-                                        <p className="landing-footer-newsletter-status">{newsletterStatus}</p>
-                                    ) : null}
+                                    <p className="landing-footer-brand-copy">
+                                        AI landing page builder that creates stunning designs in seconds. No design skills needed. Export to HTML and Figma. Trusted by 140,000+ users worldwide.
+                                    </p>
                                 </div>
 
-                                <div className="landing-footer-emblem" aria-hidden="true">
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-1" />
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-2" />
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-3" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-1" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-2" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-3" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-4" />
-                                    <div className="landing-footer-emblem-core">
-                                        <img src={appLogo} alt="" className="landing-footer-emblem-logo" />
-                                    </div>
+                                <div className="landing-footer-links-grid">
+                                    {LANDING_FOOTER_COLUMNS.map((column) => (
+                                        <div key={column.title} className="landing-footer-column">
+                                            <p className="landing-footer-column-title">{column.title}</p>
+                                            <div className="landing-footer-column-links">
+                                                {column.items.map((item) => (
+                                                    item.href ? (
+                                                        <a
+                                                            key={item.label}
+                                                            href={item.href}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="landing-footer-link"
+                                                        >
+                                                            {item.label}
+                                                        </a>
+                                                    ) : (
+                                                        <button
+                                                            key={item.label}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (item.path) onNavigate(item.path);
+                                                            }}
+                                                            className="landing-footer-link"
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    )
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
                             <div className="landing-footer-divider" />
 
-                            <div className="landing-footer-bottom-row">
-                                <div className="landing-footer-links-block">
-                                    <h4>Useful links</h4>
-                                    <div className="landing-footer-links-stack">
-                                        <button type="button" onClick={() => onNavigate('/templates')} className="landing-footer-link">Careers</button>
-                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Terms of Services</button>
-                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Privacy Policy</button>
-                                    </div>
+                            <div className="landing-footer-meta-row">
+                                <div className="landing-footer-meta-left">
+                                    <p className="landing-footer-copyright">
+                                        © 2026 EazyUI. All rights reserved.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={toggleTheme}
+                                        className="landing-footer-theme-pill"
+                                        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                                        title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                                    >
+                                        <Monitor size={13} />
+                                        {theme === 'light' ? <Moon size={12} /> : <Sun size={12} />}
+                                    </button>
                                 </div>
 
-                                <div className="landing-footer-follow-block">
-                                    <h4>Follow us</h4>
-                                    <div className="landing-footer-social-row">
-                                        <a href="https://x.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="X">
-                                            <X size={16} />
-                                        </a>
-                                        <a href="https://youtube.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-red" aria-label="YouTube">
-                                            <Youtube size={16} />
-                                        </a>
-                                        <a href="https://instagram.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="Instagram">
-                                            <Instagram size={16} />
-                                        </a>
-                                        <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-blue" aria-label="LinkedIn">
-                                            <Linkedin size={16} />
-                                        </a>
-                                    </div>
-
-                                    <div className="landing-footer-signature">
-                                        <div className="landing-footer-signature-brand">
-                                            <img src={appLogo} alt="EazyUI logo" className="landing-footer-signature-logo" />
-                                            <span>EazyUI</span>
-                                        </div>
-                                        <p>© Copyright 2026 EazyUI Inc. All rights reserved</p>
-                                    </div>
+                                <div className="landing-footer-social-row">
+                                    {LANDING_FOOTER_SOCIALS.map((item) => {
+                                        const Icon = item.icon;
+                                        return (
+                                            <a
+                                                key={item.label}
+                                                href={item.href}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="landing-footer-social-icon"
+                                                aria-label={item.label}
+                                            >
+                                                <Icon size={15} />
+                                            </a>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="landing-footer-bottom-half" aria-hidden="true">
-                            <div className="landing-footer-wordmark">eazyui</div>
                         </div>
                     </motion.div>
                 </footer>

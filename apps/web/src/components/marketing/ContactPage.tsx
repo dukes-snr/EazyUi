@@ -1,5 +1,5 @@
-import { useState, useRef, type FormEvent } from 'react';
-import { ArrowRight, CheckCircle2, Mail, MessageSquareText, Send, ShieldCheck } from 'lucide-react';
+import { useEffect, useState, useRef, type FormEvent } from 'react';
+import { CheckCircle2, ChevronDown, Send } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
 import { apiClient } from '../../api/client';
 
@@ -19,6 +19,7 @@ const REASON_OPTIONS = [
 
 export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+    const reasonMenuRef = useRef<HTMLDivElement | null>(null);
     const [form, setForm] = useState({
         name: '',
         email: '',
@@ -26,6 +27,7 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
         reason: 'sales',
         message: '',
     });
+    const [isReasonMenuOpen, setIsReasonMenuOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
     const [statusKind, setStatusKind] = useState<'success' | 'error' | null>(null);
@@ -33,6 +35,30 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
     const handleChange = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
         setForm((prev) => ({ ...prev, [key]: value }));
     };
+
+    const selectedReasonLabel = REASON_OPTIONS.find((option) => option.value === form.reason)?.label ?? 'Select reason';
+
+    useEffect(() => {
+        const handlePointerDown = (event: MouseEvent) => {
+            if (!reasonMenuRef.current) return;
+            if (reasonMenuRef.current.contains(event.target as Node)) return;
+            setIsReasonMenuOpen(false);
+        };
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsReasonMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleEscape);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, []);
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -70,67 +96,51 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
         <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)]">
             <MarketingHeader onNavigate={onNavigate} onOpenApp={onOpenApp} scrollContainerRef={scrollContainerRef} />
 
-            <main className="px-4 pb-24 pt-10 md:px-6 md:pt-14">
-                <section className="mx-auto grid w-full max-w-[1120px] gap-8 lg:grid-cols-[0.9fr_1.1fr]">
+            <main className="px-4 pb-24 pt-12 md:px-6 md:pt-20">
+                <section className="mx-auto grid w-full max-w-[1120px] gap-12 lg:grid-cols-[0.88fr_1.12fr] lg:gap-16">
                     <div className="pt-2">
                         <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-primary)]">Contact</p>
-                        <h1 className="mt-4 max-w-[10ch] text-[42px] font-semibold leading-[0.98] tracking-[-0.06em] text-[var(--ui-text)] md:text-[68px]">
-                            Reach the team with the right context.
+                        <h1 className="mt-4 max-w-[10ch] text-[42px] font-semibold leading-[0.98] tracking-[-0.06em] text-[var(--ui-text)] md:text-[66px]">
+                            Contact the team with clarity.
                         </h1>
                         <p className="mt-5 max-w-[54ch] text-[15px] leading-8 text-[var(--ui-text-muted)] md:text-[17px]">
-                            Use the form for sales, enterprise rollout, billing, support, or partnership requests. This page sends through the existing Resend-backed email flow so your request lands as an actual message, not a dead form entry.
+                            Use the form for sales, enterprise rollout, billing, support, or partnership requests. Keep it short, specific, and tied to the decision or outcome you need help with.
                         </p>
 
-                        <div className="mt-8 grid gap-4">
-                            <article className="rounded-[1.4rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_70%,white)] p-5 dark:bg-[color:color-mix(in_srgb,var(--ui-surface-2)_88%,transparent)]">
-                                <p className="inline-flex items-center gap-2 text-[12px] font-medium text-[var(--ui-primary)]">
-                                    <Mail size={14} />
-                                    Email route
+                        <div className="mt-10 space-y-8">
+                            <div>
+                                <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Best for</p>
+                                <p className="mt-2 max-w-[46ch] text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                                    Sales conversations, enterprise rollout planning, support issues, billing questions, and partnerships.
                                 </p>
-                                <p className="mt-3 text-[14px] leading-7 text-[var(--ui-text-muted)]">
-                                    Your message is delivered through the same Resend infrastructure already used for the site newsletter and welcome emails.
+                            </div>
+                            <div>
+                                <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Helpful context</p>
+                                <p className="mt-2 max-w-[46ch] text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                                    Include your company, team size, timeline, and the exact decision or blocker you want help with.
                                 </p>
-                            </article>
-                            <article className="rounded-[1.4rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_70%,white)] p-5 dark:bg-[color:color-mix(in_srgb,var(--ui-surface-2)_88%,transparent)]">
-                                <p className="inline-flex items-center gap-2 text-[12px] font-medium text-[var(--ui-primary)]">
-                                    <ShieldCheck size={14} />
-                                    Helpful details
-                                </p>
-                                <p className="mt-3 text-[14px] leading-7 text-[var(--ui-text-muted)]">
-                                    The most useful requests explain your company, the reason for contact, and what you are trying to achieve with EazyUI.
-                                </p>
-                            </article>
-                            <article className="rounded-[1.4rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_70%,white)] p-5 dark:bg-[color:color-mix(in_srgb,var(--ui-surface-2)_88%,transparent)]">
-                                <p className="inline-flex items-center gap-2 text-[12px] font-medium text-[var(--ui-primary)]">
-                                    <MessageSquareText size={14} />
-                                    Faster replies
-                                </p>
-                                <p className="mt-3 text-[14px] leading-7 text-[var(--ui-text-muted)]">
-                                    If this is about enterprise rollout or billing, include expected team size, timeline, or the decision you need help making.
-                                </p>
-                            </article>
+                            </div>
                         </div>
 
-                        <div className="mt-8 flex flex-wrap gap-3">
+                        <div className="mt-10 flex flex-wrap gap-5 text-[13px] font-medium">
                             <button
                                 type="button"
                                 onClick={onOpenApp}
-                                className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ui-primary)] px-5 text-[12px] font-semibold uppercase tracking-[0.12em] text-white shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_28%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
+                                className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-border)_72%,transparent)] bg-[var(--ui-surface-2)] px-4 py-2 text-[var(--ui-text)] transition-colors hover:border-[var(--ui-primary)] hover:text-[var(--ui-primary)]"
                             >
                                 Open app
-                                <ArrowRight size={14} />
                             </button>
                             <button
                                 type="button"
                                 onClick={() => onNavigate('/pricing')}
-                                className="inline-flex h-11 items-center gap-2 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_20%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_6%,var(--ui-surface-2))] px-5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text)] transition-colors hover:border-[color:color-mix(in_srgb,var(--ui-primary)_40%,transparent)] hover:text-[var(--ui-primary)]"
+                                className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-border)_72%,transparent)] bg-[var(--ui-surface-2)] px-4 py-2 text-[var(--ui-text-muted)] transition-colors hover:border-[var(--ui-primary)] hover:text-[var(--ui-primary)]"
                             >
                                 Back to pricing
                             </button>
                         </div>
                     </div>
 
-                    <div className="rounded-[2rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_72%,white)] p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)] dark:bg-[color:color-mix(in_srgb,var(--ui-surface-2)_92%,transparent)] dark:shadow-[0_24px_60px_rgba(2,6,23,0.18)] md:p-7">
+                    <div className="rounded-[2rem] border border-[color:color-mix(in_srgb,var(--ui-border)_78%,transparent)] bg-[var(--ui-surface-2)] p-6 md:p-8">
                         <form onSubmit={handleSubmit} className="space-y-5">
                             <div className="grid gap-5 md:grid-cols-2">
                                 <label className="block">
@@ -141,7 +151,8 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
                                         onChange={(event) => handleChange('name', event.target.value)}
                                         placeholder="Your full name"
                                         required
-                                        className="mt-2 h-12 w-full rounded-[1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[var(--ui-surface-1)] px-4 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)]"
+                                        className="mt-3 h-12 w-full border-0 bg-transparent px-0 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)]"
+                                        style={{ border: 'none', background: 'transparent', boxShadow: 'none', borderRadius: 0, paddingLeft: 0, paddingRight: 0 }}
                                     />
                                 </label>
                                 <label className="block">
@@ -152,7 +163,8 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
                                         onChange={(event) => handleChange('email', event.target.value)}
                                         placeholder="name@company.com"
                                         required
-                                        className="mt-2 h-12 w-full rounded-[1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[var(--ui-surface-1)] px-4 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)]"
+                                        className="mt-3 h-12 w-full border-0 bg-transparent px-0 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)]"
+                                        style={{ border: 'none', background: 'transparent', boxShadow: 'none', borderRadius: 0, paddingLeft: 0, paddingRight: 0 }}
                                     />
                                 </label>
                             </div>
@@ -165,20 +177,57 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
                                         value={form.company}
                                         onChange={(event) => handleChange('company', event.target.value)}
                                         placeholder="Company or team"
-                                        className="mt-2 h-12 w-full rounded-[1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[var(--ui-surface-1)] px-4 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)]"
+                                        className="mt-3 h-12 w-full border-0 bg-transparent px-0 text-[14px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)]"
+                                        style={{ border: 'none', background: 'transparent', boxShadow: 'none', borderRadius: 0, paddingLeft: 0, paddingRight: 0 }}
                                     />
                                 </label>
                                 <label className="block">
                                     <span className="text-[12px] font-medium uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Reason</span>
-                                    <select
-                                        value={form.reason}
-                                        onChange={(event) => handleChange('reason', event.target.value)}
-                                        className="mt-2 h-12 w-full rounded-[1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[var(--ui-surface-1)] px-4 text-[14px] text-[var(--ui-text)] outline-none transition-colors focus:border-[var(--ui-primary)]"
-                                    >
-                                        {REASON_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>{option.label}</option>
-                                        ))}
-                                    </select>
+                                    <div ref={reasonMenuRef} className="relative mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsReasonMenuOpen((current) => !current)}
+                                            className={`flex h-12 w-full items-center justify-between border-0 border-b bg-transparent px-0 text-left text-[14px] outline-none transition-colors ${isReasonMenuOpen ? 'border-[var(--ui-primary)] text-[var(--ui-text)]' : 'border-[var(--ui-border)] text-[var(--ui-text)]'}`}
+                                            aria-haspopup="listbox"
+                                            aria-expanded={isReasonMenuOpen}
+                                        >
+                                            <span>{selectedReasonLabel}</span>
+                                            <ChevronDown
+                                                size={16}
+                                                className={`shrink-0 text-[var(--ui-text-subtle)] transition-transform ${isReasonMenuOpen ? 'rotate-180' : ''}`}
+                                            />
+                                        </button>
+                                        {isReasonMenuOpen ? (
+                                            <div
+                                                className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-20 overflow-hidden rounded-[1.15rem] border border-[color:color-mix(in_srgb,var(--ui-border)_72%,transparent)] bg-[var(--ui-surface-1)]"
+                                                role="listbox"
+                                                aria-label="Contact reason"
+                                            >
+                                                {REASON_OPTIONS.map((option) => {
+                                                    const isSelected = option.value === form.reason;
+                                                    return (
+                                                        <button
+                                                            key={option.value}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                handleChange('reason', option.value);
+                                                                setIsReasonMenuOpen(false);
+                                                            }}
+                                                            className={`flex w-full items-center justify-between px-4 py-3 text-left text-[14px] transition-colors ${isSelected
+                                                                ? 'bg-[var(--ui-surface-2)] text-[var(--ui-text)]'
+                                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'
+                                                                }`}
+                                                            role="option"
+                                                            aria-selected={isSelected}
+                                                        >
+                                                            <span>{option.label}</span>
+                                                            {isSelected ? <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--ui-primary)]">Selected</span> : null}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : null}
+                                    </div>
                                 </label>
                             </div>
 
@@ -190,14 +239,15 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
                                     placeholder="Tell us what you need, what stage your team is at, and what outcome you want."
                                     required
                                     rows={8}
-                                    className="mt-2 w-full rounded-[1.1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_14%,var(--ui-border))] bg-[var(--ui-surface-1)] px-4 py-3 text-[14px] leading-7 text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)]"
+                                    className="mt-3 w-full resize-none border-0 bg-transparent px-0 py-3 text-[14px] leading-7 text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)]"
+                                    style={{ border: 'none', background: 'transparent', boxShadow: 'none', borderRadius: 0, paddingLeft: 0, paddingRight: 0 }}
                                 />
                             </label>
 
                             {status ? (
-                                <div className={`rounded-[1rem] border px-4 py-3 text-[13px] leading-6 ${statusKind === 'success'
-                                    ? 'border-emerald-400/24 bg-emerald-400/10 text-emerald-300'
-                                    : 'border-rose-400/24 bg-rose-400/10 text-rose-300'
+                                <div className={`px-0 py-1 text-[13px] leading-6 ${statusKind === 'success'
+                                    ? 'text-emerald-400'
+                                    : 'text-rose-400'
                                     }`}
                                 >
                                     {statusKind === 'success' ? <CheckCircle2 size={16} className="mr-2 inline-block" /> : null}
@@ -208,7 +258,7 @@ export function ContactPage({ onNavigate, onOpenApp }: ContactPageProps) {
                             <button
                                 type="submit"
                                 disabled={busy || !form.name.trim() || !form.email.trim() || !form.message.trim()}
-                                className="inline-flex h-12 items-center gap-2 rounded-full bg-[var(--ui-primary)] px-5 text-[12px] font-semibold uppercase tracking-[0.12em] text-white shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_28%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                                className="inline-flex h-12 items-center gap-2 rounded-full bg-[var(--ui-primary)] px-5 text-[12px] font-semibold uppercase tracking-[0.12em] text-white transition-colors hover:bg-[var(--ui-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <Send size={14} />
                                 {busy ? 'Sending...' : 'Send message'}
