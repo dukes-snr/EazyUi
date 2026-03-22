@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Instagram, Linkedin, Loader2, Mail, X, Youtube } from 'lucide-react';
+import { ArrowUp, Check, Linkedin, Loader2, Monitor, Moon, Sun, X, Youtube } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
 import appLogo from '../../assets/Ui-logo.png';
 import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse } from '../../api/client';
+import { useUiStore } from '../../stores';
 
 type PricingPageProps = {
     onNavigate: (path: string) => void;
@@ -123,6 +124,70 @@ const COMPARISON_ROWS: Array<{ label: string; values: Record<CorePlanKey, Compar
     },
 ] as const;
 
+type LandingFooterLinkItem = {
+    label: string;
+    path?: string;
+    href?: string;
+};
+
+type LandingFooterColumn = {
+    title: string;
+    items: LandingFooterLinkItem[];
+};
+
+const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
+    {
+        title: 'Product',
+        items: [
+            { label: 'Create', path: '/app' },
+            { label: 'Templates', path: '/templates' },
+            { label: 'Components', path: '/learn' },
+            { label: 'Assets', path: '/learn' },
+            { label: 'Pricing', path: '/pricing' },
+            { label: 'Changelog', path: '/changelog' },
+        ],
+    },
+    {
+        title: 'Resources',
+        items: [
+            { label: 'Introduction', path: '/learn' },
+            { label: 'How to Prompt', path: '/learn' },
+            { label: 'How to Edit', path: '/learn' },
+            { label: 'Sell Templates', path: '/templates' },
+            { label: 'Affiliates', path: '/contact' },
+            { label: 'FAQ', path: '/learn' },
+        ],
+    },
+    {
+        title: 'What We Use',
+        items: [
+            { label: 'Mobbin', href: 'https://mobbin.com' },
+            { label: 'Screen Studio', href: 'https://www.screen.studio' },
+            { label: 'Courses', path: '/learn' },
+            { label: 'UI Kit', path: '/templates' },
+            { label: 'Video Editor', href: 'https://www.adobe.com/products/premiere.html' },
+            { label: 'Mockups', path: '/templates' },
+        ],
+    },
+    {
+        title: 'Connect',
+        items: [
+            { label: 'Privacy', path: '/learn' },
+            { label: 'Terms', path: '/learn' },
+            { label: 'Support', path: '/contact' },
+            { label: 'Report Issue', path: '/contact' },
+            { label: 'LinkedIn', href: 'https://linkedin.com' },
+            { label: 'X', href: 'https://x.com' },
+        ],
+    },
+] as const;
+
+const LANDING_FOOTER_SOCIALS = [
+    { label: 'X', href: 'https://x.com', icon: X },
+    { label: 'YouTube', href: 'https://youtube.com', icon: Youtube },
+    { label: 'LinkedIn', href: 'https://linkedin.com', icon: Linkedin },
+] as const;
+
 function formatMoney(amountCents: number | null, currency: string | null): string {
     if (amountCents === null || Number.isNaN(amountCents)) return 'Contact';
     return new Intl.NumberFormat(undefined, {
@@ -194,12 +259,11 @@ function renderComparisonValue(value: ComparisonValue, featured = false) {
 
 export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+    const theme = useUiStore((state) => state.theme);
+    const toggleTheme = useUiStore((state) => state.toggleTheme);
     const [cadence, setCadence] = useState<BillingCadence>('monthly');
     const [catalog, setCatalog] = useState<BillingCatalogResponse | null>(null);
     const [loadingCatalog, setLoadingCatalog] = useState(true);
-    const [newsletterEmail, setNewsletterEmail] = useState('');
-    const [newsletterBusy, setNewsletterBusy] = useState(false);
-    const [newsletterStatus, setNewsletterStatus] = useState<string | null>(null);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -234,23 +298,6 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
             };
         });
     }, [cadence, catalog]);
-
-    const handleNewsletterSignup = async () => {
-        const cleanEmail = newsletterEmail.trim();
-        if (!cleanEmail || newsletterBusy) return;
-
-        try {
-            setNewsletterBusy(true);
-            setNewsletterStatus(null);
-            await apiClient.subscribeToNewsletter(cleanEmail);
-            setNewsletterStatus('Thanks. Check your inbox soon.');
-            setNewsletterEmail('');
-        } catch (error) {
-            setNewsletterStatus((error as Error).message || 'Could not send email.');
-        } finally {
-            setNewsletterBusy(false);
-        }
-    };
 
     return (
         <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)]">
@@ -423,100 +470,98 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                     </div>
                 </section>
 
-                <footer className="landing-footer" style={{ background: 'var(--ui-surface-1)' }}>
+                                <footer className="landing-footer">
                     <div className="landing-footer-shell">
-                        <div className="landing-footer-top-half">
-                            <div className="landing-footer-top-row">
-                                <div className="landing-footer-newsletter">
-                                    <h2 className="landing-footer-newsletter-title">Subscribe to our newsletter</h2>
-                                    <p className="landing-footer-newsletter-copy">
-                                        Product updates, design drops, and new generation workflows from EazyUI.
-                                    </p>
-                                    <div className="landing-footer-newsletter-form">
-                                        <label className="landing-footer-email-field">
-                                            <Mail size={15} />
-                                            <input
-                                                type="email"
-                                                placeholder="name@email.com"
-                                                aria-label="Email address"
-                                                value={newsletterEmail}
-                                                onChange={(event) => setNewsletterEmail(event.target.value)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        void handleNewsletterSignup();
-                                                    }
-                                                }}
-                                            />
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleNewsletterSignup()}
-                                            className="landing-footer-signup-button"
-                                            disabled={newsletterBusy || !newsletterEmail.trim()}
-                                        >
-                                            {newsletterBusy ? 'Sending...' : 'Sign up'}
-                                        </button>
+                        <div className="landing-footer-panel">
+                            <button
+                                type="button"
+                                className="landing-footer-scrolltop"
+                                onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+                                aria-label="Scroll to top"
+                            >
+                                <ArrowUp size={14} />
+                            </button>
+
+                            <div className="landing-footer-main-grid">
+                                <div className="landing-footer-brand-column">
+                                    <div className="landing-footer-brand-mark" aria-hidden="true">
+                                        <img src={appLogo} alt="" className="landing-footer-brand-logo" />
                                     </div>
-                                    {newsletterStatus ? <p className="landing-footer-newsletter-status">{newsletterStatus}</p> : null}
+                                    <p className="landing-footer-brand-copy">
+                                        AI landing page builder that creates stunning designs in seconds. No design skills needed. Export to HTML and Figma. Trusted by 140,000+ users worldwide.
+                                    </p>
                                 </div>
 
-                                <div className="landing-footer-emblem" aria-hidden="true">
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-1" />
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-2" />
-                                    <div className="landing-footer-emblem-ring landing-footer-emblem-ring-3" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-1" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-2" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-3" />
-                                    <div className="landing-footer-emblem-node landing-footer-emblem-node-4" />
-                                    <div className="landing-footer-emblem-core">
-                                        <img src={appLogo} alt="" className="landing-footer-emblem-logo" />
-                                    </div>
+                                <div className="landing-footer-links-grid">
+                                    {LANDING_FOOTER_COLUMNS.map((column) => (
+                                        <div key={column.title} className="landing-footer-column">
+                                            <p className="landing-footer-column-title">{column.title}</p>
+                                            <div className="landing-footer-column-links">
+                                                {column.items.map((item) => (
+                                                    item.href ? (
+                                                        <a
+                                                            key={item.label}
+                                                            href={item.href}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="landing-footer-link"
+                                                        >
+                                                            {item.label}
+                                                        </a>
+                                                    ) : (
+                                                        <button
+                                                            key={item.label}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (item.path) onNavigate(item.path);
+                                                            }}
+                                                            className="landing-footer-link"
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    )
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
                             <div className="landing-footer-divider" />
 
-                            <div className="landing-footer-bottom-row">
-                                <div className="landing-footer-links-block">
-                                    <h4>Useful links</h4>
-                                    <div className="landing-footer-links-stack">
-                                        <button type="button" onClick={() => onNavigate('/templates')} className="landing-footer-link">Careers</button>
-                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Terms of Services</button>
-                                        <button type="button" onClick={() => onNavigate('/learn')} className="landing-footer-link">Privacy Policy</button>
-                                    </div>
+                            <div className="landing-footer-meta-row">
+                                <div className="landing-footer-meta-left">
+                                    <p className="landing-footer-copyright">Copyright 2026 EazyUI. All rights reserved.</p>
+                                    <button
+                                        type="button"
+                                        onClick={toggleTheme}
+                                        className="landing-footer-theme-pill"
+                                        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                                        title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                                    >
+                                        <Monitor size={13} />
+                                        {theme === 'light' ? <Moon size={12} /> : <Sun size={12} />}
+                                    </button>
                                 </div>
 
-                                <div className="landing-footer-follow-block">
-                                    <h4>Follow us</h4>
-                                    <div className="landing-footer-social-row">
-                                        <a href="https://x.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="X">
-                                            <X size={16} />
-                                        </a>
-                                        <a href="https://youtube.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-red" aria-label="YouTube">
-                                            <Youtube size={16} />
-                                        </a>
-                                        <a href="https://instagram.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon" aria-label="Instagram">
-                                            <Instagram size={16} />
-                                        </a>
-                                        <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="landing-footer-social-icon is-blue" aria-label="LinkedIn">
-                                            <Linkedin size={16} />
-                                        </a>
-                                    </div>
-
-                                    <div className="landing-footer-signature">
-                                        <div className="landing-footer-signature-brand">
-                                            <img src={appLogo} alt="EazyUI logo" className="landing-footer-signature-logo" />
-                                            <span>EazyUI</span>
-                                        </div>
-                                        <p>© Copyright 2026 EazyUI Inc. All rights reserved</p>
-                                    </div>
+                                <div className="landing-footer-social-row">
+                                    {LANDING_FOOTER_SOCIALS.map((item) => {
+                                        const Icon = item.icon;
+                                        return (
+                                            <a
+                                                key={item.label}
+                                                href={item.href}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="landing-footer-social-icon"
+                                                aria-label={item.label}
+                                            >
+                                                <Icon size={15} />
+                                            </a>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="landing-footer-bottom-half" aria-hidden="true">
-                            <div className="landing-footer-wordmark">eazyui</div>
                         </div>
                     </div>
                 </footer>
@@ -524,3 +569,4 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
         </div>
     );
 }
+

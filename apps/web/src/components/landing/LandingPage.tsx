@@ -1340,7 +1340,7 @@ export function LandingPage({ onStart, onNavigate, userProfile, onSignOut, onSen
                                             }}
                                             placeholder=""
                                             placeholderClassName="px-2 py-1 text-left"
-                                            className="no-focus-ring w-full min-h-[72px] max-h-[180px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:ring-0"
+                                            className="no-focus-ring w-full min-h-[102px] max-h-[230px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:ring-0"
                                         />
                                     </div>
                                 </div>

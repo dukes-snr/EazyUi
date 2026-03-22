@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, Zap } from 'lucide-react';
+import { ArrowUp, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient, type BillingSummary } from '../../api/client';
@@ -88,6 +88,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const setTheme = useUiStore((state) => state.setTheme);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
@@ -320,10 +322,32 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.innerWidth < 1024) {
-      setSidebarExpanded(false);
-    }
+
+    const syncViewport = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobileViewport(mobile);
+      if (mobile) {
+        setSidebarExpanded(false);
+      } else {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+    return () => window.removeEventListener('resize', syncViewport);
   }, []);
+
+  useEffect(() => {
+    if (!isMobileSidebarOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileSidebarOpen]);
 
   useEffect(() => {
     const unsub = observeAuthState((user) => setAuthUser(user));
@@ -563,9 +587,162 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
 
   return (
     <div className="h-screen w-screen text-[var(--ui-text)]">
+      {isMobileViewport && isMobileSidebarOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-[color:color-mix(in_srgb,var(--workspace-backdrop)_82%,black)]/85 backdrop-blur-md lg:hidden"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        >
+          <div
+            className="flex h-full w-full max-w-[22rem] flex-col bg-[var(--ui-surface-1)] px-4 pb-5 pt-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileSidebarOpen(false);
+                  onNavigate('/');
+                }}
+                className="flex items-center gap-3 rounded-[20px] px-2 py-2 text-left"
+              >
+                <span className="grid h-10 w-10 place-items-center">
+                  <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+                </span>
+                <span>
+                  <span className="block text-base font-semibold text-[var(--ui-text)]">EazyUI</span>
+                  <span className="block text-[11px] text-[var(--ui-text-subtle)]">Project workspace</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(false)}
+                className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)]"
+                aria-label="Close menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-6 flex flex-1 flex-col overflow-hidden">
+              <div className="overflow-y-auto pr-1">
+                <p className="mb-2 px-2 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
+                <nav className="flex flex-col gap-2">
+                  {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setIsMobileSidebarOpen(false);
+                        onClick();
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-[22px] px-3 py-3 text-left transition-all ${active
+                        ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft-strong)] text-[var(--ui-text)]'
+                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}
+                    >
+                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
+                        <Icon size={16} className={iconClassName} />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
+                        <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
+                      </span>
+                    </button>
+                  ))}
+                </nav>
+
+                <div className="mt-6 rounded-[24px] border border-[var(--workspace-upgrade-border)] bg-[var(--workspace-upgrade-bg)] p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--ui-bg)] text-[var(--color-text)]">
+                      <Sparkles size={16} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Upgrade plan</p>
+                      <p className="mt-1 text-base font-semibold text-[var(--ui-text)]">Pro Plan</p>
+                      <p className="mt-2 text-[12px] leading-5 text-[var(--ui-text-muted)]">
+                        Unlock faster queues, larger credit caps, and premium workspace tools.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSidebarOpen(false);
+                      onNavigate('/pricing');
+                    }}
+                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/30 bg-[var(--color-accent)] px-4 text-sm font-semibold text-[var(--workspace-upgrade-button-text)] transition-colors hover:bg-white"
+                  >
+                    View plans
+                  </button>
+                </div>
+
+                <div className="mt-6 rounded-[22px]">
+                  <p className="pl-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--workspace-soft-strong)] p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTheme('light')}
+                      className={`inline-flex h-11 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'light'
+                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                        : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                    >
+                      <Sun size={14} />
+                      Light
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTheme('dark')}
+                      className={`inline-flex h-11 items-center justify-center gap-2 rounded-[14px] text-sm font-medium transition-colors ${theme === 'dark'
+                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
+                        : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                    >
+                      <Moon size={14} />
+                      Dark
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-[var(--workspace-sidebar-border)] pt-4">
+                <div className="flex items-center gap-3 rounded-[22px] bg-[var(--workspace-soft)] px-3 py-3 text-left">
+                  <span className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
+                    <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
+                    <span className="block truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSidebarOpen(false);
+                      onNavigate('/pricing');
+                    }}
+                    className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)]"
+                  >
+                    Billing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSidebarOpen(false);
+                      void handleSignOut();
+                    }}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 px-3 text-xs font-medium uppercase tracking-[0.08em] text-rose-200"
+                  >
+                    <LogOut size={13} />
+                    Logout
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="workspace-shell-frame flex h-full overflow-hidden p-2 md:p-3">
         <aside
-          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[28px] transition-[width] duration-300 ease-out"
+          className="hidden h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[28px] bg-[var(--ui-surface-1)] transition-[width] duration-300 ease-out lg:flex"
           style={{ width: sidebarWidth }}
         >
           <div className={`flex shrink-0 items-center ${sidebarExpanded ? 'justify-between gap-3' : 'flex-col gap-2'}`}>
@@ -812,19 +989,30 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           </div>
         </aside>
 
-        <div className="min-w-0 flex-1 pl-2 md:pl-3">
+        <div className="min-w-0 flex-1 lg:pl-3">
           <div className="flex h-full flex-col overflow-hidden rounded-[30px] bg-[var(--ui-surface-1)] shadow-[var(--workspace-content-shadow)]">
-            <div className="px-5 py-4 md:px-7">
+            <div className="px-4 py-4 md:px-7">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  {/* <h1 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--ui-text)] md:text-[30px]">Projects</h1> */}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileSidebarOpen(true)}
+                    className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] lg:hidden"
+                    aria-label="Open workspace menu"
+                  >
+                    <Menu size={18} />
+                  </button>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)] lg:hidden">Workspace</p>
+                    {/* <h1 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--ui-text)] md:text-[30px]">Projects</h1> */}
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${shellBadgeClassName}`}>
                     <FolderOpen size={12} />
                     {projects.length} projects
                   </span>
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${shellBadgeClassName}`}>
+                  <span className={`hidden items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] sm:inline-flex ${shellBadgeClassName}`}>
                     {theme === 'light' ? <Sun size={12} /> : <Moon size={12} />}
                     {theme} mode
                   </span>
@@ -850,7 +1038,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     Build faster in one workspace
                   </motion.p>
                   <motion.p
-                    className="mt-5 text-[42px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] md:text-[58px]"
+                    className="mt-5 text-[32px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] sm:text-[38px] md:text-[58px]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 16 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.58, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
@@ -890,7 +1078,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 images={starterImages}
                 onRemove={(index) => setStarterImages((prev) => prev.filter((_, i) => i !== index))}
               />
-              <div className="relative z-10 rounded-[28px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-3 text-left md:p-4">
+              <div className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -900,7 +1088,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   className="hidden"
                 />
                 <div className="flex items-start gap-2 px-1">
-                  <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px]">
+                  <div className="mt-0.5 hidden h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px] sm:block">
                     <Orb
                       className="h-full w-full"
                       colors={workspaceOrbColors}
@@ -958,11 +1146,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     }}
                     placeholder="What do you want to create?"
                     placeholderClassName="px-2 py-1 text-left"
-                    className="no-focus-ring w-full min-h-[72px] max-h-[220px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0"
+                    className="no-focus-ring w-full min-h-[88px] max-h-[240px] overflow-y-auto border-0 bg-transparent px-1 py-1 text-[15px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0 sm:px-2 sm:text-[16px]"
                   />
                 </div>
-                <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between gap-3 border-t border-[var(--ui-border)] pt-2">
+                <div className="flex items-center gap-2.5">
                   <div className="relative">
                     <motion.button
                       type="button"
@@ -974,7 +1162,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         }
                         setIsAddMenuOpen(true);
                       }}
-                      className="grid h-9 w-9 place-items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
+                      className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
                       title="Add to prompt"
                       whileHover={shouldReduceMotion ? undefined : { y: -1 }}
                       whileTap={shouldReduceMotion ? undefined : { scale: 0.97 }}
@@ -995,33 +1183,33 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       />
                     )}
                   </div>
-                  <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
+                  <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                       <button
                         key={p}
                         type="button"
                         onClick={() => setDeviceType(p)}
                         className={`p-1.5 rounded-full transition-all ${deviceType === p
-                          ? 'bg-[var(--ui-primary)] text-white shadow-[0_8px_22px_color-mix(in_srgb,var(--ui-primary)_20%,transparent)]'
-                          : 'text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text-muted)]'
+                          ? 'bg-[var(--ui-primary)] text-[var(--ui-text)] shadow-sm'
+                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
                           }`}
                         title={`Generate for ${p}`}
                       >
-                        {p === 'mobile' && <Smartphone size={14} />}
-                        {p === 'tablet' && <Tablet size={14} />}
-                        {p === 'desktop' && <Monitor size={14} />}
+                        {p === 'mobile' && <Smartphone size={15} />}
+                        {p === 'tablet' && <Tablet size={15} />}
+                        {p === 'desktop' && <Monitor size={15} />}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center rounded-full bg-[var(--ui-surface-3)] p-1 ring-1 ring-[var(--ui-border)]">
+                  <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
                     <button
                       type="button"
                       onClick={() => setModelProfile('fast')}
                       className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                        ? 'bg-amber-500/20 text-[var(--ui-text)] ring-1 ring-amber-400/40'
-                        : 'text-amber-400 hover:bg-[var(--ui-surface-4)] hover:text-amber-200'
+                        ? 'bg-[var(--ui-surface-1)] text-amber-400 ring-1 ring-amber-400/40'
+                        : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-1)]'
                         }`}
                       title="Fast mode"
                     >
@@ -1031,15 +1219,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       type="button"
                       onClick={() => setModelProfile('quality')}
                       className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] text-[var(--ui-text)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
-                        : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-primary)]'
+                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
+                        : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)]'
                         }`}
                       title="Quality mode"
                     >
                       <Sparkles size={12} />
                     </button>
                   </div>
-                  <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
+                  <div ref={styleMenuRef} className="relative flex items-center">
                     <button
                       type="button"
                       onClick={() => setShowStyleMenu((open) => !open)}
@@ -1188,11 +1376,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           )}
 
           {!loading && projects.length > 0 && (
-            <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <section className="mt-6 grid grid-cols-2 gap-3">
               {projects.map((project, index) => (
                 <motion.article
                   key={project.id}
-                  className={`relative rounded-[24px] border p-4 shadow-[0_16px_32px_rgba(0,0,0,0.06)] ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}
+                  className={`relative rounded-[22px] border p-3 shadow-[0_16px_32px_rgba(0,0,0,0.06)] sm:rounded-[24px] sm:p-4 ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 24, scale: 0.985 }}
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.42, delay: Math.min(index * 0.04, 0.24), ease: [0.22, 1, 0.36, 1] }}
@@ -1222,15 +1410,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         );
                       }
                       return (
-                        <div className="relative flex h-[260px] items-center justify-center gap-3 overflow-hidden rounded-[20px] bg-[var(--workspace-soft-strong)] px-3 py-4">
+                        <div className="relative flex h-[210px] items-center justify-center gap-2 overflow-hidden rounded-[18px] bg-[var(--workspace-soft-strong)] px-2 py-3 sm:h-[260px] sm:gap-3 sm:rounded-[20px] sm:px-3 sm:py-4">
                           {frameImages.map((imageUrl, index) => (
                             <div
                               key={`${project.id}-preview-${index}`}
                               className={`relative overflow-hidden rounded-[18px] border border-white/15 bg-[#080A12] shadow-[0_16px_30px_rgba(0,0,0,0.5)] ${frameImages.length > 1
                                 ? index === 0
-                                  ? 'h-[220px] w-[108px] -rotate-3'
-                                  : 'h-[220px] w-[108px] rotate-3'
-                                : 'h-[230px] w-[116px]'
+                                  ? 'h-[170px] w-[82px] -rotate-3 sm:h-[220px] sm:w-[108px]'
+                                  : 'h-[170px] w-[82px] rotate-3 sm:h-[220px] sm:w-[108px]'
+                                : 'h-[182px] w-[92px] sm:h-[230px] sm:w-[116px]'
                                 }`}
                             >
                               <div className="absolute inset-[3px] overflow-hidden rounded-[15px] bg-[#121623]">
@@ -1260,12 +1448,12 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     <span>Updated {formatDate(project.updatedAt)}</span>
                     <span>{project.screenCount ?? 0} screens</span>
                   </div>
-                  <div className="mt-4 flex items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => onOpenProject(project.id)}
                       disabled={deletingIdSet.has(project.id)}
-                      className="h-8 rounded-full border border-[var(--ui-border-light)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)] disabled:opacity-50"
+                      className="h-9 rounded-full border border-[var(--ui-border-light)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)] disabled:opacity-50"
                     >
                       <span className="inline-flex items-center gap-1.5"><FolderOpen size={12} /> Open</span>
                     </button>
@@ -1273,7 +1461,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       type="button"
                       onClick={() => void handleDelete([project.id])}
                       disabled={deletingIdSet.has(project.id) || deleteProgress !== null}
-                      className="h-8 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--color-error)] hover:bg-rose-500/20 disabled:opacity-50"
+                      className="h-9 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--color-error)] hover:bg-rose-500/20 disabled:opacity-50"
                     >
                       <span className="inline-flex items-center gap-1.5">
                         {deletingIdSet.has(project.id) ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}

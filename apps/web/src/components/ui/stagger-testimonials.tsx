@@ -135,7 +135,7 @@ export function StaggerTestimonials({ testimonials, className }: StaggerTestimon
                 return;
             }
 
-            setCardSize(290);
+            setCardSize(320);
         };
 
         updateSize();
@@ -146,7 +146,7 @@ export function StaggerTestimonials({ testimonials, className }: StaggerTestimon
     return (
         <div
             className={cn('relative w-full overflow-hidden rounded-[32px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]', className)}
-            style={{ height: cardSize + 250 }}
+            style={{ height: cardSize + (cardSize <= 320 ? 290 : 250) }}
         >
             {testimonialsList.map((testimonial, index) => {
                 const position = testimonialsList.length % 2
