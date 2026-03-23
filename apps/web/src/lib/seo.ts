@@ -10,6 +10,7 @@ export type SeoConfig = {
     path: string;
     robots?: string;
     ogType?: 'website' | 'article';
+    jsonLd?: Array<Record<string, unknown>>;
 };
 
 const DEFAULT_DESCRIPTION = 'Generate and edit UI designs with AI. Create beautiful interfaces with natural language prompts.';
@@ -63,6 +64,20 @@ function setOptionalVerification() {
     setMeta('google-site-verification', verification);
 }
 
+function setStructuredData(items: Array<Record<string, unknown>>) {
+    const existing = Array.from(document.head.querySelectorAll('script[data-eazyui-seo-jsonld="true"]'));
+    existing.forEach((element) => element.remove());
+
+    items.forEach((item, index) => {
+        const script = document.createElement('script');
+        script.type = 'application/ld+json';
+        script.dataset.eazyuiSeoJsonld = 'true';
+        script.dataset.eazyuiSeoJsonldIndex = String(index);
+        script.text = JSON.stringify(item);
+        document.head.appendChild(script);
+    });
+}
+
 export function applySeo(config: SeoConfig) {
     const siteUrl = getSiteUrl();
     const canonicalUrl = `${siteUrl}${config.path === '/' ? '' : config.path}`;
@@ -91,5 +106,5 @@ export function applySeo(config: SeoConfig) {
 
     setLink('canonical', canonicalUrl);
     setOptionalVerification();
+    setStructuredData(config.jsonLd || []);
 }
-

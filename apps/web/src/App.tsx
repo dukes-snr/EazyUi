@@ -26,7 +26,7 @@ import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import { subscribeProjectRealtime } from './lib/firestoreData';
 import { capturePostHogPageview, identifyPostHogUser, resetPostHogUser } from './lib/posthog';
-import { applySeo, type SeoConfig } from './lib/seo';
+import { applySeo, getSiteUrl, type SeoConfig } from './lib/seo';
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
@@ -138,43 +138,148 @@ function createProjectId() {
     return `project-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildBreadcrumbJsonLd(items: Array<{ name: string; path: string }>) {
+    const siteUrl = getSiteUrl();
+    return {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: items.map((item, index) => ({
+            '@type': 'ListItem',
+            position: index + 1,
+            name: item.name,
+            item: `${siteUrl}${item.path === '/' ? '' : item.path}`,
+        })),
+    };
+}
+
+function getPublicStructuredData(path: string, pageName: string) {
+    const siteUrl = getSiteUrl();
+    const canonicalUrl = `${siteUrl}${path === '/' ? '' : path}`;
+    const organization = {
+        '@context': 'https://schema.org',
+        '@type': 'Organization',
+        name: 'EazyUI',
+        url: siteUrl,
+        logo: `${siteUrl}/favicon.png`,
+        description: 'EazyUI is an AI landing page builder and UI design tool for generating polished interfaces from prompts.',
+    };
+    const website = {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: 'EazyUI',
+        url: siteUrl,
+    };
+    const softwareApplication = {
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'EazyUI',
+        applicationCategory: 'DesignApplication',
+        operatingSystem: 'Web',
+        url: siteUrl,
+        image: `${siteUrl}/favicon.png`,
+        description: 'AI landing page builder and UI design tool for creating websites, product screens, and export-ready interface concepts.',
+        offers: {
+            '@type': 'Offer',
+            price: '0',
+            priceCurrency: 'USD',
+            description: 'Free plan available',
+        },
+    };
+    const webpage = {
+        '@context': 'https://schema.org',
+        '@type': 'WebPage',
+        name: pageName,
+        url: canonicalUrl,
+        isPartOf: {
+            '@type': 'WebSite',
+            name: 'EazyUI',
+            url: siteUrl,
+        },
+    };
+
+    return { organization, website, softwareApplication, webpage };
+}
+
 function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
+    const publicData = getPublicStructuredData('/', 'EazyUI');
+
     switch (route.kind) {
         case 'landing':
             return {
-                title: 'EazyUI | AI-Powered UI Design and Landing Pages',
-                description: 'Create landing pages, polished interfaces, and product UI concepts with AI. EazyUI helps you go from prompt to production-ready direction faster.',
+                title: 'AI Landing Page Builder & UI Design Tool | EazyUI',
+                description: 'EazyUI is an AI landing page builder and UI design tool for creating landing pages, website concepts, and product interfaces from prompts, with HTML and Figma-ready outputs.',
                 path: '/',
+                jsonLd: [
+                    publicData.organization,
+                    publicData.website,
+                    publicData.softwareApplication,
+                    publicData.webpage,
+                ],
             };
         case 'templates':
             return {
-                title: 'Templates | EazyUI',
-                description: 'Browse UI templates, reusable sections, and design building blocks to accelerate your next product or landing page.',
+                title: 'AI Landing Page Templates & UI Sections | EazyUI',
+                description: 'Browse landing page templates, reusable UI sections, and website building blocks to launch SaaS pages and product marketing sites faster with EazyUI.',
                 path: '/templates',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData('/templates', 'Templates | EazyUI')),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Templates', path: '/templates' },
+                    ]),
+                ],
             };
         case 'learn':
             return {
-                title: 'Learn | EazyUI',
-                description: 'Learn prompting, editing, and workflow techniques for generating stronger UI directions and cleaner design outputs with EazyUI.',
+                title: 'AI UI Design Prompt Guide & Tutorials | EazyUI',
+                description: 'Learn how to prompt AI for landing pages, app interfaces, and stronger design directions with practical EazyUI tutorials, editing workflows, and prompt guidance.',
                 path: '/learn',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData('/learn', 'Learn | EazyUI')),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Learn', path: '/learn' },
+                    ]),
+                ],
             };
         case 'pricing':
             return {
-                title: 'Pricing | EazyUI',
-                description: 'Compare EazyUI pricing plans, feature access, and workflow capacity for solo builders, designers, and teams.',
+                title: 'AI Landing Page Builder Pricing | EazyUI',
+                description: 'Compare EazyUI pricing for AI landing page generation, UI design workflows, prompt-based editing, and team collaboration features.',
                 path: '/pricing',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData('/pricing', 'Pricing | EazyUI')),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Pricing', path: '/pricing' },
+                    ]),
+                ],
             };
         case 'changelog':
             return {
-                title: 'Changelog | EazyUI',
-                description: 'Follow product improvements, releases, and workflow updates across the EazyUI design and canvas experience.',
+                title: 'Product Changelog & Releases | EazyUI',
+                description: 'Follow EazyUI product releases, UI workflow improvements, canvas updates, and design-tool improvements as the platform evolves.',
                 path: '/changelog',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData('/changelog', 'Changelog | EazyUI')),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Changelog', path: '/changelog' },
+                    ]),
+                ],
             };
         case 'contact':
             return {
-                title: 'Contact | EazyUI',
-                description: 'Talk to the EazyUI team about support, product questions, partnerships, or plan recommendations.',
+                title: 'Contact EazyUI | Sales, Support, and Partnerships',
+                description: 'Contact EazyUI for product support, sales questions, pricing help, partnerships, or workflow guidance for your AI design setup.',
                 path: '/contact',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData('/contact', 'Contact | EazyUI')),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Contact', path: '/contact' },
+                    ]),
+                ],
             };
         case 'login':
             return {
@@ -182,6 +287,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Access your EazyUI account.',
                 path: '/auth/login',
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         case 'app-home':
             return {
@@ -189,6 +295,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Create and manage UI projects inside EazyUI.',
                 path: '/app',
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         case 'app-projects':
             return {
@@ -196,6 +303,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Manage your EazyUI projects.',
                 path: '/app/projects',
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         case 'app-project-new':
             return {
@@ -203,6 +311,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Create a new EazyUI project.',
                 path: '/app/projects/new',
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         case 'app-project-settings':
             return {
@@ -210,6 +319,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Configure your EazyUI project settings.',
                 path: `/app/projects/${encodeURIComponent(route.projectId)}/settings${route.tab ? `?tab=${encodeURIComponent(route.tab)}` : ''}`,
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         case 'app-project-canvas':
             return {
@@ -217,12 +327,14 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: 'Edit and arrange UI screens in the EazyUI canvas workspace.',
                 path: `/app/projects/${encodeURIComponent(route.projectId)}/canvas${route.screenId ? `/${encodeURIComponent(route.screenId)}` : ''}`,
                 robots: 'noindex,nofollow',
+                jsonLd: [],
             };
         default:
             return {
                 title: 'EazyUI',
                 description: 'AI-powered UI design workspace.',
                 path: '/',
+                jsonLd: [],
             };
     }
 }
