@@ -21,7 +21,13 @@ const ENV_FILES = [
 const ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
   { path: '/templates', changefreq: 'weekly', priority: '0.9' },
-  { path: '/learn', changefreq: 'weekly', priority: '0.85' },
+  { path: '/blog', changefreq: 'weekly', priority: '0.9' },
+  { path: '/blog/prompt-engineering-for-ai-landing-pages', changefreq: 'monthly', priority: '0.82' },
+  { path: '/blog/reference-led-prompts-for-better-ui-first-passes', changefreq: 'monthly', priority: '0.81' },
+  { path: '/blog/ai-landing-page-builder-vs-traditional-design-workflow', changefreq: 'monthly', priority: '0.81' },
+  { path: '/blog/turning-ai-ui-outputs-into-build-ready-specs', changefreq: 'monthly', priority: '0.8' },
+  { path: '/blog/seo-friendly-landing-pages-generated-with-ai', changefreq: 'monthly', priority: '0.82' },
+  { path: '/blog/pricing-pages-that-convert-with-ai-design', changefreq: 'monthly', priority: '0.8' },
   { path: '/pricing', changefreq: 'weekly', priority: '0.85' },
   { path: '/changelog', changefreq: 'weekly', priority: '0.8' },
   { path: '/contact', changefreq: 'monthly', priority: '0.7' },
@@ -46,7 +52,7 @@ function readEnvValue(key) {
 
 function normalizeSiteUrl(raw) {
   const trimmed = String(raw || '').trim();
-  if (!trimmed) return 'http://localhost:5173';
+  if (!trimmed) return 'https://eazyui.vercel.app';
   return trimmed.replace(/\/+$/, '');
 }
 

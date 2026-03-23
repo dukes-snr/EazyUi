@@ -407,7 +407,7 @@ export function CanvasProfileMenu() {
 
     const goToHelp = () => {
         setOpenProfile(false);
-        window.history.pushState({}, '', '/learn');
+        window.history.pushState({}, '', '/blog');
         window.dispatchEvent(new PopStateEvent('popstate'));
     };
 

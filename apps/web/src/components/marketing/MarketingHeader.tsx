@@ -17,7 +17,7 @@ type MarketingHeaderProps = {
 const NAV_ITEMS = [
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
-    { label: 'Learn', path: '/learn' },
+    { label: 'Blog', path: '/blog' },
     { label: "What's New", path: '/changelog' },
 ] as const;
 
@@ -51,6 +51,12 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
     }, []);
 
     const currentPath = window.location.pathname;
+    const isNavItemActive = (path: string) => {
+        if (path === '/blog') {
+            return currentPath === '/blog' || currentPath === '/learn' || currentPath.startsWith('/blog/');
+        }
+        return currentPath === path;
+    };
 
     useEffect(() => {
         setIsMobileNavOpen(false);
@@ -94,7 +100,7 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                                     setIsMobileNavOpen(false);
                                     onNavigate(item.path);
                                 }}
-                                className={`flex min-h-14 items-center rounded-[22px] px-4 text-left text-base font-medium transition-colors ${currentPath === item.path ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]' : 'text-[var(--ui-text)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)]'}`}
+                                className={`flex min-h-14 items-center rounded-[22px] px-4 text-left text-base font-medium transition-colors ${isNavItemActive(item.path) ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]' : 'text-[var(--ui-text)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)]'}`}
                             >
                                 {item.label}
                             </button>
@@ -219,7 +225,7 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)] ${currentPath === item.path ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
+                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)] ${isNavItemActive(item.path) ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
                             >
                                 {item.label}
                             </button>

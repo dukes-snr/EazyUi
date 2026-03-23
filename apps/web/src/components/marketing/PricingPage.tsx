@@ -141,8 +141,8 @@ const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
         items: [
             { label: 'Create', path: '/app' },
             { label: 'Templates', path: '/templates' },
-            { label: 'Components', path: '/learn' },
-            { label: 'Assets', path: '/learn' },
+            { label: 'Components', path: '/blog' },
+            { label: 'Assets', path: '/blog' },
             { label: 'Pricing', path: '/pricing' },
             { label: 'Changelog', path: '/changelog' },
         ],
@@ -150,12 +150,12 @@ const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
     {
         title: 'Resources',
         items: [
-            { label: 'Introduction', path: '/learn' },
-            { label: 'How to Prompt', path: '/learn' },
-            { label: 'How to Edit', path: '/learn' },
+            { label: 'Introduction', path: '/blog' },
+            { label: 'How to Prompt', path: '/blog' },
+            { label: 'How to Edit', path: '/blog' },
             { label: 'Sell Templates', path: '/templates' },
             { label: 'Affiliates', path: '/contact' },
-            { label: 'FAQ', path: '/learn' },
+            { label: 'FAQ', path: '/blog' },
         ],
     },
     {
@@ -163,7 +163,7 @@ const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
         items: [
             { label: 'Mobbin', href: 'https://mobbin.com' },
             { label: 'Screen Studio', href: 'https://www.screen.studio' },
-            { label: 'Courses', path: '/learn' },
+            { label: 'Courses', path: '/blog' },
             { label: 'UI Kit', path: '/templates' },
             { label: 'Video Editor', href: 'https://www.adobe.com/products/premiere.html' },
             { label: 'Mockups', path: '/templates' },
@@ -172,8 +172,8 @@ const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
     {
         title: 'Connect',
         items: [
-            { label: 'Privacy', path: '/learn' },
-            { label: 'Terms', path: '/learn' },
+            { label: 'Privacy', path: '/blog' },
+            { label: 'Terms', path: '/blog' },
             { label: 'Support', path: '/contact' },
             { label: 'Report Issue', path: '/contact' },
             { label: 'LinkedIn', href: 'https://linkedin.com' },

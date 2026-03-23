@@ -9,7 +9,8 @@ import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
 import { EditWorkspaceOverlay } from './components/edit/EditWorkspaceOverlay';
 import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { LandingPage } from './components/landing/LandingPage';
-import { LearnPage } from './components/marketing/LearnPage';
+import { BlogDetailPage } from './components/marketing/BlogDetailPage';
+import { BlogPage } from './components/marketing/BlogPage';
 import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
@@ -28,6 +29,7 @@ import { subscribeProjectRealtime } from './lib/firestoreData';
 import { capturePostHogPageview, identifyPostHogUser, resetPostHogUser } from './lib/posthog';
 import { applySeo, getSiteUrl, type SeoConfig } from './lib/seo';
 import type { ChatMessage } from './stores/chat-store';
+import { getBlogPostBySlug } from './content/blogPosts';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
 import logo from './assets/Ui-logo.png';
@@ -40,7 +42,8 @@ type RouteInfo =
     | { kind: 'landing' }
     | { kind: 'login' }
     | { kind: 'templates' }
-    | { kind: 'learn' }
+    | { kind: 'blog' }
+    | { kind: 'blog-detail'; slug: string }
     | { kind: 'pricing' }
     | { kind: 'changelog' }
     | { kind: 'contact' }
@@ -108,10 +111,14 @@ function getRouteFromPath(): RouteInfo {
 
     if (path === '/auth/login' || path === '/login') return { kind: 'login' };
     if (path === '/templates') return { kind: 'templates' };
-    if (path === '/learn') return { kind: 'learn' };
+    if (path === '/learn' || path === '/blog') return { kind: 'blog' };
     if (path === '/pricing') return { kind: 'pricing' };
     if (path === '/changelog') return { kind: 'changelog' };
     if (path === '/contact') return { kind: 'contact' };
+
+    if (segments[0] === 'blog' && segments[1]) {
+        return { kind: 'blog-detail', slug: decodeURIComponent(segments[1]) };
+    }
 
     if (path === '/workspace') return { kind: 'app-home' }; // legacy route support
     if (path === '/app') return { kind: 'app-home' };
@@ -200,6 +207,42 @@ function getPublicStructuredData(path: string, pageName: string) {
     return { organization, website, softwareApplication, webpage };
 }
 
+function buildArticleJsonLd({
+    title,
+    description,
+    path,
+    publishedAt,
+}: {
+    title: string;
+    description: string;
+    path: string;
+    publishedAt: string;
+}) {
+    const siteUrl = getSiteUrl();
+    const canonicalUrl = `${siteUrl}${path === '/' ? '' : path}`;
+    return {
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: title,
+        description,
+        datePublished: publishedAt,
+        dateModified: publishedAt,
+        mainEntityOfPage: canonicalUrl,
+        author: {
+            '@type': 'Organization',
+            name: 'EazyUI',
+        },
+        publisher: {
+            '@type': 'Organization',
+            name: 'EazyUI',
+            logo: {
+                '@type': 'ImageObject',
+                url: `${siteUrl}/favicon.png`,
+            },
+        },
+    };
+}
+
 function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
     const publicData = getPublicStructuredData('/', 'EazyUI');
 
@@ -229,19 +272,52 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                     ]),
                 ],
             };
-        case 'learn':
+        case 'blog':
             return {
-                title: 'AI UI Design Prompt Guide & Tutorials | EazyUI',
-                description: 'Learn how to prompt AI for landing pages, app interfaces, and stronger design directions with practical EazyUI tutorials, editing workflows, and prompt guidance.',
-                path: '/learn',
+                title: 'AI Landing Page Builder Blog, Prompting Guides & SEO Notes | EazyUI',
+                description: 'Read the EazyUI blog for prompt engineering guides, AI landing page workflow notes, pricing page breakdowns, and SEO-focused articles for modern product sites.',
+                path: '/blog',
                 jsonLd: [
-                    ...Object.values(getPublicStructuredData('/learn', 'Learn | EazyUI')),
+                    ...Object.values(getPublicStructuredData('/blog', 'Blog | EazyUI')),
                     buildBreadcrumbJsonLd([
                         { name: 'Home', path: '/' },
-                        { name: 'Learn', path: '/learn' },
+                        { name: 'Blog', path: '/blog' },
                     ]),
                 ],
             };
+        case 'blog-detail': {
+            const post = getBlogPostBySlug(route.slug);
+            if (!post) {
+                return {
+                    title: 'Blog | EazyUI',
+                    description: 'Read practical articles about AI landing pages, UI prompting, and product design workflows.',
+                    path: `/blog/${encodeURIComponent(route.slug)}`,
+                    jsonLd: [],
+                };
+            }
+
+            const articlePath = `/blog/${post.slug}`;
+            return {
+                title: post.seoTitle,
+                description: post.seoDescription,
+                path: articlePath,
+                ogType: 'article',
+                jsonLd: [
+                    ...Object.values(getPublicStructuredData(articlePath, `${post.title} | EazyUI`)),
+                    buildBreadcrumbJsonLd([
+                        { name: 'Home', path: '/' },
+                        { name: 'Blog', path: '/blog' },
+                        { name: post.title, path: articlePath },
+                    ]),
+                    buildArticleJsonLd({
+                        title: post.title,
+                        description: post.seoDescription,
+                        path: articlePath,
+                        publishedAt: new Date(post.publishedAt).toISOString(),
+                    }),
+                ],
+            };
+        }
         case 'pricing':
             return {
                 title: 'AI Landing Page Builder Pricing | EazyUI',
@@ -1019,6 +1095,12 @@ function App() {
         if (route.kind === 'templates') {
             return <TemplatesPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
+        if (route.kind === 'blog') {
+            return <BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        }
+        if (route.kind === 'blog-detail') {
+            return <BlogDetailPage slug={route.slug} onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        }
         if (route.kind === 'pricing') {
             return <PricingPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
@@ -1028,7 +1110,7 @@ function App() {
         if (route.kind === 'contact') {
             return <ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
         }
-        return <LearnPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        return <BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
     }
 
     if (route.kind === 'app-project-canvas' && isMobileCanvasViewport) {

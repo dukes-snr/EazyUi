@@ -103,7 +103,7 @@ export function TemplatesPage({ onNavigate, onOpenApp }: TemplatesPageProps) {
                         ) : null}
 
                         <div className="mt-14 flex flex-col items-center justify-between gap-5 text-[12px] text-[var(--ui-text-subtle)] md:flex-row">
-                            <button type="button" onClick={() => onNavigate('/learn')} className="transition-colors hover:text-[var(--ui-text)]">
+                            <button type="button" onClick={() => onNavigate('/blog')} className="transition-colors hover:text-[var(--ui-text)]">
                                 Privacy Policy
                             </button>
                             <p>Made with EazyUI</p>
