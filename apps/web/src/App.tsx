@@ -26,6 +26,7 @@ import type { User } from 'firebase/auth';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from './lib/auth';
 import { subscribeProjectRealtime } from './lib/firestoreData';
 import { capturePostHogPageview, identifyPostHogUser, resetPostHogUser } from './lib/posthog';
+import { applySeo, type SeoConfig } from './lib/seo';
 import type { ChatMessage } from './stores/chat-store';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
@@ -137,6 +138,95 @@ function createProjectId() {
     return `project-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
+    switch (route.kind) {
+        case 'landing':
+            return {
+                title: 'EazyUI | AI-Powered UI Design and Landing Pages',
+                description: 'Create landing pages, polished interfaces, and product UI concepts with AI. EazyUI helps you go from prompt to production-ready direction faster.',
+                path: '/',
+            };
+        case 'templates':
+            return {
+                title: 'Templates | EazyUI',
+                description: 'Browse UI templates, reusable sections, and design building blocks to accelerate your next product or landing page.',
+                path: '/templates',
+            };
+        case 'learn':
+            return {
+                title: 'Learn | EazyUI',
+                description: 'Learn prompting, editing, and workflow techniques for generating stronger UI directions and cleaner design outputs with EazyUI.',
+                path: '/learn',
+            };
+        case 'pricing':
+            return {
+                title: 'Pricing | EazyUI',
+                description: 'Compare EazyUI pricing plans, feature access, and workflow capacity for solo builders, designers, and teams.',
+                path: '/pricing',
+            };
+        case 'changelog':
+            return {
+                title: 'Changelog | EazyUI',
+                description: 'Follow product improvements, releases, and workflow updates across the EazyUI design and canvas experience.',
+                path: '/changelog',
+            };
+        case 'contact':
+            return {
+                title: 'Contact | EazyUI',
+                description: 'Talk to the EazyUI team about support, product questions, partnerships, or plan recommendations.',
+                path: '/contact',
+            };
+        case 'login':
+            return {
+                title: 'Login | EazyUI',
+                description: 'Access your EazyUI account.',
+                path: '/auth/login',
+                robots: 'noindex,nofollow',
+            };
+        case 'app-home':
+            return {
+                title: 'Workspace | EazyUI',
+                description: 'Create and manage UI projects inside EazyUI.',
+                path: '/app',
+                robots: 'noindex,nofollow',
+            };
+        case 'app-projects':
+            return {
+                title: 'Projects | EazyUI',
+                description: 'Manage your EazyUI projects.',
+                path: '/app/projects',
+                robots: 'noindex,nofollow',
+            };
+        case 'app-project-new':
+            return {
+                title: 'New Project | EazyUI',
+                description: 'Create a new EazyUI project.',
+                path: '/app/projects/new',
+                robots: 'noindex,nofollow',
+            };
+        case 'app-project-settings':
+            return {
+                title: 'Project Settings | EazyUI',
+                description: 'Configure your EazyUI project settings.',
+                path: `/app/projects/${encodeURIComponent(route.projectId)}/settings${route.tab ? `?tab=${encodeURIComponent(route.tab)}` : ''}`,
+                robots: 'noindex,nofollow',
+            };
+        case 'app-project-canvas':
+            return {
+                title: 'Canvas Workspace | EazyUI',
+                description: 'Edit and arrange UI screens in the EazyUI canvas workspace.',
+                path: `/app/projects/${encodeURIComponent(route.projectId)}/canvas${route.screenId ? `/${encodeURIComponent(route.screenId)}` : ''}`,
+                robots: 'noindex,nofollow',
+            };
+        default:
+            return {
+                title: 'EazyUI',
+                description: 'AI-powered UI design workspace.',
+                path: '/',
+            };
+    }
+}
+
 function App() {
     const { spec } = useDesignStore();
     const { doc } = useCanvasStore();
@@ -194,6 +284,10 @@ function App() {
             resetProjectMemory();
         }
     }, [projectId, resetProjectMemory]);
+
+    useEffect(() => {
+        applySeo(getSeoConfigForRoute(route));
+    }, [route]);
 
     useEffect(() => {
         let cancelled = false;
