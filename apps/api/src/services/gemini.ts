@@ -922,9 +922,27 @@ export interface GenerateOptions {
     stylePreset?: string;
     platform?: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     preferredModel?: string;
     temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
+}
+
+export interface AssetReference {
+    assetId: string;
+    name: string;
+    scope: 'project' | 'account';
+    kind: 'image' | 'logo' | 'component';
+    downloadUrl: string;
+    mimeType: string;
+    projectId?: string;
+    width?: number;
+    height?: number;
+    role?: 'logo' | 'product-shot' | 'illustration' | 'photo' | 'brand-texture';
+    pinned?: boolean;
+    isPreferredLogo?: boolean;
+    isKeyBrandAsset?: boolean;
+    source: 'saved_attachment' | 'project_brand';
 }
 
 export interface GenerateProjectDesignSystemOptions {
@@ -932,6 +950,7 @@ export interface GenerateProjectDesignSystemOptions {
     stylePreset?: string;
     platform?: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     preferredModel?: string;
     temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
@@ -1019,6 +1038,53 @@ Rules:
 - These URLs came from the referenced site scrape and are approved to use directly in <img src> attributes.
 - When a screen needs hero art, supporting media, or character imagery that matches the referenced site, prefer these exact URLs first.
 - Only fall back to Unsplash when none of these reference image URLs fit the specific component context.`;
+}
+
+function mergeAssetReferenceImages(images: string[], assetRefs: AssetReference[], limit = 8): string[] {
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const value of [...images, ...assetRefs.map((assetRef) => assetRef.downloadUrl)]) {
+        const normalized = String(value || '').trim();
+        if (!normalized) continue;
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        merged.push(normalized);
+        if (merged.length >= limit) break;
+    }
+    return merged;
+}
+
+function buildAssetReferenceContextPrompt(assetRefs: AssetReference[]): string {
+    if (!assetRefs.length) return '';
+    const lines = assetRefs
+        .slice(0, 12)
+        .map((assetRef, index) => {
+            const qualifiers = [
+                assetRef.source === 'project_brand' ? 'project brand asset' : 'saved prompt asset',
+                assetRef.scope === 'project' ? 'project scope' : 'account scope',
+                assetRef.role ? `role: ${assetRef.role}` : '',
+                assetRef.pinned ? 'pinned' : '',
+                assetRef.isPreferredLogo ? 'preferred logo' : '',
+                assetRef.isKeyBrandAsset ? 'key brand asset' : '',
+                typeof assetRef.width === 'number' && typeof assetRef.height === 'number'
+                    ? `${assetRef.width}x${assetRef.height}`
+                    : '',
+            ].filter(Boolean);
+            return `${index + 1}. ${assetRef.name} [${assetRef.kind}] (${qualifiers.join(', ')})\n   URL: ${assetRef.downloadUrl}`;
+        });
+    return `SAVED ASSET REFERENCES:
+${lines.join('\n')}
+
+Rules:
+- These saved asset references are distinct from raw prompt attachments.
+- Treat them as exact reusable media assets, not loose style inspiration.
+- If a relevant saved asset exists, use that asset instead of inventing or substituting a different logo, illustration, product image, or texture.
+- For logo assets: keep the exact mark/artwork from the saved asset. Do not redraw, rename, paraphrase, or replace it with placeholder brand text.
+- For product-shot, photo, illustration, and brand-texture assets: prefer the exact saved asset URL in hero areas, cards, galleries, and supporting media when it fits the request.
+- When editing existing HTML, update the relevant <img> src/srcset usage to the exact saved asset URL when the instruction implies replacement or brand alignment.
+- Prefer the preferred logo for brand marks, app bars, splash screens, and auth/header placements.
+- Use pinned and key brand assets when the request needs brand imagery, hero art, product photography, or textures.
+- Reuse these exact saved assets when relevant instead of inventing different brand imagery.`;
 }
 
 async function analyzeReferenceImages(images: string[]): Promise<string> {
@@ -1941,11 +2007,15 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
     const stylePreset = safeString(options.stylePreset, 'modern', 32).toLowerCase();
     const platform = safeString(options.platform, 'mobile', 32).toLowerCase();
     const images = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+    const assetRefs = Array.isArray(options.assetRefs) ? options.assetRefs : [];
+    const referenceImages = mergeAssetReferenceImages(images, assetRefs);
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] design-system:start', {
         stylePreset,
         platform,
         imagesCount: images.length,
+        assetRefCount: assetRefs.length,
+        referenceImageCount: referenceImages.length,
         preferredModel: options.preferredModel || null,
         temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
@@ -1962,10 +2032,11 @@ export async function generateProjectDesignSystem(options: GenerateProjectDesign
     }
 
     const fallback = buildFallbackProjectDesignSystem(prompt, stylePreset, platform);
-    const imageAnalysis = await analyzeReferenceImages(images);
-    const imageGuidance = images.length > 0
+    const imageAnalysis = await analyzeReferenceImages(referenceImages);
+    const imageGuidance = referenceImages.length > 0
         ? 'Attached image(s) are PRIMARY visual references. Match their brand cues, art direction, contrast, spacing feel, radius language, and typography tone unless they would clearly harm usability.'
         : '';
+    const assetReferenceGuidance = buildAssetReferenceContextPrompt(assetRefs);
     const colorPrompt = buildDesignSystemColorPrompt(prompt, stylePreset);
     const brandingPriorityPrompt = buildBrandingPriorityPrompt(prompt);
 
@@ -2024,6 +2095,7 @@ Style preset: ${stylePreset}
 Platform: ${platform}
 ${imageGuidance}
 ${imageAnalysis || ''}
+${assetReferenceGuidance}
 Generate the design system that should be reused for this whole project.
 Infer and set a clean project/product name in systemName (not a sentence, not "Design System").
 Choose a palette that feels creative, product-specific, and professionally art-directed rather than generic.
@@ -2064,7 +2136,7 @@ Choose typography that fits the brand personality instead of defaulting to the s
         } else {
             const preferredGeminiModel = resolveDesignSystemPreferredModel(preferredModel);
             const primaryGeminiModelName = preferredGeminiModel || modelName;
-            const imageParts = await resolveImageParts(images);
+            const imageParts = await resolveImageParts(referenceImages);
             const runGeminiDesignSystemAttempt = async (activeModelName: string, retry = false): Promise<unknown> => {
                 const designSystemModel = activeModelName === modelName ? model : getGenerativeModel(activeModelName).model;
                 const result = await designSystemModel.generateContent({
@@ -2136,26 +2208,30 @@ export async function generateDesign(options: GenerateOptions): Promise<{
     designSpec: HtmlDesignSpec;
     usage?: TokenUsageSummary;
 }> {
-    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+    const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], assetRefs = [], preferredModel } = options;
+    const referenceImages = mergeAssetReferenceImages(images, assetRefs);
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] generateDesign:start', {
         stylePreset,
         platform,
         imagesCount: images.length,
+        assetRefCount: assetRefs.length,
+        referenceImageCount: referenceImages.length,
         preferredModel: preferredModel || null,
         temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
         promptPreview: String(prompt || '').slice(0, 180),
     });
     const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
-    const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
-    const imageAnalysis = await analyzeReferenceImages(images);
+    const generationConfig = getGenerationConfig(referenceImages.length > 0, modelTemperature);
+    const imageAnalysis = await analyzeReferenceImages(referenceImages);
     const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
     const designSystemResult = await generateProjectDesignSystem({
         prompt,
         stylePreset,
         platform,
         images,
+        assetRefs,
         preferredModel,
         temperature: modelTemperature,
         projectDesignSystem: options.projectDesignSystem,
@@ -2164,12 +2240,13 @@ export async function generateDesign(options: GenerateOptions): Promise<{
     usageEntries.push(...(designSystemResult.usage?.entries || []));
     const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
-    const imageGuidance = images.length > 0
+    const imageGuidance = referenceImages.length > 0
         ? `Use the attached image(s) as PRIMARY reference. Match palette, typography mood, spacing density, component shapes, and layout hierarchy. Do not ignore reference cues.
 If the text request is ambiguous (e.g., "as seen", "like this"), preserve the same app domain and information architecture as the reference image(s).`
         : '';
-    const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(images);
-    const noImageGuidance = images.length === 0 ? NO_IMAGE_REFERENCE_QUALITY_RULES : '';
+    const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(referenceImages);
+    const assetReferenceGuidance = buildAssetReferenceContextPrompt(assetRefs);
+    const noImageGuidance = referenceImages.length === 0 ? NO_IMAGE_REFERENCE_QUALITY_RULES : '';
 
     const baseUserPrompt = `
 Design a UI for: "${prompt}"
@@ -2180,6 +2257,7 @@ ${imageGuidance}
 ${noImageGuidance}
 ${imageAnalysis}
 ${referenceImageUrlGuidance}
+${assetReferenceGuidance}
 ${designSystemGuidance}
 `;
 
@@ -2192,11 +2270,12 @@ ${imageGuidance}
 ${noImageGuidance}
 ${imageAnalysis}
 ${referenceImageUrlGuidance}
+${assetReferenceGuidance}
 ${designSystemGuidance}
 `;
 
     const buildParts = (userPrompt: string) => {
-        return resolveImageParts(images).then((imageParts) => {
+        return resolveImageParts(referenceImages).then((imageParts) => {
             const parts: any[] = [{ text: GENERATE_HTML_PROMPT + '\n\n' + userPrompt }];
             parts.push(...imageParts);
             return parts;
@@ -2221,7 +2300,7 @@ ${designSystemGuidance}
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
                         temperature: modelTemperature,
-                        topP: images.length > 0 ? 0.85 : 0.9,
+                        topP: referenceImages.length > 0 ? 0.85 : 0.9,
                         responseFormat: 'json_object',
                         thinking: false,
                     })
@@ -2231,7 +2310,7 @@ ${designSystemGuidance}
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
                         temperature: modelTemperature,
-                        topP: images.length > 0 ? 0.85 : 0.9,
+                        topP: referenceImages.length > 0 ? 0.85 : 0.9,
                         reasoningEffort: 'low',
                         responseFormat: 'json_object',
                     }));
@@ -2327,26 +2406,31 @@ export function generateDesignStreamWithUsage(options: GenerateOptions): {
 
     const stream = (async function* () {
         try {
-            const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], preferredModel } = options;
+            const { prompt, stylePreset = 'modern', platform = 'mobile', images = [], assetRefs = [], preferredModel } = options;
+            const referenceImages = mergeAssetReferenceImages(images, assetRefs);
             const modelTemperature = resolveModelTemperature(options.temperature, 1);
             console.info('[Gemini] generateDesignStream:start', {
                 stylePreset,
                 platform,
                 imagesCount: images.length,
+                assetRefCount: assetRefs.length,
+                referenceImageCount: referenceImages.length,
                 preferredModel: preferredModel || null,
                 temperature: modelTemperature,
                 hasProjectDesignSystem: Boolean(options.projectDesignSystem),
                 promptPreview: String(prompt || '').slice(0, 180),
             });
             const dimensions = PLATFORM_DIMENSIONS[platform] || PLATFORM_DIMENSIONS.mobile;
-            const generationConfig = getGenerationConfig(images.length > 0, modelTemperature);
-            const imageAnalysis = await analyzeReferenceImages(images);
-            const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(images);
+            const generationConfig = getGenerationConfig(referenceImages.length > 0, modelTemperature);
+            const imageAnalysis = await analyzeReferenceImages(referenceImages);
+            const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(referenceImages);
+            const assetReferenceGuidance = buildAssetReferenceContextPrompt(assetRefs);
             const designSystemResult = await generateProjectDesignSystem({
                 prompt,
                 stylePreset,
                 platform,
                 images,
+                assetRefs,
                 preferredModel,
                 temperature: modelTemperature,
                 projectDesignSystem: options.projectDesignSystem,
@@ -2356,13 +2440,14 @@ export function generateDesignStreamWithUsage(options: GenerateOptions): {
             const designSystemGuidance = buildDesignSystemGuidance(projectDesignSystem);
 
             const userPrompt = `Design: "${prompt}". Platform: ${platform}. Style: ${stylePreset}.
-${images.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
-${images.length ? '' : NO_IMAGE_REFERENCE_QUALITY_RULES}
+${referenceImages.length ? 'Attached image(s) are PRIMARY reference. Match them strongly.' : ''}
+${referenceImages.length ? '' : NO_IMAGE_REFERENCE_QUALITY_RULES}
 ${imageAnalysis}
 ${referenceImageUrlGuidance}
+${assetReferenceGuidance}
 ${designSystemGuidance}`;
             const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
-            parts.push(...await resolveImageParts(images));
+            parts.push(...await resolveImageParts(referenceImages));
 
             const preferredGeminiModel = (!isGroqModel(preferredModel) && !isNvidiaModel(preferredModel))
                 ? resolvePreferredModel(preferredModel)
@@ -2426,6 +2511,7 @@ export interface EditOptions {
     html: string;
     screenId: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     preferredModel?: string;
     temperature?: number;
     projectDesignSystem?: ProjectDesignSystem;
@@ -2541,7 +2627,8 @@ export async function editDesign(options: EditOptions): Promise<{
     description?: string;
     usage?: TokenUsageSummary;
 }> {
-    const { instruction, html, images = [], preferredModel } = options;
+    const { instruction, html, images = [], assetRefs = [], preferredModel } = options;
+    const referenceImages = mergeAssetReferenceImages(images, assetRefs);
     const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
     const modelTemperature = resolveModelTemperature(options.temperature, 1);
     console.info('[Gemini] editDesign:start', {
@@ -2549,6 +2636,8 @@ export async function editDesign(options: EditOptions): Promise<{
         htmlChars: String(html || '').length,
         instructionPreview: String(instruction || '').slice(0, 180),
         imagesCount: images.length,
+        assetRefCount: assetRefs.length,
+        referenceImageCount: referenceImages.length,
         preferredModel: preferredModel || null,
         temperature: modelTemperature,
         hasProjectDesignSystem: Boolean(options.projectDesignSystem),
@@ -2585,11 +2674,13 @@ Consistency requirements:
 ${consistencyRules.length > 0 ? `- Consistency rules:\n${consistencyRules.map((rule) => `  - ${rule}`).join('\n')}` : ''}
 ${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((screen) => `  - ${screen.name}\n${screen.htmlSnippet}`).join('\n')}` : ''}
 ${designSystemGuidance}`.trim();
-    const userPrompt = `${EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
-    const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
+    const assetReferenceGuidance = buildAssetReferenceContextPrompt(assetRefs);
+    const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(referenceImages);
+    const userPrompt = `${EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${referenceImageUrlGuidance}\n${assetReferenceGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
+    const fastUserPrompt = `${FAST_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${referenceImageUrlGuidance}\n${assetReferenceGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
 
     const parts: any[] = [{ text: userPrompt }];
-    parts.push(...await resolveImageParts(images));
+    parts.push(...await resolveImageParts(referenceImages));
 
     const parseEditResponse = (raw: string): { html: string; description?: string } => {
         const descriptionMatch = raw.match(/<description>([\s\S]*?)<\/description>/i);
@@ -2722,7 +2813,8 @@ export function editDesignStreamWithUsage(options: EditOptions): {
 
     const stream = (async function* () {
         try {
-            const { instruction, html, images = [], preferredModel } = options;
+            const { instruction, html, images = [], assetRefs = [], preferredModel } = options;
+            const referenceImages = mergeAssetReferenceImages(images, assetRefs);
             const modelTemperature = resolveModelTemperature(options.temperature, 1);
             const normalizedDesignSystem = options.projectDesignSystem
                 ? normalizeProjectDesignSystem(
@@ -2754,9 +2846,11 @@ Consistency requirements:
 ${consistencyRules.length > 0 ? `- Consistency rules:\n${consistencyRules.map((rule) => `  - ${rule}`).join('\n')}` : ''}
 ${referenceScreens.length > 0 ? `- Reference screens:\n${referenceScreens.map((screen) => `  - ${screen.name}\n${screen.htmlSnippet}`).join('\n')}` : ''}
 ${designSystemGuidance}`.trim();
-            const streamPrompt = `${STREAM_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
+            const assetReferenceGuidance = buildAssetReferenceContextPrompt(assetRefs);
+            const referenceImageUrlGuidance = buildReferenceImageUrlGuidance(referenceImages);
+            const streamPrompt = `${STREAM_EDIT_HTML_PROMPT}\n${consistencyGuidance}\n${referenceImageUrlGuidance}\n${assetReferenceGuidance}\n${html}\n\nUser instruction: "${instruction}"`;
             const parts: any[] = [{ text: streamPrompt }];
-            parts.push(...await resolveImageParts(images));
+            parts.push(...await resolveImageParts(referenceImages));
 
             if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
                 const edited = await editDesign(options);

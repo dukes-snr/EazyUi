@@ -45,12 +45,12 @@ function resolveStorageBucket(serviceAccount: Record<string, unknown> | null): s
     ? serviceAccount.project_id.trim()
     : '';
   if (serviceAccountProjectId) {
-    return `${serviceAccountProjectId}.appspot.com`;
+    return `${serviceAccountProjectId}.firebasestorage.app`;
   }
 
   const envProjectId = (process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || '').trim();
   if (envProjectId) {
-    return `${envProjectId}.appspot.com`;
+    return `${envProjectId}.firebasestorage.app`;
   }
 
   return undefined;

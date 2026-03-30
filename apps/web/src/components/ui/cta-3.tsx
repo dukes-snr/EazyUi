@@ -53,7 +53,7 @@ export function CallToAction({ className, onContactSales, onGetStarted }: CallTo
                 <Button
                     variant="outline"
                     onClick={onContactSales}
-                    className="border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] hover:border-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
+                    className="border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-white hover:border-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
                 >
                     Contact Sales
                 </Button>

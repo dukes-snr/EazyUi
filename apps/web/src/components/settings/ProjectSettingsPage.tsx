@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, Check, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
@@ -671,18 +671,20 @@ export function ProjectSettingsPage({
                                                 <button
                                                     type="button"
                                                     onClick={() => setTheme('light')}
-                                                    className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${theme === 'light' ? 'bg-[var(--ui-surface-3)]' : ''}`}
+                                                    className={`inline-flex h-8 items-center gap-1.5 px-3 text-xs transition-colors ${theme === 'light' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
                                                 >
                                                     <Sun size={12} />
                                                     Light
+                                                    {theme === 'light' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => setTheme('dark')}
-                                                    className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${theme === 'dark' ? 'bg-[var(--ui-surface-3)]' : ''}`}
+                                                    className={`inline-flex h-8 items-center gap-1.5 border-l border-[var(--ui-border)] px-3 text-xs transition-colors ${theme === 'dark' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
                                                 >
                                                     <Moon size={12} />
                                                     Dark
+                                                    {theme === 'dark' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
                                                 </button>
                                             </div>
                                         )}
@@ -697,16 +699,18 @@ export function ProjectSettingsPage({
                                                 <button
                                                     type="button"
                                                     onClick={() => void handleDeviceDisplayModeChange('framed')}
-                                                    className={`inline-flex h-8 items-center gap-1 px-3 text-xs ${deviceDisplayMode === 'framed' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)]'}`}
+                                                    className={`inline-flex h-8 items-center gap-1.5 px-3 text-xs transition-colors ${deviceDisplayMode === 'framed' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
                                                 >
                                                     Framed
+                                                    {deviceDisplayMode === 'framed' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => void handleDeviceDisplayModeChange('clean')}
-                                                    className={`inline-flex h-8 items-center gap-1 border-l border-[var(--ui-border)] px-3 text-xs ${deviceDisplayMode === 'clean' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)]'}`}
+                                                    className={`inline-flex h-8 items-center gap-1.5 border-l border-[var(--ui-border)] px-3 text-xs transition-colors ${deviceDisplayMode === 'clean' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
                                                 >
                                                     Clean
+                                                    {deviceDisplayMode === 'clean' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
                                                 </button>
                                             </div>
                                         )}

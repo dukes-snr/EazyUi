@@ -4,9 +4,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
-import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta } from '../../api/client';
+import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta, type AssetReference, type AssetRecord, type AssetScope } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, ChevronDown, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon } from 'lucide-react';
+import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, ChevronDown, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon, RotateCcw } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -18,6 +18,7 @@ import {
     getComposerReferenceHostname,
     formatComposerUrlReferenceToken,
     getFilteredComposerReferenceRootOptions,
+    inferComposerReferencedScreenUsage,
     normalizeComposerReferenceUrl,
     replaceComposerReferenceTrigger,
     type ComposerReferenceTextRange,
@@ -26,6 +27,8 @@ import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle }
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
+import { AssetsPanel } from './AssetsPanel';
+import { buildAssetReference } from '../../lib/firestoreData';
 import appLogo from '../../assets/Ui-logo.png';
 
 const FEEDBACK_BUCKETS = {
@@ -262,6 +265,141 @@ const DESIGN_RADIUS_STYLE_PRESETS = [
     { key: 'normal', label: 'Normal radius', value: '16px' },
     { key: 'full', label: 'Full radius', value: '999px' },
 ] as const;
+type DesignSystemPalettePreset = {
+    key: string;
+    label: string;
+    description: string;
+    light: ProjectDesignSystem['tokens'];
+    dark: ProjectDesignSystem['tokens'];
+};
+
+const DESIGN_SYSTEM_COLOR_PALETTE_PRESETS: DesignSystemPalettePreset[] = [
+    {
+        key: 'ember-slate',
+        label: 'Ember Slate',
+        description: 'Warm neutrals with ember orange and violet highlights.',
+        light: {
+            bg: '#F7F3EC',
+            surface: '#FFFDFC',
+            surface2: '#E9E0D2',
+            text: '#201913',
+            muted: '#7B6B5C',
+            stroke: '#D9CCBB',
+            accent: '#D96A3A',
+            accent2: '#8B5CF6',
+        },
+        dark: {
+            bg: '#130F0B',
+            surface: '#1A1511',
+            surface2: '#251E18',
+            text: '#F7EFE6',
+            muted: '#B29E8C',
+            stroke: '#3A3027',
+            accent: '#FF8B57',
+            accent2: '#B69BFF',
+        },
+    },
+    {
+        key: 'ocean-ink',
+        label: 'Ocean Ink',
+        description: 'Cool cyan accents over deep marine surfaces.',
+        light: {
+            bg: '#EEF6FA',
+            surface: '#FBFEFF',
+            surface2: '#D9E9F0',
+            text: '#12212B',
+            muted: '#667A87',
+            stroke: '#C3D5DE',
+            accent: '#1194D6',
+            accent2: '#0D7A72',
+        },
+        dark: {
+            bg: '#09131A',
+            surface: '#0F1B23',
+            surface2: '#162734',
+            text: '#E7F3F8',
+            muted: '#90A8B5',
+            stroke: '#243845',
+            accent: '#33ADF1',
+            accent2: '#38C8B6',
+        },
+    },
+    {
+        key: 'sage-brass',
+        label: 'Sage Brass',
+        description: 'Soft greens balanced with brushed brass accents.',
+        light: {
+            bg: '#F2F4EE',
+            surface: '#FCFDF9',
+            surface2: '#E0E7DA',
+            text: '#1D241B',
+            muted: '#6C7767',
+            stroke: '#CBD4C5',
+            accent: '#6B8A4F',
+            accent2: '#B98A38',
+        },
+        dark: {
+            bg: '#0E130D',
+            surface: '#141B13',
+            surface2: '#1D261B',
+            text: '#EEF2E8',
+            muted: '#9AA594',
+            stroke: '#2D372A',
+            accent: '#8FB86B',
+            accent2: '#E0AA49',
+        },
+    },
+    {
+        key: 'rose-graphite',
+        label: 'Rose Graphite',
+        description: 'Muted graphite base with rose and plum emphasis.',
+        light: {
+            bg: '#F7F2F4',
+            surface: '#FFFDFE',
+            surface2: '#E9DEE3',
+            text: '#22181D',
+            muted: '#7F6D75',
+            stroke: '#D8CAD0',
+            accent: '#C85C7E',
+            accent2: '#7654D6',
+        },
+        dark: {
+            bg: '#120D10',
+            surface: '#1A1418',
+            surface2: '#241C21',
+            text: '#F7EEF2',
+            muted: '#B19CA4',
+            stroke: '#372B31',
+            accent: '#EC7C9C',
+            accent2: '#9D83FF',
+        },
+    },
+    {
+        key: 'cobalt-lime',
+        label: 'Cobalt Lime',
+        description: 'Crisp cobalt foundations with sharp lime contrast.',
+        light: {
+            bg: '#EFF3F8',
+            surface: '#FBFDFF',
+            surface2: '#DDE5F0',
+            text: '#111A25',
+            muted: '#657384',
+            stroke: '#C5D1DF',
+            accent: '#2B66E5',
+            accent2: '#8DBF2E',
+        },
+        dark: {
+            bg: '#09101A',
+            surface: '#101926',
+            surface2: '#172235',
+            text: '#EDF3FA',
+            muted: '#94A2B4',
+            stroke: '#253247',
+            accent: '#5B92FF',
+            accent2: '#B5E14F',
+        },
+    },
+];
 
 const GENERIC_FONT_FAMILIES = new Set([
     'sans-serif',
@@ -300,6 +438,14 @@ function normalizePickerHexColor(value: string | undefined, fallback = '#F9A825'
         }
     }
     return fallback;
+}
+
+function areDesignTokenSetsEquivalent(
+    left: ProjectDesignSystem['tokens'],
+    right: ProjectDesignSystem['tokens']
+): boolean {
+    const keys = Object.keys(left) as Array<keyof ProjectDesignSystem['tokens']>;
+    return keys.every((key) => normalizePickerHexColor(left[key]) === normalizePickerHexColor(right[key]));
 }
 
 function hexToPickerRgb(value: string): { r: number; g: number; b: number } {
@@ -706,11 +852,46 @@ function resolveDesignSystemTokenModes(
 function normalizeProjectDesignSystemModes(system: ProjectDesignSystem): ProjectDesignSystem {
     const tokenModes = resolveDesignSystemTokenModes(system);
     const activeMode = resolveActiveThemeMode(system.themeMode);
+    const savedPalette = system.savedPalette || {
+        key: 'project-custom',
+        label: 'Project palette',
+        description: 'Original palette generated for this project.',
+        light: { ...tokenModes.light },
+        dark: { ...tokenModes.dark },
+    };
     return {
         ...system,
+        savedPalette,
         tokenModes,
         tokens: activeMode === 'dark' ? { ...tokenModes.dark } : { ...tokenModes.light },
     };
+}
+
+function findMatchingDesignSystemPalettePreset(
+    system: ProjectDesignSystem,
+    paletteOptions = DESIGN_SYSTEM_COLOR_PALETTE_PRESETS
+): DesignSystemPalettePreset | null {
+    const tokenModes = resolveDesignSystemTokenModes(system);
+    return paletteOptions.find((preset) => {
+        return areDesignTokenSetsEquivalent(tokenModes.light, preset.light)
+            && areDesignTokenSetsEquivalent(tokenModes.dark, preset.dark);
+    }) || null;
+}
+
+function applyDesignSystemPalettePreset(
+    system: ProjectDesignSystem,
+    preset: DesignSystemPalettePreset
+): ProjectDesignSystem {
+    const tokenModes = {
+        light: { ...preset.light },
+        dark: { ...preset.dark },
+    };
+    const activeMode = resolveActiveThemeMode(system.themeMode);
+    return normalizeProjectDesignSystemModes({
+        ...system,
+        tokenModes,
+        tokens: { ...tokenModes[activeMode] },
+    });
 }
 
 function areRadiusValuesEquivalent(left: string | undefined, right: string | undefined): boolean {
@@ -823,6 +1004,7 @@ type DesignSystemProposalContext = {
     prompt: string;
     appPromptForPlanning: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     referenceUrls?: string[];
     referenceImageUrls?: string[];
     platform: 'mobile' | 'tablet' | 'desktop';
@@ -929,7 +1111,10 @@ function buildContinuationStyleReference(screens: HtmlScreen[]): string {
     return chunks.join('\n\n');
 }
 
-function buildReferencedScreensPromptContext(screens: HtmlScreen[]): string {
+function buildReferencedScreensPromptContext(
+    screens: HtmlScreen[],
+    mode: 'edit-target' | 'reference-source' = 'reference-source'
+): string {
     if (!Array.isArray(screens) || screens.length === 0) return '';
     const lines = screens.map((screen) => `- ${screen.name}`);
     const snippets = screens
@@ -941,9 +1126,12 @@ function buildReferencedScreensPromptContext(screens: HtmlScreen[]): string {
         })
         .filter(Boolean);
     const snippetBlock = snippets.length > 0 ? `\n\n${snippets.join('\n\n')}` : '';
+    const usageInstruction = mode === 'edit-target'
+        ? 'These referenced screens are the primary edit targets. Modify them in place unless the user explicitly asks to create a different or new screen.'
+        : 'These referenced screens are source references only. Use them for style and continuity, but do not edit them in place unless the user explicitly asks.';
     return `Referenced canvas screens (treat as attached context):\n${lines.join('\n')}
 
-Use these references to keep stylistic continuity with existing screens unless explicitly overridden.${snippetBlock}`;
+${usageInstruction}${snippetBlock}`;
 }
 
 function buildScreenReferenceMeta(screens: HtmlScreen[]): {
@@ -969,6 +1157,32 @@ function buildScreenReferenceMeta(screens: HtmlScreen[]): {
             };
             return acc;
         }, {}),
+    };
+}
+
+type MessageRevertScreenSnapshot = {
+    screenId: string;
+    name: string;
+    html: string;
+    width: number;
+    height: number;
+    existed: boolean;
+};
+
+type MessageRevertPayload = {
+    screens: MessageRevertScreenSnapshot[];
+};
+
+function createMessageRevertPayload(screens: HtmlScreen[], existed: boolean): MessageRevertPayload {
+    return {
+        screens: screens.map((screen) => ({
+            screenId: screen.screenId,
+            name: screen.name,
+            html: screen.html,
+            width: screen.width,
+            height: screen.height,
+            existed,
+        })),
     };
 }
 
@@ -2161,10 +2375,37 @@ type ChatPanelProps = {
     } | null;
 };
 
+type ComposerAttachmentMeta = {
+    origin: 'saved' | 'upload';
+    name: string;
+    scope?: AssetScope;
+    assetRef?: AssetReference;
+};
+
+function dedupeAssetReferences(assetRefs: AssetReference[]): AssetReference[] {
+    const seen = new Set<string>();
+    return assetRefs.filter((assetRef) => {
+        const key = `${assetRef.assetId}:${assetRef.scope}:${assetRef.projectId || ''}:${assetRef.source}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+async function readComposerImageAsDataUrl(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () => reject(new Error('Failed to read image attachment.'));
+        reader.readAsDataURL(file);
+    });
+}
+
 export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const PLAN_MODE_STORAGE_KEY = 'eazyui:plan-mode';
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
+    const [composerAttachmentMeta, setComposerAttachmentMeta] = useState<ComposerAttachmentMeta[]>([]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [planMode, setPlanMode] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
@@ -2199,6 +2440,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
     const [activeTokenEditor, setActiveTokenEditor] = useState<DesignTokenKey | null>(null);
     const [designSystemInspectorTab, setDesignSystemInspectorTab] = useState<'colors' | 'fonts' | 'corners'>('colors');
+    const [openPaletteDropdown, setOpenPaletteDropdown] = useState(false);
     const [openFontDropdown, setOpenFontDropdown] = useState<'display' | 'body' | null>(null);
     const [openRadiusDropdown, setOpenRadiusDropdown] = useState<keyof ProjectDesignSystem['radius'] | null>(null);
     const [, setClockTick] = useState(0);
@@ -2540,6 +2782,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         setActiveTokenEditor(null);
         setIsDesignSystemEditing(true);
         setDesignSystemInspectorTab('colors');
+        setOpenPaletteDropdown(false);
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
         setChatPanelView('design-system');
@@ -2551,6 +2794,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const normalized = normalizeProjectDesignSystemModes(current);
         setDesignSystemDraft(cloneDesignSystem(normalized));
         setActiveTokenEditor(null);
+        setOpenPaletteDropdown(false);
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
     };
@@ -2634,6 +2878,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
         setIsDesignSystemEditing(true);
         setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
+        setOpenPaletteDropdown(false);
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
         syncPendingDesignSystemProposal(normalizedDraft);
@@ -2724,6 +2969,16 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     };
 
+    const applyDesignSystemPalettePresetToDraft = (presetKey: string) => {
+        updateDesignSystemDraft((current) => {
+            const preset = designSystemPaletteOptions.find((entry) => entry.key === presetKey);
+            if (!preset) return current;
+            return applyDesignSystemPalettePreset(current, preset);
+        });
+        setActiveTokenEditor(null);
+        setOpenPaletteDropdown(false);
+    };
+
     const screenPreviewById = useMemo(() => {
         const map = new Map<string, HtmlScreen>();
         (spec?.screens || []).forEach((screen) => map.set(screen.screenId, screen));
@@ -2809,6 +3064,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     useEffect(() => {
         if (chatPanelView !== 'design-system') {
+            setOpenPaletteDropdown(false);
             setOpenFontDropdown(null);
             setOpenRadiusDropdown(null);
             return;
@@ -3351,29 +3607,111 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         return [...new Set([...rendered, ...uploaded])].slice(0, 3);
     };
 
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
+    const appendComposerAttachments = useCallback((entries: Array<{ src: string; meta: ComposerAttachmentMeta }>) => {
+        if (entries.length === 0) return;
+        setImages((previous) => {
+            const availableSlots = Math.max(0, MAX_COMPOSER_ATTACHMENTS - previous.length);
+            if (availableSlots === 0) return previous;
+            const acceptedEntries = entries.slice(0, availableSlots);
+            if (acceptedEntries.length === 0) return previous;
+            setComposerAttachmentMeta((current) => [...current, ...acceptedEntries.map((entry) => entry.meta)]);
+            return [...previous, ...acceptedEntries.map((entry) => entry.src)];
+        });
+    }, []);
+
+    const clearComposerAttachments = useCallback(() => {
+        setImages([]);
+        setComposerAttachmentMeta([]);
+    }, []);
+
+    useEffect(() => {
+        if (composerAttachmentMeta.length <= images.length) return;
+        setComposerAttachmentMeta((current) => current.slice(0, images.length));
+    }, [composerAttachmentMeta.length, images.length]);
+
+    const resolveAttachmentRequestPayload = useCallback((
+        attachmentImages: string[] | undefined,
+        overrideAssetRefs?: AssetReference[],
+        overrideMeta?: ComposerAttachmentMeta[]
+    ) => {
+        const nextImages = Array.isArray(attachmentImages) ? attachmentImages.filter(Boolean) : [];
+        const effectiveMeta = overrideMeta
+            || (
+                nextImages.length === images.length
+                && nextImages.every((image, index) => image === images[index])
+                    ? composerAttachmentMeta.slice(0, nextImages.length)
+                    : []
+            );
+        const assetRefs = dedupeAssetReferences(
+            overrideAssetRefs && overrideAssetRefs.length > 0
+                ? overrideAssetRefs
+                : effectiveMeta
+                    .map((meta) => meta.assetRef || null)
+                    .filter((meta): meta is AssetReference => Boolean(meta))
+        );
+        const rawImages = effectiveMeta.length === nextImages.length
+            ? nextImages.filter((_, index) => effectiveMeta[index]?.origin !== 'saved')
+            : nextImages;
+        return {
+            rawImages,
+            assetRefs,
+        };
+    }, [composerAttachmentMeta, images]);
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (files.length === 0) return;
 
         const availableSlots = Math.max(0, MAX_COMPOSER_ATTACHMENTS - images.length);
-        if (availableSlots === 0) {
-            e.target.value = '';
-            return;
-        }
+        if (availableSlots === 0) return;
 
-        Array.from(files).slice(0, availableSlots).forEach(file => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = reader.result as string;
-                setImages(prev => (prev.length >= MAX_COMPOSER_ATTACHMENTS ? prev : [...prev, base64]));
-            };
-            reader.readAsDataURL(file);
-        });
-        e.target.value = '';
+        try {
+            const nextEntries = await Promise.all(
+                files.slice(0, availableSlots).map(async (file) => ({
+                    src: await readComposerImageAsDataUrl(file),
+                    meta: {
+                        origin: 'upload' as const,
+                        name: file.name || 'upload',
+                    },
+                }))
+            );
+            appendComposerAttachments(nextEntries);
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Attachment failed',
+                message: (error as Error).message || 'Could not add that image to the prompt.',
+            });
+        }
     };
 
     const removeImage = (index: number) => {
         setImages(prev => prev.filter((_, i) => i !== index));
+        setComposerAttachmentMeta(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const attachSavedAssetToComposer = ({ asset }: { asset: AssetRecord }) => {
+        if (images.length >= MAX_COMPOSER_ATTACHMENTS) {
+            pushToast({
+                kind: 'error',
+                title: 'Attachment limit reached',
+                message: 'Remove an attachment before adding another saved asset.',
+            });
+            return;
+        }
+        appendComposerAttachments([
+            {
+                src: asset.downloadUrl,
+                meta: {
+                    origin: 'saved',
+                    name: asset.name,
+                    scope: asset.scope,
+                    assetRef: buildAssetReference(asset, { source: 'saved_attachment' }),
+                },
+            },
+        ]);
+        setChatPanelView('chat');
     };
 
     const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -3497,6 +3835,83 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
     };
 
+    const buildRevertPayloadForScreenIds = useCallback((screenIds: string[]): MessageRevertPayload | undefined => {
+        if (!Array.isArray(screenIds) || screenIds.length === 0) return undefined;
+        const currentScreens = useDesignStore.getState().spec?.screens || [];
+        const byId = new Map(currentScreens.map((screen) => [screen.screenId, screen] as const));
+        const screens = screenIds
+            .map((screenId) => byId.get(screenId))
+            .filter(Boolean) as HtmlScreen[];
+        if (screens.length === 0) return undefined;
+        return createMessageRevertPayload(screens, false);
+    }, []);
+
+    const handleRevertMessage = useCallback((messageId: string) => {
+        const message = useChatStore.getState().messages.find((entry) => entry.id === messageId);
+        const payload = (message?.meta as { revertPayload?: MessageRevertPayload; revertedAt?: number } | undefined)?.revertPayload;
+        const alreadyReverted = Boolean((message?.meta as { revertedAt?: number } | undefined)?.revertedAt);
+        if (!payload || alreadyReverted) return;
+
+        const currentSpec = useDesignStore.getState().spec;
+        const currentBoards = useCanvasStore.getState().doc.boards;
+        const currentById = new Map((currentSpec?.screens || []).map((screen) => [screen.screenId, screen] as const));
+        const removedIds: string[] = [];
+        const restoredIds: string[] = [];
+
+        payload.screens.forEach((snapshot) => {
+            if (!snapshot.existed) {
+                removedIds.push(snapshot.screenId);
+                removeScreen(snapshot.screenId);
+                return;
+            }
+
+            const existing = currentById.get(snapshot.screenId);
+            if (existing) {
+                updateScreen(snapshot.screenId, snapshot.html, 'complete', snapshot.width, snapshot.height, snapshot.name);
+            } else {
+                addScreens([{
+                    screenId: snapshot.screenId,
+                    name: snapshot.name,
+                    html: snapshot.html,
+                    width: snapshot.width,
+                    height: snapshot.height,
+                    status: 'complete',
+                }]);
+                if (!useCanvasStore.getState().getBoardForScreen(snapshot.screenId)) {
+                    useCanvasStore.getState().addBoard({
+                        screenId: snapshot.screenId,
+                        name: snapshot.name,
+                        width: snapshot.width,
+                        height: snapshot.height,
+                    });
+                }
+            }
+            restoredIds.push(snapshot.screenId);
+        });
+
+        if (removedIds.length > 0) {
+            setBoards(currentBoards.filter((board) => !removedIds.includes(board.screenId)));
+        }
+        if (restoredIds.length > 0) {
+            setFocusNodeIds(restoredIds);
+        }
+
+        updateMessage(messageId, {
+            meta: {
+                ...(message?.meta || {}),
+                revertedAt: Date.now(),
+            },
+        });
+
+        notifySuccess(
+            'Version restored',
+            removedIds.length > 0
+                ? `Reverted ${removedIds.length} generated screen${removedIds.length === 1 ? '' : 's'}.`
+                : `Restored ${restoredIds.length} screen${restoredIds.length === 1 ? '' : 's'} to the previous version.`
+        );
+        void persistProjectAfterAiChange('message revert');
+    }, [addScreens, notifySuccess, persistProjectAfterAiChange, removeScreen, setBoards, setFocusNodeIds, updateMessage, updateScreen]);
+
     const togglePlanMode = () => {
         setPlanMode((prev) => {
             const next = !prev;
@@ -3557,6 +3972,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         void handleGenerate(
             visiblePrompt,
             [],
+            [],
             targetPlatform,
             targetStyle,
             targetModel,
@@ -3586,6 +4002,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             ? useChatStore.getState().messages.find((item) => item.id === context.parentUserId && item.role === 'user')
             : null;
         const imagesToUse = Array.isArray(context.images) ? context.images : (parentMessage?.images || []);
+        const assetRefsToUse = Array.isArray(context.assetRefs) ? context.assetRefs : [];
 
         applyProjectDesignSystem(designSystem);
         updateMessage(assistantMessageId, {
@@ -3599,6 +4016,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         await handleGenerate(
             context.prompt,
             imagesToUse,
+            assetRefsToUse,
             context.platform,
             context.stylePreset,
             context.modelProfile,
@@ -3714,13 +4132,20 @@ Return a polished, consistent screen without introducing a new navigation patter
         const imagesToSend = overrideImages ? [...overrideImages] : [...images];
         const referenceScreens = incomingReferenceScreens || resolvedComposerReferences.referenceScreens;
         const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.referenceUrls;
+        const referencedScreenUsage = inferComposerReferencedScreenUsage(
+            requestPrompt,
+            referenceScreens.map((screen) => ({ screenId: screen.screenId, name: screen.name }))
+        );
         const routeReferenceScreens = pickRouteReferenceScreens(
             requestPrompt,
             useDesignStore.getState().spec?.screens || [],
             referenceScreens
         );
         const requestPromptWithReferences = referenceScreens.length > 0
-            ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
+            ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(
+                referenceScreens,
+                referencedScreenUsage.mode === 'edit-target' ? 'edit-target' : 'reference-source'
+            )}`
             : requestPrompt;
         const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Planning your flow...');
@@ -3745,7 +4170,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
         if (!existingUserMessageId) {
             setPrompt('');
-            setImages([]);
+            clearComposerAttachments();
             closeMentionMenu();
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
@@ -3927,6 +4352,7 @@ Return a polished, consistent screen without introducing a new navigation patter
     const handleGenerate = async (
         incomingPrompt?: string,
         incomingImages?: string[],
+        incomingAssetRefs?: AssetReference[],
         incomingPlatform?: 'mobile' | 'tablet' | 'desktop',
         incomingStylePreset?: 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful',
         incomingModelProfile?: DesignModelProfile,
@@ -3964,7 +4390,14 @@ Return a polished, consistent screen without introducing a new navigation patter
         const referenceImageUrls = Array.isArray(incomingReferenceImageUrls)
             ? incomingReferenceImageUrls.filter((item) => typeof item === 'string' && item.trim().length > 0)
             : composerReferenceImageUrls.filter((url) => referenceUrls.includes(url));
-        const referencePromptContext = buildReferencedScreensPromptContext(referenceScreens);
+        const referencedScreenUsage = inferComposerReferencedScreenUsage(
+            requestPrompt,
+            referenceScreens.map((screen) => ({ screenId: screen.screenId, name: screen.name }))
+        );
+        const referencePromptContext = buildReferencedScreensPromptContext(
+            referenceScreens,
+            referencedScreenUsage.mode === 'edit-target' ? 'edit-target' : 'reference-source'
+        );
         const requestPromptWithReferences = referencePromptContext
             ? `${requestPrompt}\n\n${referencePromptContext}`
             : requestPrompt;
@@ -3978,7 +4411,11 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
         void ensureNotificationPermission();
 
-        const imagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
+        const initialImagesToSend = incomingPrompt ? (incomingImages || []) : [...images];
+        const { rawImages: imagesToSend, assetRefs: assetRefsToSend } = resolveAttachmentRequestPayload(
+            initialImagesToSend,
+            incomingAssetRefs
+        );
         const platformToUse = incomingPlatform || selectedPlatform;
         const styleToUse = incomingStylePreset || stylePreset;
         const initialModelProfileToUse = incomingModelProfile || modelProfile;
@@ -4000,7 +4437,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             ? [...incomingExistingScreenNames]
             : (spec?.screens || []).map((screen) => screen.name);
         if (!incomingPrompt && !existingUserMessageId) {
-            setImages([]);
+            clearComposerAttachments();
         }
 
         const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, imagesToSend);
@@ -4012,6 +4449,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
                 livePreview: false,
                 requestKind: 'generate',
+                ...(assetRefsToSend.length > 0 ? { assetRefs: assetRefsToSend } : {}),
                 ...(incomingReferencePreviewMode ? { referencePreviewMode: incomingReferencePreviewMode } : {}),
                 ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
@@ -4071,6 +4509,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         stylePreset: styleToUse,
                         platform: platformToUse,
                         images: imagesToSend,
+                        assetRefs: assetRefsToSend,
                         referenceUrls,
                         referenceImageUrls,
                         preferredModel,
@@ -4119,6 +4558,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             prompt: requestPrompt,
                             appPromptForPlanning,
                             images: imagesToSend,
+                            assetRefs: assetRefsToSend,
                             referenceUrls,
                             referenceImageUrls,
                             platform: platformToUse,
@@ -4264,6 +4704,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    assetRefs: assetRefsToSend,
                     referenceUrls,
                     referenceImageUrls,
                     expectedScreenCount: requestedScreenCount,
@@ -4344,6 +4785,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
                 const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
                 const content = `${regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
+                const revertPayload = buildRevertPayloadForScreenIds(generatedIds);
 
                 updateMessage(assistantMsgId, {
                     content,
@@ -4355,6 +4797,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...{
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
+                            ...(revertPayload ? { revertPayload } : {}),
                             plannerContext: {
                                 appPrompt: appPromptForPlanning,
                                 platform: platformToUse,
@@ -4394,6 +4837,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset: styleToUse,
                 platform: platformToUse,
                 images: imagesToSend,
+                assetRefs: assetRefsToSend,
                 referenceUrls,
                 referenceImageUrls,
                 expectedScreenCount: requestedScreenCount,
@@ -4465,6 +4909,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     stylePreset: styleToUse,
                     platform: platformToUse,
                     images: imagesToSend,
+                    assetRefs: assetRefsToSend,
                     referenceUrls,
                     referenceImageUrls,
                     expectedScreenCount: requestedScreenCount,
@@ -4565,6 +5010,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                 const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
                 const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
                 const content = `${regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
+                const fallbackIds = regen.designSpec.screens
+                    .map((_, index) => screenIdBySeq.get(createdSeqs[index] as number))
+                    .filter(Boolean) as string[];
+                const revertPayload = buildRevertPayloadForScreenIds(fallbackIds);
 
                 updateMessage(assistantMsgId, {
                     content,
@@ -4576,6 +5025,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...{
                             plannerPrompt: appPromptForPlanning,
                             plannerPostgen: postgenData || undefined,
+                            ...(revertPayload ? { revertPayload } : {}),
                             plannerContext: {
                                 appPrompt: appPromptForPlanning,
                                 platform: platformToUse,
@@ -4597,9 +5047,6 @@ Return a polished, consistent screen without introducing a new navigation patter
                 if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                     applyProjectName(plannerSuggestedProjectName);
                 }
-                const fallbackIds = regen.designSpec.screens
-                    .map((_, index) => screenIdBySeq.get(createdSeqs[index] as number))
-                    .filter(Boolean) as string[];
                 if (fallbackIds.length > 0) {
                     setFocusNodeIds(fallbackIds);
                 }
@@ -4676,6 +5123,10 @@ Return a polished, consistent screen without introducing a new navigation patter
             const snapshotScreens = useDesignStore.getState().spec?.screens || [];
             const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
             const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
+            const generatedIds = createdSeqs
+                .map((seq) => screenIdBySeq.get(seq))
+                .filter(Boolean) as string[];
+            const revertPayload = buildRevertPayloadForScreenIds(generatedIds);
 
             updateMessage(assistantMsgId, {
                 content: `${responseSummary}${planningSummary}${postgenBlock}`.trim(),
@@ -4687,6 +5138,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     ...{
                         plannerPrompt: appPromptForPlanning,
                         plannerPostgen: postgenData || undefined,
+                        ...(revertPayload ? { revertPayload } : {}),
                         plannerContext: {
                             appPrompt: appPromptForPlanning,
                             platform: platformToUse,
@@ -4708,9 +5160,6 @@ Return a polished, consistent screen without introducing a new navigation patter
             if (plannerSuggestedProjectName && !firstRequestProjectNameLocked) {
                 applyProjectName(plannerSuggestedProjectName);
             }
-            const generatedIds = createdSeqs
-                .map((seq) => screenIdBySeq.get(seq))
-                .filter(Boolean) as string[];
             if (generatedIds.length > 0) {
                 setFocusNodeIds(generatedIds);
             }
@@ -4794,7 +5243,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             apiClient.setComposerTemperature(safeTemperature);
         }
         pinToLatest('auto');
-        void handleGenerate(next, nextImages, nextPlatform, nextStylePreset, nextModelProfile, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, nextReferenceUrls, nextReferenceImageUrls);
+        void handleGenerate(next, nextImages, [], nextPlatform, nextStylePreset, nextModelProfile, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, nextReferenceUrls, nextReferenceImageUrls);
     }, [initialRequest, messages.length, isGenerating]);
 
     type EditExecutionOptions = {
@@ -4820,6 +5269,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         targetScreen: HtmlScreen,
         instruction: string,
         attachedImages?: string[],
+        attachedAssetRefs?: AssetReference[],
         existingUserMessageId?: string,
         incomingReferenceScreens?: HtmlScreen[],
         options?: EditExecutionOptions,
@@ -4879,7 +5329,10 @@ Return a polished, consistent screen without introducing a new navigation patter
             screens: availableMentionScreens,
         });
         const currentPrompt = parsedEditReferences.cleanedText.trim();
-        const editImages = Array.isArray(attachedImages) ? attachedImages : [];
+        const { rawImages: editImages, assetRefs: editAssetRefs } = resolveAttachmentRequestPayload(
+            Array.isArray(attachedImages) ? attachedImages : [],
+            attachedAssetRefs
+        );
         const userMsgId = existingUserMessageId || addMessage('user', currentPrompt, editImages.length ? editImages : undefined, screenRef);
         const assistantMsgId = options?.assistantMessageId || addMessage('assistant', 'Updating...', undefined, screenRef);
         const referenceScreens = incomingReferenceScreens || getScreenReferencesFromComposer(parsedEditReferences.screenReferences);
@@ -4891,6 +5344,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     ...(useChatStore.getState().messages.find(m => m.id === userMsgId)?.meta || {}),
                     requestKind: 'edit',
                     livePreview: false,
+                    ...(editAssetRefs.length > 0 ? { assetRefs: editAssetRefs } : {}),
                     ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                     ...referenceMeta,
                 }
@@ -4937,6 +5391,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 html: targetScreen.html,
                 screenId: targetScreen.screenId,
                 images: editImages,
+                assetRefs: editAssetRefs,
                 referenceUrls,
                 preferredModel: getPreferredTextModel(resolvedModelProfile),
                 projectDesignSystem: useDesignStore.getState().spec?.designSystem,
@@ -5041,6 +5496,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...{
                             plannerPrompt: currentPrompt,
                             plannerPostgen: postgenData || undefined,
+                            revertPayload: createMessageRevertPayload([targetScreen], true),
                             plannerContext: {
                                 appPrompt: currentPrompt,
                                 platform: selectedPlatform,
@@ -5125,11 +5581,12 @@ Return a polished, consistent screen without introducing a new navigation patter
         userMessageId: string;
         requestPrompt: string;
         attachedImages: string[];
+        attachedAssetRefs?: AssetReference[];
         referenceMeta: ReturnType<typeof buildScreenReferenceMeta>;
         referenceUrls: string[];
     }) => {
         setIsAwaitingAssistantDecision(false);
-        const { userMessageId, requestPrompt, attachedImages, referenceMeta, referenceUrls } = params;
+        const { userMessageId, requestPrompt, attachedImages, attachedAssetRefs, referenceMeta, referenceUrls } = params;
         const currentSpec = useDesignStore.getState().spec;
         const currentDesignSystem = currentSpec?.designSystem;
         if (!currentDesignSystem) return false;
@@ -5144,6 +5601,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             meta: {
                 ...(useChatStore.getState().messages.find((message) => message.id === userMessageId)?.meta || {}),
                 requestKind: 'design_system',
+                ...(attachedAssetRefs && attachedAssetRefs.length > 0 ? { assetRefs: attachedAssetRefs } : {}),
                 ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
             },
@@ -5179,6 +5637,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 stylePreset,
                 platform: selectedPlatform,
                 images: attachedImages,
+                assetRefs: attachedAssetRefs,
                 referenceUrls,
                 projectId: projectId || undefined,
                 projectDesignSystem: currentDesignSystem,
@@ -5293,6 +5752,7 @@ Return a polished, consistent screen without introducing a new navigation patter
         existingUserMessageId?: string,
         overridePrompt?: string,
         overrideImages?: string[],
+        overrideAssetRefs?: AssetReference[],
         incomingReferenceScreens?: HtmlScreen[],
         incomingReferenceUrls?: string[]
     ) => {
@@ -5301,9 +5761,18 @@ Return a polished, consistent screen without introducing a new navigation patter
         if (!requestPrompt || isGenerating || isAwaitingAssistantDecision) return;
         setIsAwaitingAssistantDecision(true);
         pinToLatest('smooth');
-        const attachedImages = overrideImages ? [...overrideImages] : [...images];
+        const initialAttachedImages = overrideImages ? [...overrideImages] : [...images];
+        const { rawImages: attachedImages, assetRefs: attachedAssetRefs } = resolveAttachmentRequestPayload(
+            initialAttachedImages,
+            overrideAssetRefs
+        );
         const referenceScreens = incomingReferenceScreens || resolvedComposerReferences.referenceScreens;
         const referenceUrls = incomingReferenceUrls || resolvedComposerReferences.referenceUrls;
+        const referencedScreenUsage = inferComposerReferencedScreenUsage(
+            requestPrompt,
+            referenceScreens.map((screen) => ({ screenId: screen.screenId, name: screen.name }))
+        );
+        const forceReferencedScreenEdit = referencedScreenUsage.mode === 'edit-target' && referenceScreens.length > 0;
         const routeReferenceScreens = pickRouteReferenceScreens(
             requestPrompt,
             useDesignStore.getState().spec?.screens || [],
@@ -5316,7 +5785,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ? 'palette'
                 : undefined;
         const routingPrompt = referenceScreens.length > 0
-            ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(referenceScreens)}`
+            ? `${requestPrompt}\n\n${buildReferencedScreensPromptContext(
+                referenceScreens,
+                forceReferencedScreenEdit ? 'edit-target' : 'reference-source'
+            )}`
             : requestPrompt;
         const referenceMeta = buildScreenReferenceMeta(referenceScreens);
         const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, attachedImages.length ? attachedImages : undefined);
@@ -5324,6 +5796,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             meta: {
                 ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
                 requestKind: 'route',
+                ...(attachedAssetRefs.length > 0 ? { assetRefs: attachedAssetRefs } : {}),
                 ...(routedReferencePreviewMode ? { referencePreviewMode: routedReferencePreviewMode } : {}),
                 ...(referenceUrls.length > 0 ? { referenceUrls } : {}),
                 ...(referenceMeta.screenIds.length > 0 ? referenceMeta : {}),
@@ -5333,7 +5806,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             closeMentionMenu();
             setPrompt('');
             if (attachedImages.length > 0) {
-                setImages([]);
+                clearComposerAttachments();
                 if (fileInputRef.current) fileInputRef.current.value = '';
             }
         }
@@ -5343,6 +5816,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 userMessageId: userMsgId,
                 requestPrompt,
                 attachedImages,
+                attachedAssetRefs,
                 referenceMeta,
                 referenceUrls,
             });
@@ -5350,15 +5824,16 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
 
         const executeFallbackRoute = async () => {
-            const editLike = /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish)/i.test(requestPrompt);
+            const editLike = forceReferencedScreenEdit || /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish|finish|complete|continue|tighten)/i.test(requestPrompt);
             const fallbackTarget = generationReferenceScreens[0] || null;
             if (editLike && fallbackTarget) {
-                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, userMsgId, generationReferenceScreens, undefined, referenceUrls);
+                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, attachedAssetRefs, userMsgId, generationReferenceScreens, undefined, referenceUrls);
                 return;
             }
             await handleGenerate(
                 requestPrompt,
                 attachedImages,
+                attachedAssetRefs,
                 selectedPlatform,
                 stylePreset,
                 modelProfile,
@@ -5391,14 +5866,17 @@ Return a polished, consistent screen without introducing a new navigation patter
                 throw new Error('Planner route phase mismatch');
             }
             const route = routeResponse;
+            const effectiveRouteIntent = forceReferencedScreenEdit && route.intent !== 'chat_assist'
+                ? 'edit_existing_screen'
+                : route.intent;
             const routeTokenUsage = getBillingTotalTokens((route as any)?.billing);
 
             updateMessage(userMsgId, {
                 meta: {
                     ...(useChatStore.getState().messages.find((message) => message.id === userMsgId)?.meta || {}),
-                    requestKind: route.intent === 'chat_assist'
+                    requestKind: effectiveRouteIntent === 'chat_assist'
                         ? 'assist'
-                        : route.intent === 'edit_existing_screen'
+                        : effectiveRouteIntent === 'edit_existing_screen'
                             ? 'edit'
                             : 'generate',
                     plannerRoute: route,
@@ -5409,7 +5887,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 },
             });
 
-            if (route.intent === 'chat_assist' || route.action === 'assist') {
+            if (effectiveRouteIntent === 'chat_assist' || route.action === 'assist') {
                 const snapshotScreens = useDesignStore.getState().spec?.screens || [];
                 const snapshotScreenNames = snapshotScreens.map((screen) => screen.name);
                 const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
@@ -5441,9 +5919,11 @@ Return a polished, consistent screen without introducing a new navigation patter
                 return;
             }
 
-            if (route.intent === 'edit_existing_screen' || route.action === 'edit') {
+            if (effectiveRouteIntent === 'edit_existing_screen' || route.action === 'edit') {
                 const allScreens = useDesignStore.getState().spec?.screens || [];
-                const targets = resolveRoutedScreens(route, allScreens, generationReferenceScreens);
+                const targets = forceReferencedScreenEdit && referenceScreens.length > 0
+                    ? referenceScreens
+                    : resolveRoutedScreens(route, allScreens, generationReferenceScreens);
                 if (targets.length === 0) {
                     setIsAwaitingAssistantDecision(false);
                     const assistantMsgId = addMessage(
@@ -5520,6 +6000,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 target,
                                 route.editInstruction || requestPrompt,
                                 attachedImages,
+                                attachedAssetRefs,
                                 userMsgId,
                                 perTargetReferences,
                                 {
@@ -5553,6 +6034,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         `[h3]Changes[/h3]\n${successLines || '[li]No screens were updated.[/li]'}`,
                         failed.length > 0 ? `[h3]Needs attention[/h3]\n${failureLines}` : '',
                     ].filter(Boolean).join('\n\n');
+                    const revertPayload = createMessageRevertPayload(targets, true);
 
                     updateMessage(assistantMsgId, {
                         content: finalContent,
@@ -5564,6 +6046,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             ...(totalTokenUsage > 0 ? { tokenUsageTotal: totalTokenUsage } : {}),
                             typedComplete: true,
                             livePreview: false,
+                            revertPayload,
                         },
                     });
                     if (succeeded.length > 0) {
@@ -5599,6 +6082,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         target,
                         route.editInstruction || requestPrompt,
                         attachedImages,
+                        attachedAssetRefs,
                         userMsgId,
                         perTargetReferences,
                         undefined,
@@ -5608,12 +6092,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                 return;
             }
 
-            const targetedScreens = route.intent === 'add_screen'
+            const targetedScreens = effectiveRouteIntent === 'add_screen'
                 ? route.generateTheseNow.filter(Boolean).slice(0, 3)
                 : undefined;
             await handleGenerate(
                 requestPrompt,
                 attachedImages,
+                attachedAssetRefs,
                 selectedPlatform,
                 stylePreset,
                 modelProfile,
@@ -5655,6 +6140,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         const requestKind = String((source.meta as any)?.requestKind || 'generate');
         const retryPrompt = source.content || '';
         const retryImages = Array.isArray(source.images) ? source.images : [];
+        const retryAssetRefs = Array.isArray((source.meta as any)?.assetRefs)
+            ? (((source.meta as any)?.assetRefs as AssetReference[]).filter((item) => item && typeof item === 'object'))
+            : [];
         const retryScreenIds = Array.isArray((source.meta as any)?.screenIds)
             ? (((source.meta as any)?.screenIds as string[]).filter(Boolean))
             : [];
@@ -5675,6 +6163,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             userMessageId,
             retryPrompt,
             retryImages,
+            retryAssetRefs,
             retryReferences,
             retryReferenceUrls
         );
@@ -5824,6 +6313,13 @@ Return a polished, consistent screen without introducing a new navigation patter
     const designSystemForPanel = (isDesignSystemEditing && normalizedDesignSystemDraft)
         ? normalizedDesignSystemDraft
         : normalizedStoredDesignSystem;
+    const designSystemPaletteOptions = useMemo(() => {
+        if (!designSystemForPanel?.savedPalette) return DESIGN_SYSTEM_COLOR_PALETTE_PRESETS;
+        return [designSystemForPanel.savedPalette, ...DESIGN_SYSTEM_COLOR_PALETTE_PRESETS];
+    }, [designSystemForPanel]);
+    const activeDesignSystemPalettePreset = designSystemForPanel
+        ? findMatchingDesignSystemPalettePreset(designSystemForPanel, designSystemPaletteOptions)
+        : null;
     const isDesignSystemEditable = isDesignSystemView && Boolean(designSystemForPanel);
     const hasDesignSystemDraftChanges = Boolean(
         normalizedStoredDesignSystem
@@ -6081,11 +6577,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             const userReferenceUrls = Array.isArray((message.meta as any)?.referenceUrls)
                                                 ? (((message.meta as any)?.referenceUrls as string[]).filter((item) => typeof item === 'string' && item.trim().length > 0))
                                                 : [];
+                                            const savedAssetRefs = Array.isArray((message.meta as any)?.assetRefs)
+                                                ? (((message.meta as any)?.assetRefs as AssetReference[]).filter((item) => item && typeof item === 'object'))
+                                                : [];
                                             const referenceContext = ((message.meta as any)?.referenceContext || null) as ReferenceContextMeta | null;
                                             const referencePreviewMode = String((message.meta as any)?.referencePreviewMode || 'screen');
                                             const hasReferenceStrip = userReferenceIds.length > 0 && referencePreviewMode === 'palette';
                                             const hasReferenceThumbs = userReferenceIds.length > 0 && referencePreviewMode !== 'palette';
-                                            if (!hasReferenceStrip && !hasReferenceThumbs && userReferenceUrls.length === 0 && !(message.images && message.images.length > 0)) return null;
+                                            if (!hasReferenceStrip && !hasReferenceThumbs && userReferenceUrls.length === 0 && savedAssetRefs.length === 0 && !(message.images && message.images.length > 0)) return null;
                                             return (
                                             <div className="flex flex-wrap items-end gap-2 justify-end mb-1 w-full">
                                                 {hasReferenceStrip && (
@@ -6112,6 +6611,21 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                             />
                                                         );
                                                     })}
+                                                {savedAssetRefs.slice(0, 4).map((assetRef) => (
+                                                    <button
+                                                        key={`${message.id}-${assetRef.assetId}-${assetRef.source}`}
+                                                        type="button"
+                                                        onClick={() => setViewerImage({ src: assetRef.downloadUrl, alt: assetRef.name })}
+                                                        className="group relative flex h-20 w-20 flex-col justify-end overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] shadow-sm focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--ui-primary)_48%,transparent)]"
+                                                        title={assetRef.name}
+                                                    >
+                                                        <img src={assetRef.downloadUrl} alt={assetRef.name} className="absolute inset-0 h-full w-full object-cover" />
+                                                        <div className="relative z-[1] bg-[linear-gradient(180deg,transparent,rgba(5,10,20,0.85))] px-2 py-1.5 text-left">
+                                                            <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-emerald-200">Saved asset</div>
+                                                            <div className="truncate text-[10px] text-white">{assetRef.name}</div>
+                                                        </div>
+                                                    </button>
+                                                ))}
                                                 {message.images && message.images.map((img, idx) => (
                                                     <button
                                                         key={idx}
@@ -6357,6 +6871,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2 px-1">
+                                                    {message.status === 'complete' && (message.meta as any)?.revertPayload && (
+                                                        <button
+                                                            onClick={() => handleRevertMessage(message.id)}
+                                                            disabled={Boolean((message.meta as any)?.revertedAt) || isGenerating}
+                                                            className={`p-1.5 rounded-md transition-all ${Boolean((message.meta as any)?.revertedAt)
+                                                                ? 'text-emerald-300 bg-emerald-500/12'
+                                                                : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'} disabled:opacity-60 disabled:cursor-not-allowed`}
+                                                            title={Boolean((message.meta as any)?.revertedAt) ? 'Already reverted' : 'Revert this result'}
+                                                        >
+                                                            <RotateCcw size={14} />
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleCopyMessage(message.id, message.content)}
                                                         className="p-1.5 rounded-md text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] transition-all"
@@ -6519,6 +7045,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     type="button"
                                                     onClick={() => {
                                                         setDesignSystemInspectorTab(tabKey);
+                                                        setOpenPaletteDropdown(false);
                                                         setOpenFontDropdown(null);
                                                         setOpenRadiusDropdown(null);
                                                     }}
@@ -6555,6 +7082,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                             type="button"
                                                             onClick={() => {
                                                                 if (!active) toggleDesignSystemThemeVariant();
+                                                                setOpenPaletteDropdown(false);
                                                             }}
                                                             className={`inline-flex items-center gap-1.5 rounded-[11px] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${active
                                                                 ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
@@ -6571,14 +7099,92 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             </div>
                                         </div>
                                         <div className="mt-4 rounded-[20px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
-                                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Color Theme</p>
-                                            <div className="mt-3 flex items-center gap-3 rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3">
-                                                <span className="h-10 w-10 shrink-0 rounded-full" style={{ background: `conic-gradient(from 220deg, ${designSystemForPanel.tokens.accent}, ${designSystemForPanel.tokens.accent2}, ${designSystemForPanel.tokens.surface2}, ${designSystemForPanel.tokens.accent})` }} />
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-[12px] font-semibold capitalize text-[var(--ui-text)]">{designSystemForPanel.stylePreset}</p>
-                                                    <p className="text-[11px] text-[var(--ui-text-muted)]">Custom</p>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Color Theme</p>
+                                                    <p className="mt-1 text-[11px] text-[var(--ui-text-muted)]">Switch the full light and dark palette together.</p>
                                                 </div>
-                                                <ChevronDown size={16} className="text-[var(--ui-text-subtle)]" />
+                                                <p className="rounded-full border border-[var(--ui-border)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-muted)] capitalize">
+                                                    {designSystemForPanel.stylePreset}
+                                                </p>
+                                            </div>
+                                            <div className="relative mt-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!isDesignSystemEditable) return;
+                                                        setActiveTokenEditor(null);
+                                                        setOpenFontDropdown(null);
+                                                        setOpenRadiusDropdown(null);
+                                                        setOpenPaletteDropdown((current) => !current);
+                                                    }}
+                                                    className="flex w-full items-center gap-3 rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-left transition-colors hover:bg-[var(--ui-surface-3)]"
+                                                >
+                                                    <span className="flex shrink-0 items-center -space-x-2">
+                                                        {[designSystemForPanel.tokens.bg, designSystemForPanel.tokens.surface2, designSystemForPanel.tokens.accent, designSystemForPanel.tokens.accent2].map((color, index) => (
+                                                            <span
+                                                                key={`design-palette-chip-${index}`}
+                                                                className="h-8 w-8 rounded-full border border-white/10 shadow-[0_0_0_1px_rgba(10,10,10,0.08)]"
+                                                                style={{ background: color }}
+                                                            />
+                                                        ))}
+                                                    </span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-[12px] font-semibold text-[var(--ui-text)]">
+                                                            {activeDesignSystemPalettePreset?.label || 'Custom palette'}
+                                                        </p>
+                                                        <p className="text-[11px] text-[var(--ui-text-muted)]">
+                                                            {activeDesignSystemPalettePreset?.description || 'Manual token edits are active for this theme.'}
+                                                        </p>
+                                                    </div>
+                                                    <ChevronDown
+                                                        size={16}
+                                                        className={`shrink-0 text-[var(--ui-text-subtle)] transition-transform ${openPaletteDropdown ? 'rotate-180' : ''}`}
+                                                    />
+                                                </button>
+                                                {openPaletteDropdown && (
+                                                    <div className="absolute inset-x-0 top-[calc(100%+10px)] z-20 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+                                                        <div className="space-y-1">
+                                                            {designSystemPaletteOptions.map((preset) => {
+                                                                const isSelected = activeDesignSystemPalettePreset?.key === preset.key;
+                                                                return (
+                                                                    <button
+                                                                        key={`design-palette-preset-${preset.key}`}
+                                                                        type="button"
+                                                                        onClick={() => applyDesignSystemPalettePresetToDraft(preset.key)}
+                                                                        className={`w-full rounded-[14px] border px-3 py-3 text-left transition-colors ${isSelected
+                                                                            ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_30%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-2))]'
+                                                                            : 'border-transparent hover:border-[var(--ui-border)] hover:bg-[var(--ui-surface-2)]'
+                                                                            }`}
+                                                                    >
+                                                                        <div className="flex items-start gap-3">
+                                                                            <span className="mt-0.5 flex shrink-0 items-center -space-x-1.5">
+                                                                                {[preset.light.bg, preset.light.surface2, preset.light.accent, preset.dark.accent2].map((color, index) => (
+                                                                                    <span
+                                                                                        key={`${preset.key}-swatch-${index}`}
+                                                                                        className="h-6 w-6 rounded-full border border-white/10"
+                                                                                        style={{ background: color }}
+                                                                                    />
+                                                                                ))}
+                                                                            </span>
+                                                                            <div className="min-w-0 flex-1">
+                                                                                <div className="flex items-center justify-between gap-3">
+                                                                                    <p className="text-[12px] font-semibold text-[var(--ui-text)]">{preset.label}</p>
+                                                                                    {isSelected && (
+                                                                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]">
+                                                                                            <Check size={12} />
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                                <p className="mt-1 text-[11px] leading-5 text-[var(--ui-text-muted)]">{preset.description}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="mt-4">
@@ -6610,6 +7216,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                 type="button"
                                                                 onClick={() => {
                                                                     if (!isDesignSystemEditable) return;
+                                                                    setOpenPaletteDropdown(false);
                                                                     setActiveTokenEditor(isActive ? null : tokenName);
                                                                 }}
                                                                 className="flex w-full items-center gap-3 px-3 py-3 text-left"
@@ -6699,7 +7306,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         </div>
                                                         <button
                                                             type="button"
-                                                            onClick={() => setOpenFontDropdown((current) => (current === 'display' ? null : 'display'))}
+                                                            onClick={() => {
+                                                                setOpenPaletteDropdown(false);
+                                                                setOpenFontDropdown((current) => (current === 'display' ? null : 'display'));
+                                                            }}
                                                             className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                                                         >
                                                             Change
@@ -6734,7 +7344,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         </div>
                                                         <button
                                                             type="button"
-                                                            onClick={() => setOpenFontDropdown((current) => (current === 'body' ? null : 'body'))}
+                                                            onClick={() => {
+                                                                setOpenPaletteDropdown(false);
+                                                                setOpenFontDropdown((current) => (current === 'body' ? null : 'body'));
+                                                            }}
                                                             className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                                                         >
                                                             Change
@@ -6849,7 +7462,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                 />
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => setOpenRadiusDropdown((current) => (current === radiusKey ? null : radiusKey))}
+                                                                    onClick={() => {
+                                                                        setOpenPaletteDropdown(false);
+                                                                        setOpenRadiusDropdown((current) => (current === radiusKey ? null : radiusKey));
+                                                                    }}
                                                                     className="rounded-[12px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
                                                                 >
                                                                     More
@@ -6937,20 +7553,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                             )}
                         </div>
                     ) : (
-                        <div className="flex-1 overflow-y-auto px-4 py-4">
-                            <div className="flex min-h-full items-center">
-                                <div className="w-full rounded-[28px] p-5">
-                                    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-primary)]" />
-                                        Assets
-                                    </div>
-                                    <h3 className="mt-4 text-[24px] font-semibold leading-[1.02] tracking-[-0.03em] text-[var(--ui-text)]">Coming soon</h3>
-                                    <p className="mt-2 max-w-[290px] text-[12px] leading-relaxed text-[var(--ui-text-muted)]">
-                                        The project asset space will live here once uploads, saved snippets and reusable media are ready.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
+                        <AssetsPanel
+                            projectId={projectId}
+                            onAttachAsset={attachSavedAssetToComposer}
+                        />
                     )}
 
                     {chatPanelView === 'chat' && showScrollToLatest && (
@@ -6968,7 +7574,15 @@ Return a polished, consistent screen without introducing a new navigation patter
                     <>
                     {/* Chat Input Container */}
                     <div className="relative mx-4 mb-6 overflow-visible">
-                        <ComposerAttachmentStack images={images} onRemove={removeImage} size="compact" />
+                        <ComposerAttachmentStack
+                            images={images}
+                            onRemove={removeImage}
+                            size="compact"
+                            badges={composerAttachmentMeta.map((attachment) => ({
+                                label: attachment.origin === 'saved' ? 'Saved' : 'Upload',
+                                tone: attachment.origin === 'saved' ? 'saved' : 'upload',
+                            }))}
+                        />
                         <div className="relative flex flex-col gap-2 rounded-[20px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-1)),var(--ui-surface-1))] p-3 transition-all">
                             <button
                                 type="button"
@@ -6986,6 +7600,23 @@ Return a polished, consistent screen without introducing a new navigation patter
 
                             {/* Text Area & Images */}
                             <div className="relative min-w-0 flex-1">
+                                {composerAttachmentMeta.length > 0 && (
+                                    <div className="mb-2 flex flex-wrap gap-2 px-1">
+                                        {composerAttachmentMeta.map((attachment, index) => (
+                                            <div
+                                                key={`${attachment.origin}-${attachment.name}-${index}`}
+                                                className="inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[10px] text-[var(--ui-text-muted)]"
+                                            >
+                                                <span className={`rounded-full px-2 py-0.5 font-semibold uppercase tracking-[0.12em] ${attachment.origin === 'saved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'}`}>
+                                                    {attachment.origin === 'saved' ? 'Saved asset' : 'Upload'}
+                                                </span>
+                                                <span className="max-w-[180px] truncate text-[11px] text-[var(--ui-text)]">
+                                                    {attachment.name || `Attachment ${index + 1}`}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                                 <div className="flex items-start gap-2 px-1">
                                     <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] p-[2px]">
                                         <Orb

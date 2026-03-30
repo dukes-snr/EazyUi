@@ -1,10 +1,11 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 
 import featureSlide1 from '../../assets/Slide1.png';
 import featureSlide2 from '../../assets/Slide2.png';
 import featureSlide3 from '../../assets/Slide3.png';
 import featureSlide4 from '../../assets/Slide4.png';
+import { markLatestChangelogSeen } from '../../utils/changelogUpdates';
 import { Timeline, type TimelineEntry } from '../ui/timeline';
 import { MarketingHeader } from './MarketingHeader';
 
@@ -16,23 +17,76 @@ type ChangelogPageProps = {
 export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
+    useEffect(() => {
+        markLatestChangelogSeen();
+    }, []);
+
     const timelineData = useMemo<TimelineEntry[]>(() => [
         {
-            title: 'v3.8.0',
+            title: 'v1.8.6',
             content: (
                 <div>
                     <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
-                        Mar 03, 2026 • Feature
+                        Mar 30, 2026 - Feature
                     </p>
                     <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
-                        Project-aware design planning and sharper request routing
+                        Save images once and use them anywhere in your project
                     </h3>
                     <div className="mt-5 space-y-4">
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            EazyUI now reads project memory and recent screen context before deciding what to do next, so the system is better at separating fresh generations from edits and direct chat answers.
+                            EazyUI now has a project media library, so you can save useful images and bring them back into prompts and edits without re-uploading them every time.
                         </p>
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            We also tightened repeated interface logic for headers, actions, and navigation patterns, which makes generated flows feel more coherent from screen to screen instead of drifting after the first pass.
+                            It is a faster way to keep logos, references, and product visuals close while you work.
+                        </p>
+                    </div>
+                    <div className="mt-8 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        {[
+                            {
+                                label: 'Library',
+                                title: 'Reusable project images',
+                                description: 'Keep your important images in one place and pull them in whenever you need them.',
+                            },
+                            {
+                                label: 'Upload',
+                                title: 'Cleaner upload flow',
+                                description: 'Adding images feels simpler whether your project is empty or already full of media.',
+                            },
+                            {
+                                label: 'Brand',
+                                title: 'Better brand handling',
+                                description: 'Logos and brand visuals are easier to save and reuse across the project.',
+                            },
+                        ].map((item) => (
+                            <div
+                                key={item.title}
+                                className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4"
+                            >
+                                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">{item.label}</p>
+                                <p className="mt-2 text-[16px] font-semibold text-[var(--ui-text)]">{item.title}</p>
+                                <p className="mt-2 text-[14px] leading-6 text-[var(--ui-text-muted)]">{item.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            title: 'v1.8.0',
+            content: (
+                <div>
+                    <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                        Mar 03, 2026 - Feature
+                    </p>
+                    <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
+                        EazyUI is better at knowing when to create, edit, or guide
+                    </h3>
+                    <div className="mt-5 space-y-4">
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            Requests now feel more natural because EazyUI does a better job understanding whether you want a brand-new screen, an edit, or just a quick answer.
+                        </p>
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            That means less steering from you and results that stay closer to the direction of your project.
                         </p>
                     </div>
                     <div className="mt-8 grid grid-cols-2 gap-4">
@@ -51,21 +105,21 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
             ),
         },
         {
-            title: 'v3.7.4',
+            title: 'v1.7.4',
             content: (
                 <div>
                     <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
-                        Mar 02, 2026 • Feature
+                        Mar 02, 2026 - Feature
                     </p>
                     <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
-                        Design-system generation now happens before first screen output
+                        New projects start with a clearer visual direction
                     </h3>
                     <div className="mt-5 space-y-4">
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            The first request in a project can now generate a proper design system before screen generation starts, giving the rest of the project a stronger visual language from the beginning.
+                            Projects can now lock in a stronger visual style earlier, so the first screens already feel more connected.
                         </p>
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            We added a design-system message widget in chat and persist the response in project history, so teams can revisit and refine the system instead of reconstructing it later.
+                            It is also easier to come back to that design direction later and keep refining it.
                         </p>
                     </div>
                     <div className="mt-8 grid grid-cols-2 gap-4">
@@ -84,28 +138,28 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
             ),
         },
         {
-            title: 'v3.7.1',
+            title: 'v1.7.1',
             content: (
                 <div>
                     <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
-                        Mar 01, 2026 • Improvement
+                        Mar 01, 2026 - Improvement
                     </p>
                     <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
-                        Streaming, canvas interaction, and motion controls feel steadier
+                        The workspace feels smoother day to day
                     </h3>
                     <div className="mt-5 space-y-4">
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            We reduced visible flicker during streaming output so partial renders feel smoother while content is still arriving, especially on longer generations.
+                            Streaming is calmer, the canvas feels steadier, and moving around the workspace is a bit more reliable.
                         </p>
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            Canvas interactions also got a pass: better keyboard shortcuts, cleaner focus handling, and more deliberate device animation defaults in generated code.
+                            It is mostly polish, but it makes the product feel more solid while you work.
                         </p>
                     </div>
                     <div className="mt-8 space-y-3">
                         {[
-                            'Smoother streaming output while generation is still in progress',
-                            'Cleaner keyboard shortcuts and focus behavior inside the canvas',
-                            'More stable motion defaults for generated interactive screens',
+                            'Smoother updates while screens are still generating',
+                            'Cleaner movement and interaction inside the canvas',
+                            'More stable motion across generated screens',
                         ].map((item) => (
                             <div
                                 key={item}
@@ -120,21 +174,21 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
             ),
         },
         {
-            title: 'v3.6.9',
+            title: 'v1.6.9',
             content: (
                 <div>
                     <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
-                        Feb 28, 2026 • Platform
+                        Feb 28, 2026 - Platform
                     </p>
                     <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
-                        Billing now supports plans, top-ups, and clearer credit accounting
+                        Plans and credits are easier to understand
                     </h3>
                     <div className="mt-5 space-y-4">
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            Stripe checkout and billing portal flows are now wired in for subscription plans and credit top-ups, so the commercial side of the product matches the maturity of the workspace.
+                            Billing now does a better job showing how plans, top-ups, and credits fit together.
                         </p>
                         <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                            We also added monthly credit accounting, rollover support on paid usage, and better local billing logs for setup and debugging during development.
+                            It should be easier to understand what you have and what you used.
                         </p>
                     </div>
                     <div className="mt-8 grid grid-cols-2 gap-4">
@@ -142,14 +196,14 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
                             <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Commerce</p>
                             <p className="mt-2 text-[16px] font-semibold text-[var(--ui-text)]">Plans and top-ups</p>
                             <p className="mt-2 text-[14px] leading-6 text-[var(--ui-text-muted)]">
-                                Subscription checkout and one-off credit purchasing now work as part of the same billing model.
+                                Upgrading and adding more credits now feel like part of one simple flow.
                             </p>
                         </div>
                         <div className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
                             <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Usage</p>
-                            <p className="mt-2 text-[16px] font-semibold text-[var(--ui-text)]">Clearer credit logic</p>
+                            <p className="mt-2 text-[16px] font-semibold text-[var(--ui-text)]">Clearer balances</p>
                             <p className="mt-2 text-[14px] leading-6 text-[var(--ui-text-muted)]">
-                                Monthly credits, rollover handling, and local billing logs are now easier to understand and verify.
+                                Credit balances and usage are easier to follow at a glance.
                             </p>
                         </div>
                     </div>
@@ -166,7 +220,7 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
                 <Timeline
                     data={timelineData}
                     title="Changelog from the EazyUI journey"
-                    description="A running view of the releases shaping EazyUI, from generation quality and design systems to workflow polish, billing, and product infrastructure."
+                    description="A simple look at what is new in EazyUI, with friendly updates on features, polish, and product improvements."
                 />
 
                 <section className="px-4 pt-6 md:px-6 md:pt-10">

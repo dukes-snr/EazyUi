@@ -6,12 +6,8 @@ import { getStorage } from "firebase/storage";
 function resolveStorageBucket(bucket?: string, projectId?: string) {
   const raw = (bucket || "").trim();
   const pid = (projectId || "").trim();
-  if (raw.endsWith(".firebasestorage.app") && pid) {
-    // Firebase web SDK expects the underlying GCS bucket form for reliable browser access.
-    return `${pid}.appspot.com`;
-  }
   if (raw) return raw;
-  return pid ? `${pid}.appspot.com` : undefined;
+  return pid ? `${pid}.firebasestorage.app` : undefined;
 }
 
 const firebaseConfig = {

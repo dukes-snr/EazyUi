@@ -9,12 +9,13 @@ import {
   orderBy,
   query,
   setDoc,
+  updateDoc,
   type Unsubscribe,
   writeBatch,
 } from "firebase/firestore";
 import { deleteObject, getBytes, getDownloadURL, ref, uploadString } from "firebase/storage";
-import type { HtmlDesignSpec, ProjectMemory, ReferenceContextMeta } from "@/api/client";
-import { db, storage } from "./firebase";
+import type { AssetKind, AssetRecord, AssetReference, AssetRole, AssetScope, HtmlDesignSpec, ProjectAssetContext, ProjectAssetLink, ProjectMemory, ReferenceContextMeta } from "@/api/client";
+import { auth, db, storage } from "./firebase";
 
 const IS_LOCAL_DEV_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
 const RENDER_IMAGE_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "/api";
@@ -56,12 +57,46 @@ type WorkspaceSnapshot = {
   projectMemory?: ProjectMemory | null;
 };
 
+type StoredAssetDoc = {
+  id: string;
+  name: string;
+  scope: AssetScope;
+  kind: AssetKind;
+  downloadUrl: string;
+  storagePath: string;
+  mimeType: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  tags?: string[];
+  projectId?: string;
+  ownerUid: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StoredProjectAssetContext = {
+  version: number;
+  autoUseBrandAssets: boolean;
+  links: Array<{
+    assetId: string;
+    scope: AssetScope;
+    projectId?: string;
+    role?: AssetRole;
+    pinned?: boolean;
+    isPreferredLogo?: boolean;
+    isKeyBrandAsset?: boolean;
+  }>;
+  updatedAt: string;
+};
+
 export type FirestoreProjectRecord = {
   projectId: string;
   designSpec: HtmlDesignSpec;
   canvasDoc: unknown;
   chatState: unknown;
   projectMemory?: ProjectMemory;
+  projectAssetContext?: ProjectAssetContext;
   createdAt: string;
   updatedAt: string;
 };
@@ -85,6 +120,7 @@ type ProjectMetaData = {
   canvasDoc?: unknown;
   chatState?: unknown;
   projectMemory?: ProjectMemory;
+  projectAssetContext?: StoredProjectAssetContext;
   snapshotPath?: string;
   coverImagePath?: string;
   coverImageUrl?: string;
@@ -175,6 +211,216 @@ function normalizeTimestampMs(value: unknown, fallback: number): number {
     if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
   }
   return fallback;
+}
+
+function sanitizeAssetFileName(value: string) {
+  return String(value || "asset")
+    .trim()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "asset";
+}
+
+function getAssetExtension(fileName: string, mimeType: string) {
+  const fromName = String(fileName || "").match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (fromName) return fromName;
+  const normalizedMime = String(mimeType || "").toLowerCase();
+  if (normalizedMime.includes("png")) return "png";
+  if (normalizedMime.includes("webp")) return "webp";
+  if (normalizedMime.includes("gif")) return "gif";
+  if (normalizedMime.includes("avif")) return "avif";
+  return "jpg";
+}
+
+function getAssetCollectionPath(params: { uid: string; scope: AssetScope; projectId?: string }) {
+  const { uid, scope, projectId } = params;
+  if (scope === "project") {
+    if (!projectId) throw new Error("Project assets require a projectId.");
+    return `users/${uid}/projects/${projectId}/assets`;
+  }
+  return `users/${uid}/assets`;
+}
+
+function getAssetStoragePath(params: {
+  uid: string;
+  scope: AssetScope;
+  assetId: string;
+  fileName: string;
+  mimeType: string;
+  projectId?: string;
+}) {
+  const { uid, scope, assetId, fileName, mimeType, projectId } = params;
+  const safeName = sanitizeAssetFileName(fileName);
+  const ext = getAssetExtension(fileName, mimeType);
+  if (scope === "project") {
+    if (!projectId) throw new Error("Project assets require a projectId.");
+    return `users/${uid}/projects/${projectId}/assets/${assetId}-${safeName}.${ext}`;
+  }
+  return `users/${uid}/assets/${assetId}-${safeName}.${ext}`;
+}
+
+async function uploadAssetThroughApi(params: {
+  storagePath: string;
+  base64DataUrl: string;
+  mimeType: string;
+}): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Authentication required for asset upload.");
+  }
+  const token = await user.getIdToken();
+  const response = await fetch(`${RENDER_IMAGE_API_BASE}/assets/upload`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      storagePath: params.storagePath,
+      base64DataUrl: params.base64DataUrl,
+      mimeType: params.mimeType,
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: "Asset upload failed." }));
+    throw new Error(String(error.message || error.error || `HTTP ${response.status}`));
+  }
+  const payload = await response.json() as { downloadUrl?: string };
+  if (!payload.downloadUrl) {
+    throw new Error("API upload did not return a download URL.");
+  }
+  return payload.downloadUrl;
+}
+
+function normalizeAssetRecord(data: Partial<StoredAssetDoc> | null | undefined): AssetRecord | null {
+  if (!data || typeof data !== "object") return null;
+  if (!data.id || !data.name || !data.scope || !data.kind || !data.downloadUrl || !data.storagePath || !data.mimeType || !data.ownerUid || !data.createdAt || !data.updatedAt) {
+    return null;
+  }
+
+  return {
+    id: String(data.id),
+    name: String(data.name),
+    scope: data.scope,
+    kind: data.kind,
+    downloadUrl: String(data.downloadUrl),
+    storagePath: String(data.storagePath),
+    mimeType: String(data.mimeType),
+    ...(typeof data.sizeBytes === "number" ? { sizeBytes: data.sizeBytes } : {}),
+    ...(typeof data.width === "number" ? { width: data.width } : {}),
+    ...(typeof data.height === "number" ? { height: data.height } : {}),
+    ...(Array.isArray(data.tags) ? { tags: data.tags.filter((item): item is string => typeof item === "string" && item.trim().length > 0) } : {}),
+    ...(typeof data.projectId === "string" && data.projectId.trim().length > 0 ? { projectId: data.projectId } : {}),
+    ownerUid: String(data.ownerUid),
+    createdAt: String(data.createdAt),
+    updatedAt: String(data.updatedAt),
+  };
+}
+
+function normalizeProjectAssetLink(data: Partial<ProjectAssetLink> | null | undefined): ProjectAssetLink | null {
+  if (!data || typeof data !== "object") return null;
+  const assetId = typeof data.assetId === "string" ? data.assetId.trim() : "";
+  const scope = data.scope === "project" || data.scope === "account" ? data.scope : null;
+  if (!assetId || !scope) return null;
+  const role = data.role === "logo" || data.role === "product-shot" || data.role === "illustration" || data.role === "photo" || data.role === "brand-texture"
+    ? data.role
+    : undefined;
+  return stripUndefinedDeep({
+    assetId,
+    scope,
+    ...(typeof data.projectId === "string" && data.projectId.trim() ? { projectId: data.projectId.trim() } : {}),
+    ...(role ? { role } : {}),
+    ...(data.pinned === true ? { pinned: true } : {}),
+    ...(data.isPreferredLogo === true ? { isPreferredLogo: true } : {}),
+    ...(data.isKeyBrandAsset === true ? { isKeyBrandAsset: true } : {}),
+  }) as ProjectAssetLink;
+}
+
+function sanitizeProjectAssetContext(value: unknown): ProjectAssetContext | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const links = Array.isArray(raw.links)
+    ? raw.links
+      .map((item) => normalizeProjectAssetLink(item as Partial<ProjectAssetLink>))
+      .filter((item): item is ProjectAssetLink => Boolean(item))
+      .slice(0, 24)
+    : [];
+  const autoUseBrandAssets = raw.autoUseBrandAssets === true;
+  const updatedAt = pickIsoTime(raw.updatedAt);
+  if (links.length === 0 && !autoUseBrandAssets) return {
+    version: 1,
+    autoUseBrandAssets: false,
+    links: [],
+    updatedAt,
+  };
+  return {
+    version: 1,
+    autoUseBrandAssets,
+    links,
+    updatedAt,
+  };
+}
+
+export function buildAssetReference(record: AssetRecord, options?: {
+  source?: AssetReference["source"];
+  role?: AssetRole;
+  pinned?: boolean;
+  isPreferredLogo?: boolean;
+  isKeyBrandAsset?: boolean;
+}): AssetReference {
+  return stripUndefinedDeep({
+    assetId: record.id,
+    name: record.name,
+    scope: record.scope,
+    kind: record.kind,
+    downloadUrl: record.downloadUrl,
+    mimeType: record.mimeType,
+    ...(record.projectId ? { projectId: record.projectId } : {}),
+    ...(typeof record.width === "number" ? { width: record.width } : {}),
+    ...(typeof record.height === "number" ? { height: record.height } : {}),
+    ...(options?.role ? { role: options.role } : {}),
+    ...(options?.pinned ? { pinned: true } : {}),
+    ...(options?.isPreferredLogo ? { isPreferredLogo: true } : {}),
+    ...(options?.isKeyBrandAsset ? { isKeyBrandAsset: true } : {}),
+    source: options?.source || "project_brand",
+  }) as AssetReference;
+}
+
+function sanitizeAssetReferencesForMeta(value: unknown, maxItems = 12): AssetReference[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const raw = item as Partial<AssetReference>;
+      const assetId = typeof raw.assetId === "string" ? raw.assetId.trim() : "";
+      const name = typeof raw.name === "string" ? raw.name.trim() : "";
+      const scope = raw.scope === "project" || raw.scope === "account" ? raw.scope : null;
+      const kind = raw.kind === "image" || raw.kind === "logo" || raw.kind === "component" ? raw.kind : null;
+      const downloadUrl = typeof raw.downloadUrl === "string" ? raw.downloadUrl.trim() : "";
+      const mimeType = typeof raw.mimeType === "string" ? raw.mimeType.trim() : "";
+      const source = raw.source === "saved_attachment" || raw.source === "project_brand" ? raw.source : null;
+      if (!assetId || !name || !scope || !kind || !downloadUrl || !mimeType || !source) return null;
+      return stripUndefinedDeep({
+        assetId,
+        name: sanitizeMetaString(name, name, 120),
+        scope,
+        kind,
+        downloadUrl: sanitizeMetaString(downloadUrl, downloadUrl, MAX_PERSISTED_IMAGE_URL_LENGTH),
+        mimeType: sanitizeMetaString(mimeType, mimeType, 120),
+        ...(typeof raw.projectId === "string" && raw.projectId.trim() ? { projectId: raw.projectId.trim() } : {}),
+        ...(typeof raw.width === "number" ? { width: raw.width } : {}),
+        ...(typeof raw.height === "number" ? { height: raw.height } : {}),
+        ...(raw.role ? { role: raw.role } : {}),
+        ...(raw.pinned === true ? { pinned: true } : {}),
+        ...(raw.isPreferredLogo === true ? { isPreferredLogo: true } : {}),
+        ...(raw.isKeyBrandAsset === true ? { isKeyBrandAsset: true } : {}),
+        source,
+      }) as AssetReference;
+    })
+    .filter((item): item is AssetReference => Boolean(item))
+    .slice(0, maxItems);
 }
 
 function sanitizeMetaString(value: unknown, fallback: string, max = 256): string {
@@ -406,6 +652,11 @@ function sanitizeDesignSystemProposalContextForMeta(value: unknown): Record<stri
     out.referenceImageUrls = referenceImageUrls;
   }
 
+  const assetRefs = sanitizeAssetReferencesForMeta(raw.assetRefs);
+  if (assetRefs.length > 0) {
+    out.assetRefs = assetRefs;
+  }
+
   return out;
 }
 
@@ -458,6 +709,11 @@ function sanitizePersistedMeta(value: unknown): Record<string, unknown> | null {
   const referenceContext = sanitizeReferenceContextForMeta(raw.referenceContext);
   if (referenceContext) {
     next.referenceContext = referenceContext;
+  }
+
+  const assetRefs = sanitizeAssetReferencesForMeta(raw.assetRefs);
+  if (assetRefs.length > 0) {
+    next.assetRefs = assetRefs;
   }
 
   if (Array.isArray(raw.screenIds)) {
@@ -1643,6 +1899,7 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
     canvasDoc,
     chatState: messages.length > 0 ? { messages } : (data.chatState ?? null),
     projectMemory: persistedProjectMemory || derivedProjectMemory || undefined,
+    projectAssetContext: sanitizeProjectAssetContext(data.projectAssetContext) || undefined,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -1682,6 +1939,7 @@ export async function getProjectFirestore(uid: string, projectId: string): Promi
         canvasDoc: parsed.canvasDoc ?? null,
         chatState: persistedMessages.length > 0 ? { messages: persistedMessages } : (parsed.chatState ?? null),
         projectMemory: persistedProjectMemory || snapshotProjectMemory || derivedProjectMemory || undefined,
+        projectAssetContext: sanitizeProjectAssetContext(data.projectAssetContext) || undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -1700,6 +1958,7 @@ export async function getProjectFirestore(uid: string, projectId: string): Promi
       canvasDoc: data.canvasDoc ?? null,
       chatState: data.chatState ?? null,
       projectMemory: persistedProjectMemory || derivedProjectMemory || undefined,
+      projectAssetContext: sanitizeProjectAssetContext(data.projectAssetContext) || undefined,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     };
@@ -1960,4 +2219,164 @@ export async function deleteProjectAsset(params: { uid: string; projectId: strin
   const { uid, projectId, assetPath } = params;
   const storageRef = ref(storage, `users/${uid}/projects/${projectId}/${assetPath}`);
   await deleteObject(storageRef);
+}
+
+export async function listUserAssets(params: {
+  uid: string;
+  scope: AssetScope;
+  projectId?: string;
+}): Promise<AssetRecord[]> {
+  const collectionPath = getAssetCollectionPath(params);
+  const assetsRef = collection(db, collectionPath);
+  const snapshot = await getDocs(query(assetsRef, orderBy("updatedAt", "desc"), limit(100)));
+  return snapshot.docs
+    .map((docSnap) => normalizeAssetRecord(docSnap.data() as Partial<StoredAssetDoc>))
+    .filter(Boolean) as AssetRecord[];
+}
+
+export async function uploadUserAssetBase64(params: {
+  uid: string;
+  scope: AssetScope;
+  fileName: string;
+  base64DataUrl: string;
+  mimeType: string;
+  projectId?: string;
+  kind?: AssetKind;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  tags?: string[];
+}): Promise<AssetRecord> {
+  const { uid, scope, projectId, fileName, base64DataUrl, mimeType } = params;
+  const assetsRef = collection(db, getAssetCollectionPath({ uid, scope, projectId }));
+  const assetDoc = doc(assetsRef);
+  const assetId = assetDoc.id;
+  const storagePath = getAssetStoragePath({
+    uid,
+    scope,
+    projectId,
+    assetId,
+    fileName,
+    mimeType,
+  });
+  let downloadUrl = "";
+  if (IS_LOCAL_DEV_HOST) {
+    downloadUrl = await uploadAssetThroughApi({
+      storagePath,
+      base64DataUrl,
+      mimeType,
+    });
+  } else {
+    const storageRef = ref(storage, storagePath);
+    try {
+      await uploadString(storageRef, base64DataUrl, "data_url");
+      downloadUrl = await getDownloadURL(storageRef);
+    } catch (error) {
+      if (!isStorageCorsOrNetworkError(error)) throw error;
+      downloadUrl = await uploadAssetThroughApi({
+        storagePath,
+        base64DataUrl,
+        mimeType,
+      });
+    }
+  }
+  const now = new Date().toISOString();
+  const record: StoredAssetDoc = {
+    id: assetId,
+    name: sanitizeAssetFileName(fileName),
+    scope,
+    kind: params.kind || "image",
+    downloadUrl,
+    storagePath,
+    mimeType,
+    ...(typeof params.sizeBytes === "number" ? { sizeBytes: params.sizeBytes } : {}),
+    ...(typeof params.width === "number" ? { width: params.width } : {}),
+    ...(typeof params.height === "number" ? { height: params.height } : {}),
+    ...(Array.isArray(params.tags) && params.tags.length > 0 ? { tags: params.tags } : {}),
+    ...(projectId ? { projectId } : {}),
+    ownerUid: uid,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await setDoc(assetDoc, record);
+  return normalizeAssetRecord(record)!;
+}
+
+export async function deleteUserAsset(params: {
+  uid: string;
+  scope: AssetScope;
+  asset: Pick<AssetRecord, "id" | "storagePath" | "projectId">;
+}): Promise<void> {
+  const { uid, scope, asset } = params;
+  const collectionPath = getAssetCollectionPath({ uid, scope, projectId: asset.projectId });
+  const assetDoc = doc(db, collectionPath, asset.id);
+  await deleteDoc(assetDoc);
+  try {
+    const storageRef = ref(storage, asset.storagePath);
+    await deleteObject(storageRef);
+  } catch {
+    // ignore missing storage object cleanup failures
+  }
+}
+
+export async function updateUserAssetMetadata(params: {
+  uid: string;
+  scope: AssetScope;
+  assetId: string;
+  projectId?: string;
+  updates: {
+    name?: string;
+    kind?: AssetKind;
+    tags?: string[];
+  };
+}): Promise<void> {
+  const { uid, scope, assetId, projectId, updates } = params;
+  const collectionPath = getAssetCollectionPath({ uid, scope, projectId });
+  const assetDoc = doc(db, collectionPath, assetId);
+  const payload = stripUndefinedDeep({
+    ...(typeof updates.name === "string" ? { name: sanitizeMetaString(updates.name, "asset", 120) } : {}),
+    ...(updates.kind ? { kind: updates.kind } : {}),
+    ...(Array.isArray(updates.tags) ? { tags: sanitizeMetaStringArray(updates.tags, 16, 48) } : {}),
+    updatedAt: new Date().toISOString(),
+  });
+  await updateDoc(assetDoc, payload);
+}
+
+export async function getProjectAssetContext(params: {
+  uid: string;
+  projectId: string;
+}): Promise<ProjectAssetContext | null> {
+  const projectRef = doc(db, "users", params.uid, "projects", params.projectId);
+  const snapshot = await getDoc(projectRef);
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data() as ProjectMetaData;
+  return sanitizeProjectAssetContext(data.projectAssetContext);
+}
+
+export async function updateProjectAssetContext(params: {
+  uid: string;
+  projectId: string;
+  context: ProjectAssetContext | null | undefined;
+}): Promise<ProjectAssetContext> {
+  const now = new Date().toISOString();
+  const sanitized = sanitizeProjectAssetContext({
+    ...(params.context || {}),
+    updatedAt: now,
+  }) || {
+    version: 1,
+    autoUseBrandAssets: false,
+    links: [],
+    updatedAt: now,
+  };
+  const nextContext: ProjectAssetContext = {
+    version: 1,
+    autoUseBrandAssets: sanitized.autoUseBrandAssets === true,
+    links: sanitized.links,
+    updatedAt: now,
+  };
+  await setDoc(doc(db, "users", params.uid, "projects", params.projectId), {
+    projectAssetContext: nextContext,
+    updatedAt: now,
+  }, { merge: true });
+  return nextContext;
 }

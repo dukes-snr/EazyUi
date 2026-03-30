@@ -1,11 +1,14 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useCanvasStore, useDesignStore, useUiStore } from '../../stores';
+import { useCanvasStore, useDesignStore, useProjectStore, useUiStore } from '../../stores';
+import type { User } from 'firebase/auth';
 import { useEditStore } from '../../stores/edit-store';
-import { apiClient } from '../../api/client';
+import { apiClient, type AssetRecord, type AssetScope } from '../../api/client';
 import { ensureEditableUids, type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, ImagePlus, Maximize2, Minimize2, Pipette, Redo2, Undo2, X } from 'lucide-react';
+import { ArrowUpLeft, FolderOpen, ImagePlus, Loader2, Maximize2, Minimize2, Pipette, Redo2, Undo2, Upload, UserRound, X } from 'lucide-react';
 import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectParent, dispatchSelectScreenContainer, dispatchSelectUid } from '../../utils/editMessaging';
 import { getPreferredTextModel } from '../../constants/designModels';
+import { observeAuthState } from '../../lib/auth';
+import { listUserAssets, uploadUserAssetBase64 } from '../../lib/firestoreData';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type PositionOffsets = { top: string; right: string; bottom: string; left: string };
@@ -15,8 +18,106 @@ type RGB = { r: number; g: number; b: number };
 type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
 type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
-type ScreenImageItem = { uid: string; src: string; alt: string };
+type ImageFitMode = 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
+type ScreenImageItem = {
+    uid: string;
+    src: string;
+    alt: string;
+    fit: ImageFitMode;
+    widthHint?: number;
+    heightHint?: number;
+};
 const MAX_UPLOADED_IMAGE_DATA_URL_LENGTH = 350_000;
+const IMAGE_FIT_OPTIONS: Array<{ value: ImageFitMode; label: string }> = [
+    { value: 'cover', label: 'Cover' },
+    { value: 'contain', label: 'Contain' },
+    { value: 'fill', label: 'Fill' },
+    { value: 'none', label: 'None' },
+    { value: 'scale-down', label: 'Scale down' },
+];
+
+function formatSavedAssetMeta(asset: AssetRecord) {
+    const parts: string[] = [];
+    if (typeof asset.width === 'number' && typeof asset.height === 'number' && asset.width > 0 && asset.height > 0) {
+        parts.push(`${asset.width}x${asset.height}`);
+    }
+    if (typeof asset.sizeBytes === 'number' && asset.sizeBytes > 0) {
+        parts.push(`${Math.max(1, Math.round(asset.sizeBytes / 1024))} KB`);
+    }
+    return parts.join(' • ');
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () => reject(new Error('Failed to read image file.'));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function getImageDimensions(dataUrl: string): Promise<{ width: number; height: number } | null> {
+    return await new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth || 0, height: image.naturalHeight || 0 });
+        image.onerror = () => resolve(null);
+        image.src = dataUrl;
+    });
+}
+
+function readInlineCssValue(styleText: string | null, propertyName: string): string {
+    const style = String(styleText || '');
+    const match = style.match(new RegExp(`${propertyName}\\s*:\\s*([^;]+)`, 'i'));
+    return match?.[1]?.trim() || '';
+}
+
+function parsePositiveDimension(value?: string | null): number | undefined {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    const match = raw.match(/(\d+(\.\d+)?)/);
+    const numeric = match ? Number(match[1]) : Number(raw);
+    if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+    return numeric;
+}
+
+function normalizeImageFit(value?: string | null): ImageFitMode {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'contain' || normalized === 'fill' || normalized === 'none' || normalized === 'scale-down') {
+        return normalized;
+    }
+    return 'cover';
+}
+
+function resolveScreenImageItem(img: HTMLImageElement): ScreenImageItem | null {
+    const uid = img.getAttribute('data-uid') || '';
+    if (!uid) return null;
+    const styleText = img.getAttribute('style');
+    const widthHint = parsePositiveDimension(img.getAttribute('width')) ?? parsePositiveDimension(readInlineCssValue(styleText, 'width'));
+    const heightHint = parsePositiveDimension(img.getAttribute('height')) ?? parsePositiveDimension(readInlineCssValue(styleText, 'height'));
+    const fit = normalizeImageFit(readInlineCssValue(styleText, 'object-fit') || img.style.objectFit);
+
+    return {
+        uid,
+        src: img.getAttribute('src') || '',
+        alt: img.getAttribute('alt') || '',
+        fit,
+        ...(widthHint ? { widthHint } : {}),
+        ...(heightHint ? { heightHint } : {}),
+    };
+}
+
+function formatAspectRatio(width: number, height: number): string {
+    if (width <= 0 || height <= 0) return 'unknown';
+    const ratio = width / height;
+    return `${ratio.toFixed(2)}:1`;
+}
+
+function hasSignificantAspectRatioMismatch(image: ScreenImageItem, nextDimensions?: { width: number; height: number } | null): boolean {
+    if (!image.widthHint || !image.heightHint || !nextDimensions?.width || !nextDimensions?.height) return false;
+    const slotRatio = image.widthHint / image.heightHint;
+    const nextRatio = nextDimensions.width / nextDimensions.height;
+    return Math.abs(slotRatio - nextRatio) / slotRatio >= 0.35;
+}
 
 function defaultImagePromptFromAlt(alt?: string, appName?: string, screenName?: string): string {
     const cleaned = (alt || '').trim();
@@ -436,7 +537,8 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
 
 export function EditPanel() {
     const { spec, updateScreen } = useDesignStore();
-    const { modelProfile } = useUiStore();
+    const { modelProfile, pushToast, requestConfirmation } = useUiStore();
+    const { projectId } = useProjectStore();
     const { setFocusNodeId } = useCanvasStore();
     const {
         isEditMode,
@@ -505,9 +607,23 @@ export function EditPanel() {
     const [imageGenPromptByUid, setImageGenPromptByUid] = useState<Record<string, string>>({});
     const [imageGenLoadingUid, setImageGenLoadingUid] = useState<string | null>(null);
     const [imagesTabError, setImagesTabError] = useState('');
+    const [authUser, setAuthUser] = useState<User | null>(null);
+    const [assetPickerScope, setAssetPickerScope] = useState<AssetScope>('project');
+    const [assetPickerTargetUid, setAssetPickerTargetUid] = useState<string | null>(null);
+    const [assetUploadTargetUid, setAssetUploadTargetUid] = useState<string | null>(null);
+    const [assetPickerSearchByScope, setAssetPickerSearchByScope] = useState<Record<AssetScope, string>>({ project: '', account: '' });
+    const [assetPickerSelectedByScope, setAssetPickerSelectedByScope] = useState<Record<AssetScope, string | null>>({ project: null, account: null });
+    const [recentAssetHistory, setRecentAssetHistory] = useState<AssetRecord[]>([]);
+    const [savedAssets, setSavedAssets] = useState<AssetRecord[]>([]);
+    const [savedAssetsLoading, setSavedAssetsLoading] = useState(false);
+    const [savedAssetsUploading, setSavedAssetsUploading] = useState(false);
+    const [savedAssetsError, setSavedAssetsError] = useState('');
     const aiAbortRef = useRef<AbortController | null>(null);
     const imageFileInputRef = useRef<HTMLInputElement | null>(null);
     const globalImageFileInputRef = useRef<HTMLInputElement | null>(null);
+    const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
+    const assetPickerListRef = useRef<HTMLDivElement | null>(null);
+    const assetPickerScrollByScopeRef = useRef<Record<AssetScope, number>>({ project: 0, account: 0 });
     const iconListRef = useRef<HTMLDivElement | null>(null);
 
     const activeScreen = useMemo(() => {
@@ -521,6 +637,8 @@ export function EditPanel() {
     }, [aiEditHistoryByScreen, screenId]);
     const canUndo = pointer > 0;
     const canRedo = pointer < patches.length;
+    const effectiveAssetPickerScope = assetPickerScope === 'project' && !projectId ? 'account' : assetPickerScope;
+    const activeAssetPickerSearch = assetPickerSearchByScope[effectiveAssetPickerScope] || '';
 
     const applyScreenHtmlImmediately = (nextHtml: string) => {
         if (!screenId) return;
@@ -618,12 +736,8 @@ export function EditPanel() {
         }
         const doc = new DOMParser().parseFromString(activeScreen.html, 'text/html');
         const items = Array.from(doc.querySelectorAll('img'))
-            .map((img) => ({
-                uid: img.getAttribute('data-uid') || '',
-                src: img.getAttribute('src') || '',
-                alt: img.getAttribute('alt') || '',
-            }))
-            .filter((item) => !!item.uid);
+            .map((img) => resolveScreenImageItem(img))
+            .filter((item): item is ScreenImageItem => Boolean(item));
         setScreenImages(items);
         const inputs: Record<string, string> = {};
         const nextGenPrompts: Record<string, string> = {};
@@ -795,11 +909,68 @@ export function EditPanel() {
         srcset: nextSrc,
     });
 
+    const applyImageFitForUid = (uid: string, fit: ImageFitMode) => {
+        if (!uid) return;
+        applyPatch({ op: 'set_style', uid, style: { 'object-fit': fit } });
+        setScreenImages((prev) => prev.map((item) => (item.uid === uid ? { ...item, fit } : item)));
+    };
+
     const applyImageSourceForUid = (uid: string, nextSrc: string) => {
         if (!uid) return;
         applyPatch({ op: 'set_attr', uid, attr: buildImageAttrPatch(nextSrc) });
         setImageInputs((prev) => ({ ...prev, [uid]: nextSrc }));
         setScreenImages((prev) => prev.map((item) => (item.uid === uid ? { ...item, src: nextSrc } : item)));
+    };
+
+    const replaceImageSourceSafely = async (params: {
+        image: ScreenImageItem;
+        nextSrc: string;
+        nextDimensions?: { width: number; height: number } | null;
+        sourceLabel?: string;
+        onApplied?: () => void;
+    }): Promise<boolean> => {
+        const { image, sourceLabel, onApplied } = params;
+        const nextSrc = params.nextSrc.trim();
+        if (!nextSrc) {
+            setImagesTabError('Image source cannot be empty.');
+            setImageInputs((prev) => ({ ...prev, [image.uid]: image.src }));
+            return false;
+        }
+        if (nextSrc === image.src) {
+            setImagesTabError('');
+            return true;
+        }
+
+        let dimensions = params.nextDimensions ?? null;
+        if (!dimensions) {
+            dimensions = await getImageDimensions(nextSrc);
+        }
+        if (!dimensions) {
+            const message = 'That image could not be loaded. Check the URL or file and try again.';
+            setImagesTabError(message);
+            setImageInputs((prev) => ({ ...prev, [image.uid]: image.src }));
+            pushToast({ kind: 'error', title: 'Invalid image', message });
+            return false;
+        }
+
+        if (hasSignificantAspectRatioMismatch(image, dimensions)) {
+            const slotLabel = image.alt?.trim() || 'this image slot';
+            const accepted = await requestConfirmation({
+                title: 'Aspect ratio looks different',
+                message: `${sourceLabel || 'This image'} is ${formatAspectRatio(dimensions.width, dimensions.height)} while ${slotLabel} is about ${formatAspectRatio(image.widthHint || 0, image.heightHint || 0)}. Continue and adjust fit if needed?`,
+                confirmLabel: 'Replace image',
+                cancelLabel: 'Keep current',
+            });
+            if (!accepted) {
+                setImageInputs((prev) => ({ ...prev, [image.uid]: image.src }));
+                return false;
+            }
+        }
+
+        setImagesTabError('');
+        applyImageSourceForUid(image.uid, nextSrc);
+        onApplied?.();
+        return true;
     };
 
     const onUndo = () => {
@@ -812,6 +983,152 @@ export function EditPanel() {
         if (!screenId || !canRedo) return;
         const rebuilt = redoAndRebuild();
         if (rebuilt) updateScreen(screenId, rebuilt);
+    };
+
+    useEffect(() => {
+        const unsubscribe = observeAuthState((user) => setAuthUser(user));
+        return () => unsubscribe();
+    }, []);
+
+    const loadSavedAssets = async () => {
+        if (!assetPickerTargetUid || !authUser) {
+            setSavedAssets([]);
+            setSavedAssetsError('');
+            return;
+        }
+
+        setSavedAssetsLoading(true);
+        setSavedAssetsError('');
+        try {
+            const items = await listUserAssets({
+                uid: authUser.uid,
+                scope: effectiveAssetPickerScope,
+                projectId: effectiveAssetPickerScope === 'project' ? projectId || undefined : undefined,
+            });
+            setSavedAssets(items);
+        } catch (error) {
+            setSavedAssetsError((error as Error).message || 'Failed to load saved assets.');
+        } finally {
+            setSavedAssetsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        void loadSavedAssets();
+    }, [assetPickerTargetUid, authUser, effectiveAssetPickerScope, projectId]);
+
+    const filteredSavedAssets = useMemo(() => {
+        const query = activeAssetPickerSearch.trim().toLowerCase();
+        if (!query) return savedAssets;
+        return savedAssets.filter((asset) => {
+            const haystack = [
+                asset.name,
+                asset.kind,
+                asset.scope,
+                ...(asset.tags || []),
+            ].join(' ').toLowerCase();
+            return haystack.includes(query);
+        });
+    }, [activeAssetPickerSearch, savedAssets]);
+
+    const selectedSavedAssetId = assetPickerSelectedByScope[effectiveAssetPickerScope];
+    const selectedSavedAsset = useMemo(
+        () => savedAssets.find((asset) => asset.id === selectedSavedAssetId) || null,
+        [savedAssets, selectedSavedAssetId]
+    );
+
+    const pushRecentAsset = (asset: AssetRecord) => {
+        setRecentAssetHistory((current) => [
+            asset,
+            ...current.filter((item) => item.id !== asset.id),
+        ].slice(0, 8));
+    };
+
+    const applySavedAssetToImage = async (targetUid: string, asset: AssetRecord): Promise<boolean> => {
+        const targetImage = screenImages.find((item) => item.uid === targetUid);
+        if (!targetImage) return false;
+        const applied = await replaceImageSourceSafely({
+            image: targetImage,
+            nextSrc: asset.downloadUrl,
+            nextDimensions: typeof asset.width === 'number' && typeof asset.height === 'number'
+                ? { width: asset.width, height: asset.height }
+                : null,
+            sourceLabel: asset.name,
+            onApplied: () => {
+                pushRecentAsset(asset);
+                setAssetPickerSelectedByScope((current) => ({
+                    ...current,
+                    [effectiveAssetPickerScope]: asset.id,
+                }));
+                setAssetPickerTargetUid(null);
+            },
+        });
+        return applied;
+    };
+
+    useEffect(() => {
+        if (savedAssets.length === 0) return;
+        const currentSelection = assetPickerSelectedByScope[effectiveAssetPickerScope];
+        if (currentSelection && savedAssets.some((asset) => asset.id === currentSelection)) return;
+        setAssetPickerSelectedByScope((current) => ({
+            ...current,
+            [effectiveAssetPickerScope]: savedAssets[0]?.id || null,
+        }));
+    }, [assetPickerSelectedByScope, effectiveAssetPickerScope, savedAssets]);
+
+    useEffect(() => {
+        if (!assetPickerTargetUid || !assetPickerListRef.current) return;
+        const nextScrollTop = assetPickerScrollByScopeRef.current[effectiveAssetPickerScope] || 0;
+        const frame = window.requestAnimationFrame(() => {
+            if (!assetPickerListRef.current) return;
+            assetPickerListRef.current.scrollTop = nextScrollTop;
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [assetPickerTargetUid, effectiveAssetPickerScope, filteredSavedAssets.length]);
+
+    const handleAssetUploadFromPicker = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.currentTarget.value = '';
+        const targetUid = assetUploadTargetUid;
+        if (!file || !targetUid || !authUser) return;
+        if (effectiveAssetPickerScope === 'project' && !projectId) {
+            const message = 'Project assets need an active project.';
+            setSavedAssetsError(message);
+            pushToast({ kind: 'error', title: 'Upload failed', message });
+            return;
+        }
+
+        setSavedAssetsUploading(true);
+        setSavedAssetsError('');
+        try {
+            const dataUrl = await readFileAsDataUrl(file);
+            const dimensions = await getImageDimensions(dataUrl);
+            const savedAsset = await uploadUserAssetBase64({
+                uid: authUser.uid,
+                scope: effectiveAssetPickerScope,
+                projectId: effectiveAssetPickerScope === 'project' ? projectId || undefined : undefined,
+                fileName: file.name,
+                base64DataUrl: dataUrl,
+                mimeType: file.type || 'image/jpeg',
+                sizeBytes: file.size,
+                ...(dimensions ? dimensions : {}),
+            });
+            const applied = await applySavedAssetToImage(targetUid, savedAsset);
+            await loadSavedAssets();
+            if (!applied) return;
+            pushToast({
+                kind: 'success',
+                title: 'Saved to assets',
+                message: `${savedAsset.name} is ready in ${effectiveAssetPickerScope === 'project' ? 'project' : 'account'} assets and applied to this slot.`,
+            });
+        } catch (error) {
+            const message = (error as Error).message || 'Could not upload image to assets.';
+            setSavedAssetsError(message);
+            pushToast({ kind: 'error', title: 'Upload failed', message });
+        } finally {
+            setSavedAssetsUploading(false);
+            setAssetUploadTargetUid(null);
+        }
     };
 
     const patchStyle = (style: Record<string, string>) => {
@@ -1976,9 +2293,17 @@ RULES:
                                     if (!file || !uploadTargetUid) return;
                                     setImagesTabError('');
                                     void optimizeUploadedImageFile(file)
-                                        .then((result) => {
+                                        .then(async (result) => {
                                             if (!result) return;
-                                            applyImageSourceForUid(uploadTargetUid, result);
+                                            const targetImage = screenImages.find((item) => item.uid === uploadTargetUid);
+                                            if (!targetImage) return;
+                                            const dimensions = await getImageDimensions(result);
+                                            await replaceImageSourceSafely({
+                                                image: targetImage,
+                                                nextSrc: result,
+                                                nextDimensions: dimensions,
+                                                sourceLabel: file.name || 'Uploaded image',
+                                            });
                                         })
                                         .catch((error) => {
                                             setImagesTabError((error as Error).message || 'Image upload failed.');
@@ -1987,62 +2312,319 @@ RULES:
                                     setUploadTargetUid(null);
                                 }}
                             />
+                            <input
+                                ref={assetUploadInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(event) => void handleAssetUploadFromPicker(event)}
+                            />
                             {screenImages.length === 0 ? (
-                                <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-3 text-xs text-[var(--ui-text-muted)]">
+                                <div className="rounded-2xl bg-[var(--ui-surface-2)] px-4 py-4 text-xs text-[var(--ui-text-muted)]">
                                     No images found on this screen.
                                 </div>
                             ) : (
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     {imagesTabError && (
-                                        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                                        <div className="rounded-2xl bg-red-500/12 px-4 py-3 text-xs text-red-200">
                                             {imagesTabError}
                                         </div>
                                     )}
-                                    {screenImages.map((image) => (
-                                        <div key={image.uid} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-2 space-y-2">
-                                            <div className="grid grid-cols-[64px_1fr_auto] items-center gap-2">
+                                    {recentAssetHistory.length > 0 && (
+                                        <div className="rounded-[24px] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_82%,var(--ui-surface-1))] p-4">
+                                            <div className="flex items-end justify-between gap-3">
+                                                <div>
+                                                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Recent assets</div>
+                                                    <div className="mt-1 text-[15px] font-semibold text-[var(--ui-text)]">Quick picks</div>
+                                                </div>
+                                                {assetPickerTargetUid ? (
+                                                    <div className="rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                                                        Slot armed
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[11px] text-[var(--ui-text-muted)]">Choose a slot to apply</div>
+                                                )}
+                                            </div>
+                                            <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+                                                {recentAssetHistory.map((asset) => (
+                                                    <button
+                                                        key={`recent-${asset.id}`}
+                                                        type="button"
+                                                        disabled={!assetPickerTargetUid}
+                                                        onClick={() => {
+                                                            if (!assetPickerTargetUid) return;
+                                                            void applySavedAssetToImage(assetPickerTargetUid, asset);
+                                                        }}
+                                                        className="min-w-[132px] rounded-[20px] bg-[var(--ui-surface-1)] p-2.5 text-left transition-colors hover:bg-[var(--ui-surface-3)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        <div className="aspect-square overflow-hidden rounded-[16px] bg-[var(--ui-surface-3)]">
+                                                            <img src={asset.downloadUrl} alt={asset.name} className="h-full w-full object-cover" />
+                                                        </div>
+                                                        <div className="mt-2 min-w-0">
+                                                            <div className="truncate text-[12px] font-semibold text-[var(--ui-text)]">{asset.name}</div>
+                                                            <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">
+                                                                {asset.scope === 'project' ? 'Project' : 'Account'}
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {screenImages.map((image, imageIndex) => (
+                                        <div
+                                            key={image.uid}
+                                            className={`rounded-[24px] p-3 space-y-3 transition-colors ${assetPickerTargetUid === image.uid
+                                                ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-1))]'
+                                                : 'bg-[color:color-mix(in_srgb,var(--ui-surface-1)_90%,var(--ui-surface-2))]'
+                                                }`}
+                                        >
+                                            <div className="grid grid-cols-[72px_1fr] gap-3">
                                                 <button
                                                     type="button"
                                                     onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                    className="h-16 w-16 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-3)]"
+                                                    className="h-[72px] w-[72px] overflow-hidden rounded-[18px] bg-[var(--ui-surface-3)]"
                                                     title="Select image element"
                                                 >
                                                     <img src={image.src} alt={image.alt || 'image'} className="h-full w-full object-cover" />
                                                 </button>
-                                                <input
-                                                    value={imageInputs[image.uid] || ''}
-                                                    onChange={(e) => {
-                                                        const next = e.target.value;
-                                                        setImageInputs((prev) => ({ ...prev, [image.uid]: next }));
-                                                    }}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') applyImageSourceForUid(image.uid, imageInputs[image.uid] || '');
-                                                    }}
-                                                    onBlur={() => applyImageSourceForUid(image.uid, imageInputs[image.uid] || '')}
-                                                    className={inputBase}
-                                                    placeholder="Image URL"
-                                                />
-                                                <div className="flex flex-col gap-1">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => dispatchSelectUid(screenId!, image.uid)}
-                                                        className="rounded-md bg-[var(--ui-surface-3)] px-2 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
-                                                    >
-                                                        Select
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setUploadTargetUid(image.uid);
-                                                            globalImageFileInputRef.current?.click();
+                                                <div className="min-w-0 space-y-3">
+                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Image slot {imageIndex + 1}</div>
+                                                            <div className="mt-1 truncate text-[15px] font-semibold text-[var(--ui-text)]">
+                                                                {image.alt?.trim() ? image.alt : 'Untitled image'}
+                                                            </div>
+                                                            <div className="mt-1 text-[11px] text-[var(--ui-text-muted)]">
+                                                                {assetPickerTargetUid === image.uid ? 'Asset library open for this slot.' : 'Replace, upload, or browse saved media.'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => dispatchSelectUid(screenId!, image.uid)}
+                                                                className="rounded-full bg-[var(--ui-surface-1)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                                            >
+                                                                Select
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setUploadTargetUid(image.uid);
+                                                                    globalImageFileInputRef.current?.click();
+                                                                }}
+                                                                className="rounded-full bg-[var(--ui-surface-1)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                                            >
+                                                                Upload
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAssetPickerTargetUid((current) => current === image.uid ? null : image.uid);
+                                                                    setAssetPickerScope((current) => (current === 'project' && !projectId ? 'account' : current));
+                                                                    setSavedAssetsError('');
+                                                                }}
+                                                                className={`rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${assetPickerTargetUid === image.uid
+                                                                    ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]'
+                                                                    : 'bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
+                                                                    }`}
+                                                            >
+                                                                Assets
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <input
+                                                        value={imageInputs[image.uid] || ''}
+                                                        onChange={(e) => {
+                                                            const next = e.target.value;
+                                                            setImageInputs((prev) => ({ ...prev, [image.uid]: next }));
                                                         }}
-                                                        className="rounded-md bg-[var(--ui-surface-3)] px-2 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-4)]"
-                                                    >
-                                                        Upload
-                                                    </button>
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.currentTarget.blur();
+                                                            }
+                                                        }}
+                                                        onBlur={() => {
+                                                            void replaceImageSourceSafely({
+                                                                image,
+                                                                nextSrc: imageInputs[image.uid] || '',
+                                                                sourceLabel: 'Image URL',
+                                                            });
+                                                        }}
+                                                        className="w-full rounded-[18px] bg-[var(--ui-surface-2)] px-4 py-3 text-[13px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:bg-[var(--ui-surface-1)]"
+                                                        placeholder="Image URL"
+                                                    />
+                                                    <div className="grid grid-cols-[94px_1fr] items-center gap-3 rounded-[18px] bg-[var(--ui-surface-2)] px-3 py-2">
+                                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                                                            Image fit
+                                                        </div>
+                                                        <select
+                                                            value={image.fit}
+                                                            onChange={(event) => applyImageFitForUid(image.uid, event.target.value as ImageFitMode)}
+                                                            className="w-full appearance-none rounded-[14px] bg-[var(--ui-surface-1)] bg-[linear-gradient(45deg,transparent_50%,#9ca3af_50%),linear-gradient(135deg,#9ca3af_50%,transparent_50%)] bg-[position:calc(100%-16px)_calc(50%-2px),calc(100%-10px)_calc(50%-2px)] bg-[length:6px_6px,6px_6px] bg-no-repeat px-3 py-2 pr-8 text-[12px] text-[var(--ui-text)] outline-none"
+                                                        >
+                                                            {IMAGE_FIT_OPTIONS.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            {assetPickerTargetUid === image.uid && (
+                                                <div className="rounded-[22px] bg-[var(--ui-surface-1)] p-4 space-y-4">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div>
+                                                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Saved assets</div>
+                                                            <div className="mt-1 text-[12px] leading-5 text-[var(--ui-text-muted)]">Targeting slot {imageIndex + 1}. Pick an asset, then apply it when ready.</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAssetUploadTargetUid(image.uid);
+                                                                    assetUploadInputRef.current?.click();
+                                                                }}
+                                                                disabled={!authUser || savedAssetsUploading}
+                                                                className="inline-flex items-center gap-1 rounded-full bg-[var(--ui-surface-2)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] disabled:cursor-not-allowed disabled:opacity-45"
+                                                            >
+                                                                {savedAssetsUploading && assetUploadTargetUid === image.uid ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                                                                Upload
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAssetPickerTargetUid(null);
+                                                                    setAssetUploadTargetUid(null);
+                                                                }}
+                                                                className="rounded-full bg-[var(--ui-surface-2)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                                            >
+                                                                Close
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="rounded-[18px] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-3 py-3">
+                                                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-primary)]">Target slot</div>
+                                                        <div className="mt-1 text-[12px] font-semibold text-[var(--ui-text)]">Image {imageIndex + 1}</div>
+                                                        <div className="mt-1 text-[11px] text-[var(--ui-text-muted)]">{image.alt?.trim() ? image.alt : 'No alt text on this image element.'}</div>
+                                                    </div>
+                                                    <div className="inline-flex w-full rounded-[16px] bg-[var(--ui-surface-2)] p-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setAssetPickerScope('project')}
+                                                            disabled={!projectId}
+                                                            className={`flex-1 rounded-[12px] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors ${effectiveAssetPickerScope === 'project' ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'} disabled:cursor-not-allowed disabled:opacity-45`}
+                                                        >
+                                                            <span className="inline-flex items-center gap-1.5">
+                                                                <FolderOpen size={12} />
+                                                                Project
+                                                            </span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setAssetPickerScope('account')}
+                                                            className={`flex-1 rounded-[12px] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors ${effectiveAssetPickerScope === 'account' ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'}`}
+                                                        >
+                                                            <span className="inline-flex items-center gap-1.5">
+                                                                <UserRound size={12} />
+                                                                Account
+                                                            </span>
+                                                        </button>
+                                                    </div>
+                                                    <label className="flex items-center gap-2 rounded-[16px] bg-[var(--ui-surface-2)] px-3 py-3">
+                                                        <input
+                                                            value={assetPickerSearchByScope[effectiveAssetPickerScope] || ''}
+                                                            onChange={(event) => setAssetPickerSearchByScope((current) => ({
+                                                                ...current,
+                                                                [effectiveAssetPickerScope]: event.target.value,
+                                                            }))}
+                                                            placeholder={`Search ${effectiveAssetPickerScope} assets`}
+                                                            className="w-full bg-transparent text-[12px] text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-subtle)]"
+                                                        />
+                                                    </label>
+                                                    {savedAssetsError ? (
+                                                        <div className="rounded-2xl bg-red-500/12 px-3 py-3 text-xs text-red-200">
+                                                            {savedAssetsError}
+                                                        </div>
+                                                    ) : null}
+                                                    {savedAssetsLoading ? (
+                                                        <div className="flex items-center gap-2 text-[11px] text-[var(--ui-text-muted)]">
+                                                            <Loader2 size={12} className="animate-spin" />
+                                                            Loading saved assets...
+                                                        </div>
+                                                    ) : savedAssets.length === 0 ? (
+                                                        <div className="rounded-2xl bg-[var(--ui-surface-2)] px-4 py-4 text-xs leading-5 text-[var(--ui-text-muted)]">
+                                                            {authUser
+                                                                ? effectiveAssetPickerScope === 'project'
+                                                                    ? 'No project assets yet. Upload one here or from the chat Assets tab.'
+                                                                    : 'No account assets yet. Upload one here or from the chat Assets tab.'
+                                                                : 'Sign in to use saved assets.'}
+                                                        </div>
+                                                    ) : filteredSavedAssets.length === 0 ? (
+                                                        <div className="rounded-2xl bg-[var(--ui-surface-2)] px-4 py-4 text-xs leading-5 text-[var(--ui-text-muted)]">
+                                                            No saved assets match "{activeAssetPickerSearch.trim()}" in this scope.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-3">
+                                                            {selectedSavedAsset ? (
+                                                                <div className="flex items-center justify-between gap-3 rounded-[18px] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-2))] px-3 py-3">
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-primary)]">Selected asset</div>
+                                                                        <div className="mt-1 truncate text-[12px] font-semibold text-[var(--ui-text)]">{selectedSavedAsset.name}</div>
+                                                                        <div className="mt-1 text-[11px] text-[var(--ui-text-muted)]">{formatSavedAssetMeta(selectedSavedAsset) || 'Saved image asset'}</div>
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => void applySavedAssetToImage(image.uid, selectedSavedAsset)}
+                                                                        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--ui-primary)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-[var(--ui-primary-hover)]"
+                                                                    >
+                                                                        <ImagePlus size={12} />
+                                                                        Use selected asset
+                                                                    </button>
+                                                                </div>
+                                                            ) : null}
+                                                            <div
+                                                                ref={assetPickerListRef}
+                                                                onScroll={(event) => {
+                                                                    assetPickerScrollByScopeRef.current[effectiveAssetPickerScope] = event.currentTarget.scrollTop;
+                                                                }}
+                                                                className="grid max-h-64 grid-cols-2 gap-3 overflow-y-auto pr-1"
+                                                            >
+                                                            {filteredSavedAssets.map((asset) => (
+                                                                <button
+                                                                    key={asset.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setAssetPickerSelectedByScope((current) => ({
+                                                                            ...current,
+                                                                            [effectiveAssetPickerScope]: asset.id,
+                                                                        }));
+                                                                    }}
+                                                                    className={`w-full rounded-[20px] p-2.5 text-left transition-colors ${
+                                                                        selectedSavedAsset?.id === asset.id
+                                                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-2))]'
+                                                                            : 'bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="aspect-[4/3] overflow-hidden rounded-[16px] bg-[var(--ui-surface-3)]">
+                                                                        <img src={asset.downloadUrl} alt={asset.name} className="h-full w-full object-cover" />
+                                                                    </div>
+                                                                    <div className="mt-2 min-w-0">
+                                                                        <div className="truncate text-[12px] font-semibold text-[var(--ui-text)]">{asset.name}</div>
+                                                                        <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">
+                                                                            {asset.scope === 'project' ? 'Project asset' : 'Account asset'}
+                                                                        </div>
+                                                                        <div className="mt-1 text-[11px] text-[var(--ui-text-muted)]">{formatSavedAssetMeta(asset) || 'Saved image asset'}</div>
+                                                                    </div>
+                                                                </button>
+                                                            ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <div className="flex items-center gap-2 rounded-[18px] bg-[var(--ui-surface-2)] p-2">
                                                 <input
                                                     value={imageGenPromptByUid[image.uid] || ''}
                                                     onChange={(e) => {
@@ -2052,14 +2634,14 @@ RULES:
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter') void generateImageForUid(image.uid);
                                                     }}
-                                                    className={inputBase}
-                                                    placeholder="Generate a new image for this slot..."
+                                                    className="w-full rounded-[14px] bg-[var(--ui-surface-1)] px-4 py-3 text-[13px] text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-subtle)]"
+                                                    placeholder="Describe a new image for this slot"
                                                 />
                                                 <button
                                                     type="button"
                                                     onClick={() => void generateImageForUid(image.uid)}
                                                     disabled={imageGenLoadingUid === image.uid || !(imageGenPromptByUid[image.uid] || '').trim()}
-                                                    className="flex items-center gap-1 rounded-md border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_15%,transparent)] px-3 py-2 text-[10px] uppercase tracking-wide text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                    className="flex items-center gap-1 rounded-full bg-[var(--ui-primary)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-[var(--ui-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                                     title="Generate and replace image"
                                                 >
                                                     <ImagePlus size={12} />
@@ -2069,7 +2651,7 @@ RULES:
                                                     <button
                                                         type="button"
                                                         onClick={stopAiEdit}
-                                                        className="rounded-md bg-red-500/10 border border-red-400/30 px-3 py-2 text-[10px] uppercase tracking-wide text-red-100 hover:bg-red-500/20"
+                                                        className="rounded-full bg-red-500/12 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-red-100 hover:bg-red-500/20"
                                                         title="Stop image generation"
                                                     >
                                                         Stop

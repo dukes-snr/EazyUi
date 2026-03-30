@@ -1,6 +1,7 @@
 import { getApps, initializeApp, applicationDefault, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import fs from 'fs';
 
 export type AuthUserContext = {
@@ -8,12 +9,19 @@ export type AuthUserContext = {
     email?: string;
 };
 
+let cachedServiceAccount: Record<string, unknown> | null | undefined;
+
 function parseServiceAccountFromEnv(): Record<string, unknown> | null {
+    if (cachedServiceAccount !== undefined) {
+        return cachedServiceAccount;
+    }
+
     const jsonPath = (process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim();
     if (jsonPath) {
         try {
             const fromFile = fs.readFileSync(jsonPath, 'utf8');
-            return JSON.parse(fromFile) as Record<string, unknown>;
+            cachedServiceAccount = JSON.parse(fromFile) as Record<string, unknown>;
+            return cachedServiceAccount;
         } catch (error) {
             console.warn('[Auth] Invalid FIREBASE_SERVICE_ACCOUNT_PATH value', error);
         }
@@ -22,7 +30,8 @@ function parseServiceAccountFromEnv(): Record<string, unknown> | null {
     const rawJson = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
     if (rawJson) {
         try {
-            return JSON.parse(rawJson) as Record<string, unknown>;
+            cachedServiceAccount = JSON.parse(rawJson) as Record<string, unknown>;
+            return cachedServiceAccount;
         } catch (error) {
             console.warn('[Auth] Invalid FIREBASE_SERVICE_ACCOUNT_JSON value', error);
         }
@@ -32,27 +41,44 @@ function parseServiceAccountFromEnv(): Record<string, unknown> | null {
     if (rawB64) {
         try {
             const decoded = Buffer.from(rawB64, 'base64').toString('utf8');
-            return JSON.parse(decoded) as Record<string, unknown>;
+            cachedServiceAccount = JSON.parse(decoded) as Record<string, unknown>;
+            return cachedServiceAccount;
         } catch (error) {
             console.warn('[Auth] Invalid FIREBASE_SERVICE_ACCOUNT_BASE64 value', error);
         }
     }
 
-    return null;
+    cachedServiceAccount = null;
+    return cachedServiceAccount;
+}
+
+function resolveFirebaseStorageBucketName(serviceAccount: Record<string, unknown> | null): string | undefined {
+    const direct = String(process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim();
+    if (direct) return direct;
+    const projectId = String(
+        process.env.FIREBASE_PROJECT_ID
+        || process.env.VITE_FIREBASE_PROJECT_ID
+        || serviceAccount?.project_id
+        || ''
+    ).trim();
+    return projectId ? `${projectId}.firebasestorage.app` : undefined;
 }
 
 function ensureFirebaseAdmin() {
     if (getApps().length > 0) return getApps()[0];
 
     const serviceAccount = parseServiceAccountFromEnv();
+    const storageBucket = resolveFirebaseStorageBucketName(serviceAccount);
     if (serviceAccount) {
         return initializeApp({
             credential: cert(serviceAccount as any),
+            ...(storageBucket ? { storageBucket } : {}),
         });
     }
 
     return initializeApp({
         credential: applicationDefault(),
+        ...(storageBucket ? { storageBucket } : {}),
     });
 }
 
@@ -77,4 +103,10 @@ export async function verifyAuthHeader(headerValue: string | undefined): Promise
 export function getFirebaseDb() {
     ensureFirebaseAdmin();
     return getFirestore();
+}
+
+export function getFirebaseStorageBucket(): ReturnType<ReturnType<typeof getStorage>['bucket']> {
+    const app = ensureFirebaseAdmin();
+    const configuredBucket = resolveFirebaseStorageBucketName(parseServiceAccountFromEnv());
+    return configuredBucket ? getStorage(app).bucket(configuredBucket) : getStorage(app).bucket();
 }

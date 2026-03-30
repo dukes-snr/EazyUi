@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Sparkles, Square, Send } from 'lucide-react';
 import { apiClient } from '../../api/client';
-import { useDesignStore, useUiStore } from '../../stores';
+import { useCanvasStore, useDesignStore, useUiStore } from '../../stores';
 import { useEditStore } from '../../stores/edit-store';
 import { dispatchSelectUid } from '../../utils/editMessaging';
 import { ensureEditableUids } from '../../utils/htmlPatcher';
@@ -10,8 +10,10 @@ import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import {
     extractComposerInlineReferences,
     findComposerReferenceTrigger,
+    formatComposerScreenReferenceToken,
     formatComposerUrlReferenceToken,
     getFilteredComposerReferenceRootOptions,
+    inferComposerReferencedScreenUsage,
     normalizeComposerReferenceUrl,
     replaceComposerReferenceTrigger,
     type ComposerReferenceTextRange,
@@ -23,6 +25,7 @@ import { Orb } from '../ui/Orb';
 export function EditAiComposer() {
     const { spec, updateScreen } = useDesignStore();
     const { modelProfile } = useUiStore();
+    const setFocusNodeId = useCanvasStore((state) => state.setFocusNodeId);
     const {
         isEditMode,
         screenId,
@@ -37,7 +40,7 @@ export function EditAiComposer() {
     const [error, setError] = useState('');
     const [description, setDescription] = useState('');
     const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
-    const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
+    const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url' | 'screen'>('root');
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
     const [referenceUrlDraft, setReferenceUrlDraft] = useState('');
@@ -45,12 +48,24 @@ export function EditAiComposer() {
     const textareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement | null>(null);
+    const referenceSearchInputRef = useRef<HTMLInputElement | null>(null);
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
     const activeScreen = useMemo(() => {
         if (!spec || !screenId) return null;
         return spec.screens.find((screen) => screen.screenId === screenId) || null;
     }, [screenId, spec]);
+    const availableMentionScreens = useMemo(
+        () => (spec?.screens || []).map((screen) => ({ screenId: screen.screenId, name: screen.name })),
+        [spec?.screens]
+    );
+    const screenReferenceOptions = useMemo(() => {
+        const normalizedQuery = referenceRootQuery.trim().toLowerCase();
+        return availableMentionScreens.filter((screen) => {
+            if (!normalizedQuery) return true;
+            return screen.name.toLowerCase().includes(normalizedQuery);
+        });
+    }, [availableMentionScreens, referenceRootQuery]);
 
     const selectionLabel = useMemo(() => {
         if (!selected) return null;
@@ -62,7 +77,7 @@ export function EditAiComposer() {
     const editOrbInput = busy ? 0.6 : prompt.trim() ? 0.38 : 0.15;
     const editOrbOutput = busy ? 0.8 : prompt.trim() ? 0.55 : 0.2;
     const rootReferenceOptions = useMemo(
-        () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
+        () => getFilteredComposerReferenceRootOptions(referenceRootQuery, true),
         [referenceRootQuery]
     );
 
@@ -96,6 +111,13 @@ export function EditAiComposer() {
         setIsReferenceMenuOpen(true);
     };
 
+    const openScreenReferenceInput = () => {
+        setReferenceMenuMode('screen');
+        setReferenceActiveIndex(0);
+        setReferenceRootQuery('');
+        setIsReferenceMenuOpen(true);
+    };
+
     const submitUrlReference = () => {
         const normalized = normalizeComposerReferenceUrl(referenceUrlDraft);
         if (!normalized) return;
@@ -113,37 +135,93 @@ export function EditAiComposer() {
         }, 0);
     };
 
+    const submitScreenReference = (name: string) => {
+        const range = referenceTriggerRangeRef.current;
+        if (!range) return;
+        const source = textareaRef.current?.getValue() ?? prompt;
+        const result = replaceComposerReferenceTrigger(source, range, formatComposerScreenReferenceToken(name));
+        setPrompt(result.value);
+        closeReferenceMenu();
+        window.setTimeout(() => {
+            const target = textareaRef.current;
+            if (!target) return;
+            target.focus();
+            target.setSelectionRange(result.cursor, result.cursor);
+        }, 0);
+    };
+
     const applyAiEdit = async () => {
-        if (!isEditMode || !screenId || !activeScreen || !selected) return;
+        if (!isEditMode || !screenId || !activeScreen) return;
         const nextPrompt = prompt.trim();
         if (!nextPrompt || busy) return;
-        const parsedReferences = extractComposerInlineReferences(nextPrompt);
+        const parsedReferences = extractComposerInlineReferences(nextPrompt, {
+            allowScreen: true,
+            screens: availableMentionScreens,
+        });
+        const referencedScreenUsage = inferComposerReferencedScreenUsage(
+            parsedReferences.cleanedText.trim(),
+            parsedReferences.screenReferences
+        );
+        const screenById = new Map((spec?.screens || []).map((screen) => [screen.screenId, screen] as const));
+        const referencedScreens = parsedReferences.screenReferences
+            .map((reference) => screenById.get(reference.screenId))
+            .filter((screen): screen is NonNullable<typeof activeScreen> => Boolean(screen));
+        const targetScreen = referencedScreenUsage.mode === 'edit-target' && referencedScreens.length > 0
+            ? referencedScreens[0]
+            : activeScreen;
+        if (!targetScreen) return;
+        const supportingReferenceScreens = referencedScreenUsage.mode === 'edit-target'
+            ? referencedScreens.slice(1)
+            : referencedScreens;
+        const shouldRunScreenLevelEdit = referencedScreenUsage.mode === 'edit-target'
+            || !selected
+            || targetScreen.screenId !== screenId;
+        const scopedSelection = shouldRunScreenLevelEdit ? null : selected;
+        if (!shouldRunScreenLevelEdit && !scopedSelection) return;
+        const selectedForScopedEdit = scopedSelection as NonNullable<typeof selected>;
 
-        const htmlSource = rebuildHtml() || activeScreen.html;
+        const htmlSource = shouldRunScreenLevelEdit
+            ? targetScreen.html
+            : (rebuildHtml() || activeScreen.html);
         if (!htmlSource) return;
 
-        const scopedInstruction = `
+        const scopedInstruction = shouldRunScreenLevelEdit ? `
+Edit this existing screen in place.
+
+USER REQUEST:
+${parsedReferences.cleanedText.trim()}
+
+TARGET SCREEN:
+- name: ${targetScreen.name}
+- screenId: ${targetScreen.screenId}
+
+RULES:
+- Treat this target screen as the screen to update directly.
+- Preserve the overall app structure and return valid full HTML only.
+- Keep existing data-uid and data-editable attributes whenever possible.
+- If referenced screens are provided, use them only for continuity and styling context unless the request explicitly says to copy a section.
+`.trim() : `
 Edit only the selected component in this screen.
 
 USER REQUEST:
 ${parsedReferences.cleanedText.trim()}
 
 TARGET COMPONENT:
-- data-uid: ${selected.uid}
-- tag: ${selected.tagName.toLowerCase()}
-- type: ${selected.elementType}
-- classes: ${(selected.classList || []).join(' ') || '(none)'}
-- inline-style: ${JSON.stringify(selected.inlineStyle || {})}
-- attrs: ${JSON.stringify(selected.attributes || {})}
+- data-uid: ${selectedForScopedEdit.uid}
+- tag: ${selectedForScopedEdit.tagName.toLowerCase()}
+- type: ${selectedForScopedEdit.elementType}
+- classes: ${(selectedForScopedEdit.classList || []).join(' ') || '(none)'}
+- inline-style: ${JSON.stringify(selectedForScopedEdit.inlineStyle || {})}
+- attrs: ${JSON.stringify(selectedForScopedEdit.attributes || {})}
 
 LAYOUT CONTEXT:
-- computed display: ${selected.computedStyle.display || ''}
-- computed position: ${selected.computedStyle.position || ''}
-- computed z-index: ${selected.computedStyle.zIndex || ''}
-- computed width: ${selected.computedStyle.width || ''}
-- computed height: ${selected.computedStyle.height || ''}
-- computed margin: ${selected.computedStyle.margin || ''}
-- computed padding: ${selected.computedStyle.padding || ''}
+- computed display: ${selectedForScopedEdit.computedStyle.display || ''}
+- computed position: ${selectedForScopedEdit.computedStyle.position || ''}
+- computed z-index: ${selectedForScopedEdit.computedStyle.zIndex || ''}
+- computed width: ${selectedForScopedEdit.computedStyle.width || ''}
+- computed height: ${selectedForScopedEdit.computedStyle.height || ''}
+- computed margin: ${selectedForScopedEdit.computedStyle.margin || ''}
+- computed padding: ${selectedForScopedEdit.computedStyle.padding || ''}
 
 RULES:
 - Keep the screen architecture intact and preserve all unrelated components.
@@ -160,29 +238,41 @@ RULES:
         abortRef.current = controller;
 
         try {
+            if (targetScreen.screenId !== screenId) {
+                setActiveScreen(targetScreen.screenId, targetScreen.html);
+            }
+            setFocusNodeId(targetScreen.screenId);
             const response = await apiClient.edit({
                 instruction: scopedInstruction,
                 html: htmlSource,
-                screenId,
+                screenId: targetScreen.screenId,
                 referenceUrls: parsedReferences.urlReferences.map((item) => item.url),
+                referenceScreens: supportingReferenceScreens.slice(0, 2).map((screen) => ({
+                    screenId: screen.screenId,
+                    name: screen.name,
+                    html: screen.html,
+                })),
                 preferredModel: getPreferredTextModel(modelProfile),
             }, controller.signal);
             const ensured = ensureEditableUids(response.html);
-            updateScreen(screenId, ensured, 'complete');
-            setActiveScreen(screenId, ensured);
+            updateScreen(targetScreen.screenId, ensured, 'complete');
+            setActiveScreen(targetScreen.screenId, ensured);
+            setFocusNodeId(targetScreen.screenId);
             if (response.description?.trim()) setDescription(response.description.trim());
             addAiEditHistory({
                 id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                screenId,
-                uid: selected.uid,
-                tagName: selected.tagName.toLowerCase(),
-                elementType: selected.elementType,
+                screenId: targetScreen.screenId,
+                uid: shouldRunScreenLevelEdit ? '__screen__' : selectedForScopedEdit.uid,
+                tagName: shouldRunScreenLevelEdit ? 'screen' : selectedForScopedEdit.tagName.toLowerCase(),
+                elementType: shouldRunScreenLevelEdit ? 'container' : selectedForScopedEdit.elementType,
                 prompt: nextPrompt,
                 description: response.description?.trim(),
                 createdAt: new Date().toISOString(),
             });
             setPrompt('');
-            window.setTimeout(() => dispatchSelectUid(screenId, selected.uid), 100);
+            if (!shouldRunScreenLevelEdit) {
+                window.setTimeout(() => dispatchSelectUid(targetScreen.screenId, selectedForScopedEdit.uid), 100);
+            }
         } catch (err) {
             if ((err as Error).name === 'AbortError') {
                 setError('AI edit stopped.');
@@ -218,8 +308,14 @@ RULES:
     }, [isReferenceMenuOpen, referenceMenuMode]);
 
     useEffect(() => {
-        if (!isReferenceMenuOpen || referenceMenuMode !== 'url') return;
-        referenceUrlInputRef.current?.focus();
+        if (!isReferenceMenuOpen) return;
+        if (referenceMenuMode === 'url') {
+            referenceUrlInputRef.current?.focus();
+            return;
+        }
+        if (referenceMenuMode === 'screen') {
+            referenceSearchInputRef.current?.focus();
+        }
     }, [isReferenceMenuOpen, referenceMenuMode]);
 
     if (!isEditMode) return null;
@@ -284,6 +380,30 @@ RULES:
                                                 event.preventDefault();
                                                 const choice = rootReferenceOptions[referenceActiveIndex] || rootReferenceOptions[0];
                                                 if (choice?.key === 'url') openUrlReferenceInput();
+                                                if (choice?.key === 'screen') openScreenReferenceInput();
+                                                return;
+                                            }
+                                        }
+                                        if (referenceMenuMode === 'screen' && screenReferenceOptions.length > 0) {
+                                            if (event.key === 'ArrowDown') {
+                                                event.preventDefault();
+                                                setReferenceActiveIndex((prev) => (prev + 1) % screenReferenceOptions.length);
+                                                return;
+                                            }
+                                            if (event.key === 'ArrowUp') {
+                                                event.preventDefault();
+                                                setReferenceActiveIndex((prev) => (prev - 1 + screenReferenceOptions.length) % screenReferenceOptions.length);
+                                                return;
+                                            }
+                                            if (event.key === 'Escape') {
+                                                event.preventDefault();
+                                                closeReferenceMenu();
+                                                return;
+                                            }
+                                            if (event.key === 'Enter' && !event.shiftKey) {
+                                                event.preventDefault();
+                                                const choice = screenReferenceOptions[referenceActiveIndex] || screenReferenceOptions[0];
+                                                if (choice) submitScreenReference(choice.name);
                                                 return;
                                             }
                                         }
@@ -299,10 +419,10 @@ RULES:
                                     }
                                 }}
                                 placeholder={selected
-                                    ? 'Describe exactly what to change for the selected element... (type @ to add a URL reference)'
-                                    : 'Select an element first...'}
+                                    ? 'Describe what to change. Type @ to target a screen or add a URL reference...'
+                                    : 'Describe a screen edit or select an element for scoped changes...'}
                                 placeholderClassName="px-3 py-2.5"
-                                disabled={!selected || busy}
+                                disabled={!activeScreen || busy}
                                 className="edit-ai-textarea"
                             />
                         </div>
@@ -315,11 +435,17 @@ RULES:
                             onCancel={closeReferenceMenu}
                             onRootOptionHover={setReferenceActiveIndex}
                             onScreenHover={setReferenceActiveIndex}
+                            onScreenQueryChange={setReferenceRootQuery}
                             onSelectRootOption={(key) => {
                                 if (key === 'url') openUrlReferenceInput();
+                                if (key === 'screen') openScreenReferenceInput();
                             }}
+                            onSelectScreen={(screen) => submitScreenReference(screen.name)}
                             onSubmitUrl={submitUrlReference}
                             rootOptions={rootReferenceOptions}
+                            screenOptions={screenReferenceOptions}
+                            screenQuery={referenceRootQuery}
+                            searchInputRef={referenceSearchInputRef}
                             urlDraft={referenceUrlDraft}
                             urlInputRef={referenceUrlInputRef}
                             onUrlDraftChange={setReferenceUrlDraft}
@@ -338,7 +464,7 @@ RULES:
                         <button
                             type="button"
                             onClick={() => void applyAiEdit()}
-                            disabled={!selected || !prompt.trim()}
+                            disabled={!activeScreen || !prompt.trim()}
                             className="edit-ai-send"
                             title="Apply AI edit"
                         >

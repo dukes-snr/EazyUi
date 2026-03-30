@@ -12,6 +12,10 @@ type ComposerAttachmentStackProps = {
     onRemove: (index: number) => void;
     className?: string;
     size?: 'default' | 'compact';
+    badges?: Array<{
+        label: string;
+        tone?: 'saved' | 'upload';
+    }>;
 };
 
 export function ComposerAttachmentStack({
@@ -19,10 +23,12 @@ export function ComposerAttachmentStack({
     onRemove,
     className,
     size = 'default',
+    badges,
 }: ComposerAttachmentStackProps) {
     if (images.length === 0) return null;
 
     const visibleImages = images.slice(0, MAX_COMPOSER_ATTACHMENTS);
+    const visibleBadges = (badges || []).slice(0, MAX_COMPOSER_ATTACHMENTS);
     const isCompact = size === 'compact';
     const stackStep = isCompact ? 30 : STACK_STEP_PX;
     const stackWidth = (isCompact ? 76 : 96) + Math.max(0, visibleImages.length - 1) * stackStep;
@@ -60,6 +66,17 @@ export function ComposerAttachmentStack({
                         >
                             <img src={src} alt="" className="h-full w-full object-cover" />
                             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(15,23,42,0.16))]" />
+                            {visibleBadges[index] ? (
+                                <div
+                                    className={`pointer-events-none absolute bottom-2 left-2 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                                        visibleBadges[index]?.tone === 'saved'
+                                            ? 'bg-emerald-500/85 text-white'
+                                            : 'bg-[var(--ui-surface-1)]/90 text-[var(--ui-text)]'
+                                    }`}
+                                >
+                                    {visibleBadges[index]?.label}
+                                </div>
+                            ) : null}
                         </div>
                         <button
                             type="button"

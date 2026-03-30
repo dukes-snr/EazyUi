@@ -22,6 +22,13 @@ export type ComposerUrlReference = {
     label: string;
 };
 
+export type ComposerReferencedScreenUsageMode = 'none' | 'edit-target' | 'reference-source';
+
+export type ComposerReferencedScreenUsage = {
+    mode: ComposerReferencedScreenUsageMode;
+    targetScreenIds: string[];
+};
+
 export type ComposerInlineReferenceParseResult = {
     cleanedText: string;
     urlReferences: ComposerUrlReference[];
@@ -102,9 +109,22 @@ export function getFilteredComposerReferenceRootOptions(query: string, allowScre
         });
 }
 
+function looksLikeComposerReferenceUrl(value: string): boolean {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    if (/^https?:\/\//i.test(trimmed)) return true;
+    if (/^localhost(?::\d+)?(?:\/|$)/i.test(trimmed)) return true;
+    if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/|$)/.test(trimmed)) return true;
+    if (trimmed.includes('/')) return true;
+    if (/:\d{2,5}(?:\/|$)/.test(trimmed)) return true;
+    if (/^[^\s]+\.[^\s]+$/.test(trimmed)) return true;
+    return false;
+}
+
 export function normalizeComposerReferenceUrl(value: string): string | null {
     const trimmed = String(value || '').trim();
     if (!trimmed) return null;
+    if (!looksLikeComposerReferenceUrl(trimmed)) return null;
 
     const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
@@ -158,6 +178,46 @@ export function formatComposerUrlReferenceToken(url: string): string {
     return `@${compact}`;
 }
 
+export function inferComposerReferencedScreenUsage(
+    prompt: string,
+    references: ComposerScreenReferenceOption[] = []
+): ComposerReferencedScreenUsage {
+    if (!Array.isArray(references) || references.length === 0) {
+        return { mode: 'none', targetScreenIds: [] };
+    }
+
+    const normalizedPrompt = String(prompt || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    if (!normalizedPrompt) {
+        return {
+            mode: 'edit-target',
+            targetScreenIds: references.map((reference) => reference.screenId),
+        };
+    }
+
+    const mentionsNewScreenGoal = /\b(new|another|different)\s+(screen|page|view|flow|layout)\b/i.test(normalizedPrompt)
+        || /\b(create|make|build|generate|design|draft)\b[\s\S]{0,80}\b(screen|page|view|flow|layout)\b/i.test(normalizedPrompt)
+        || /\b(as|into)\s+(a|an)?\s*[\w\s-]{0,40}(screen|page|view|flow|layout)\b/i.test(normalizedPrompt);
+
+    const mentionsReferenceTransfer = /\b(copy|borrow|use|reuse|take|pull|match|mirror|inspir(?:e|ed)|based on|style from|same as|like)\b/i.test(normalizedPrompt);
+
+    if (mentionsNewScreenGoal && mentionsReferenceTransfer) {
+        return { mode: 'reference-source', targetScreenIds: [] };
+    }
+
+    if (mentionsNewScreenGoal && /\bfrom\b/i.test(normalizedPrompt)) {
+        return { mode: 'reference-source', targetScreenIds: [] };
+    }
+
+    return {
+        mode: 'edit-target',
+        targetScreenIds: references.map((reference) => reference.screenId),
+    };
+}
+
 export function getComposerAtomicReferenceRanges(
     value: string,
     options?: ComposerReferenceResolutionOptions
@@ -189,28 +249,26 @@ export function getComposerAtomicReferenceRanges(
         const text = `@${rawToken}`;
         const start = match.index + leading.length;
         const end = start + text.length;
-        const normalizedUrl = normalizeComposerReferenceUrl(rawToken);
-
-        if (normalizedUrl) {
+        const screen = allowScreen ? screenByKey.get(normalizeComposerScreenReferenceKey(rawToken)) : undefined;
+        if (screen) {
             ranges.push({
                 start,
                 end,
                 text,
-                kind: 'url',
-                url: normalizedUrl,
+                kind: 'screen',
+                screen,
             });
             continue;
         }
 
-        if (!allowScreen) continue;
-        const screen = screenByKey.get(normalizeComposerScreenReferenceKey(rawToken));
-        if (!screen) continue;
+        const normalizedUrl = normalizeComposerReferenceUrl(rawToken);
+        if (!normalizedUrl) continue;
         ranges.push({
             start,
             end,
             text,
-            kind: 'screen',
-            screen,
+            kind: 'url',
+            url: normalizedUrl,
         });
     }
 

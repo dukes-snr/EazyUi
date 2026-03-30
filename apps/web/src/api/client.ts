@@ -87,6 +87,31 @@ export interface ProjectDesignSystem {
             accent2: string;
         };
     };
+    savedPalette?: {
+        key: string;
+        label: string;
+        description: string;
+        light: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+        dark: {
+            bg: string;
+            surface: string;
+            surface2: string;
+            text: string;
+            muted: string;
+            stroke: string;
+            accent: string;
+            accent2: string;
+        };
+    };
     typography: {
         displayFont: string;
         bodyFont: string;
@@ -155,6 +180,62 @@ export interface ProjectMemory {
     };
 }
 
+export type AssetScope = 'project' | 'account';
+export type AssetKind = 'image' | 'logo' | 'component';
+export type AssetRole = 'logo' | 'product-shot' | 'illustration' | 'photo' | 'brand-texture';
+
+export interface AssetRecord {
+    id: string;
+    name: string;
+    scope: AssetScope;
+    kind: AssetKind;
+    downloadUrl: string;
+    storagePath: string;
+    mimeType: string;
+    sizeBytes?: number;
+    width?: number;
+    height?: number;
+    tags?: string[];
+    projectId?: string;
+    ownerUid: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface ProjectAssetLink {
+    assetId: string;
+    scope: AssetScope;
+    projectId?: string;
+    role?: AssetRole;
+    pinned?: boolean;
+    isPreferredLogo?: boolean;
+    isKeyBrandAsset?: boolean;
+}
+
+export interface ProjectAssetContext {
+    version: number;
+    autoUseBrandAssets: boolean;
+    links: ProjectAssetLink[];
+    updatedAt: string;
+}
+
+export interface AssetReference {
+    assetId: string;
+    name: string;
+    scope: AssetScope;
+    kind: AssetKind;
+    downloadUrl: string;
+    mimeType: string;
+    projectId?: string;
+    width?: number;
+    height?: number;
+    role?: AssetRole;
+    pinned?: boolean;
+    isPreferredLogo?: boolean;
+    isKeyBrandAsset?: boolean;
+    source: 'saved_attachment' | 'project_brand';
+}
+
 export interface NewsletterSubscribeResponse {
     success: boolean;
 }
@@ -190,6 +271,7 @@ export interface GenerateRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[]; // Base64 encoded images
+    assetRefs?: AssetReference[];
     referenceUrls?: string[];
     referenceImageUrls?: string[];
     expectedScreenCount?: number;
@@ -222,6 +304,7 @@ export interface EditRequest {
     html: string;
     screenId: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     referenceUrls?: string[];
     preferredModel?: string;
     projectDesignSystem?: ProjectDesignSystem;
@@ -313,6 +396,7 @@ export interface GenerateDesignSystemRequest {
     stylePreset?: string;
     platform?: string;
     images?: string[];
+    assetRefs?: AssetReference[];
     referenceUrls?: string[];
     referenceImageUrls?: string[];
     preferredModel?: string;
@@ -691,6 +775,7 @@ export interface ProjectResponse {
     canvasDoc: unknown;
     chatState: unknown;
     projectMemory?: ProjectMemory;
+    projectAssetContext?: ProjectAssetContext;
     createdAt: string;
     updatedAt: string;
 }

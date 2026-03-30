@@ -25,7 +25,7 @@ Default config:
 - `MCP_FETCH_TIMEOUT_MS=90000`
 - `MCP_FETCH_HEAVY_TIMEOUT_MS=420000` (used for long AI routes: generate/edit/design-system)
 - `MCP_FETCH_RETRIES=1`
-- `FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com` (recommended so MCP `project.save` writes `snapshots/latest.json`)
+- `FIREBASE_STORAGE_BUCKET=your-project-id.firebasestorage.app` (recommended so MCP `project.save` writes `snapshots/latest.json`)
 
 ## Endpoints
 

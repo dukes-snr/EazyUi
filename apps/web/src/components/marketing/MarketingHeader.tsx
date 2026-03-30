@@ -1,48 +1,51 @@
-import { motion, useMotionValueEvent, useReducedMotion, useScroll, useSpring } from 'framer-motion';
-import { Menu, Moon, Sun, X } from 'lucide-react';
+import { useMotionValueEvent, useScroll } from 'framer-motion';
+import { ArrowUp, Menu, Moon, Sun, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { User } from 'firebase/auth';
 import appLogo from '../../assets/Ui-logo.png';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useUiStore } from '../../stores';
+import { useChangelogUnseenCount } from '../../utils/changelogUpdates';
 
 type MarketingHeaderProps = {
     onNavigate: (path: string) => void;
     onOpenApp?: () => void;
     scrollContainerRef?: RefObject<HTMLElement | null>;
     tone?: 'default' | 'surface';
+    topStageDark?: boolean;
 };
 
 const NAV_ITEMS = [
+    { label: 'Home', path: '/' },
     { label: 'Templates', path: '/templates' },
     { label: 'Pricing', path: '/pricing' },
     { label: 'Blog', path: '/blog' },
     { label: "What's New", path: '/changelog' },
 ] as const;
 
-export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, tone = 'default' }: MarketingHeaderProps) {
+const ANNOUNCEMENT_BAR = {
+    label: 'Announcement',
+    text: 'New: save images to your project library and reuse them across prompts and edits.',
+    path: '/changelog',
+};
+
+export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, tone = 'default', topStageDark = false }: MarketingHeaderProps) {
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
-    const shouldReduceMotion = useReducedMotion();
     const [authUser, setAuthUser] = useState<User | null>(null);
     const [isNavScrolled, setIsNavScrolled] = useState(false);
     const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
     const [verificationBusy, setVerificationBusy] = useState(false);
     const [verificationSent, setVerificationSent] = useState(false);
-    const { scrollY, scrollYProgress } = useScroll({ container: scrollContainerRef as RefObject<HTMLElement> | undefined });
-    const easedScrollProgress = useSpring(scrollYProgress, shouldReduceMotion ? {
-        stiffness: 900,
-        damping: 120,
-        mass: 1,
-    } : {
-        stiffness: 110,
-        damping: 24,
-        mass: 0.3,
-    });
+    const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+    const unseenChangelogCount = useChangelogUnseenCount();
+    const { scrollY } = useScroll({ container: scrollContainerRef as RefObject<HTMLElement> | undefined });
 
     useMotionValueEvent(scrollY, 'change', (value) => {
         setIsNavScrolled(value > 8);
+        const viewportHeight = scrollContainerRef?.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 0);
+        setShowScrollTopButton(value > (viewportHeight * 2));
     });
 
     useEffect(() => {
@@ -102,7 +105,12 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                                 }}
                                 className={`flex min-h-14 items-center rounded-[22px] px-4 text-left text-base font-medium transition-colors ${isNavItemActive(item.path) ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]' : 'text-[var(--ui-text)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)]'}`}
                             >
-                                {item.label}
+                                <span>{item.label}</span>
+                                {item.path === '/changelog' && unseenChangelogCount > 0 && (
+                                    <span className="ml-2 inline-flex min-w-6 items-center justify-center rounded-full bg-[var(--ui-primary)] px-1.5 py-1 text-[11px] font-semibold leading-none text-white">
+                                        {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>
@@ -202,14 +210,38 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
         await signOutCurrentUser();
     };
 
+    const handleScrollToTop = () => {
+        const target = scrollContainerRef?.current;
+        if (target) {
+            target.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+        if (typeof window !== 'undefined') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
     return (
         <>
-            <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''} ${tone === 'surface' ? 'is-surface' : ''}`}>
+            <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''} ${tone === 'surface' ? 'is-surface' : ''} ${topStageDark ? 'landing-top-stage-dark' : ''}`}>
+                <button
+                    type="button"
+                    onClick={() => onNavigate(ANNOUNCEMENT_BAR.path)}
+                    className="marketing-announcement-bar flex h-10 w-full items-center justify-center gap-2 px-4 text-center sm:px-6"
+                >
+                    <span className="rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                        {ANNOUNCEMENT_BAR.label}
+                    </span>
+                    <span className="text-[12px] text-[var(--ui-text-muted)] sm:text-[13px]">
+                        {ANNOUNCEMENT_BAR.text}
+                    </span>
+                    {unseenChangelogCount > 0 && (
+                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--ui-primary)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                            {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
+                        </span>
+                    )}
+                </button>
                 <div className="landing-nav-frame">
-                    <motion.div
-                        className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left bg-gradient-to-r from-cyan-300 via-blue-400 to-indigo-500"
-                        style={{ scaleX: shouldReduceMotion ? scrollYProgress : easedScrollProgress }}
-                    />
                     <div className="mx-auto flex h-14 max-w-[1160px] items-center justify-between px-4 sm:px-6">
                     <button
                         type="button"
@@ -225,9 +257,14 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                                 key={item.label}
                                 type="button"
                                 onClick={() => onNavigate(item.path)}
-                                className={`h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)] ${isNavItemActive(item.path) ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
+                                className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] uppercase tracking-[0.08em] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] hover:text-[var(--ui-primary)] ${isNavItemActive(item.path) ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)]'}`}
                             >
-                                {item.label}
+                                <span>{item.label}</span>
+                                {item.path === '/changelog' && unseenChangelogCount > 0 && (
+                                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--ui-primary)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                                        {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>
@@ -317,6 +354,17 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                     </div>
                 </div>
             </header>
+            {showScrollTopButton && (
+                <button
+                    type="button"
+                    onClick={handleScrollToTop}
+                    className="fixed bottom-6 right-6 z-[70] inline-flex h-11 w-11 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_42%,var(--ui-border))] bg-[var(--ui-primary)] text-white shadow-[0_14px_34px_color-mix(in_srgb,var(--ui-primary)_28%,transparent)] transition-colors hover:bg-[var(--ui-primary-hover)]"
+                    aria-label="Scroll to top"
+                    title="Scroll to top"
+                >
+                    <ArrowUp size={16} />
+                </button>
+            )}
             {mobileNavOverlay}
         </>
     );

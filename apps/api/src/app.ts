@@ -18,7 +18,8 @@ import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provide
 import { getDefaultGeminiTextModel, normalizeGeminiTextModel } from './services/modelConfig.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
-import { verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
+import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
+import { resolveProjectBrandAssetContext, sanitizeAssetReferences, type AssetReference as RequestAssetReference } from './services/projectAssetContext.js';
 import { renderRequestActivityDashboardHtml } from './services/requestActivityDashboard.js';
 import { getRequestActivitySnapshot, upsertRequestActivity, type RequestActivityItem as ServerActivityItem } from './services/requestActivity.js';
 import {
@@ -216,6 +217,68 @@ function stopStreamKeepalive(timer: ReturnType<typeof setInterval> | null | unde
     if (timer) {
         clearInterval(timer);
     }
+}
+
+function mergeAssetReferences(
+    explicitAssetRefs: RequestAssetReference[],
+    projectBrandAssetRefs: RequestAssetReference[]
+): RequestAssetReference[] {
+    const seen = new Set<string>();
+    const merged: RequestAssetReference[] = [];
+    for (const assetRef of [...explicitAssetRefs, ...projectBrandAssetRefs]) {
+        const key = `${assetRef.assetId}:${assetRef.scope}:${assetRef.projectId || ''}:${assetRef.source}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(assetRef);
+    }
+    return merged;
+}
+
+async function resolveEffectiveAssetReferences(input: {
+    uid: string;
+    projectId?: string;
+    assetRefs?: unknown;
+}) {
+    const explicitAssetRefs = sanitizeAssetReferences(input.assetRefs);
+    try {
+        const projectBrandContext = await resolveProjectBrandAssetContext({
+            uid: input.uid,
+            projectId: input.projectId,
+        });
+        const projectBrandAssetRefs = projectBrandContext.context?.autoUseBrandAssets
+            ? projectBrandContext.assetRefs
+            : [];
+        return {
+            explicitAssetRefs,
+            projectBrandAssetRefs,
+            mergedAssetRefs: mergeAssetReferences(explicitAssetRefs, projectBrandAssetRefs),
+            projectBrandContext: projectBrandContext.context,
+        };
+    } catch (error) {
+        fastify.log.warn({
+            route: 'asset-ref-resolution',
+            uid: input.uid,
+            projectId: input.projectId,
+            err: error,
+        }, 'asset refs: falling back to explicit request refs only');
+        return {
+            explicitAssetRefs,
+            projectBrandAssetRefs: [] as RequestAssetReference[],
+            mergedAssetRefs: explicitAssetRefs,
+            projectBrandContext: null,
+        };
+    }
+}
+
+function parseDataUrlPayload(value: string): { mimeType: string; buffer: Buffer } {
+    const match = String(value || '').match(/^data:([^;]+);base64,(.+)$/);
+    if (!match?.[1] || !match?.[2]) {
+        throw new Error('Invalid data URL payload.');
+    }
+    return {
+        mimeType: match[1].trim(),
+        buffer: Buffer.from(match[2], 'base64'),
+    };
 }
 
 function getActiveBillingProvider() {
@@ -2729,6 +2792,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        assetRefs?: RequestAssetReference[];
         referenceUrls?: string[];
         referenceImageUrls?: string[];
         expectedScreenCount?: number;
@@ -2739,7 +2803,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/generate', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, referenceUrls, referenceImageUrls, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, assetRefs, referenceUrls, referenceImageUrls, expectedScreenCount, preferredModel, temperature, projectDesignSystem, bundleIncludesDesignSystem, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2751,6 +2815,16 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate');
     if (!user) return;
+    const {
+        explicitAssetRefs,
+        projectBrandAssetRefs,
+        mergedAssetRefs,
+        projectBrandContext,
+    } = await resolveEffectiveAssetReferences({
+        uid: user.uid,
+        projectId,
+        assetRefs,
+    });
 
     const floorEstimate = estimateCredits({
         operation: 'generate',
@@ -2807,11 +2881,15 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            explicitAssetRefCount: explicitAssetRefs.length,
+            projectBrandAssetRefCount: projectBrandAssetRefs.length,
+            assetRefCount: mergedAssetRefs.length,
             scrapedReferenceImageCount: scrapedReferenceImages.length,
             finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            autoUseBrandAssets: projectBrandContext?.autoUseBrandAssets === true,
             referenceUrlsCount: referenceUrls?.length || 0,
             normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
             webContextApplied,
@@ -2822,6 +2900,7 @@ fastify.post<{
             stylePreset,
             platform,
             images: finalImages,
+            assetRefs: mergedAssetRefs,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -2909,6 +2988,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        assetRefs?: RequestAssetReference[];
         referenceUrls?: string[];
         referenceImageUrls?: string[];
         preferredModel?: string;
@@ -2918,7 +2998,7 @@ fastify.post<{
         projectId?: string;
     };
 }>('/api/design-system', async (request, reply) => {
-    const { prompt, stylePreset, platform, images, referenceUrls, referenceImageUrls, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
+    const { prompt, stylePreset, platform, images, assetRefs, referenceUrls, referenceImageUrls, preferredModel, temperature, projectDesignSystem, bundleWithFirstGeneration, projectId } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -2930,6 +3010,16 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/design-system');
     if (!user) return;
+    const {
+        explicitAssetRefs,
+        projectBrandAssetRefs,
+        mergedAssetRefs,
+        projectBrandContext,
+    } = await resolveEffectiveAssetReferences({
+        uid: user.uid,
+        projectId,
+        assetRefs,
+    });
     const bundled = Boolean(bundleWithFirstGeneration);
     const designSystemFloorEstimate = !bundled
         ? estimateCredits({
@@ -2985,11 +3075,15 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            explicitAssetRefCount: explicitAssetRefs.length,
+            projectBrandAssetRefCount: projectBrandAssetRefs.length,
+            assetRefCount: mergedAssetRefs.length,
             scrapedReferenceImageCount: scrapedReferenceImages.length,
             finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            autoUseBrandAssets: projectBrandContext?.autoUseBrandAssets === true,
             bundledWithFirstGeneration: bundled,
             referenceUrlsCount: referenceUrls?.length || 0,
             normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
@@ -3001,6 +3095,7 @@ fastify.post<{
             stylePreset,
             platform,
             images: finalImages,
+            assetRefs: mergedAssetRefs,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -3098,6 +3193,7 @@ fastify.post<{
         html: string;
         screenId: string;
         images?: string[];
+        assetRefs?: RequestAssetReference[];
         referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
@@ -3115,7 +3211,7 @@ fastify.post<{
         }>;
     };
 }>('/api/edit', async (request, reply) => {
-    const { instruction, html, screenId, images, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const { instruction, html, screenId, images, assetRefs, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -3131,6 +3227,16 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit');
     if (!user) return;
+    const {
+        explicitAssetRefs,
+        projectBrandAssetRefs,
+        mergedAssetRefs,
+        projectBrandContext,
+    } = await resolveEffectiveAssetReferences({
+        uid: user.uid,
+        projectId,
+        assetRefs,
+    });
     const floorEstimate = estimateCredits({
         operation: 'edit',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -3178,9 +3284,13 @@ fastify.post<{
             screenId,
             htmlChars: html.length,
             imagesCount: images?.length || 0,
+            explicitAssetRefCount: explicitAssetRefs.length,
+            projectBrandAssetRefCount: projectBrandAssetRefs.length,
+            assetRefCount: mergedAssetRefs.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            autoUseBrandAssets: projectBrandContext?.autoUseBrandAssets === true,
             consistencyRuleCount: consistencyProfile?.rules?.length || 0,
             canonicalNavbarLabels: consistencyProfile?.canonicalNavbarLabels?.slice(0, 8) || [],
             referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
@@ -3194,6 +3304,7 @@ fastify.post<{
             html,
             screenId,
             images,
+            assetRefs: mergedAssetRefs,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -3282,6 +3393,7 @@ fastify.post<{
         html: string;
         screenId: string;
         images?: string[];
+        assetRefs?: RequestAssetReference[];
         referenceUrls?: string[];
         preferredModel?: string;
         temperature?: number;
@@ -3299,7 +3411,7 @@ fastify.post<{
         }>;
     };
 }>('/api/edit-stream', async (request, reply) => {
-    const { instruction, html, screenId, images, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
+    const { instruction, html, screenId, images, assetRefs, referenceUrls, preferredModel, temperature, projectDesignSystem, projectId, consistencyProfile, referenceScreens } = request.body;
     const startedAt = Date.now();
     const traceId = request.id;
     const billingRequestId = resolveBillingRequestId(request);
@@ -3315,6 +3427,16 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit-stream');
     if (!user) return;
+    const {
+        explicitAssetRefs,
+        projectBrandAssetRefs,
+        mergedAssetRefs,
+        projectBrandContext,
+    } = await resolveEffectiveAssetReferences({
+        uid: user.uid,
+        projectId,
+        assetRefs,
+    });
     const floorEstimate = estimateCredits({
         operation: 'edit',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -3399,9 +3521,13 @@ fastify.post<{
             screenId,
             htmlChars: html.length,
             imagesCount: images?.length || 0,
+            explicitAssetRefCount: explicitAssetRefs.length,
+            projectBrandAssetRefCount: projectBrandAssetRefs.length,
+            assetRefCount: mergedAssetRefs.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            autoUseBrandAssets: projectBrandContext?.autoUseBrandAssets === true,
             consistencyRuleCount: consistencyProfile?.rules?.length || 0,
             referenceScreens: (referenceScreens || []).map((screen) => screen.name).slice(0, 4),
             referenceUrlsCount: referenceUrls?.length || 0,
@@ -3415,6 +3541,7 @@ fastify.post<{
             html,
             screenId,
             images,
+            assetRefs: mergedAssetRefs,
             preferredModel,
             temperature,
             projectDesignSystem,
@@ -4213,6 +4340,83 @@ fastify.get('/api/debug/nvidia-last-chat', async (_request, reply) => {
 
 fastify.post<{
     Body: {
+        storagePath: string;
+        base64DataUrl: string;
+        mimeType?: string;
+    };
+}>('/api/assets/upload', async (request, reply) => {
+    const startedAt = Date.now();
+    const traceId = request.id;
+    const { storagePath, base64DataUrl, mimeType } = request.body;
+
+    if (!storagePath?.trim()) {
+        return reply.status(400).send({ error: 'Storage path is required' });
+    }
+    if (!base64DataUrl?.trim()) {
+        return reply.status(400).send({ error: 'Base64 data URL is required' });
+    }
+
+    const user = await requireAuthenticatedUser(request, reply, '/api/assets/upload');
+    if (!user) return;
+
+    try {
+        const normalizedStoragePath = storagePath.trim().replace(/^\/+/, '');
+        const expectedPrefix = `users/${user.uid}/`;
+        if (!normalizedStoragePath.startsWith(expectedPrefix)) {
+            return reply.status(403).send({
+                error: 'Forbidden',
+                message: 'Asset upload path is outside the authenticated user scope.',
+            });
+        }
+        const parsed = parseDataUrlPayload(base64DataUrl);
+        const contentType = String(mimeType || parsed.mimeType || 'application/octet-stream').trim();
+        const bucket = getFirebaseStorageBucket();
+        const file = bucket.file(normalizedStoragePath);
+        const token = uuidv4();
+
+        await file.save(parsed.buffer, {
+            resumable: false,
+            metadata: {
+                contentType,
+                cacheControl: 'public, max-age=31536000, immutable',
+                metadata: {
+                    firebaseStorageDownloadTokens: token,
+                    ownerUid: user.uid,
+                },
+            },
+        });
+
+        const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(normalizedStoragePath)}?alt=media&token=${encodeURIComponent(token)}`;
+        fastify.log.info({
+            traceId,
+            route: '/api/assets/upload',
+            uid: user.uid,
+            storagePath: normalizedStoragePath,
+            durationMs: Date.now() - startedAt,
+            bytes: parsed.buffer.byteLength,
+        }, 'assets/upload: complete');
+        return {
+            storagePath: normalizedStoragePath,
+            downloadUrl,
+        };
+    } catch (error) {
+        fastify.log.error({
+            traceId,
+            route: '/api/assets/upload',
+            uid: user.uid,
+            storagePath,
+            durationMs: Date.now() - startedAt,
+            err: error,
+        }, 'assets/upload: failed');
+        return reply.status(500).send({
+            error: 'Failed to upload asset',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
         html: string;
         width?: number;
         height?: number;
@@ -4338,6 +4542,7 @@ fastify.post<{
         stylePreset?: string;
         platform?: string;
         images?: string[];
+        assetRefs?: RequestAssetReference[];
         referenceUrls?: string[];
         referenceImageUrls?: string[];
         expectedScreenCount?: number;
@@ -4353,6 +4558,7 @@ fastify.post<{
         stylePreset,
         platform,
         images,
+        assetRefs,
         referenceUrls,
         referenceImageUrls,
         expectedScreenCount,
@@ -4373,6 +4579,16 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-stream');
     if (!user) return;
+    const {
+        explicitAssetRefs,
+        projectBrandAssetRefs,
+        mergedAssetRefs,
+        projectBrandContext,
+    } = await resolveEffectiveAssetReferences({
+        uid: user.uid,
+        projectId,
+        assetRefs,
+    });
     const floorEstimate = estimateCredits({
         operation: 'generate_stream',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -4464,11 +4680,15 @@ fastify.post<{
             platform,
             stylePreset,
             imagesCount: images?.length || 0,
+            explicitAssetRefCount: explicitAssetRefs.length,
+            projectBrandAssetRefCount: projectBrandAssetRefs.length,
+            assetRefCount: mergedAssetRefs.length,
             scrapedReferenceImageCount: scrapedReferenceImages.length,
             finalReferenceImageCount: finalImages.length,
             preferredModel,
             temperature,
             hasProjectDesignSystem: Boolean(projectDesignSystem),
+            autoUseBrandAssets: projectBrandContext?.autoUseBrandAssets === true,
             bundleIncludesDesignSystem: Boolean(bundleIncludesDesignSystem),
             referenceUrlsCount: referenceUrls?.length || 0,
             normalizedReferenceUrlsCount: normalizedReferenceUrls.length,
@@ -4480,6 +4700,7 @@ fastify.post<{
             stylePreset,
             platform,
             images: finalImages,
+            assetRefs: mergedAssetRefs,
             preferredModel,
             temperature,
             projectDesignSystem,
