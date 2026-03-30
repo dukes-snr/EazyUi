@@ -13,7 +13,7 @@ export type SeoConfig = {
     jsonLd?: Array<Record<string, unknown>>;
 };
 
-const DEFAULT_DESCRIPTION = 'Generate and edit UI designs with AI. Create beautiful interfaces with natural language prompts.';
+const DEFAULT_DESCRIPTION = 'EazyUI is an AI UI design workspace for creating product screens, dashboards, web app interfaces, and design systems from prompts.';
 
 function normalizeSiteUrl(raw?: string | null) {
     const trimmed = String(raw || '').trim();
@@ -85,7 +85,7 @@ export function applySeo(config: SeoConfig) {
     const description = config.description || DEFAULT_DESCRIPTION;
     const robots = config.robots || 'index,follow';
     const ogType = config.ogType || 'website';
-    const ogImage = `${siteUrl}/favicon.png`;
+    const ogImage = `${siteUrl}/OG-image.png`;
 
     document.title = title;
 

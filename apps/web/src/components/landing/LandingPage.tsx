@@ -999,7 +999,7 @@ export function LandingPage(props: LandingPageProps) {
                                 />
                             </span>
                         </h1>
-                        <p className="mt-2 mb-12 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready app screens and landing pages from a single prompt.</p>
+                        <p className="mt-2 mb-12 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready screens, flows, and interfaces from a single prompt.</p>
 
                         <div className="relative mx-auto mt-7 w-full max-w-[780px] overflow-visible">
                             <ComposerAttachmentStack
@@ -1600,7 +1600,7 @@ export function LandingPage(props: LandingPageProps) {
                                         <img src={appLogo} alt="" className="landing-footer-brand-logo" />
                                     </div>
                                     <p className="landing-footer-brand-copy">
-                                        AI landing page builder that creates stunning designs in seconds. No design skills needed. Export to HTML and Figma. Trusted by 140,000+ users worldwide.
+                                        AI UI design workspace for creating screens, flows, and interface concepts in seconds. Export to HTML and Figma. Trusted by 140,000+ users worldwide.
                                     </p>
                                 </div>
 

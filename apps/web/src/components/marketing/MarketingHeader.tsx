@@ -227,16 +227,16 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
                 <button
                     type="button"
                     onClick={() => onNavigate(ANNOUNCEMENT_BAR.path)}
-                    className="marketing-announcement-bar flex h-10 w-full items-center justify-center gap-2 px-4 text-center sm:px-6"
+                    className="marketing-announcement-bar flex min-h-12 w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 px-3 py-2 text-center sm:h-10 sm:min-h-0 sm:flex-nowrap sm:gap-2 sm:px-6 sm:py-0"
                 >
-                    <span className="rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                    <span className="rounded-full border border-white/30 bg-white/16 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
                         {ANNOUNCEMENT_BAR.label}
                     </span>
-                    <span className="text-[12px] text-[var(--ui-text-muted)] sm:text-[13px]">
+                    <span className="max-w-[28rem] text-[11px] leading-5 text-white sm:max-w-none sm:text-[13px]">
                         {ANNOUNCEMENT_BAR.text}
                     </span>
                     {unseenChangelogCount > 0 && (
-                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--ui-primary)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#C85A14]">
                             {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
                         </span>
                     )}

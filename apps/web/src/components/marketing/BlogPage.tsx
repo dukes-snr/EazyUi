@@ -115,7 +115,7 @@ export function BlogPage({ onNavigate, onOpenApp }: BlogPageProps) {
                                 <h1 className="blog-page-title">Recent writing</h1>
                             </div>
                             <p className="blog-page-copy">
-                                Detailed notes on AI landing pages, prompting, SEO, pricing, and turning generated interface ideas into product-ready work.
+                                Detailed notes on UI prompting, design workflows, interface systems, pricing, and turning generated ideas into product-ready work.
                             </p>
                         </div>
 

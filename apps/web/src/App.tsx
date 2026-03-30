@@ -168,7 +168,7 @@ function getPublicStructuredData(path: string, pageName: string) {
         name: 'EazyUI',
         url: siteUrl,
         logo: `${siteUrl}/favicon.png`,
-        description: 'EazyUI is an AI landing page builder and UI design tool for generating polished interfaces from prompts.',
+        description: 'EazyUI is an AI UI design workspace for generating product screens, web app interfaces, and design systems from prompts.',
     };
     const website = {
         '@context': 'https://schema.org',
@@ -183,8 +183,8 @@ function getPublicStructuredData(path: string, pageName: string) {
         applicationCategory: 'DesignApplication',
         operatingSystem: 'Web',
         url: siteUrl,
-        image: `${siteUrl}/favicon.png`,
-        description: 'AI landing page builder and UI design tool for creating websites, product screens, and export-ready interface concepts.',
+        image: `${siteUrl}/OG-image.png`,
+        description: 'AI UI design workspace for creating product screens, web app interfaces, dashboards, and export-ready design concepts.',
         offers: {
             '@type': 'Offer',
             price: '0',
@@ -249,8 +249,8 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
     switch (route.kind) {
         case 'landing':
             return {
-                title: 'AI Landing Page Builder & UI Design Tool | EazyUI',
-                description: 'EazyUI is an AI landing page builder and UI design tool for creating landing pages, website concepts, and product interfaces from prompts, with HTML and Figma-ready outputs.',
+                title: 'AI UI Design Workspace for Product Screens & Interfaces | EazyUI',
+                description: 'EazyUI is an AI UI design workspace for creating mobile screens, dashboards, web app interfaces, and design systems from prompts, with editable outputs for product teams.',
                 path: '/',
                 jsonLd: [
                     publicData.organization,
@@ -261,8 +261,8 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
             };
         case 'templates':
             return {
-                title: 'AI Landing Page Templates & UI Sections | EazyUI',
-                description: 'Browse landing page templates, reusable UI sections, and website building blocks to launch SaaS pages and product marketing sites faster with EazyUI.',
+                title: 'UI Templates, Screens & Interface Sections | EazyUI',
+                description: 'Browse reusable UI templates, app screens, product sections, and interface building blocks to move faster inside EazyUI.',
                 path: '/templates',
                 jsonLd: [
                     ...Object.values(getPublicStructuredData('/templates', 'Templates | EazyUI')),
@@ -274,8 +274,8 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
             };
         case 'blog':
             return {
-                title: 'AI Landing Page Builder Blog, Prompting Guides & SEO Notes | EazyUI',
-                description: 'Read the EazyUI blog for prompt engineering guides, AI landing page workflow notes, pricing page breakdowns, and SEO-focused articles for modern product sites.',
+                title: 'UI Design Prompting, Workflows & Product Notes | EazyUI Blog',
+                description: 'Read the EazyUI blog for UI prompting guides, design workflow notes, interface critiques, and practical product design articles.',
                 path: '/blog',
                 jsonLd: [
                     ...Object.values(getPublicStructuredData('/blog', 'Blog | EazyUI')),
@@ -290,7 +290,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
             if (!post) {
                 return {
                     title: 'Blog | EazyUI',
-                    description: 'Read practical articles about AI landing pages, UI prompting, and product design workflows.',
+                    description: 'Read practical articles about UI prompting, product interface design, and AI-assisted design workflows.',
                     path: `/blog/${encodeURIComponent(route.slug)}`,
                     jsonLd: [],
                 };
@@ -320,8 +320,8 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
         }
         case 'pricing':
             return {
-                title: 'AI Landing Page Builder Pricing | EazyUI',
-                description: 'Compare EazyUI pricing for AI landing page generation, UI design workflows, prompt-based editing, and team collaboration features.',
+                title: 'UI Design Workspace Pricing | EazyUI',
+                description: 'Compare EazyUI pricing for AI-powered UI design workflows, prompt-based editing, reusable assets, and team collaboration.',
                 path: '/pricing',
                 jsonLd: [
                     ...Object.values(getPublicStructuredData('/pricing', 'Pricing | EazyUI')),
