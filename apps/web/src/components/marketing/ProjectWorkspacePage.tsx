@@ -8,7 +8,7 @@ import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
-import { useUiStore } from '../../stores';
+import { useOnboardingStore, useUiStore } from '../../stores';
 import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import {
   extractComposerInlineReferences,
@@ -24,6 +24,7 @@ import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/Compose
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
+import { GuideBubbleOverlay, type GuideBubbleStep } from '../ui/GuideBubbleOverlay';
 import { Orb } from '../ui/Orb';
 
 type ProjectWorkspacePageProps = {
@@ -46,6 +47,38 @@ type ProjectListItem = {
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
 const SIDEBAR_EXPANDED_WIDTH = 288;
 const SIDEBAR_COLLAPSED_WIDTH = 88;
+const WORKSPACE_GUIDE_ID = 'workspace-first-run';
+
+const WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
+  {
+    id: 'workspace-new-project',
+    targetId: 'workspace-nav-new-project',
+    title: 'Start a blank project',
+    body: 'Use this when you want a fresh project directly without writing a prompt first.',
+    placement: 'right',
+  },
+  {
+    id: 'workspace-starter-prompt',
+    targetId: 'workspace-starter-prompt',
+    title: 'Describe what you want to build',
+    body: 'Write the screen, flow, or product idea here. You can also add references and images before generating.',
+    placement: 'bottom',
+  },
+  {
+    id: 'workspace-create-submit',
+    targetId: 'workspace-create-submit',
+    title: 'Generate from your prompt',
+    body: 'Press this to turn your request into a new project workspace.',
+    placement: 'left',
+  },
+  {
+    id: 'workspace-project-library',
+    targetId: 'workspace-project-library',
+    title: 'Come back to any project here',
+    body: 'Everything you create appears in this list so you can reopen it and keep editing later.',
+    placement: 'top',
+  },
+];
 
 const workspaceSignals = [
   {
@@ -86,6 +119,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const requestConfirmation = useUiStore((state) => state.requestConfirmation);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
+  const activeGuideId = useOnboardingStore((state) => state.activeGuideId);
+  const guideStepIndex = useOnboardingStore((state) => state.stepIndex);
+  const seenGuideIds = useOnboardingStore((state) => state.seenGuideIds);
+  const startGuide = useOnboardingStore((state) => state.startGuide);
+  const nextGuideStep = useOnboardingStore((state) => state.nextStep);
+  const prevGuideStep = useOnboardingStore((state) => state.prevStep);
+  const finishGuide = useOnboardingStore((state) => state.finishGuide);
+  const skipGuide = useOnboardingStore((state) => state.skipGuide);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -211,6 +252,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     : 'border-white/10 bg-white/[0.04] text-slate-300';
   const accentButtonClassName = 'border-[var(--ui-primary)] bg-[var(--ui-primary)] text-white shadow-[0_14px_34px_color-mix(in_srgb,var(--ui-primary)_26%,transparent)] hover:bg-[var(--ui-primary-hover)]';
   const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
+  const hasSeenWorkspaceGuide = seenGuideIds.includes(WORKSPACE_GUIDE_ID);
+  const isWorkspaceGuideActive = activeGuideId === WORKSPACE_GUIDE_ID;
+  const activeWorkspaceGuideStep = isWorkspaceGuideActive ? WORKSPACE_GUIDE_STEPS[guideStepIndex] || null : null;
 
   async function loadProjects() {
     if (!authReady || !isAuthenticated) return;
@@ -338,6 +382,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     window.addEventListener('resize', syncViewport);
     return () => window.removeEventListener('resize', syncViewport);
   }, []);
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || loading || isMobileViewport || hasSeenWorkspaceGuide || activeGuideId) return;
+    const timeoutId = window.setTimeout(() => {
+      startGuide(WORKSPACE_GUIDE_ID);
+    }, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeGuideId, authReady, hasSeenWorkspaceGuide, isAuthenticated, isMobileViewport, loading, startGuide]);
 
   useEffect(() => {
     if (!isMobileSidebarOpen) return;
@@ -820,6 +872,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       key={id}
                       type="button"
                       onClick={onClick}
+                      data-guide-id={id === 'new-project' ? 'workspace-nav-new-project' : undefined}
                       className={`group flex items-center transition-all duration-300 ${sidebarExpanded
                         ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
                           ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
@@ -1111,7 +1164,10 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 images={starterImages}
                 onRemove={(index) => setStarterImages((prev) => prev.filter((_, i) => i !== index))}
               />
-              <div className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4">
+              <div
+                data-guide-id="workspace-starter-prompt"
+                className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4"
+              >
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1312,6 +1368,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   <motion.button
                     type="submit"
                     disabled={!starterPrompt.trim() || creatingFromPrompt}
+                    data-guide-id="workspace-create-submit"
                     className={`h-10 w-10 shrink-0 rounded-full border flex items-center justify-center transition-all disabled:opacity-40 ${accentButtonClassName}`}
                     title="Create project from request"
                     whileHover={shouldReduceMotion ? undefined : { y: -1, scale: 1.02 }}
@@ -1347,6 +1404,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </motion.section>
 
                 <motion.section
+                  data-guide-id="workspace-project-library"
                   className="mt-16 md:mt-20"
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 22 }}
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
@@ -1512,6 +1570,20 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           </div>
         </div>
       </div>
+      <GuideBubbleOverlay
+        step={activeWorkspaceGuideStep}
+        stepIndex={guideStepIndex}
+        stepCount={WORKSPACE_GUIDE_STEPS.length}
+        onPrev={prevGuideStep}
+        onSkip={skipGuide}
+        onNext={() => {
+          if (guideStepIndex >= WORKSPACE_GUIDE_STEPS.length - 1) {
+            finishGuide();
+            return;
+          }
+          nextGuideStep(WORKSPACE_GUIDE_STEPS.length);
+        }}
+      />
       <ConfirmationDialog />
     </div>
   );
