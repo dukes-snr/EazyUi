@@ -9,7 +9,7 @@ type PluginAuthBridgePageProps = {
 };
 
 type BridgeStatus = 'idle' | 'posting' | 'done' | 'error';
-const DEFAULT_AUTH_API_BASE = 'https://eazyui-api.onrender.com/api';
+const DEFAULT_AUTH_API_BASE = 'https://eazyui.onrender.com/api';
 
 function resolveAuthApiBase() {
   const queryValue = new URLSearchParams(window.location.search).get('apiBase') || '';
