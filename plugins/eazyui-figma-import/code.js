@@ -6,12 +6,26 @@ figma.showUI(__html__, {
 
 const DEFAULT_FONT = { family: "Inter", style: "Regular" };
 const ENABLE_AUTO_LAYOUT = true;
+const AUTH_SESSION_STORAGE_KEY = "eazyui-figma-import:auth-session";
 let availableFontsPromise = null;
 const iconSvgCache = new Map();
 const IMPORT_ASSET_PREFIX = "EazyUI";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function decodeBase64ToBytes(base64) {
+  const clean = String(base64 || "").trim();
+  if (!clean) {
+    throw new Error("Missing image data.");
+  }
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function toNumber(value, fallback = 0) {
@@ -2107,6 +2121,41 @@ async function importPayload(payload, importSettings) {
   };
 }
 
+function importRenderedScreenImage(message) {
+  const width = Math.max(1, toNumber(message.width, 402));
+  const height = Math.max(1, toNumber(message.height, 874));
+  const bytes = decodeBase64ToBytes(message.pngBase64);
+  const image = figma.createImage(bytes);
+
+  const frame = figma.createFrame();
+  frame.name = String(message.name || message.screenId || "Imported screen");
+  frame.resize(width, height);
+  frame.fills = [];
+  frame.clipsContent = true;
+  frame.layoutMode = "NONE";
+  frame.x = figma.viewport.center.x - width / 2;
+  frame.y = figma.viewport.center.y - height / 2;
+
+  const imageNode = figma.createRectangle();
+  imageNode.name = "Screen Preview";
+  imageNode.resize(width, height);
+  imageNode.x = 0;
+  imageNode.y = 0;
+  imageNode.fills = [
+    {
+      type: "IMAGE",
+      imageHash: image.hash,
+      scaleMode: "FILL",
+    },
+  ];
+  frame.appendChild(imageNode);
+  figma.currentPage.appendChild(frame);
+  figma.currentPage.selection = [frame];
+  figma.viewport.scrollAndZoomIntoView([frame]);
+
+  return frame;
+}
+
 figma.ui.onmessage = async (message) => {
   try {
     if (!message || typeof message !== "object") {
@@ -2128,6 +2177,29 @@ figma.ui.onmessage = async (message) => {
       return;
     }
 
+    if (message.type === "load-auth-session") {
+      const session = await figma.clientStorage.getAsync(AUTH_SESSION_STORAGE_KEY);
+      figma.ui.postMessage({
+        type: "auth-session-loaded",
+        session: session && typeof session === "object" ? session : null,
+      });
+      return;
+    }
+
+    if (message.type === "save-auth-session") {
+      const session = message.session && typeof message.session === "object" ? message.session : null;
+      if (!session) {
+        throw new Error("Missing auth session.");
+      }
+      await figma.clientStorage.setAsync(AUTH_SESSION_STORAGE_KEY, session);
+      return;
+    }
+
+    if (message.type === "clear-auth-session") {
+      await figma.clientStorage.deleteAsync(AUTH_SESSION_STORAGE_KEY);
+      return;
+    }
+
     if (message.type === "import-payload") {
       const result = await importPayload(message.payload, message.settings);
       figma.ui.postMessage({
@@ -2138,6 +2210,16 @@ figma.ui.onmessage = async (message) => {
       figma.notify(
         `Imported ${result.count} screen${result.count === 1 ? "" : "s"} from EazyUI.`
       );
+      return;
+    }
+
+    if (message.type === "import-screen-image") {
+      const frame = importRenderedScreenImage(message);
+      figma.ui.postMessage({
+        type: "screen-import-complete",
+        name: frame.name,
+      });
+      figma.notify(`Imported ${frame.name} from EazyUI.`);
     }
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Import failed.";

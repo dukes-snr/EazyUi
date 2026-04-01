@@ -1,5 +1,6 @@
 {
   "name": "EazyUI Figma Import",
+  "id": "1621132142776956314",
   "api": "1.0.0",
   "editorType": ["figma"],
   "main": "code.js",

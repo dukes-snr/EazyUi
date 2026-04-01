@@ -1353,6 +1353,7 @@
     let selectedProjectName = "";
     let projectsLoading = false;
     let screensLoading = false;
+    let screenImportInFlightId = "";
     let pendingAuthState = "";
     let authPollHandle = null;
     let authPollInFlight = false;
@@ -1465,6 +1466,13 @@
       } catch (_error) {
         // Ignore storage failures in embedded webviews.
       }
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "save-auth-session",
+          session,
+        },
+      }, "*");
     }
 
     function clearAuthSession(options) {
@@ -1473,6 +1481,12 @@
       } catch (_error) {
         // Ignore storage failures in embedded webviews.
       }
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "clear-auth-session",
+        },
+      }, "*");
 
       stopAuthPolling();
       pendingAuthState = "";
@@ -1486,6 +1500,51 @@
       if (!options || options.keepStatus !== true) {
         setStatus("Project session cleared. Sign in again to browse projects.", "warning");
       }
+    }
+
+    function requestStoredAuthSession() {
+      parent.postMessage({
+        pluginMessage: {
+          type: "load-auth-session",
+        },
+      }, "*");
+    }
+
+    function applyStoredAuthSession(session) {
+      const nextSession = session && typeof session === "object"
+        ? {
+            token: typeof session.token === "string" ? session.token : "",
+            expiresAt: typeof session.expiresAt === "number"
+              ? session.expiresAt
+              : typeof session.expiresAt === "string"
+                ? Date.parse(session.expiresAt)
+                : getTokenExpiryMs(session.token),
+            user: {
+              uid: session.user && typeof session.user.uid === "string" ? session.user.uid : "",
+              email: session.user && typeof session.user.email === "string" ? session.user.email : "",
+              displayName: session.user && typeof session.user.displayName === "string" ? session.user.displayName : "",
+            },
+          }
+        : null;
+
+      if (!nextSession || !nextSession.token) {
+        return;
+      }
+
+      if (isAuthSessionExpired(nextSession)) {
+        clearAuthSession({ keepStatus: true });
+        return;
+      }
+
+      authSession = nextSession;
+      try {
+        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(nextSession));
+      } catch (_error) {
+        // Ignore storage failures in embedded webviews.
+      }
+      renderProjectBrowser();
+      setStatus("Restored your EazyUI session. Loading projects...", "success");
+      void loadProjects({ keepSelection: true });
     }
 
     function generateAuthState() {
@@ -1570,18 +1629,19 @@
       screensList.innerHTML = screenItems.map((screen) => {
         const statusClass = screen.status === "streaming" ? "entity-pill warn" : "entity-pill";
         const updatedMeta = screen.updatedAt ? '<span>Updated ' + escapeHtml(formatRelativeDate(screen.updatedAt)) + '</span>' : '';
+        const importing = screenImportInFlightId === screen.screenId;
         return (
-          '<div class="entity-item" data-screen-id="' + escapeHtml(screen.screenId) + '">' +
+          '<button class="entity-item' + (importing ? ' active' : '') + '" type="button" data-screen-id="' + escapeHtml(screen.screenId) + '">' +
             '<div class="entity-title">' +
               '<strong>' + escapeHtml(screen.name || screen.screenId) + '</strong>' +
-              '<span class="' + statusClass + '">' + escapeHtml(screen.status) + '</span>' +
+              '<span class="' + statusClass + '">' + escapeHtml(importing ? "importing" : screen.status) + '</span>' +
             '</div>' +
             '<div class="entity-meta">' +
               '<span>' + escapeHtml(String(screen.width || 0)) + ' x ' + escapeHtml(String(screen.height || 0)) + '</span>' +
               updatedMeta +
             '</div>' +
-            '<div class="entity-body">' + escapeHtml(screen.screenId) + '</div>' +
-          '</div>'
+            '<div class="entity-body">Click to import into Figma. ' + escapeHtml(screen.screenId) + '</div>' +
+          '</button>'
         );
       }).join("");
     }
@@ -1698,6 +1758,11 @@
           return;
         }
 
+        if (response.status >= 500) {
+          setStatus("Waiting for EazyUI to finish browser sign-in...", "info");
+          return;
+        }
+
         if (!response.ok) {
           let message = "Failed to complete browser authentication.";
           try {
@@ -1713,11 +1778,8 @@
 
         const session = await parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
         applyPluginAuthSession(session);
-      } catch (error) {
-        stopAuthPolling();
-        pendingAuthState = "";
-        renderProjectBrowser();
-        setStatus(error instanceof Error ? error.message : "Failed to complete browser authentication.", "error");
+      } catch (_error) {
+        setStatus("Waiting for EazyUI to finish browser sign-in...", "info");
       } finally {
         authPollInFlight = false;
       }
@@ -1801,6 +1863,47 @@
       } finally {
         screensLoading = false;
         renderProjectBrowser();
+      }
+    }
+
+    async function importProjectScreen(screenId) {
+      if (!authSession) {
+        setStatus("Sign in before importing screens.", "warning");
+        return;
+      }
+      if (!selectedProjectId) {
+        setStatus("Choose a project before importing a screen.", "warning");
+        return;
+      }
+
+      const screen = screenItems.find((item) => item.screenId === screenId);
+      const screenLabel = screen ? (screen.name || screen.screenId) : screenId;
+      const confirmed = window.confirm('Import "' + screenLabel + '" into the current Figma file?');
+      if (!confirmed) {
+        return;
+      }
+
+      screenImportInFlightId = screenId;
+      isBusy = true;
+      renderProjectBrowser();
+      setStatus('Preparing "' + screenLabel + '" for import...', "warning");
+
+      try {
+        const result = await pluginApiFetch(
+          "/plugin/projects/" + encodeURIComponent(selectedProjectId) + "/screens/" + encodeURIComponent(screenId) + "/figma-payload"
+        );
+        parent.postMessage({
+          pluginMessage: {
+            type: "import-payload",
+            payload: result,
+            settings: getImportSettings(),
+          },
+        }, "*");
+      } catch (error) {
+        screenImportInFlightId = "";
+        isBusy = false;
+        renderProjectBrowser();
+        setStatus(error instanceof Error ? error.message : "Failed to import the selected screen.", "error");
       }
     }
 
@@ -2173,6 +2276,14 @@
       void loadProjectScreens(projectId);
     });
 
+    screensList.addEventListener("click", (event) => {
+      const trigger = event.target.closest("[data-screen-id]");
+      if (!trigger) return;
+      const screenId = trigger.getAttribute("data-screen-id");
+      if (!screenId || screensLoading || Boolean(screenImportInFlightId)) return;
+      void importProjectScreen(screenId);
+    });
+
     pasteButton.addEventListener("click", async () => {
       if (!clipboardApiAvailable || clipboardReadBlocked) {
         focusEditor(true);
@@ -2314,8 +2425,17 @@
       const message = event.data && event.data.pluginMessage;
       if (!message) return;
 
+      if (message.type === "auth-session-loaded") {
+        if (!authSession && message.session) {
+          applyStoredAuthSession(message.session);
+        }
+        return;
+      }
+
       if (message.type === "import-complete") {
         isBusy = false;
+        screenImportInFlightId = "";
+        renderProjectBrowser();
         syncUi({ keepStatus: true });
         const assets = message.assets || {};
         const assetSummary = [
@@ -2334,8 +2454,17 @@
 
       if (message.type === "import-error") {
         isBusy = false;
+        screenImportInFlightId = "";
+        renderProjectBrowser();
         syncUi({ keepStatus: true });
         setStatus(message.message || "Import failed.", "error");
+      }
+
+      if (message.type === "screen-import-complete") {
+        screenImportInFlightId = "";
+        isBusy = false;
+        renderProjectBrowser();
+        setStatus('Imported "' + (message.name || "screen") + '" into Figma.', "success");
       }
     });
 
@@ -2345,8 +2474,10 @@
     }
     renderProjectBrowser();
     if (authSession) {
+      writeAuthSession(authSession);
       void loadProjects();
     }
+    requestStoredAuthSession();
   </script>
 </body>
 </html>

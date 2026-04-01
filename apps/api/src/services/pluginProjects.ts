@@ -1,4 +1,4 @@
-import { getFirebaseDb } from './firebaseAuth.js';
+import { getFirebaseDb, getFirebaseStorageBucket } from './firebaseAuth.js';
 
 export type PluginProjectListItem = {
     id: string;
@@ -18,6 +18,13 @@ export type PluginProjectScreenItem = {
     height: number;
     status: 'streaming' | 'complete';
     updatedAt?: string;
+};
+
+export type PluginProjectScreenRenderSource = {
+    project: PluginProjectListItem;
+    screen: PluginProjectScreenItem;
+    html: string;
+    designSystem?: unknown;
 };
 
 function asString(value: unknown, fallback = ''): string {
@@ -101,4 +108,66 @@ export async function getPluginProjectScreens(uid: string, projectId: string): P
 
     screens.sort((left, right) => left.name.localeCompare(right.name));
     return { project, screens };
+}
+
+export async function getPluginProjectScreenRenderSource(
+    uid: string,
+    projectId: string,
+    screenId: string,
+): Promise<PluginProjectScreenRenderSource | null> {
+    const db = getFirebaseDb();
+    const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+    const [projectSnap, screenSnap] = await Promise.all([
+        projectRef.get(),
+        projectRef.collection('screens').doc(screenId).get(),
+    ]);
+
+    if (!projectSnap.exists || !screenSnap.exists) return null;
+
+    const projectData = (projectSnap.data() || {}) as Record<string, unknown>;
+    const projectDesignSpecMeta = ((projectData.designSpecMeta || {}) as Record<string, unknown>);
+    const project: PluginProjectListItem = {
+        id: projectSnap.id,
+        name: asString(projectData.name, 'Untitled project'),
+        createdAt: asString(projectData.createdAt, asString(projectData.updatedAt)),
+        updatedAt: asString(projectData.updatedAt),
+        screenCount: asNumber(
+            projectData.screenCount,
+            Array.isArray(projectDesignSpecMeta.screens) ? projectDesignSpecMeta.screens.length : 0,
+        ),
+        hasSnapshot: Boolean(projectData.snapshotPath),
+        description: asString(projectDesignSpecMeta.description) || undefined,
+        coverImageUrl: normalizeCoverImage(projectData),
+    };
+
+    const screenData = (screenSnap.data() || {}) as Record<string, unknown>;
+    const screen: PluginProjectScreenItem = {
+        screenId: asString(screenData.screenId, screenSnap.id),
+        name: asString(screenData.name, 'Untitled screen'),
+        width: asNumber(screenData.width, 402),
+        height: asNumber(screenData.height, 874),
+        status: asString(screenData.status, 'complete') === 'streaming' ? 'streaming' : 'complete',
+        updatedAt: asString(screenData.updatedAt) || undefined,
+    };
+
+    let html = asString(screenData.html).trim();
+    const htmlPath = asString(screenData.htmlPath).trim();
+    if (!html && htmlPath) {
+        const bucket = getFirebaseStorageBucket();
+        const [buffer] = await bucket.file(`users/${uid}/projects/${projectId}/${htmlPath}`).download();
+        html = buffer.toString('utf8').trim();
+    }
+    if (!html) {
+        html = asString(screenData.htmlSnippet).trim();
+    }
+    if (!html) {
+        throw new Error('The requested screen does not have importable HTML content.');
+    }
+
+    return {
+        project,
+        screen,
+        html,
+        designSystem: projectDesignSpecMeta.designSystem,
+    };
 }

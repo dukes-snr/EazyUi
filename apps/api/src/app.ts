@@ -20,7 +20,7 @@ import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from '
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import { consumePluginAuthSession, writePluginAuthSession } from './services/pluginAuthSessions.js';
-import { getPluginProjectScreens, listPluginProjects } from './services/pluginProjects.js';
+import { getPluginProjectScreenRenderSource, getPluginProjectScreens, listPluginProjects } from './services/pluginProjects.js';
 import { resolveProjectBrandAssetContext, sanitizeAssetReferences, type AssetReference as RequestAssetReference } from './services/projectAssetContext.js';
 import { renderRequestActivityDashboardHtml } from './services/requestActivityDashboard.js';
 import { getRequestActivitySnapshot, upsertRequestActivity, type RequestActivityItem as ServerActivityItem } from './services/requestActivity.js';
@@ -1455,6 +1455,524 @@ function normalizeRenderColorSchemeHtml(html: string): { html: string; colorSche
         html: nextHtml,
         colorScheme: 'light',
     };
+}
+
+async function renderHtmlToImagePayload(params: {
+    html: string;
+    width?: number;
+    height?: number;
+    scale?: number;
+    fullPage?: boolean;
+    format?: 'png' | 'jpeg';
+    quality?: number;
+    fitToViewport?: boolean;
+}): Promise<{
+    imageBase64: string;
+    mimeType: string;
+    pngBase64: string;
+    width: number;
+    height: number;
+    scale: number;
+    fullPage: boolean;
+}> {
+    const rawHtml = String(params.html || '');
+    const width = Math.max(240, Math.min(2400, Number(params.width || 402)));
+    const height = Math.max(240, Math.min(3200, Number(params.height || 874)));
+    const scale = Math.max(1, Math.min(3, Number(params.scale || 2)));
+    const fullPage = params.fullPage === true;
+    const format = params.format === 'jpeg' ? 'jpeg' : 'png';
+    const quality = format === 'jpeg'
+        ? Math.max(30, Math.min(95, Number(params.quality || 72)))
+        : undefined;
+    const fitToViewport = params.fitToViewport === true;
+
+    if (!rawHtml.trim()) {
+        throw new Error('html is required');
+    }
+
+    const normalizedRender = normalizeRenderColorSchemeHtml(rawHtml);
+    const browser = await getRenderBrowser();
+    const context = await browser.newContext({
+        viewport: { width, height },
+        deviceScaleFactor: scale,
+        colorScheme: normalizedRender.colorScheme,
+    });
+    const page = await context.newPage();
+    try {
+        await page.setContent(normalizedRender.html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 20000,
+        });
+        try {
+            await page.waitForLoadState('networkidle', { timeout: 1500 });
+        } catch {
+            // ignore
+        }
+        if (fitToViewport) {
+            await page.evaluate(({ viewportWidth, viewportHeight }: { viewportWidth: number; viewportHeight: number }) => {
+                const docEl = document.documentElement;
+                const body = document.body;
+                if (!docEl || !body) return;
+                docEl.style.margin = '0';
+                body.style.margin = '0';
+                body.style.transform = 'none';
+                body.style.width = 'auto';
+                body.style.height = 'auto';
+                body.style.minHeight = 'auto';
+                body.style.position = 'absolute';
+                body.style.top = '0';
+                body.style.left = '0';
+                body.style.right = 'auto';
+                body.style.bottom = 'auto';
+                body.style.overflow = 'visible';
+                const docWidth = Math.max(
+                    docEl.scrollWidth,
+                    docEl.offsetWidth,
+                    body.scrollWidth,
+                    body.offsetWidth,
+                    1,
+                );
+                const docHeight = Math.max(
+                    docEl.scrollHeight,
+                    docEl.offsetHeight,
+                    body.scrollHeight,
+                    body.offsetHeight,
+                    1,
+                );
+                const scaleToFitWidth = viewportWidth / Math.max(1, docWidth);
+                const safeScale = Number.isFinite(scaleToFitWidth) ? Math.min(1, Math.max(0.1, scaleToFitWidth)) : 1;
+                const offsetX = Math.max(0, (viewportWidth - (docWidth * safeScale)) / 2);
+                docEl.style.width = `${viewportWidth}px`;
+                docEl.style.height = `${viewportHeight}px`;
+                docEl.style.overflow = 'hidden';
+                body.style.overflow = 'hidden';
+                body.style.transformOrigin = 'top left';
+                body.style.transform = `translate(${offsetX}px, 0px) scale(${safeScale})`;
+                body.style.width = `${docWidth}px`;
+                body.style.height = `${docHeight}px`;
+            }, { viewportWidth: width, viewportHeight: height });
+            await page.waitForTimeout(120);
+        }
+        await page.waitForTimeout(180);
+        const image = await page.screenshot({
+            type: format,
+            fullPage,
+            ...(typeof quality === 'number' ? { quality } : {}),
+        });
+        return {
+            imageBase64: image.toString('base64'),
+            mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
+            pngBase64: image.toString('base64'),
+            width,
+            height,
+            scale,
+            fullPage,
+        };
+    } finally {
+        await context.close();
+    }
+}
+
+async function buildFigmaScenePayloadFromHtml(params: {
+    html: string;
+    screenId: string;
+    name: string;
+    width?: number;
+    height?: number;
+    designSystem?: unknown;
+}): Promise<Record<string, unknown>> {
+    const rawHtml = String(params.html || '');
+    const width = Math.max(240, Math.min(2400, Number(params.width || 402)));
+    const height = Math.max(240, Math.min(3200, Number(params.height || 874)));
+    if (!rawHtml.trim()) {
+        throw new Error('html is required');
+    }
+
+    const normalizedRender = normalizeRenderColorSchemeHtml(rawHtml);
+    const browser = await getRenderBrowser();
+    const context = await browser.newContext({
+        viewport: { width, height },
+        deviceScaleFactor: 1,
+        colorScheme: normalizedRender.colorScheme,
+    });
+    const page = await context.newPage();
+    try {
+        await page.setContent(normalizedRender.html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 20000,
+        });
+        try {
+            await page.waitForLoadState('networkidle', { timeout: 1500 });
+        } catch {
+            // ignore
+        }
+        await page.waitForTimeout(180);
+
+        const payload = await page.evaluate(({ screenId, name, width, height, designSystem }: {
+            screenId: string;
+            name: string;
+            width: number;
+            height: number;
+            designSystem: unknown;
+        }) => {
+            const SKIP_TAGS = new Set(['script', 'style', 'meta', 'link', 'head', 'title', 'noscript', 'template']);
+            const TEXT_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'label', 'small', 'strong', 'em', 'b', 'i', 'li', 'figcaption', 'blockquote', 'code', 'pre']);
+
+            function round2(value: any) {
+                return Math.round((Number(value) || 0) * 100) / 100;
+            }
+
+            function toPx(value: any) {
+                const parsed = Number.parseFloat(String(value || '0'));
+                return Number.isFinite(parsed) ? parsed : 0;
+            }
+
+            function readInsets(css: any, prefix: any) {
+                return {
+                    top: round2(toPx(prefix === 'padding' ? css.paddingTop : css.marginTop)),
+                    right: round2(toPx(prefix === 'padding' ? css.paddingRight : css.marginRight)),
+                    bottom: round2(toPx(prefix === 'padding' ? css.paddingBottom : css.marginBottom)),
+                    left: round2(toPx(prefix === 'padding' ? css.paddingLeft : css.marginLeft)),
+                };
+            }
+
+            function normalizeBounds(rect: any, rootRect: any) {
+                return {
+                    x: round2(rect.left - rootRect.left),
+                    y: round2(rect.top - rootRect.top),
+                    width: round2(rect.width),
+                    height: round2(rect.height),
+                };
+            }
+
+            function getNodeName(element: any) {
+                const tagName = element.tagName.toLowerCase();
+                const idName = String(element.getAttribute('id') || '').trim();
+                const className = String(element.getAttribute('class') || '').trim();
+                if (idName) return `${tagName}#${idName}`;
+                if (className) return `${tagName}.${className.split(/\s+/)[0]}`;
+                return tagName;
+            }
+
+            function extractDirectText(element: any) {
+                const tagName = element.tagName.toLowerCase();
+                if (tagName === 'input') {
+                    return String(element.value || element.placeholder || '').trim();
+                }
+                if (tagName === 'textarea') {
+                    return String(element.value || element.placeholder || '').trim();
+                }
+                return Array.from(element.childNodes)
+                    .filter((node: any) => node.nodeType === Node.TEXT_NODE)
+                    .map((node: any) => node.textContent || '')
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+
+            function hasElementChildren(element: any) {
+                return Array.from(element.children).some((child: any) => !SKIP_TAGS.has(child.tagName.toLowerCase()));
+            }
+
+            function hasVisualChrome(css: any) {
+                return css.backgroundColor !== 'rgba(0, 0, 0, 0)'
+                    || toPx(css.borderTopWidth) > 0
+                    || toPx(css.borderRightWidth) > 0
+                    || toPx(css.borderBottomWidth) > 0
+                    || toPx(css.borderLeftWidth) > 0
+                    || css.boxShadow !== 'none'
+                    || css.backdropFilter !== 'none';
+            }
+
+            function inferSizeMode(css: any, axis: any) {
+                const display = String(css.display || '').toLowerCase();
+                const sizeValue = String(axis === 'width' ? css.width : css.height || '').toLowerCase();
+                if (sizeValue === 'max-content' || sizeValue === 'fit-content') return 'hug';
+                if (sizeValue === 'auto' && (display === 'inline' || display === 'inline-flex' || display === 'inline-block')) {
+                    return 'hug';
+                }
+                if ((axis === 'width' && Number.parseFloat(css.flexGrow || '0') > 0) || (axis === 'height' && Number.parseFloat(css.flexGrow || '0') > 0)) {
+                    return 'fill';
+                }
+                return 'fixed';
+            }
+
+            function buildLayout(css: any) {
+                const flexGrow = Number.parseFloat(css.flexGrow || '0');
+                const flexShrink = Number.parseFloat(css.flexShrink || '1');
+                return {
+                    display: css.display,
+                    position: css.position,
+                    flexDirection: css.flexDirection || undefined,
+                    justifyContent: css.justifyContent || undefined,
+                    alignContent: css.alignContent || undefined,
+                    alignItems: css.alignItems || undefined,
+                    alignSelf: css.alignSelf || undefined,
+                    gap: round2(toPx(css.gap)),
+                    rowGap: round2(toPx(css.rowGap || css.gap)),
+                    columnGap: round2(toPx(css.columnGap || css.gap)),
+                    wrap: css.flexWrap === 'wrap' || css.flexWrap === 'wrap-reverse',
+                    flexGrow: Number.isFinite(flexGrow) ? round2(flexGrow) : undefined,
+                    flexShrink: Number.isFinite(flexShrink) ? round2(flexShrink) : undefined,
+                    flexBasis: css.flexBasis && css.flexBasis !== 'auto' ? css.flexBasis : undefined,
+                    justifySelf: css.justifySelf || undefined,
+                    widthMode: inferSizeMode(css, 'width'),
+                    heightMode: inferSizeMode(css, 'height'),
+                    overflowX: css.overflowX || undefined,
+                    overflowY: css.overflowY || undefined,
+                    safeAutoLayout: false,
+                    padding: readInsets(css, 'padding'),
+                    margin: readInsets(css, 'margin'),
+                };
+            }
+
+            function buildBorder(css: any) {
+                return {
+                    radius: css.borderRadius,
+                    top: { width: round2(toPx(css.borderTopWidth)), color: css.borderTopColor, style: css.borderTopStyle },
+                    right: { width: round2(toPx(css.borderRightWidth)), color: css.borderRightColor, style: css.borderRightStyle },
+                    bottom: { width: round2(toPx(css.borderBottomWidth)), color: css.borderBottomColor, style: css.borderBottomStyle },
+                    left: { width: round2(toPx(css.borderLeftWidth)), color: css.borderLeftColor, style: css.borderLeftStyle },
+                };
+            }
+
+            function buildTypography(css: any) {
+                return {
+                    fontFamily: css.fontFamily,
+                    fontSize: css.fontSize,
+                    fontWeight: css.fontWeight,
+                    fontStyle: css.fontStyle,
+                    lineHeight: css.lineHeight,
+                    letterSpacing: css.letterSpacing,
+                    textAlign: css.textAlign,
+                    textTransform: css.textTransform,
+                    textDecoration: css.textDecorationLine || css.textDecoration,
+                    whiteSpace: css.whiteSpace,
+                    fontVariationSettings: css.fontVariationSettings || undefined,
+                };
+            }
+
+            function buildVisual(css: any, element: any) {
+                const visual: any = {
+                    color: css.color || 'rgb(17, 24, 39)',
+                    backgroundColor: css.backgroundColor || 'rgba(0, 0, 0, 0)',
+                    backgroundImage: css.backgroundImage && css.backgroundImage !== 'none' ? css.backgroundImage : undefined,
+                    backgroundSize: css.backgroundSize && css.backgroundSize !== 'auto' ? css.backgroundSize : undefined,
+                    backgroundPosition: css.backgroundPosition && css.backgroundPosition !== '0% 0%' ? css.backgroundPosition : undefined,
+                    backgroundRepeat: css.backgroundRepeat && css.backgroundRepeat !== 'repeat' ? css.backgroundRepeat : undefined,
+                    backgroundBlendMode: css.backgroundBlendMode && css.backgroundBlendMode !== 'normal' ? css.backgroundBlendMode : undefined,
+                    opacity: css.opacity || '1',
+                    boxShadow: css.boxShadow || 'none',
+                    filter: css.filter && css.filter !== 'none' ? css.filter : undefined,
+                    backdropFilter: css.backdropFilter && css.backdropFilter !== 'none' ? css.backdropFilter : undefined,
+                    textShadow: css.textShadow && css.textShadow !== 'none' ? css.textShadow : undefined,
+                    mixBlendMode: css.mixBlendMode && css.mixBlendMode !== 'normal' ? css.mixBlendMode : undefined,
+                    clipPath: css.clipPath && css.clipPath !== 'none' ? css.clipPath : undefined,
+                    maskImage: css.maskImage && css.maskImage !== 'none' ? css.maskImage : undefined,
+                    maskSize: css.maskSize && css.maskSize !== 'auto' ? css.maskSize : undefined,
+                    maskPosition: css.maskPosition && css.maskPosition !== '0% 0%' ? css.maskPosition : undefined,
+                    maskRepeat: css.maskRepeat && css.maskRepeat !== 'repeat' ? css.maskRepeat : undefined,
+                    outlineWidth: css.outlineWidth && css.outlineWidth !== '0px' ? css.outlineWidth : undefined,
+                    outlineColor: css.outlineColor && css.outlineColor !== 'currentcolor' ? css.outlineColor : undefined,
+                    outlineStyle: css.outlineStyle && css.outlineStyle !== 'none' ? css.outlineStyle : undefined,
+                    outlineOffset: css.outlineOffset && css.outlineOffset !== '0px' ? css.outlineOffset : undefined,
+                };
+                if (element.tagName && element.tagName.toLowerCase() === 'img') {
+                    visual.objectFit = css.objectFit || undefined;
+                    visual.objectPosition = css.objectPosition || undefined;
+                }
+                return visual;
+            }
+
+            function createTextChild(element: any, textNode: any, rootRect: any, nodeId: any): any {
+                const textContent = String(textNode.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!textContent) return null;
+                const range = document.createRange();
+                range.selectNodeContents(textNode);
+                const rect = range.getBoundingClientRect();
+                const targetRect = (rect.width > 0 || rect.height > 0) ? rect : element.getBoundingClientRect();
+                const css = window.getComputedStyle(element);
+                return {
+                    id: nodeId,
+                    name: `${getNodeName(element)}:text`,
+                    nodeType: 'text',
+                    tagName: '#text',
+                    bounds: normalizeBounds(targetRect, rootRect),
+                    layout: {
+                        display: 'inline',
+                        position: 'static',
+                        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+                        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+                    },
+                    border: {
+                        radius: '0px',
+                        top: { width: 0, color: 'transparent', style: 'none' },
+                        right: { width: 0, color: 'transparent', style: 'none' },
+                        bottom: { width: 0, color: 'transparent', style: 'none' },
+                        left: { width: 0, color: 'transparent', style: 'none' },
+                    },
+                    visual: {
+                        color: css.color || 'rgb(17, 24, 39)',
+                        backgroundColor: 'rgba(0, 0, 0, 0)',
+                        opacity: css.opacity || '1',
+                        boxShadow: 'none',
+                    },
+                    typography: buildTypography(css),
+                    textContent,
+                    children: [],
+                };
+            }
+
+            function buildSceneNode(element: any, rootRect: any): any {
+                const css = window.getComputedStyle(element);
+                const tagName = element.tagName.toLowerCase();
+                if (SKIP_TAGS.has(tagName)) return null;
+                if (css.display === 'none' || css.visibility === 'hidden' || element.hidden) return null;
+
+                const bounds = normalizeBounds(element.getBoundingClientRect(), rootRect);
+                const directText = extractDirectText(element);
+                const hasSize = bounds.width > 0.25 || bounds.height > 0.25;
+                if (!hasSize && !directText) return null;
+
+                if (tagName === 'svg') {
+                    return {
+                        id: element.getAttribute('data-uid') || element.getAttribute('id') || `svg-${Math.random().toString(36).slice(2, 10)}`,
+                        name: getNodeName(element),
+                        nodeType: 'svg',
+                        tagName,
+                        bounds,
+                        layout: buildLayout(css),
+                        border: buildBorder(css),
+                        visual: buildVisual(css, element),
+                        svg: {
+                            markup: element.outerHTML,
+                            kind: 'inline-svg',
+                        },
+                        children: [],
+                    };
+                }
+
+                if (tagName === 'img') {
+                    return {
+                        id: element.getAttribute('data-uid') || element.getAttribute('id') || `img-${Math.random().toString(36).slice(2, 10)}`,
+                        name: getNodeName(element),
+                        nodeType: 'image',
+                        tagName,
+                        bounds,
+                        layout: buildLayout(css),
+                        border: buildBorder(css),
+                        visual: buildVisual(css, element),
+                        image: {
+                            src: element.currentSrc || element.src || '',
+                            alt: element.alt || '',
+                            kind: 'content-image',
+                        },
+                        children: [],
+                    };
+                }
+
+                if (TEXT_TAGS.has(tagName) && !hasElementChildren(element) && !hasVisualChrome(css) && directText) {
+                    return {
+                        id: element.getAttribute('data-uid') || element.getAttribute('id') || `${tagName}-${Math.random().toString(36).slice(2, 10)}`,
+                        name: getNodeName(element),
+                        nodeType: 'text',
+                        tagName,
+                        bounds,
+                        layout: buildLayout(css),
+                        border: buildBorder(css),
+                        visual: buildVisual(css, element),
+                        typography: buildTypography(css),
+                        textContent: directText,
+                        children: [],
+                    };
+                }
+
+                const children: any[] = [];
+                let directTextIndex = 0;
+                for (const childNode of Array.from(element.childNodes) as any[]) {
+                    if (childNode.nodeType === Node.TEXT_NODE) {
+                        const textChild = createTextChild(element, childNode, rootRect, `${element.tagName.toLowerCase()}:text:${directTextIndex}`);
+                        directTextIndex += 1;
+                        if (textChild) {
+                            children.push(textChild);
+                        }
+                        continue;
+                    }
+                    if (childNode.nodeType !== Node.ELEMENT_NODE) continue;
+                    const nextChild: any = buildSceneNode(childNode, rootRect);
+                    if (nextChild) {
+                        children.push(nextChild);
+                    }
+                }
+
+                const layout = buildLayout(css);
+                return {
+                    id: element.getAttribute('data-uid') || element.getAttribute('id') || `${tagName}-${Math.random().toString(36).slice(2, 10)}`,
+                    name: getNodeName(element),
+                    nodeType: 'frame',
+                    tagName,
+                    bounds,
+                    layout,
+                    border: buildBorder(css),
+                    visual: buildVisual(css, element),
+                    typography: directText ? buildTypography(css) : undefined,
+                    textContent: directText || undefined,
+                    children,
+                };
+            }
+
+            const body = document.body;
+            const bodyStyle = window.getComputedStyle(body);
+            const rootRect = body.getBoundingClientRect();
+            const children = (Array.from(body.children) as any[])
+                .map((child: any) => buildSceneNode(child, rootRect))
+                .filter(Boolean);
+
+            return {
+                format: 'eazyui.figma-scene',
+                version: 2,
+                generatedAt: new Date().toISOString(),
+                notes: [
+                    'Generated from saved EazyUI project HTML for plugin import.',
+                ],
+                designSystem: designSystem || undefined,
+                screens: [
+                    {
+                        screenId,
+                        name,
+                        width,
+                        height,
+                        root: {
+                            id: `screen:${screenId}`,
+                            name,
+                            nodeType: 'screen',
+                            tagName: 'body',
+                            bounds: {
+                                x: 0,
+                                y: 0,
+                                width,
+                                height,
+                            },
+                            layout: buildLayout(bodyStyle),
+                            border: buildBorder(bodyStyle),
+                            visual: buildVisual(bodyStyle, body),
+                            children,
+                        },
+                    },
+                ],
+            };
+        }, {
+            screenId: params.screenId,
+            name: params.name,
+            width,
+            height,
+            designSystem: params.designSystem || null,
+        });
+
+        return payload as Record<string, unknown>;
+    } finally {
+        await context.close();
+    }
 }
 
 function isBlockedProxyHost(hostname: string): boolean {
@@ -4441,108 +4959,22 @@ fastify.post<{
         fitToViewport?: boolean;
     };
 }>('/api/render-screen-image', async (request, reply) => {
-    const rawHtml = String(request.body?.html || '');
-    const width = Math.max(240, Math.min(2400, Number(request.body?.width || 402)));
-    const height = Math.max(240, Math.min(3200, Number(request.body?.height || 874)));
-    const scale = Math.max(1, Math.min(3, Number(request.body?.scale || 2)));
-    const fullPage = request.body?.fullPage === true;
-    const format = request.body?.format === 'jpeg' ? 'jpeg' : 'png';
-    const quality = format === 'jpeg'
-        ? Math.max(30, Math.min(95, Number(request.body?.quality || 72)))
-        : undefined;
-    const fitToViewport = request.body?.fitToViewport === true;
-
-    if (!rawHtml.trim()) {
-        return reply.status(400).send({ error: 'html is required' });
-    }
-
     try {
-        const normalizedRender = normalizeRenderColorSchemeHtml(rawHtml);
-        const browser = await getRenderBrowser();
-        const context = await browser.newContext({
-            viewport: { width, height },
-            deviceScaleFactor: scale,
-            colorScheme: normalizedRender.colorScheme,
+        return await renderHtmlToImagePayload({
+            html: String(request.body?.html || ''),
+            width: request.body?.width,
+            height: request.body?.height,
+            scale: request.body?.scale,
+            fullPage: request.body?.fullPage,
+            format: request.body?.format,
+            quality: request.body?.quality,
+            fitToViewport: request.body?.fitToViewport,
         });
-        const page = await context.newPage();
-        try {
-            await page.setContent(normalizedRender.html, {
-                waitUntil: 'domcontentloaded',
-                timeout: 20000,
-            });
-            // Best-effort settle without hard dependency on external CDN/network-idle.
-            try {
-                await page.waitForLoadState('networkidle', { timeout: 1500 });
-            } catch {
-                // ignore
-            }
-            if (fitToViewport) {
-                await page.evaluate(({ viewportWidth, viewportHeight }: { viewportWidth: number; viewportHeight: number }) => {
-                    const docEl = document.documentElement;
-                    const body = document.body;
-                    if (!docEl || !body) return;
-                    docEl.style.margin = '0';
-                    body.style.margin = '0';
-                    body.style.transform = 'none';
-                    body.style.width = 'auto';
-                    body.style.height = 'auto';
-                    body.style.minHeight = 'auto';
-                    body.style.position = 'absolute';
-                    body.style.top = '0';
-                    body.style.left = '0';
-                    body.style.right = 'auto';
-                    body.style.bottom = 'auto';
-                    body.style.overflow = 'visible';
-                    const docWidth = Math.max(
-                        docEl.scrollWidth,
-                        docEl.offsetWidth,
-                        body.scrollWidth,
-                        body.offsetWidth,
-                        1,
-                    );
-                    const docHeight = Math.max(
-                        docEl.scrollHeight,
-                        docEl.offsetHeight,
-                        body.scrollHeight,
-                        body.offsetHeight,
-                        1,
-                    );
-                    // Match iframe behavior: fit horizontally when needed, but keep
-                    // the viewport crop instead of shrinking the entire page height.
-                    const scaleToFitWidth = viewportWidth / Math.max(1, docWidth);
-                    const safeScale = Number.isFinite(scaleToFitWidth) ? Math.min(1, Math.max(0.1, scaleToFitWidth)) : 1;
-                    const offsetX = Math.max(0, (viewportWidth - (docWidth * safeScale)) / 2);
-                    docEl.style.width = `${viewportWidth}px`;
-                    docEl.style.height = `${viewportHeight}px`;
-                    docEl.style.overflow = 'hidden';
-                    body.style.overflow = 'hidden';
-                    body.style.transformOrigin = 'top left';
-                    body.style.transform = `translate(${offsetX}px, 0px) scale(${safeScale})`;
-                    body.style.width = `${docWidth}px`;
-                    body.style.height = `${docHeight}px`;
-                }, { viewportWidth: width, viewportHeight: height });
-                await page.waitForTimeout(120);
-            }
-            await page.waitForTimeout(180);
-            const image = await page.screenshot({
-                type: format,
-                fullPage,
-                ...(typeof quality === 'number' ? { quality } : {}),
-            });
-            return {
-                imageBase64: image.toString('base64'),
-                mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
-                pngBase64: image.toString('base64'),
-                width,
-                height,
-                scale,
-                fullPage,
-            };
-        } finally {
-            await context.close();
-        }
     } catch (error) {
         fastify.log.error({ err: error }, 'render-screen-image: failed');
+        if ((error as Error).message === 'html is required') {
+            return reply.status(400).send({ error: 'html is required' });
+        }
         return reply.status(500).send({
             error: 'Failed to render image',
             message: (error as Error).message,
@@ -5155,6 +5587,74 @@ fastify.get<{
         fastify.log.error(error);
         return reply.status(500).send({
             error: 'Failed to load plugin project screens',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get<{
+    Params: { id: string; screenId: string };
+}>('/api/plugin/projects/:id/screens/:screenId/render', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/projects/:id/screens/:screenId/render');
+    if (!user) return reply;
+
+    try {
+        const source = await getPluginProjectScreenRenderSource(user.uid, request.params.id, request.params.screenId);
+        if (!source) {
+            return reply.status(404).send({ error: 'Screen not found' });
+        }
+        const rendered = await renderHtmlToImagePayload({
+            html: source.html,
+            width: source.screen.width,
+            height: source.screen.height,
+            scale: 2,
+            fullPage: false,
+            format: 'png',
+            fitToViewport: false,
+        });
+        return {
+            project: {
+                id: source.project.id,
+                name: source.project.name,
+            },
+            screen: source.screen,
+            pngBase64: rendered.pngBase64,
+            width: rendered.width,
+            height: rendered.height,
+        };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to render project screen',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get<{
+    Params: { id: string; screenId: string };
+}>('/api/plugin/projects/:id/screens/:screenId/figma-payload', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/projects/:id/screens/:screenId/figma-payload');
+    if (!user) return reply;
+
+    try {
+        const source = await getPluginProjectScreenRenderSource(user.uid, request.params.id, request.params.screenId);
+        if (!source) {
+            return reply.status(404).send({ error: 'Screen not found' });
+        }
+        const payload = await buildFigmaScenePayloadFromHtml({
+            html: source.html,
+            screenId: source.screen.screenId,
+            name: source.screen.name,
+            width: source.screen.width,
+            height: source.screen.height,
+            designSystem: source.designSystem,
+        });
+        return payload;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to build Figma payload',
             message: (error as Error).message,
         });
     }
