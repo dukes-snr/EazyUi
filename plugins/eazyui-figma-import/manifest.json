@@ -1,0 +1,12 @@
+{
+  "name": "EazyUI Figma Import",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Imports remote images referenced by EazyUI payloads from arbitrary user-designed screen content."
+  }
+}

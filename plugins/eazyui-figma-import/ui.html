@@ -1,0 +1,1658 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EazyUI Figma Import</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Segoe UI", sans-serif;
+      --bg: #232323;
+      --panel: #2b2b2b;
+      --panel-2: #303030;
+      --panel-3: #363636;
+      --border: #454545;
+      --muted: #a4a4a4;
+      --text: #f4f4f4;
+      --blue: #1890f0;
+      --blue-2: #78bcff;
+      --orange: #ff641f;
+      --cyan: #24afe8;
+      --green: #1fd195;
+      --off: #f1efef;
+      --danger: #e85d5d;
+      --warning: #d3a448;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    body {
+      font-size: 14px;
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      background: var(--bg);
+    }
+
+    .masthead {
+      position: relative;
+      min-height: 138px;
+      padding: 0;
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+      --u: 5px;
+      --c1: #ededee;
+      --c2: #000000;
+      --c3: #1e1e1e;
+      --gp: 50% / calc(var(--u) * 16.9) calc(var(--u) * 12.8);
+      background:
+        conic-gradient(
+          from 122deg at 50% 85.15%,
+          var(--c2) 0 58deg,
+          var(--c3) 0 116deg,
+          #fff0 0 100%
+        ) var(--gp),
+        conic-gradient(from 122deg at 50% 72.5%, var(--c1) 0 116deg, #fff0 0 100%) var(--gp),
+        conic-gradient(from 58deg at 82.85% 50%, var(--c3) 0 64deg, #fff0 0 100%) var(--gp),
+        conic-gradient(
+          from 58deg at 66.87% 50%,
+          var(--c1) 0 64deg,
+          var(--c2) 0 130deg,
+          #fff0 0 100%
+        ) var(--gp),
+        conic-gradient(from 238deg at 17.15% 50%, var(--c2) 0 64deg, #fff0 0 100%) var(--gp),
+        conic-gradient(
+          from 172deg at 33.13% 50%,
+          var(--c3) 0 66deg,
+          var(--c1) 0 130deg,
+          #fff0 0 100%
+        ) var(--gp),
+        linear-gradient(98deg, var(--c3) 0 15%, #fff0 calc(15% + 1px) 100%) var(--gp),
+        linear-gradient(-98deg, var(--c2) 0 15%, #fff0 calc(15% + 1px) 100%) var(--gp),
+        conic-gradient(
+          from -58deg at 50.25% 14.85%,
+          var(--c3) 0 58deg,
+          var(--c2) 0 116deg,
+          #fff0 0 100%
+        ) var(--gp),
+        conic-gradient(from -58deg at 50% 28.125%, var(--c1) 0 116deg, #fff0 0 100%) var(--gp),
+        linear-gradient(90deg, var(--c2) 0 50%, var(--c3) 0 100%) var(--gp);
+    }
+
+    .masthead::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(17, 17, 17, 0.12), rgba(17, 17, 17, 0.76) 34%, rgba(17, 17, 17, 0.92) 100%);
+      pointer-events: none;
+    }
+
+    .masthead::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 42px;
+      background: linear-gradient(180deg, rgba(22, 22, 22, 0), rgba(22, 22, 22, 0.82));
+      pointer-events: none;
+    }
+
+    .masthead-content {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 18px 16px 0 18px;
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 0;
+      font-size: 18px;
+      line-height: 0.96;
+      font-weight: 800;
+      letter-spacing: -0.06em;
+      text-transform: lowercase;
+      text-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .brand-copy span {
+      font-size: 31px;
+    }
+
+    .brand-meta {
+      display: grid;
+      gap: 12px;
+      justify-items: end;
+      text-align: right;
+    }
+
+    .brand-meta small {
+      font-size: 11px;
+      color: #e2e2e2;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    .promo {
+      padding: 10px 14px;
+      background: #ffd65a;
+      color: #1f1f1f;
+      font-weight: 700;
+      border-radius: 0;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+    }
+
+    .tabs {
+      display: flex;
+      gap: 2px;
+      padding: 10px 14px 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .tab {
+      padding: 9px 12px 10px;
+      color: var(--muted);
+      background: transparent;
+      border-radius: 8px 8px 0 0;
+      transition: background-color 160ms var(--ease), color 160ms var(--ease);
+    }
+
+    .tab.active {
+      background: var(--panel-3);
+      color: var(--text);
+    }
+
+    .content {
+      position: relative;
+      min-height: 0;
+      background: var(--panel);
+    }
+
+    .view {
+      position: absolute;
+      inset: 0;
+      padding: 16px 14px 18px;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+      overflow: auto;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity 180ms var(--ease), transform 180ms var(--ease);
+    }
+
+    .view.active {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .import-box,
+    .card,
+    .statusbar,
+    .modal {
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .editor-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .editor-main {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .editor-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .editor-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .editor-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .button-small {
+      min-height: 32px;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .editor {
+      min-height: 270px;
+      padding: 12px;
+      background: #2d3440;
+      border: 1px solid #38404e;
+      color: #d7dde8;
+      resize: none;
+      outline: none;
+    }
+
+    .editor::placeholder {
+      color: #8a94a6;
+    }
+
+    .editor:focus {
+      border-color: #5d92c8;
+    }
+
+    .editor-shell.dragover .editor {
+      border-color: var(--blue-2);
+      background: #313b49;
+      box-shadow: 0 0 0 1px rgba(120, 188, 255, 0.35);
+    }
+
+    .drop-hint {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .parse-error {
+      padding: 10px 12px;
+      border: 1px solid rgba(232, 93, 93, 0.42);
+      background: rgba(232, 93, 93, 0.08);
+      color: #ffd0d0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .parse-error[hidden] {
+      display: none;
+    }
+
+    .action-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .button {
+      min-height: 42px;
+      padding: 0 14px;
+      font-weight: 700;
+      transition: transform 140ms var(--ease), background-color 140ms var(--ease), opacity 140ms var(--ease);
+    }
+
+    .button:active {
+      transform: scale(0.98);
+    }
+
+    .button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .button-primary {
+      background: var(--blue);
+      color: white;
+    }
+
+    .button-secondary,
+    .button-ghost,
+    .icon-button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid #505050;
+    }
+
+    .icon-button {
+      width: 42px;
+      min-width: 42px;
+      padding: 0;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 14px;
+      align-items: start;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 18px;
+    }
+
+    .stat label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .stat span {
+      font-size: 12px;
+      color: #c0c0c0;
+    }
+
+    .divider {
+      position: relative;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .divider::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .divider span {
+      position: relative;
+      padding: 0 10px;
+      background: var(--panel);
+    }
+
+    .card {
+      padding: 14px;
+    }
+
+    .card h2,
+    .guide h2,
+    .modal h2 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    .card p,
+    .guide p,
+    .modal p {
+      margin: 0;
+      line-height: 1.5;
+      color: #c9c9c9;
+    }
+
+    .card-actions {
+      margin-top: 14px;
+    }
+
+    .guide {
+      display: grid;
+      gap: 12px;
+    }
+
+    .guide-step {
+      padding: 14px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .guide-step strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .statusbar {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-left: 0;
+      border-right: 0;
+      border-bottom: 0;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #686868;
+      transition: background-color 160ms var(--ease);
+    }
+
+    .statusbar[data-kind="success"] .status-dot {
+      background: var(--green);
+    }
+
+    .statusbar[data-kind="error"] .status-dot {
+      background: var(--danger);
+    }
+
+    .statusbar[data-kind="warning"] .status-dot {
+      background: var(--warning);
+    }
+
+    .status-text {
+      min-width: 0;
+      color: #d8d8d8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .meta-pill {
+      color: var(--blue-2);
+      font-weight: 700;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms var(--ease);
+    }
+
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal {
+      width: min(100%, 420px);
+      padding: 16px;
+      transform: translateY(8px);
+      transition: transform 180ms var(--ease);
+    }
+
+    .modal-backdrop.open .modal {
+      transform: translateY(0);
+    }
+
+    .modal-header,
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .modal-grid {
+      margin: 16px 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .modal-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 12px;
+      background: var(--panel-2);
+      border: 1px solid #4b4b4b;
+    }
+
+    .modal-row span {
+      color: #c9c9c9;
+    }
+
+    .modal-row strong.ok {
+      color: var(--green);
+    }
+
+    .modal-row strong.bad {
+      color: var(--danger);
+    }
+
+    .modal-row strong.warn {
+      color: #f1cd67;
+    }
+
+    .settings-stack {
+      margin-top: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .settings-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 11px 12px;
+      background: var(--panel-2);
+      border: 1px solid #4b4b4b;
+    }
+
+    .settings-option input {
+      margin-top: 2px;
+    }
+
+    .settings-option strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .settings-option span {
+      color: #c9c9c9;
+      line-height: 1.45;
+      font-size: 12px;
+    }
+
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(18, 18, 18, 0.88);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms var(--ease);
+    }
+
+    .loading-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .loading-card {
+      min-width: 280px;
+      padding: 28px 24px 24px;
+      border: 1px solid #4a4a4a;
+      background: #252525;
+      display: grid;
+      justify-items: center;
+      gap: 18px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.32);
+    }
+
+    .loading-copy {
+      display: grid;
+      gap: 6px;
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    .loading-copy strong {
+      margin-top: 52px;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .loading-copy span {
+      color: #cbcbcb;
+      line-height: 1.5;
+    }
+
+    .boxes {
+      --size: 32px;
+      --duration: 800ms;
+      position: relative;
+      width: calc(var(--size) * 3);
+      height: calc(var(--size) * 2);
+      margin: 0 0 22px;
+      transform-style: preserve-3d;
+      transform-origin: 50% 50%;
+      transform: rotateX(60deg) rotateZ(45deg) rotateY(0deg) translateZ(0);
+    }
+
+    .boxes .box {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: var(--size);
+      height: var(--size);
+      transform-style: preserve-3d;
+    }
+
+    .boxes .box:nth-child(1) {
+      transform: translate(100%, 0);
+      animation: box1 var(--duration) linear infinite;
+    }
+
+    .boxes .box:nth-child(2) {
+      transform: translate(0, 100%);
+      animation: box2 var(--duration) linear infinite;
+    }
+
+    .boxes .box:nth-child(3) {
+      transform: translate(100%, 100%);
+      animation: box3 var(--duration) linear infinite;
+    }
+
+    .boxes .box:nth-child(4) {
+      transform: translate(200%, 0);
+      animation: box4 var(--duration) linear infinite;
+    }
+
+    .boxes .box > div {
+      --background: #5c8df6;
+      --top: auto;
+      --right: auto;
+      --bottom: auto;
+      --left: auto;
+      --translateZ: calc(var(--size) / 2);
+      --rotateY: 0deg;
+      --rotateX: 0deg;
+      position: absolute;
+      top: var(--top);
+      right: var(--right);
+      bottom: var(--bottom);
+      left: var(--left);
+      width: 100%;
+      height: 100%;
+      background: var(--background);
+      transform: rotateY(var(--rotateY)) rotateX(var(--rotateX)) translateZ(var(--translateZ));
+    }
+
+    .boxes .box > div:nth-child(1) {
+      --top: 0;
+      --left: 0;
+    }
+
+    .boxes .box > div:nth-child(2) {
+      --background: #145af2;
+      --right: 0;
+      --rotateY: 90deg;
+    }
+
+    .boxes .box > div:nth-child(3) {
+      --background: #447cf5;
+      --rotateX: -90deg;
+    }
+
+    .boxes .box > div:nth-child(4) {
+      --background: #dbe3f4;
+      --top: 0;
+      --left: 0;
+      --translateZ: calc(var(--size) * 3 * -1);
+    }
+
+    @keyframes box1 {
+      0%,
+      50% {
+        transform: translate(100%, 0);
+      }
+
+      100% {
+        transform: translate(200%, 0);
+      }
+    }
+
+    @keyframes box2 {
+      0% {
+        transform: translate(0, 100%);
+      }
+
+      50% {
+        transform: translate(0, 0);
+      }
+
+      100% {
+        transform: translate(100%, 0);
+      }
+    }
+
+    @keyframes box3 {
+      0%,
+      50% {
+        transform: translate(100%, 100%);
+      }
+
+      100% {
+        transform: translate(0, 100%);
+      }
+    }
+
+    @keyframes box4 {
+      0% {
+        transform: translate(200%, 0);
+      }
+
+      50% {
+        transform: translate(200%, 100%);
+      }
+
+      100% {
+        transform: translate(100%, 100%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="masthead">
+      <div class="masthead-content">
+        <div class="brand-copy">
+          <span>eazyui.</span>
+          <span>to.</span>
+          <span>figma.</span>
+        </div>
+        <div class="brand-meta">
+          <small>payload importer</small>
+          <button class="promo" type="button" data-open-modal>Import config</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab active" type="button" data-tab-trigger="payload">Payload</button>
+      <button class="tab" type="button" data-tab-trigger="guide">Guide</button>
+    </nav>
+
+    <main class="content">
+      <section class="view active" data-tab-panel="payload">
+        <div class="section-title">Import payload</div>
+
+        <div class="editor-shell">
+          <div class="editor-main">
+            <div class="editor-toolbar">
+              <label class="editor-label" for="payload">Scene payload</label>
+              <div class="editor-actions">
+                <button id="insertExampleButton" class="button button-ghost button-small" type="button">Insert example</button>
+                <button id="formatButton" class="button button-ghost button-small" type="button">Format JSON</button>
+                <button id="clearButton" class="button button-ghost button-small" type="button">Clear</button>
+              </div>
+            </div>
+            <textarea
+              id="payload"
+              class="editor"
+              spellcheck="false"
+              aria-label="EazyUI scene payload JSON"
+              placeholder='Type or paste EazyUI JSON here…&#10;&#10;{&#10;  "format": "eazyui.figma-scene",&#10;  "version": 1,&#10;  "screens": []&#10;}'
+            ></textarea>
+            <div class="drop-hint" id="dropHint">Paste JSON, drop a <code>.json</code> file here, or insert the example payload.</div>
+            <div class="parse-error" id="parseError" role="status" aria-live="polite" hidden></div>
+          </div>
+          <div class="action-stack">
+            <button id="importButton" class="button button-primary" type="button" disabled>Import</button>
+            <button id="pasteButton" class="button button-secondary" type="button"><span id="pasteLabel">Paste from clipboard</span></button>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stats-grid">
+            <div class="stat">
+              <label>Readiness</label>
+              <strong id="readinessValue">Waiting</strong>
+              <span id="readinessHint">Paste a valid scene payload.</span>
+            </div>
+            <div class="stat">
+              <label>Screens</label>
+              <strong id="screensValue">0</strong>
+              <span>Frames to generate</span>
+            </div>
+            <div class="stat">
+              <label>Version</label>
+              <strong id="versionValue">-</strong>
+              <span>Schema version</span>
+            </div>
+            <div class="stat">
+              <label>Payload size</label>
+              <strong id="sizeValue">0 KB</strong>
+              <span id="formatValue">Awaiting JSON</span>
+            </div>
+          </div>
+          <button class="icon-button" type="button" data-open-modal aria-label="Open import diagnostics">Config</button>
+        </div>
+
+        <div class="divider"><span>or</span></div>
+
+        <div class="card">
+          <h2>Paste with keyboard</h2>
+          <p>If Figma blocks direct clipboard access in this window, click below, then use Ctrl+V or Cmd+V in the editor.</p>
+          <div class="card-actions">
+            <button id="focusButton" class="button button-secondary" type="button">Focus editor</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view guide" data-tab-panel="guide">
+        <div class="guide-step">
+          <strong>1. Copy the payload in EazyUI</strong>
+          <p>Use Copy Figma Payload from the EazyUI app. The payload must use the <code>eazyui.figma-scene</code> format.</p>
+        </div>
+        <div class="guide-step">
+          <strong>2. Paste or type it here</strong>
+          <p>Direct clipboard read may not be available inside Figma. Manual paste is always supported in the editor.</p>
+        </div>
+        <div class="guide-step">
+          <strong>3. Import once validation is ready</strong>
+          <p>The import button enables only when JSON is valid and contains at least one screen.</p>
+        </div>
+        <div class="guide-step">
+          <strong>4. Review the generated frames</strong>
+          <p>Each exported screen is created as editable Figma layers, then selected and centered on the canvas.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar" id="statusBar" data-kind="neutral">
+      <div class="status-dot" aria-hidden="true"></div>
+      <div class="status-text" id="statusText" aria-live="polite">Waiting for a payload.</div>
+      <div class="status-actions">
+        <span class="meta-pill" id="footerMeta">0 screens</span>
+        <button id="cancelButton" class="button button-ghost" type="button">Close</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="modal-backdrop" id="configModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header">
+        <h2 id="modalTitle">Import config</h2>
+        <button id="closeModalButton" class="icon-button" type="button" aria-label="Close import config">X</button>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-row"><span>Payload format</span><strong id="diagFormat" class="warn">Waiting</strong></div>
+        <div class="modal-row"><span>JSON syntax</span><strong id="diagJson" class="warn">Waiting</strong></div>
+        <div class="modal-row"><span>Screen count</span><strong id="diagScreens" class="warn">0 screens</strong></div>
+        <div class="modal-row"><span>Clipboard access</span><strong id="diagClipboard" class="warn">Keyboard paste</strong></div>
+      </div>
+      <div class="settings-stack" aria-label="Import settings">
+        <label class="settings-option">
+          <input id="createVariablesSetting" type="checkbox" checked />
+          <div>
+            <strong>Create variables</strong>
+            <span>Build local Figma variables from the exported EazyUI design system when that metadata is present.</span>
+          </div>
+        </label>
+        <label class="settings-option">
+          <input id="createStylesSetting" type="checkbox" checked />
+          <div>
+            <strong>Create styles</strong>
+            <span>Create local paint, text, and effect styles for design-system colors, typography, and shadows.</span>
+          </div>
+        </label>
+        <label class="settings-option">
+          <input id="createComponentsSetting" type="checkbox" checked />
+          <div>
+            <strong>Create components</strong>
+            <span>Promote repeated imported frames into local components and replace duplicates with instances.</span>
+          </div>
+        </label>
+      </div>
+      <p>Direct clipboard read depends on Figma's embedded browser support. Manual paste in the editor is always available.</p>
+    </div>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay" aria-hidden="true">
+    <div class="loading-card">
+      <div class="boxes" aria-hidden="true">
+        <div class="box">
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+        <div class="box">
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+        <div class="box">
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+        <div class="box">
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+      </div>
+      <div class="loading-copy">
+        <strong>Importing screens</strong>
+        <span>Building editable layers and placing them on the current Figma page.</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "eazyui-figma-import:draft";
+    const SETTINGS_KEY = "eazyui-figma-import:settings";
+    const DEFAULT_IMPORT_SETTINGS = {
+      createVariables: true,
+      createStyles: true,
+      createComponents: true,
+    };
+    const SAMPLE_PAYLOAD = {
+      format: "eazyui.figma-scene",
+      version: 2,
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      notes: ["Sample payload inserted by the plugin UI."],
+      screens: [
+        {
+          screenId: "sample-home",
+          name: "Sample Screen",
+          width: 390,
+          height: 844,
+          root: {
+            id: "screen:sample-home",
+            name: "Sample Screen",
+            nodeType: "screen",
+            tagName: "body",
+            bounds: { x: 0, y: 0, width: 390, height: 844 },
+            layout: {
+              display: "block",
+              position: "static",
+              padding: { top: 0, right: 0, bottom: 0, left: 0 },
+              margin: { top: 0, right: 0, bottom: 0, left: 0 }
+            },
+            border: {
+              radius: "0px",
+              top: { width: 0, color: "transparent", style: "none" },
+              right: { width: 0, color: "transparent", style: "none" },
+              bottom: { width: 0, color: "transparent", style: "none" },
+              left: { width: 0, color: "transparent", style: "none" }
+            },
+            visual: {
+              color: "rgb(255, 255, 255)",
+              backgroundColor: "rgb(18, 18, 18)",
+              opacity: "1",
+              boxShadow: "none"
+            },
+            children: [
+              {
+                id: "sample-card",
+                name: "div.sample-card",
+                nodeType: "frame",
+                tagName: "div",
+                bounds: { x: 24, y: 120, width: 342, height: 180 },
+                layout: {
+                  display: "block",
+                  position: "static",
+                  padding: { top: 20, right: 20, bottom: 20, left: 20 },
+                  margin: { top: 0, right: 0, bottom: 0, left: 0 }
+                },
+                border: {
+                  radius: "20px",
+                  top: { width: 1, color: "rgb(69, 69, 69)", style: "solid" },
+                  right: { width: 1, color: "rgb(69, 69, 69)", style: "solid" },
+                  bottom: { width: 1, color: "rgb(69, 69, 69)", style: "solid" },
+                  left: { width: 1, color: "rgb(69, 69, 69)", style: "solid" }
+                },
+                visual: {
+                  color: "rgb(244, 244, 244)",
+                  backgroundColor: "rgb(43, 43, 43)",
+                  opacity: "1",
+                  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.24)"
+                },
+                children: [
+                  {
+                    id: "sample-title",
+                    name: "h1.sample-title",
+                    nodeType: "text",
+                    tagName: "h1",
+                    bounds: { x: 44, y: 148, width: 240, height: 38 },
+                    layout: {
+                      display: "inline",
+                      position: "static",
+                      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+                      margin: { top: 0, right: 0, bottom: 0, left: 0 }
+                    },
+                    border: {
+                      radius: "0px",
+                      top: { width: 0, color: "transparent", style: "none" },
+                      right: { width: 0, color: "transparent", style: "none" },
+                      bottom: { width: 0, color: "transparent", style: "none" },
+                      left: { width: 0, color: "transparent", style: "none" }
+                    },
+                    visual: {
+                      color: "rgb(244, 244, 244)",
+                      backgroundColor: "rgba(0, 0, 0, 0)",
+                      opacity: "1",
+                      boxShadow: "none"
+                    },
+                    typography: {
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: "32px",
+                      fontWeight: "700",
+                      fontStyle: "normal",
+                      lineHeight: "38px",
+                      letterSpacing: "-0.04em",
+                      textAlign: "left",
+                      textTransform: "none",
+                      textDecoration: "none",
+                      whiteSpace: "normal"
+                    },
+                    textMetrics: {
+                      lineCount: 1,
+                      renderedWidth: 240,
+                      renderedHeight: 38
+                    },
+                    textContent: "Sample Payload",
+                    children: []
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const payloadInput = document.getElementById("payload");
+    const importButton = document.getElementById("importButton");
+    const pasteButton = document.getElementById("pasteButton");
+    const pasteLabel = document.getElementById("pasteLabel");
+    const focusButton = document.getElementById("focusButton");
+    const clearButton = document.getElementById("clearButton");
+    const formatButton = document.getElementById("formatButton");
+    const insertExampleButton = document.getElementById("insertExampleButton");
+    const cancelButton = document.getElementById("cancelButton");
+    const statusBar = document.getElementById("statusBar");
+    const statusText = document.getElementById("statusText");
+    const footerMeta = document.getElementById("footerMeta");
+    const readinessValue = document.getElementById("readinessValue");
+    const readinessHint = document.getElementById("readinessHint");
+    const screensValue = document.getElementById("screensValue");
+    const versionValue = document.getElementById("versionValue");
+    const sizeValue = document.getElementById("sizeValue");
+    const formatValue = document.getElementById("formatValue");
+    const configModal = document.getElementById("configModal");
+    const closeModalButton = document.getElementById("closeModalButton");
+    const diagFormat = document.getElementById("diagFormat");
+    const diagJson = document.getElementById("diagJson");
+    const diagScreens = document.getElementById("diagScreens");
+    const diagClipboard = document.getElementById("diagClipboard");
+    const createVariablesSetting = document.getElementById("createVariablesSetting");
+    const createStylesSetting = document.getElementById("createStylesSetting");
+    const createComponentsSetting = document.getElementById("createComponentsSetting");
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    const parseError = document.getElementById("parseError");
+    const editorShell = document.querySelector(".editor-shell");
+    const clipboardApiAvailable = Boolean(navigator.clipboard && typeof navigator.clipboard.readText === "function");
+
+    let isBusy = false;
+    let payloadReady = false;
+    let lastModalOpener = null;
+    let clipboardReadBlocked = false;
+
+    function formatBytes(bytes) {
+      if (!bytes) return "0 KB";
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1048576) return (bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1) + " KB";
+      return (bytes / 1048576).toFixed(1) + " MB";
+    }
+
+    function parseJsonErrorDetails(raw, error) {
+      const message = error instanceof Error ? error.message : String(error || "Invalid JSON");
+      let position = null;
+
+      const positionMatch = message.match(/position\s+(\d+)/i);
+      if (positionMatch) {
+        position = Number(positionMatch[1]);
+      }
+
+      const lineColumnMatch = message.match(/line\s+(\d+)\s+column\s+(\d+)/i);
+      if (lineColumnMatch) {
+        return {
+          message,
+          line: Number(lineColumnMatch[1]),
+          column: Number(lineColumnMatch[2]),
+        };
+      }
+
+      if (position !== null && Number.isFinite(position)) {
+        const safePosition = Math.max(0, Math.min(position, raw.length));
+        const before = raw.slice(0, safePosition);
+        const line = before.split("\n").length;
+        const column = safePosition - before.lastIndexOf("\n");
+        return { message, line, column };
+      }
+
+      return { message, line: null, column: null };
+    }
+
+    function setStatus(message, kind) {
+      statusBar.dataset.kind = kind || "neutral";
+      statusText.textContent = message;
+    }
+
+    function setDiagState(node, text, kind) {
+      node.textContent = text;
+      node.className = kind;
+    }
+
+    function syncClipboardUi() {
+      const canDirectRead = clipboardApiAvailable && !clipboardReadBlocked;
+      if (canDirectRead) {
+        pasteLabel.textContent = "Paste from clipboard";
+        setDiagState(diagClipboard, "Direct read", "ok");
+        return;
+      }
+      pasteLabel.textContent = "Focus & paste";
+      setDiagState(diagClipboard, clipboardApiAvailable ? "Blocked by Figma" : "Keyboard paste", "warn");
+    }
+
+    function readDraft() {
+      try {
+        return localStorage.getItem(STORAGE_KEY) || "";
+      } catch (_error) {
+        return "";
+      }
+    }
+
+    function readImportSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (!raw) return { ...DEFAULT_IMPORT_SETTINGS };
+        const parsed = JSON.parse(raw);
+        return {
+          createVariables: parsed.createVariables !== false,
+          createStyles: parsed.createStyles !== false,
+          createComponents: parsed.createComponents !== false,
+        };
+      } catch (_error) {
+        return { ...DEFAULT_IMPORT_SETTINGS };
+      }
+    }
+
+    function writeDraft(value) {
+      try {
+        if (value && value.trim()) {
+          localStorage.setItem(STORAGE_KEY, value);
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch (_error) {
+        // Ignore storage failures in embedded webviews.
+      }
+    }
+
+    function writeImportSettings(settings) {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      } catch (_error) {
+        // Ignore storage failures in embedded webviews.
+      }
+    }
+
+    function getImportSettings() {
+      return {
+        createVariables: Boolean(createVariablesSetting.checked),
+        createStyles: Boolean(createStylesSetting.checked),
+        createComponents: Boolean(createComponentsSetting.checked),
+      };
+    }
+
+    function syncImportSettingsUi(settings) {
+      createVariablesSetting.checked = settings.createVariables !== false;
+      createStylesSetting.checked = settings.createStyles !== false;
+      createComponentsSetting.checked = settings.createComponents !== false;
+    }
+
+    function showParseError(text) {
+      if (!text) {
+        parseError.hidden = true;
+        parseError.textContent = "";
+        return;
+      }
+      parseError.hidden = false;
+      parseError.textContent = text;
+    }
+
+    function getStats(raw) {
+      const trimmed = raw.trim();
+      const byteCount = trimmed ? new TextEncoder().encode(trimmed).length : 0;
+
+      if (!trimmed) {
+        return {
+          empty: true,
+          byteCount,
+          screens: 0,
+          version: "-",
+          format: "",
+          valid: false,
+          invalidJson: false,
+          parseError: "",
+        };
+      }
+
+      try {
+        const payload = JSON.parse(trimmed);
+        const screens = Array.isArray(payload.screens) ? payload.screens.length : 0;
+        const valid = payload && payload.format === "eazyui.figma-scene" && screens > 0;
+        return {
+          empty: false,
+          byteCount,
+          screens,
+          version: payload.version === undefined ? "-" : String(payload.version),
+          format: payload.format ? String(payload.format) : "Unknown format",
+          valid,
+          invalidJson: false,
+          parseError: "",
+        };
+      } catch (error) {
+        const details = parseJsonErrorDetails(trimmed, error);
+        return {
+          empty: false,
+          byteCount,
+          screens: 0,
+          version: "-",
+          format: "Invalid JSON",
+          valid: false,
+          invalidJson: true,
+          parseError: details.line && details.column
+            ? `JSON syntax error at line ${details.line}, column ${details.column}.`
+            : "JSON syntax error. Check the payload and try again.",
+        };
+      }
+    }
+
+    function syncUi(options) {
+      const stats = getStats(payloadInput.value);
+      payloadReady = stats.valid;
+
+      loadingOverlay.classList.toggle("open", isBusy);
+      loadingOverlay.setAttribute("aria-hidden", isBusy ? "false" : "true");
+      importButton.disabled = isBusy || !payloadReady;
+      pasteButton.disabled = isBusy;
+      cancelButton.disabled = isBusy;
+      focusButton.disabled = isBusy;
+      clearButton.disabled = isBusy || !payloadInput.value.trim();
+      formatButton.disabled = isBusy || !payloadInput.value.trim();
+      insertExampleButton.disabled = isBusy;
+      footerMeta.textContent = stats.screens + " screen" + (stats.screens === 1 ? "" : "s");
+      screensValue.textContent = String(stats.screens);
+      versionValue.textContent = stats.version;
+      sizeValue.textContent = formatBytes(stats.byteCount);
+      formatValue.textContent = stats.format || "Awaiting JSON";
+      showParseError(stats.invalidJson ? stats.parseError : "");
+
+      if (stats.empty) {
+        readinessValue.textContent = "Waiting";
+        readinessHint.textContent = "Paste a valid scene payload.";
+        setDiagState(diagFormat, "Waiting", "warn");
+        setDiagState(diagJson, "Waiting", "warn");
+        setDiagState(diagScreens, "0 screens", "warn");
+        if (!options || !options.keepStatus) {
+          setStatus("Waiting for a payload.", "neutral");
+        }
+      } else if (stats.invalidJson) {
+        readinessValue.textContent = "Syntax issue";
+        readinessHint.textContent = stats.parseError || "Fix the JSON before import.";
+        setDiagState(diagFormat, "Unreadable", "bad");
+        setDiagState(diagJson, "Invalid", "bad");
+        setDiagState(diagScreens, "0 screens", "warn");
+        if (!options || !options.keepStatus) {
+          setStatus("Payload is not valid JSON.", "error");
+        }
+      } else if (!stats.valid) {
+        readinessValue.textContent = "Needs scene data";
+        readinessHint.textContent = "Expected eazyui.figma-scene with screens.";
+        setDiagState(diagFormat, stats.format === "eazyui.figma-scene" ? "OK" : stats.format, stats.format === "eazyui.figma-scene" ? "ok" : "bad");
+        setDiagState(diagJson, "Valid", "ok");
+        setDiagState(diagScreens, stats.screens + " screens", stats.screens > 0 ? "ok" : "warn");
+        if (!options || !options.keepStatus) {
+          setStatus("JSON parsed, but the payload is not importable yet.", "warning");
+        }
+      } else {
+        readinessValue.textContent = "Ready";
+        readinessHint.textContent = "Import can run on the current page.";
+        setDiagState(diagFormat, "OK", "ok");
+        setDiagState(diagJson, "Valid", "ok");
+        setDiagState(diagScreens, stats.screens + " screens", "ok");
+        if (!options || !options.keepStatus) {
+          setStatus("Payload validated. Ready to import.", "success");
+        }
+      }
+    }
+
+    function setPayloadValue(value, options) {
+      payloadInput.value = value;
+      writeDraft(value);
+      syncUi({ keepStatus: true });
+      if (!options || options.focus !== false) {
+        payloadInput.focus();
+      }
+    }
+
+    function focusEditor(withMessage) {
+      payloadInput.focus();
+      payloadInput.select();
+      if (withMessage) {
+        setStatus("Editor focused. Use Ctrl+V or Cmd+V to paste.", "warning");
+      }
+    }
+
+    function formatCurrentJson() {
+      try {
+        const formatted = JSON.stringify(JSON.parse(payloadInput.value), null, 2);
+        setPayloadValue(formatted);
+        setStatus("JSON formatted.", "success");
+      } catch (error) {
+        const details = parseJsonErrorDetails(payloadInput.value, error);
+        showParseError(
+          details.line && details.column
+            ? `JSON syntax error at line ${details.line}, column ${details.column}.`
+            : "JSON syntax error. Fix it before formatting."
+        );
+        setStatus("Fix the JSON before formatting.", "error");
+      }
+    }
+
+    function insertSamplePayload() {
+      setPayloadValue(JSON.stringify(SAMPLE_PAYLOAD, null, 2));
+      setStatus("Sample payload inserted.", "success");
+    }
+
+    async function loadDroppedFile(file) {
+      const isJson = file && (file.type === "application/json" || /\.json$/i.test(file.name || ""));
+      if (!isJson) {
+        setStatus("Drop a .json payload file.", "error");
+        return;
+      }
+
+      const text = await file.text();
+      if (!text.trim()) {
+        setStatus("Dropped file is empty.", "error");
+        return;
+      }
+
+      setPayloadValue(text, { focus: false });
+      setStatus("JSON file loaded.", "success");
+    }
+
+    function getFocusableNodes(container) {
+      return Array.from(
+        container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+      ).filter((node) => !node.disabled && node.offsetParent !== null);
+    }
+
+    function openModal(opener) {
+      lastModalOpener = opener || document.activeElement;
+      configModal.classList.add("open");
+      closeModalButton.focus();
+    }
+
+    function closeModal() {
+      configModal.classList.remove("open");
+      if (lastModalOpener && typeof lastModalOpener.focus === "function") {
+        lastModalOpener.focus();
+      }
+    }
+
+    syncClipboardUi();
+
+    const restoredDraft = readDraft();
+    const restoredImportSettings = readImportSettings();
+    syncImportSettingsUi(restoredImportSettings);
+    if (restoredDraft.trim()) {
+      payloadInput.value = restoredDraft;
+      setStatus("Restored your last draft.", "success");
+    }
+
+    [createVariablesSetting, createStylesSetting, createComponentsSetting].forEach((node) => {
+      node.addEventListener("change", () => {
+        writeImportSettings(getImportSettings());
+      });
+    });
+
+    payloadInput.addEventListener("input", () => {
+      writeDraft(payloadInput.value);
+      syncUi();
+    });
+
+    payloadInput.addEventListener("paste", () => {
+      requestAnimationFrame(() => {
+        writeDraft(payloadInput.value);
+        syncUi({ keepStatus: true });
+        setStatus(payloadReady ? "Payload pasted and validated." : "Payload pasted. Review validation state.", payloadReady ? "success" : "warning");
+      });
+    });
+
+    focusButton.addEventListener("click", () => {
+      focusEditor(true);
+    });
+
+    clearButton.addEventListener("click", () => {
+      setPayloadValue("");
+      setStatus("Payload cleared.", "warning");
+    });
+
+    formatButton.addEventListener("click", formatCurrentJson);
+    insertExampleButton.addEventListener("click", insertSamplePayload);
+
+    pasteButton.addEventListener("click", async () => {
+      if (!clipboardApiAvailable || clipboardReadBlocked) {
+        focusEditor(true);
+        return;
+      }
+
+      try {
+        setStatus("Reading clipboard…", "warning");
+        const text = await navigator.clipboard.readText();
+        if (!text.trim()) {
+          setStatus("Clipboard is empty.", "error");
+          return;
+        }
+        setPayloadValue(text);
+        setStatus(payloadReady ? "Clipboard payload loaded." : "Clipboard text loaded. Review validation state.", payloadReady ? "success" : "warning");
+      } catch (error) {
+        clipboardReadBlocked = true;
+        syncClipboardUi();
+        focusEditor(false);
+        setStatus("Figma blocked direct clipboard read. Use Ctrl+V or Cmd+V in the editor.", "warning");
+      }
+    });
+
+    importButton.addEventListener("click", () => {
+      try {
+        isBusy = true;
+        syncUi({ keepStatus: true });
+        setStatus("Importing payload into Figma…", "warning");
+        parent.postMessage({
+          pluginMessage: {
+            type: "import-payload",
+            payload: JSON.parse(payloadInput.value),
+            settings: getImportSettings(),
+          },
+        }, "*");
+      } catch (error) {
+        isBusy = false;
+        syncUi({ keepStatus: true });
+        setStatus(error instanceof Error ? error.message : "Payload is not valid JSON.", "error");
+      }
+    });
+
+    cancelButton.addEventListener("click", () => {
+      parent.postMessage({ pluginMessage: { type: "cancel" } }, "*");
+    });
+
+    document.querySelectorAll("[data-open-modal]").forEach((button) => {
+      button.addEventListener("click", () => openModal(button));
+    });
+
+    closeModalButton.addEventListener("click", closeModal);
+
+    configModal.addEventListener("keydown", (event) => {
+      if (!configModal.classList.contains("open")) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+
+      if (event.key === "Tab") {
+        const focusable = getFocusableNodes(configModal);
+        if (focusable.length === 0) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+
+        if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    });
+
+    configModal.addEventListener("click", (event) => {
+      if (event.target === configModal) {
+        closeModal();
+      }
+    });
+
+    editorShell.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+      editorShell.classList.add("dragover");
+    });
+
+    editorShell.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      editorShell.classList.add("dragover");
+    });
+
+    editorShell.addEventListener("dragleave", (event) => {
+      if (!editorShell.contains(event.relatedTarget)) {
+        editorShell.classList.remove("dragover");
+      }
+    });
+
+    editorShell.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      editorShell.classList.remove("dragover");
+      const files = event.dataTransfer && event.dataTransfer.files;
+      if (!files || files.length === 0) {
+        setStatus("No file detected in drop.", "error");
+        return;
+      }
+
+      try {
+        await loadDroppedFile(files[0]);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Failed to read dropped file.", "error");
+      }
+    });
+
+    window.addEventListener("paste", (event) => {
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) return;
+      const text = clipboardData.getData("text/plain");
+      if (!text || !text.trim()) return;
+      event.preventDefault();
+      setPayloadValue(text);
+      setStatus(payloadReady ? "Payload pasted and validated." : "Payload pasted. Review validation state.", payloadReady ? "success" : "warning");
+    });
+
+    document.querySelectorAll("[data-tab-trigger]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.getAttribute("data-tab-trigger");
+        document.querySelectorAll("[data-tab-trigger]").forEach((item) => item.classList.toggle("active", item === button));
+        document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+          panel.classList.toggle("active", panel.getAttribute("data-tab-panel") === target);
+        });
+      });
+    });
+
+    window.onmessage = (event) => {
+      const message = event.data && event.data.pluginMessage;
+      if (!message) return;
+
+      if (message.type === "import-complete") {
+        isBusy = false;
+        syncUi({ keepStatus: true });
+        const assets = message.assets || {};
+        const assetSummary = [
+          assets.variables ? assets.variables + " vars" : "",
+          assets.styles ? assets.styles + " styles" : "",
+          assets.components ? assets.components + " comps" : "",
+        ].filter(Boolean).join(" · ");
+        footerMeta.textContent = assetSummary
+          ? message.count + " screen" + (message.count === 1 ? "" : "s") + " · " + assetSummary
+          : message.count + " screen" + (message.count === 1 ? "" : "s");
+        setStatus(
+          "Imported " + message.count + " screen" + (message.count === 1 ? "" : "s") + (assetSummary ? " and built " + assetSummary + "." : "."),
+          "success"
+        );
+      }
+
+      if (message.type === "import-error") {
+        isBusy = false;
+        syncUi({ keepStatus: true });
+        setStatus(message.message || "Import failed.", "error");
+      }
+    };
+
+    syncUi({ keepStatus: true });
+  </script>
+</body>
+</html>

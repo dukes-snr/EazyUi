@@ -491,13 +491,26 @@ export function CanvasProfileMenu() {
                                 type="button"
                                 className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
                                 disabled={anyExportBusy}
-                                onClick={() => runExportAction('figma', 'Preparing Figma export', async () => {
-                                    await exportScreensToFigmaClipboard(exportScreens);
-                                    pushToast({ kind: 'guide', title: 'Ready for Figma', message: 'Open Figma and press Ctrl+V to paste.', durationMs: 6000 });
+                                onClick={() => runExportAction('figma', 'Preparing Figma payload', async () => {
+                                    const result = await exportScreensToFigmaClipboard(exportScreens, spec?.designSystem || null);
+                                    if (result.mode === 'clipboard') {
+                                        pushToast({
+                                            kind: 'guide',
+                                            title: 'Figma payload copied',
+                                            message: 'Open the EazyUI Figma Import plugin in Figma, then paste from clipboard and import.',
+                                            durationMs: 6000,
+                                        });
+                                        return;
+                                    }
+                                    pushToast({
+                                        kind: 'success',
+                                        title: 'Figma payload exported',
+                                        message: `${result.filename} (${selectionLabel})`,
+                                    });
                                 })}
                             >
                                 {exportActionBusy === 'figma' ? <Loader2 size={14} className="animate-spin" /> : <Settings size={14} />}
-                                <span>{exportActionBusy === 'figma' ? 'Preparing Figma export...' : 'Export to Figma'}</span>
+                                <span>{exportActionBusy === 'figma' ? 'Preparing Figma payload...' : 'Copy Figma Payload'}</span>
                             </button>
                         </div>
                     )}

@@ -1,3 +1,6 @@
+import type { ProjectDesignSystem } from '../api/client';
+import { buildFigmaPastePayload } from './htmlToFigmaScene';
+
 type ExportScreen = {
     screenId: string;
     name: string;
@@ -637,19 +640,39 @@ export async function exportScreensAsImagesZip(
 
 export async function exportScreensToFigmaClipboard(
     screens: ExportScreen[],
+    designSystem?: ProjectDesignSystem | null,
 ): Promise<{ mode: 'clipboard' | 'download'; filename?: string }> {
     if (screens.length === 0) throw new Error('No screens to export.');
-    const svg = buildCombinedFigmaSvg(screens);
+    const [payload, svg] = await Promise.all([
+        buildFigmaPastePayload(screens, designSystem),
+        Promise.resolve(buildCombinedFigmaSvg(screens)),
+    ]);
+    const payloadJson = JSON.stringify(payload, null, 2);
 
     if (typeof window !== 'undefined' && 'ClipboardItem' in window && navigator.clipboard?.write) {
-        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
+        const textBlob = new Blob([payloadJson], { type: 'text/plain' });
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore ClipboardItem is runtime-guarded above
-        await navigator.clipboard.write([new ClipboardItem({ 'image/svg+xml': blob, 'text/plain': new Blob([svg], { type: 'text/plain' }) })]);
+        await navigator.clipboard.write([new ClipboardItem({
+            'image/svg+xml': svgBlob,
+            'text/plain': textBlob,
+        })]);
         return { mode: 'clipboard' };
     }
 
-    const filename = `figma-export-${nowStamp()}.svg`;
-    downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), filename);
+    const root = `figma-payload-${nowStamp()}`;
+    const filename = `${root}.zip`;
+    const zip = createZipBlob([
+        {
+            path: `${root}/payload.json`,
+            data: toBytes(payloadJson),
+        },
+        {
+            path: `${root}/preview.svg`,
+            data: toBytes(svg),
+        },
+    ]);
+    downloadBlob(zip, filename);
     return { mode: 'download', filename };
 }
