@@ -19,6 +19,8 @@ import { getDefaultGeminiTextModel, normalizeGeminiTextModel } from './services/
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
+import { consumePluginAuthSession, writePluginAuthSession } from './services/pluginAuthSessions.js';
+import { getPluginProjectScreens, listPluginProjects } from './services/pluginProjects.js';
 import { resolveProjectBrandAssetContext, sanitizeAssetReferences, type AssetReference as RequestAssetReference } from './services/projectAssetContext.js';
 import { renderRequestActivityDashboardHtml } from './services/requestActivityDashboard.js';
 import { getRequestActivitySnapshot, upsertRequestActivity, type RequestActivityItem as ServerActivityItem } from './services/requestActivity.js';
@@ -175,6 +177,10 @@ function isAllowedCorsOrigin(origin: string | undefined): boolean {
     }
 
     if (allowVercelPreviewOrigins && hostname.endsWith('.vercel.app')) {
+        return true;
+    }
+
+    if (hostname === 'figma.com' || hostname === 'www.figma.com' || hostname.endsWith('.figma.com')) {
         return true;
     }
 
@@ -667,6 +673,13 @@ function resolveAuthHeader(request: { headers: Record<string, unknown> }): strin
     if (typeof value === 'string') return value;
     if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
     return undefined;
+}
+
+function parseBearerToken(headerValue: string | undefined): string | null {
+    const value = String(headerValue || '').trim();
+    if (!value) return null;
+    const match = value.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() || null;
 }
 
 function resolveMcpApiKeyFromHeaders(headers: Record<string, unknown>): string | null {
@@ -5029,6 +5042,121 @@ fastify.get<{
 fastify.get('/api/projects', async () => {
     const projects = await listProjects();
     return { projects };
+});
+
+fastify.get('/api/plugin/projects', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/projects');
+    if (!user) return reply;
+
+    try {
+        const projects = await listPluginProjects(user.uid);
+        return { projects };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to list plugin projects',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        state?: string;
+        user?: {
+            uid?: string;
+            email?: string;
+            displayName?: string;
+        };
+    };
+}>('/api/plugin-auth/session/complete', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin-auth/session/complete');
+    if (!user) return reply;
+
+    const state = String(request.body?.state || '').trim();
+    if (!/^[a-f0-9]{24,}$/i.test(state)) {
+        return reply.status(400).send({
+            error: 'Invalid state',
+            message: 'Plugin auth state is missing or invalid.',
+        });
+    }
+
+    const token = parseBearerToken(resolveAuthHeader(request));
+    if (!token) {
+        return reply.status(400).send({
+            error: 'Missing token',
+            message: 'A bearer token is required to complete plugin authentication.',
+        });
+    }
+
+    try {
+        await writePluginAuthSession({
+            state,
+            token,
+            user: {
+                uid: user.uid,
+                email: String(request.body?.user?.email || user.email || '').trim(),
+                displayName: String(request.body?.user?.displayName || '').trim(),
+            },
+        });
+        return { ok: true };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to complete plugin authentication',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get<{
+    Params: { state: string };
+}>('/api/plugin-auth/session/:state', async (request, reply) => {
+    const state = String(request.params.state || '').trim();
+    if (!/^[a-f0-9]{24,}$/i.test(state)) {
+        return reply.status(400).send({
+            error: 'Invalid state',
+            message: 'Plugin auth state is missing or invalid.',
+        });
+    }
+
+    try {
+        const session = await consumePluginAuthSession(state);
+        if (!session) {
+            return reply.status(404).send({
+                error: 'Session pending',
+                message: 'Plugin authentication has not completed yet.',
+            });
+        }
+        return session;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to fetch plugin auth session',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get<{
+    Params: { id: string };
+}>('/api/plugin/projects/:id/screens', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/projects/:id/screens');
+    if (!user) return reply;
+
+    try {
+        const result = await getPluginProjectScreens(user.uid, request.params.id);
+        if (!result) {
+            return reply.status(404).send({ error: 'Project not found' });
+        }
+        return result;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to load plugin project screens',
+            message: (error as Error).message,
+        });
+    }
 });
 
 // Delete project

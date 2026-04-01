@@ -19,6 +19,7 @@ import { ContactPage } from './components/marketing/ContactPage';
 import { ProjectSettingsPage } from './components/settings/ProjectSettingsPage';
 import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { ToastViewport } from './components/ui/ToastViewport';
+import { PluginAuthBridgePage } from './components/plugin/PluginAuthBridgePage';
 import DemoOne from './components/ui/demo';
 import type { DesignModelProfile } from './constants/designModels';
 import { apiClient } from './api/client';
@@ -41,6 +42,7 @@ const BILLING_UPDATED_EVENT = 'eazyui:billing-updated';
 type RouteInfo =
     | { kind: 'landing' }
     | { kind: 'login' }
+    | { kind: 'plugin-auth' }
     | { kind: 'templates' }
     | { kind: 'blog' }
     | { kind: 'blog-detail'; slug: string }
@@ -110,6 +112,7 @@ function getRouteFromPath(): RouteInfo {
     const segments = path.split('/').filter(Boolean);
 
     if (path === '/auth/login' || path === '/login') return { kind: 'login' };
+    if (path === '/auth/plugin') return { kind: 'plugin-auth' };
     if (path === '/templates') return { kind: 'templates' };
     if (path === '/learn' || path === '/blog') return { kind: 'blog' };
     if (path === '/pricing') return { kind: 'pricing' };
@@ -1068,6 +1071,10 @@ function App() {
 
     if (route.kind === 'login') {
         return <DemoOne onNavigate={(path) => navigate(path)} />;
+    }
+
+    if (route.kind === 'plugin-auth') {
+        return <PluginAuthBridgePage authReady={authReady} authUser={authUser} />;
     }
 
     if (route.kind.startsWith('app-') && (!authReady || (authReady && !authUser))) {

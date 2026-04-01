@@ -2118,6 +2118,16 @@ figma.ui.onmessage = async (message) => {
       return;
     }
 
+    if (message.type === "open-auth-url") {
+      const url = typeof message.url === "string" ? message.url.trim() : "";
+      if (!url) {
+        throw new Error("Missing auth URL.");
+      }
+      figma.openExternal(url);
+      figma.notify("Opened EazyUI sign-in in your browser.");
+      return;
+    }
+
     if (message.type === "import-payload") {
       const result = await importPayload(message.payload, message.settings);
       figma.ui.postMessage({

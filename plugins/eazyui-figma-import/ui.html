@@ -455,6 +455,159 @@
       font-size: 13px;
     }
 
+    .projects-shell {
+      display: grid;
+      gap: 14px;
+    }
+
+    .projects-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .projects-session {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .projects-session strong {
+      font-size: 14px;
+    }
+
+    .projects-session span {
+      color: #c9c9c9;
+      line-height: 1.45;
+    }
+
+    .projects-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .projects-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+      min-height: 0;
+    }
+
+    .projects-column {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .projects-column-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .entity-list {
+      min-height: 220px;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+    }
+
+    .entity-empty {
+      padding: 18px 14px;
+      color: #c9c9c9;
+      line-height: 1.5;
+    }
+
+    .entity-item {
+      width: 100%;
+      padding: 14px;
+      border: 0;
+      border-bottom: 1px solid rgba(69, 69, 69, 0.8);
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      display: grid;
+      gap: 8px;
+      transition: background-color 160ms var(--ease), color 160ms var(--ease);
+    }
+
+    .entity-item:last-child {
+      border-bottom: 0;
+    }
+
+    .entity-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .entity-item.active {
+      background: rgba(24, 144, 240, 0.14);
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+
+    .entity-item[disabled] {
+      cursor: default;
+      opacity: 0.72;
+    }
+
+    .entity-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+    }
+
+    .entity-title strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .entity-pill {
+      padding: 3px 7px;
+      border: 1px solid rgba(120, 188, 255, 0.3);
+      color: var(--blue-2);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .entity-pill.warn {
+      border-color: rgba(211, 164, 72, 0.38);
+      color: #f1cd67;
+    }
+
+    .entity-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .entity-body {
+      color: #cdcdcd;
+      line-height: 1.5;
+      font-size: 12px;
+    }
+
     .statusbar {
       display: grid;
       grid-template-columns: 10px minmax(0, 1fr) auto;
@@ -805,6 +958,7 @@
 
     <nav class="tabs" aria-label="Sections">
       <button class="tab active" type="button" data-tab-trigger="payload">Payload</button>
+      <button class="tab" type="button" data-tab-trigger="projects">Projects</button>
       <button class="tab" type="button" data-tab-trigger="guide">Guide</button>
     </nav>
 
@@ -871,6 +1025,46 @@
           <p>If Figma blocks direct clipboard access in this window, click below, then use Ctrl+V or Cmd+V in the editor.</p>
           <div class="card-actions">
             <button id="focusButton" class="button button-secondary" type="button">Focus editor</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-tab-panel="projects">
+        <div class="section-title">Project browser</div>
+
+        <div class="projects-shell">
+          <div class="projects-toolbar">
+            <div class="projects-session">
+              <strong id="projectSessionTitle">Sign in to EazyUI</strong>
+              <span id="projectSessionMeta">Open the browser, authenticate, then return here to browse your projects.</span>
+            </div>
+            <div class="projects-actions">
+              <button id="projectLoginButton" class="button button-primary button-small" type="button">Sign in</button>
+              <button id="projectRefreshButton" class="button button-ghost button-small" type="button" disabled>Refresh</button>
+              <button id="projectLogoutButton" class="button button-ghost button-small" type="button" disabled>Disconnect</button>
+            </div>
+          </div>
+
+          <div class="projects-grid">
+            <div class="projects-column">
+              <div class="projects-column-header">
+                <span>Projects</span>
+                <span id="projectsCountLabel">0</span>
+              </div>
+              <div id="projectsList" class="entity-list" aria-live="polite">
+                <div class="entity-empty">Sign in to load your EazyUI projects.</div>
+              </div>
+            </div>
+
+            <div class="projects-column">
+              <div class="projects-column-header">
+                <span id="screensHeading">Screens</span>
+                <span id="screensCountLabel">0</span>
+              </div>
+              <div id="screensList" class="entity-list" aria-live="polite">
+                <div class="entity-empty">Choose a project to inspect its screens.</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -982,6 +1176,9 @@
   <script>
     const STORAGE_KEY = "eazyui-figma-import:draft";
     const SETTINGS_KEY = "eazyui-figma-import:settings";
+    const AUTH_SESSION_KEY = "eazyui-figma-import:auth-session";
+    const EAZYUI_APP_ORIGIN = "https://eazyui.vercel.app";
+    const EAZYUI_API_BASE = "https://eazyui-api.onrender.com/api";
     const DEFAULT_IMPORT_SETTINGS = {
       createVariables: true,
       createStyles: true,
@@ -1130,6 +1327,16 @@
     const createVariablesSetting = document.getElementById("createVariablesSetting");
     const createStylesSetting = document.getElementById("createStylesSetting");
     const createComponentsSetting = document.getElementById("createComponentsSetting");
+    const projectSessionTitle = document.getElementById("projectSessionTitle");
+    const projectSessionMeta = document.getElementById("projectSessionMeta");
+    const projectLoginButton = document.getElementById("projectLoginButton");
+    const projectRefreshButton = document.getElementById("projectRefreshButton");
+    const projectLogoutButton = document.getElementById("projectLogoutButton");
+    const projectsList = document.getElementById("projectsList");
+    const screensList = document.getElementById("screensList");
+    const projectsCountLabel = document.getElementById("projectsCountLabel");
+    const screensHeading = document.getElementById("screensHeading");
+    const screensCountLabel = document.getElementById("screensCountLabel");
     const loadingOverlay = document.getElementById("loadingOverlay");
     const parseError = document.getElementById("parseError");
     const editorShell = document.querySelector(".editor-shell");
@@ -1139,12 +1346,477 @@
     let payloadReady = false;
     let lastModalOpener = null;
     let clipboardReadBlocked = false;
+    let authSession = readAuthSession();
+    let projectItems = [];
+    let selectedProjectId = "";
+    let screenItems = [];
+    let selectedProjectName = "";
+    let projectsLoading = false;
+    let screensLoading = false;
+    let pendingAuthState = "";
+    let authPollHandle = null;
+    let authPollInFlight = false;
+    let authPollDeadline = 0;
 
     function formatBytes(bytes) {
       if (!bytes) return "0 KB";
       if (bytes < 1024) return bytes + " B";
       if (bytes < 1048576) return (bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1) + " KB";
       return (bytes / 1048576).toFixed(1) + " MB";
+    }
+
+    async function parseJsonResponse(response, fallbackMessage) {
+      const contentType = response.headers.get("content-type") || "";
+      const text = await response.text();
+
+      if (!contentType.includes("application/json")) {
+        throw new Error("The EazyUI API returned HTML instead of JSON. Update the frontend/API deployment config.");
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch (_error) {
+        throw new Error(fallbackMessage || "The EazyUI API returned invalid JSON.");
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function parseIsoDate(value) {
+      if (!value || typeof value !== "string") return null;
+      const time = Date.parse(value);
+      return Number.isFinite(time) ? time : null;
+    }
+
+    function formatRelativeDate(value) {
+      const time = parseIsoDate(value);
+      if (!time) return "Unknown";
+      const deltaMs = Date.now() - time;
+      const deltaMinutes = Math.max(0, Math.round(deltaMs / 60000));
+
+      if (deltaMinutes < 1) return "Just now";
+      if (deltaMinutes < 60) return deltaMinutes + "m ago";
+
+      const deltaHours = Math.round(deltaMinutes / 60);
+      if (deltaHours < 24) return deltaHours + "h ago";
+
+      const deltaDays = Math.round(deltaHours / 24);
+      if (deltaDays < 7) return deltaDays + "d ago";
+
+      const date = new Date(time);
+      return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+
+    function decodeJwtPayload(token) {
+      if (!token || typeof token !== "string") return null;
+      const parts = token.split(".");
+      if (parts.length < 2) return null;
+      try {
+        const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const json = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
+        return JSON.parse(json);
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function getTokenExpiryMs(token) {
+      const payload = decodeJwtPayload(token);
+      if (!payload || typeof payload.exp !== "number") return null;
+      return payload.exp * 1000;
+    }
+
+    function isAuthSessionExpired(session) {
+      if (!session || !session.token) return true;
+      if (!session.expiresAt) return false;
+      return Date.now() >= session.expiresAt - 30000;
+    }
+
+    function readAuthSession() {
+      try {
+        const raw = localStorage.getItem(AUTH_SESSION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.token !== "string") return null;
+        return {
+          token: parsed.token,
+          expiresAt: typeof parsed.expiresAt === "number" ? parsed.expiresAt : getTokenExpiryMs(parsed.token),
+          user: {
+            uid: parsed.user && typeof parsed.user.uid === "string" ? parsed.user.uid : "",
+            email: parsed.user && typeof parsed.user.email === "string" ? parsed.user.email : "",
+            displayName: parsed.user && typeof parsed.user.displayName === "string" ? parsed.user.displayName : "",
+          },
+        };
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function writeAuthSession(session) {
+      try {
+        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+      } catch (_error) {
+        // Ignore storage failures in embedded webviews.
+      }
+    }
+
+    function clearAuthSession(options) {
+      try {
+        localStorage.removeItem(AUTH_SESSION_KEY);
+      } catch (_error) {
+        // Ignore storage failures in embedded webviews.
+      }
+
+      stopAuthPolling();
+      pendingAuthState = "";
+      authSession = null;
+      projectItems = [];
+      selectedProjectId = "";
+      screenItems = [];
+      selectedProjectName = "";
+      renderProjectBrowser();
+
+      if (!options || options.keepStatus !== true) {
+        setStatus("Project session cleared. Sign in again to browse projects.", "warning");
+      }
+    }
+
+    function generateAuthState() {
+      if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+      }
+      return Date.now().toString(16) + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+    }
+
+    function stopAuthPolling() {
+      if (authPollHandle) {
+        window.clearInterval(authPollHandle);
+        authPollHandle = null;
+      }
+      authPollInFlight = false;
+      authPollDeadline = 0;
+    }
+
+    function getProjectUserLabel() {
+      if (!authSession || !authSession.user) return "";
+      return authSession.user.displayName || authSession.user.email || authSession.user.uid || "";
+    }
+
+    function renderProjectsList() {
+      if (projectsLoading) {
+        projectsList.innerHTML = '<div class="entity-empty">Loading projects from EazyUI...</div>';
+        return;
+      }
+
+      if (!authSession) {
+        projectsList.innerHTML = '<div class="entity-empty">Sign in to load your EazyUI projects.</div>';
+        return;
+      }
+
+      if (!projectItems.length) {
+        projectsList.innerHTML = '<div class="entity-empty">No projects were found for this account.</div>';
+        return;
+      }
+
+      projectsList.innerHTML = projectItems.map((project) => {
+        const description = project.description ? '<div class="entity-body">' + escapeHtml(project.description) + '</div>' : '';
+        const snapshotLabel = project.hasSnapshot ? "Snapshot" : "Draft only";
+        return (
+          '<button class="entity-item' + (project.id === selectedProjectId ? ' active' : '') + '" type="button" data-project-id="' + escapeHtml(project.id) + '">' +
+            '<div class="entity-title">' +
+              '<strong>' + escapeHtml(project.name || "Untitled project") + '</strong>' +
+              '<span class="entity-pill">' + escapeHtml(String(project.screenCount || 0)) + ' screens</span>' +
+            '</div>' +
+            '<div class="entity-meta">' +
+              '<span>Updated ' + escapeHtml(formatRelativeDate(project.updatedAt)) + '</span>' +
+              '<span>' + escapeHtml(snapshotLabel) + '</span>' +
+            '</div>' +
+            description +
+          '</button>'
+        );
+      }).join("");
+    }
+
+    function renderScreensList() {
+      if (!authSession) {
+        screensList.innerHTML = '<div class="entity-empty">Authenticate to inspect project screens.</div>';
+        return;
+      }
+
+      if (!selectedProjectId) {
+        screensList.innerHTML = '<div class="entity-empty">Choose a project to inspect its screens.</div>';
+        return;
+      }
+
+      if (screensLoading) {
+        screensList.innerHTML = '<div class="entity-empty">Loading screens for ' + escapeHtml(selectedProjectName || "the selected project") + '...</div>';
+        return;
+      }
+
+      if (!screenItems.length) {
+        screensList.innerHTML = '<div class="entity-empty">No screens were found in this project yet.</div>';
+        return;
+      }
+
+      screensList.innerHTML = screenItems.map((screen) => {
+        const statusClass = screen.status === "streaming" ? "entity-pill warn" : "entity-pill";
+        const updatedMeta = screen.updatedAt ? '<span>Updated ' + escapeHtml(formatRelativeDate(screen.updatedAt)) + '</span>' : '';
+        return (
+          '<div class="entity-item" data-screen-id="' + escapeHtml(screen.screenId) + '">' +
+            '<div class="entity-title">' +
+              '<strong>' + escapeHtml(screen.name || screen.screenId) + '</strong>' +
+              '<span class="' + statusClass + '">' + escapeHtml(screen.status) + '</span>' +
+            '</div>' +
+            '<div class="entity-meta">' +
+              '<span>' + escapeHtml(String(screen.width || 0)) + ' x ' + escapeHtml(String(screen.height || 0)) + '</span>' +
+              updatedMeta +
+            '</div>' +
+            '<div class="entity-body">' + escapeHtml(screen.screenId) + '</div>' +
+          '</div>'
+        );
+      }).join("");
+    }
+
+    function renderProjectBrowser() {
+      const authed = Boolean(authSession) && !isAuthSessionExpired(authSession);
+      const userLabel = getProjectUserLabel();
+
+      if (!authed) {
+        projectSessionTitle.textContent = pendingAuthState ? "Waiting for browser sign-in" : "Sign in to EazyUI";
+        projectSessionMeta.textContent = pendingAuthState
+          ? "Finish sign-in in your browser. The plugin will connect automatically once authentication completes."
+          : "Open the browser, authenticate, then return here to browse your projects.";
+      } else {
+        projectSessionTitle.textContent = userLabel || "Connected to EazyUI";
+        projectSessionMeta.textContent = projectsLoading
+          ? "Refreshing your project list..."
+          : "Browse your synced projects and inspect the screens in each one.";
+      }
+
+      projectLoginButton.textContent = pendingAuthState ? "Waiting..." : (authed ? "Switch account" : "Sign in");
+      projectLoginButton.disabled = Boolean(pendingAuthState);
+      projectRefreshButton.disabled = !authed || projectsLoading || screensLoading;
+      projectLogoutButton.disabled = !authed || projectsLoading || screensLoading;
+      projectsCountLabel.textContent = String(projectItems.length || 0);
+      screensHeading.textContent = selectedProjectName ? selectedProjectName + " screens" : "Screens";
+      screensCountLabel.textContent = String(screenItems.length || 0);
+
+      renderProjectsList();
+      renderScreensList();
+    }
+
+    async function pluginApiFetch(path) {
+      if (!authSession || isAuthSessionExpired(authSession)) {
+        clearAuthSession({ keepStatus: true });
+        throw new Error("Your EazyUI session expired. Sign in again.");
+      }
+
+      const response = await fetch(EAZYUI_API_BASE + path, {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer " + authSession.token,
+        },
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        clearAuthSession({ keepStatus: true });
+        throw new Error("Your EazyUI session was rejected. Sign in again.");
+      }
+
+      if (!response.ok) {
+        let message = "Request failed.";
+        try {
+          const body = await parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
+          if (body && typeof body.message === "string" && body.message.trim()) {
+            message = body.message.trim();
+          }
+        } catch (_error) {
+          message = _error instanceof Error ? _error.message : message;
+        }
+        throw new Error(message);
+      }
+
+      return parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
+    }
+
+    function applyPluginAuthSession(session) {
+      stopAuthPolling();
+      pendingAuthState = "";
+
+      const nextSession = {
+        token: typeof session.token === "string" ? session.token : "",
+        expiresAt: typeof session.expiresAt === "string" ? Date.parse(session.expiresAt) : getTokenExpiryMs(session.token),
+        user: {
+          uid: session.user && typeof session.user.uid === "string" ? session.user.uid : "",
+          email: session.user && typeof session.user.email === "string" ? session.user.email : "",
+          displayName: session.user && typeof session.user.displayName === "string" ? session.user.displayName : "",
+        },
+      };
+
+      if (!nextSession.token) {
+        throw new Error("Plugin auth completed without a usable access token.");
+      }
+
+      authSession = nextSession;
+      writeAuthSession(nextSession);
+      projectItems = [];
+      screenItems = [];
+      selectedProjectId = "";
+      selectedProjectName = "";
+      renderProjectBrowser();
+      setStatus("EazyUI account connected. Loading projects...", "success");
+      void loadProjects();
+    }
+
+    async function pollPendingAuthSession() {
+      if (!pendingAuthState || authPollInFlight) return;
+
+      if (authPollDeadline && Date.now() > authPollDeadline) {
+        stopAuthPolling();
+        pendingAuthState = "";
+        renderProjectBrowser();
+        setStatus("Browser sign-in timed out. Start the connection again.", "warning");
+        return;
+      }
+
+      authPollInFlight = true;
+      try {
+        const response = await fetch(EAZYUI_API_BASE + "/plugin-auth/session/" + encodeURIComponent(pendingAuthState), {
+          method: "GET",
+        });
+
+        if (response.status === 404) {
+          return;
+        }
+
+        if (!response.ok) {
+          let message = "Failed to complete browser authentication.";
+          try {
+            const body = await parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
+            if (body && typeof body.message === "string" && body.message.trim()) {
+              message = body.message.trim();
+            }
+          } catch (_error) {
+            message = _error instanceof Error ? _error.message : message;
+          }
+          throw new Error(message);
+        }
+
+        const session = await parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
+        applyPluginAuthSession(session);
+      } catch (error) {
+        stopAuthPolling();
+        pendingAuthState = "";
+        renderProjectBrowser();
+        setStatus(error instanceof Error ? error.message : "Failed to complete browser authentication.", "error");
+      } finally {
+        authPollInFlight = false;
+      }
+    }
+
+    async function loadProjects(options) {
+      if (!authSession) {
+        renderProjectBrowser();
+        return;
+      }
+
+      projectsLoading = true;
+      if (!options || options.keepSelection !== true) {
+        selectedProjectId = "";
+        selectedProjectName = "";
+        screenItems = [];
+      }
+      renderProjectBrowser();
+
+      try {
+        const data = await pluginApiFetch("/plugin/projects");
+        projectItems = Array.isArray(data.projects) ? data.projects : [];
+
+        if (options && options.keepSelection === true && selectedProjectId) {
+          const stillExists = projectItems.some((project) => project.id === selectedProjectId);
+          if (!stillExists) {
+            selectedProjectId = "";
+            selectedProjectName = "";
+            screenItems = [];
+          }
+        }
+
+        renderProjectBrowser();
+        setStatus(
+          projectItems.length
+            ? "Loaded " + projectItems.length + " project" + (projectItems.length === 1 ? "" : "s") + "."
+            : "No projects were found for this account.",
+          projectItems.length ? "success" : "warning"
+        );
+      } catch (error) {
+        projectItems = [];
+        screenItems = [];
+        selectedProjectId = "";
+        selectedProjectName = "";
+        renderProjectBrowser();
+        setStatus(error instanceof Error ? error.message : "Failed to load projects.", "error");
+      } finally {
+        projectsLoading = false;
+        renderProjectBrowser();
+      }
+    }
+
+    async function loadProjectScreens(projectId) {
+      if (!authSession) {
+        setStatus("Sign in before loading project screens.", "warning");
+        return;
+      }
+
+      const project = projectItems.find((item) => item.id === projectId);
+      selectedProjectId = projectId;
+      selectedProjectName = project ? project.name : "";
+      screenItems = [];
+      screensLoading = true;
+      renderProjectBrowser();
+
+      try {
+        const data = await pluginApiFetch("/plugin/projects/" + encodeURIComponent(projectId) + "/screens");
+        screenItems = Array.isArray(data.screens) ? data.screens : [];
+        if (data.project && typeof data.project.name === "string" && data.project.name.trim()) {
+          selectedProjectName = data.project.name.trim();
+        }
+        renderProjectBrowser();
+        setStatus(
+          "Loaded " + screenItems.length + " screen" + (screenItems.length === 1 ? "" : "s") + " from " + (selectedProjectName || "the selected project") + ".",
+          "success"
+        );
+      } catch (error) {
+        screenItems = [];
+        renderProjectBrowser();
+        setStatus(error instanceof Error ? error.message : "Failed to load project screens.", "error");
+      } finally {
+        screensLoading = false;
+        renderProjectBrowser();
+      }
+    }
+
+    function beginBrowserLogin() {
+      const state = generateAuthState();
+      const authUrl = EAZYUI_APP_ORIGIN + "/auth/plugin?state=" + encodeURIComponent(state) + "&apiBase=" + encodeURIComponent(EAZYUI_API_BASE);
+      pendingAuthState = state;
+      authPollDeadline = Date.now() + (3 * 60 * 1000);
+      renderProjectBrowser();
+      stopAuthPolling();
+      authPollHandle = window.setInterval(() => {
+        void pollPendingAuthSession();
+      }, 1500);
+      parent.postMessage({ pluginMessage: { type: "open-auth-url", url: authUrl } }, "*");
+      setStatus("Opened EazyUI sign-in in your browser. The plugin will connect automatically when you finish.", "warning");
+      void pollPendingAuthSession();
     }
 
     function parseJsonErrorDetails(raw, error) {
@@ -1485,6 +2157,21 @@
 
     formatButton.addEventListener("click", formatCurrentJson);
     insertExampleButton.addEventListener("click", insertSamplePayload);
+    projectLoginButton.addEventListener("click", beginBrowserLogin);
+    projectRefreshButton.addEventListener("click", () => {
+      void loadProjects({ keepSelection: true });
+    });
+    projectLogoutButton.addEventListener("click", () => {
+      clearAuthSession();
+    });
+
+    projectsList.addEventListener("click", (event) => {
+      const trigger = event.target.closest("[data-project-id]");
+      if (!trigger) return;
+      const projectId = trigger.getAttribute("data-project-id");
+      if (!projectId || screensLoading) return;
+      void loadProjectScreens(projectId);
+    });
 
     pasteButton.addEventListener("click", async () => {
       if (!clipboardApiAvailable || clipboardReadBlocked) {
@@ -1623,7 +2310,7 @@
       });
     });
 
-    window.onmessage = (event) => {
+    window.addEventListener("message", (event) => {
       const message = event.data && event.data.pluginMessage;
       if (!message) return;
 
@@ -1650,9 +2337,16 @@
         syncUi({ keepStatus: true });
         setStatus(message.message || "Import failed.", "error");
       }
-    };
+    });
 
     syncUi({ keepStatus: true });
+    if (authSession && isAuthSessionExpired(authSession)) {
+      clearAuthSession({ keepStatus: true });
+    }
+    renderProjectBrowser();
+    if (authSession) {
+      void loadProjects();
+    }
   </script>
 </body>
 </html>
