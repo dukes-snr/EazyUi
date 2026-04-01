@@ -161,6 +161,7 @@ const allowVercelPreviewOrigins = /^(1|true|yes)$/i.test(String(process.env.FRON
 
 function isAllowedCorsOrigin(origin: string | undefined): boolean {
     if (!origin) return true;
+    if (origin === 'null') return true;
 
     let normalizedOrigin: string;
     let hostname = '';
