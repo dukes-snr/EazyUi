@@ -28,7 +28,7 @@ import {
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
-import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, getExportTargetScreens, sendScreensToFigmaPlugin } from '../../utils/exportScreens';
+import { copyFigmaPayloadToClipboard, copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, getExportTargetScreens } from '../../utils/exportScreens';
 import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
@@ -468,8 +468,26 @@ export function CanvasProfileMenu() {
                                 className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
                                 disabled={anyExportBusy}
                                 onClick={() => runExportAction('images', 'Rendering images', async () => {
-                                    const { filename } = await exportScreensAsImagesZip(exportScreens, spec?.name || 'eazyui-design');
-                                    pushToast({ kind: 'success', title: 'Images exported', message: `${filename} (${selectionLabel})` });
+                                    const result = await exportScreensAsImagesZip(exportScreens, spec?.name || 'eazyui-design');
+                                    if (result.exportMode === 'svg-only') {
+                                        pushToast({
+                                            kind: 'guide',
+                                            title: 'Images exported as SVG',
+                                            message: `${result.filename} (${selectionLabel}). PNG rendering was unavailable, so the export used SVG files instead.`,
+                                            durationMs: 7000,
+                                        });
+                                        return;
+                                    }
+                                    if (result.exportMode === 'mixed') {
+                                        pushToast({
+                                            kind: 'guide',
+                                            title: 'Images exported with fallbacks',
+                                            message: `${result.filename} (${selectionLabel}). Some screens were saved as SVG because PNG rendering was unavailable.`,
+                                            durationMs: 7000,
+                                        });
+                                        return;
+                                    }
+                                    pushToast({ kind: 'success', title: 'Images exported', message: `${result.filename} (${selectionLabel})` });
                                 })}
                             >
                                 {exportActionBusy === 'images' ? <Loader2 size={14} className="animate-spin" /> : <Image size={14} />}
@@ -491,21 +509,17 @@ export function CanvasProfileMenu() {
                                 type="button"
                                 className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
                                 disabled={anyExportBusy}
-                                onClick={() => runExportAction('figma', 'Sending to Figma plugin', async () => {
-                                    const result = await sendScreensToFigmaPlugin(exportScreens, spec?.designSystem || null, {
-                                        projectId: projectId || undefined,
-                                        projectName: spec?.name || undefined,
-                                    });
+                                onClick={() => runExportAction('figma', 'Copying Figma payload', async () => {
+                                    const result = await copyFigmaPayloadToClipboard(exportScreens, spec?.designSystem || null);
                                     pushToast({
                                         kind: 'success',
-                                        title: 'Sent to Figma plugin',
-                                        message: `Queued ${result.screenCount} screen${result.screenCount === 1 ? '' : 's'} for import. Open the plugin in Figma to import automatically.`,
-                                        durationMs: 6000,
+                                        title: 'Figma payload copied',
+                                        message: `Copied payload for ${result.screenCount} screen${result.screenCount === 1 ? '' : 's'} to your clipboard.`,
                                     });
                                 })}
                             >
                                 {exportActionBusy === 'figma' ? <Loader2 size={14} className="animate-spin" /> : <Settings size={14} />}
-                                <span>{exportActionBusy === 'figma' ? 'Sending to Figma plugin...' : 'Send to Figma Plugin'}</span>
+                                <span>{exportActionBusy === 'figma' ? 'Copying Figma payload...' : 'Copy Figma Payload'}</span>
                             </button>
                         </div>
                     )}

@@ -88,6 +88,7 @@ import {
 } from './services/mcpApiKeys.js';
 import { captureServerAnalyticsEvent } from './services/posthog.js';
 import { getResendConfigSummary, sendAccountCreationWelcomeEmail, sendContactInquiryEmail, sendNewsletterSignupEmail } from './services/resendEmail.js';
+import { getUserProject } from './services/userProjects.js';
 import { logRequestComplete, logRequestStart, logTagged, warnTagged } from './utils/devLogs.js';
 
 function loadEnv() {
@@ -5476,6 +5477,27 @@ fastify.get<{
 fastify.get('/api/projects', async () => {
     const projects = await listProjects();
     return { projects };
+});
+
+fastify.get<{
+    Params: { id: string };
+}>('/api/projects/:id', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/projects/:id');
+    if (!user) return reply;
+
+    try {
+        const project = await getUserProject(user.uid, request.params.id);
+        if (!project) {
+            return reply.status(404).send({ error: 'Project not found' });
+        }
+        return project;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to get project',
+            message: (error as Error).message,
+        });
+    }
 });
 
 fastify.get('/api/plugin/projects', async (request, reply) => {

@@ -19,10 +19,13 @@ import { auth, db, storage } from "./firebase";
 
 const IS_LOCAL_DEV_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
 const RENDER_IMAGE_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "/api";
+const PREFER_PROJECT_RESTORE_API = import.meta.env.VITE_PREFER_PROJECT_RESTORE_API === "1"
+  || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_PREFER_PROJECT_RESTORE_API !== "0");
 const ENABLE_STORAGE_RESTORE = import.meta.env.VITE_ENABLE_STORAGE_RESTORE === "1"
   || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_RESTORE !== "0");
 const ENABLE_STORAGE_UPLOADS = import.meta.env.VITE_ENABLE_STORAGE_UPLOADS === "1"
   || (!IS_LOCAL_DEV_HOST && import.meta.env.VITE_ENABLE_STORAGE_UPLOADS !== "0");
+let storageRestoresTemporarilyDisabled = false;
 let storageUploadsTemporarilyDisabled = false;
 const backgroundCoverRefreshByProject = new Map<string, Promise<void>>();
 const STORAGE_UPLOAD_TIMEOUT_MS = 10_000;
@@ -292,6 +295,28 @@ async function uploadAssetThroughApi(params: {
     throw new Error("API upload did not return a download URL.");
   }
   return payload.downloadUrl;
+}
+
+async function loadProjectThroughApi(projectId: string): Promise<FirestoreProjectRecord | null> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Authentication required for project restore.");
+  }
+  const token = await user.getIdToken();
+  const response = await fetch(`${RENDER_IMAGE_API_BASE}/projects/${encodeURIComponent(projectId)}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+    },
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: "Project restore failed." }));
+    throw new Error(String(error.message || error.error || `HTTP ${response.status}`));
+  }
+  return response.json() as Promise<FirestoreProjectRecord>;
 }
 
 function normalizeAssetRecord(data: Partial<StoredAssetDoc> | null | undefined): AssetRecord | null {
@@ -1840,11 +1865,14 @@ async function buildProjectFromSubcollections(uid: string, projectId: string, da
     baseScreens.map(async (s) => {
       const fromDoc = screensById.get(s.screenId);
       let html = fromDoc?.html || fromDoc?.htmlSnippet || "";
-      if (!html && fromDoc?.htmlPath && ENABLE_STORAGE_RESTORE) {
+      if (!html && fromDoc?.htmlPath && ENABLE_STORAGE_RESTORE && !storageRestoresTemporarilyDisabled) {
         try {
           const bytes = await getBytes(ref(storage, `users/${uid}/projects/${projectId}/${fromDoc.htmlPath}`), 5 * 1024 * 1024);
           html = new TextDecoder().decode(bytes);
-        } catch {
+        } catch (error) {
+          if (isStorageCorsOrNetworkError(error)) {
+            storageRestoresTemporarilyDisabled = true;
+          }
           html = "";
         }
       }
@@ -1915,11 +1943,19 @@ async function loadSnapshotPayload(uid: string, projectId: string, snapshotPath:
 }
 
 export async function getProjectFirestore(uid: string, projectId: string): Promise<FirestoreProjectRecord | null> {
+  if (PREFER_PROJECT_RESTORE_API && auth.currentUser?.uid === uid) {
+    try {
+      return await loadProjectThroughApi(projectId);
+    } catch (error) {
+      console.warn("[firestore] API project restore failed, falling back to direct client restore", error);
+    }
+  }
+
   const projectRef = doc(db, "users", uid, "projects", projectId);
   const snap = await getDoc(projectRef);
   if (!snap.exists()) return null;
   const data = snap.data() as ProjectMetaData;
-  if (data.snapshotPath && ENABLE_STORAGE_RESTORE) {
+  if (data.snapshotPath && ENABLE_STORAGE_RESTORE && !storageRestoresTemporarilyDisabled) {
     try {
       const parsed = await loadSnapshotPayload(uid, projectId, data.snapshotPath);
       let persistedMessages: Array<Record<string, unknown>> = [];
@@ -1943,7 +1979,10 @@ export async function getProjectFirestore(uid: string, projectId: string): Promi
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
-    } catch {
+    } catch (error) {
+      if (isStorageCorsOrNetworkError(error)) {
+        storageRestoresTemporarilyDisabled = true;
+      }
       // fall through to metadata/subcollection fallback for backward compatibility
     }
   }

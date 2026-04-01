@@ -411,6 +411,16 @@ export async function copyScreensCodeToClipboard(screens: ExportScreen[]): Promi
     await navigator.clipboard.writeText(code);
 }
 
+export async function copyFigmaPayloadToClipboard(
+    screens: ExportScreen[],
+    designSystem?: ProjectDesignSystem | null,
+): Promise<{ screenCount: number }> {
+    if (screens.length === 0) throw new Error('No screens to export.');
+    const payload = await buildFigmaPastePayload(screens, designSystem);
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    return { screenCount: payload.screens.length };
+}
+
 export function exportScreensAsZip(
     screens: ExportScreen[],
     designName = 'eazyui-design',
@@ -544,7 +554,7 @@ async function renderScreenPngViaApi(screen: ExportScreen, scale = 2): Promise<U
 export async function exportScreensAsImagesZip(
     screens: ExportScreen[],
     designName = 'eazyui-design',
-): Promise<{ filename: string; pngCount: number; svgFallbackCount: number }> {
+): Promise<{ filename: string; pngCount: number; svgFallbackCount: number; exportMode: 'png-only' | 'mixed' | 'svg-only' }> {
     if (screens.length === 0) throw new Error('No screens to export.');
 
     const root = `${sanitizeFilePart(designName)}-images-${nowStamp()}`;
@@ -553,7 +563,7 @@ export async function exportScreensAsImagesZip(
         designName,
         exportedAt: new Date().toISOString(),
         totalScreens: screens.length,
-        format: 'mixed',
+        format: 'mixed' as 'png-only' | 'mixed' | 'svg-only',
         scale: 2,
         screens: [] as Array<{
             index: number;
@@ -612,6 +622,13 @@ export async function exportScreensAsImagesZip(
         }
     }
 
+    const exportMode: 'png-only' | 'mixed' | 'svg-only' = pngCount === 0
+        ? 'svg-only'
+        : svgFallbackCount > 0
+            ? 'mixed'
+            : 'png-only';
+    manifest.format = exportMode;
+
     entries.push({
         path: `${root}/manifest.json`,
         data: toBytes(JSON.stringify(manifest, null, 2)),
@@ -623,6 +640,7 @@ export async function exportScreensAsImagesZip(
             '',
             `Design: ${designName}`,
             `Screens: ${screens.length}`,
+            `Export Mode: ${exportMode}`,
             'Requested Format: PNG',
             'Scale: 2x',
             'Fallback: SVG when browser blocks rasterization (tainted canvas/CORS).',
@@ -631,11 +649,8 @@ export async function exportScreensAsImagesZip(
 
     const zip = createZipBlob(entries);
     const zipName = `${root}.zip`;
-    if (pngCount === 0 && svgFallbackCount > 0) {
-        throw new Error('Image export rasterization failed. The API renderer did not produce PNGs, so export was stopped instead of silently saving only SVG fallbacks.');
-    }
     downloadBlob(zip, zipName);
-    return { filename: zipName, pngCount, svgFallbackCount };
+    return { filename: zipName, pngCount, svgFallbackCount, exportMode };
 }
 
 export async function exportScreensToFigmaClipboard(
