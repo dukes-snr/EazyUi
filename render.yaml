@@ -12,6 +12,8 @@ services:
         value: 20
       - key: HOST
         value: 0.0.0.0
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
       - key: DATA_DIR
         value: /tmp/eazyui
       - key: DATABASE_URL
