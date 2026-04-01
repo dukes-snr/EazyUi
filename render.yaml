@@ -5,7 +5,7 @@ services:
     rootDir: .
     plan: starter
     buildCommand: bash ./scripts/render-build-api.sh
-    startCommand: PLAYWRIGHT_BROWSERS_PATH=0 npm run start --workspace=@eazyui/api
+    startCommand: npm run start --workspace=@eazyui/api
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -13,7 +13,7 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: "0"
+        value: .playwright-browsers
       - key: DATA_DIR
         value: /tmp/eazyui
       - key: DATABASE_URL

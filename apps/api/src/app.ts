@@ -129,6 +129,7 @@ fastify.addHook('onResponse', async (request, reply) => {
 });
 
 let renderBrowserPromise: Promise<any> | null = null;
+const PLAYWRIGHT_BROWSER_DIR = String(process.env.PLAYWRIGHT_BROWSERS_PATH || '.playwright-browsers').trim() || '.playwright-browsers';
 
 type PlatformKind = 'mobile' | 'tablet' | 'desktop';
 type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
@@ -1415,12 +1416,24 @@ async function ensureBillingEntitlementOrReply(input: {
 async function getRenderBrowser() {
     if (!renderBrowserPromise) {
         renderBrowserPromise = (async () => {
+            process.env.PLAYWRIGHT_BROWSERS_PATH = PLAYWRIGHT_BROWSER_DIR;
             const load = new Function('return import("playwright")') as () => Promise<any>;
             const playwright = await load();
-            return playwright.chromium.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            });
+            try {
+                return await playwright.chromium.launch({
+                    headless: true,
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                });
+            } catch (error) {
+                const executablePath = typeof playwright.chromium.executablePath === 'function'
+                    ? playwright.chromium.executablePath()
+                    : 'unknown';
+                throw new Error([
+                    `Playwright launch failed (browserDir=${PLAYWRIGHT_BROWSER_DIR})`,
+                    `executablePath=${executablePath}`,
+                    (error as Error).message,
+                ].join(' | '));
+            }
         })();
     }
     return renderBrowserPromise;
