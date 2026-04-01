@@ -1358,6 +1358,8 @@
     let authPollHandle = null;
     let authPollInFlight = false;
     let authPollDeadline = 0;
+    let pendingImportPollHandle = null;
+    let pendingImportPollInFlight = false;
 
     function formatBytes(bytes) {
       if (!bytes) return "0 KB";
@@ -1489,6 +1491,7 @@
       }, "*");
 
       stopAuthPolling();
+      stopPendingImportPolling();
       pendingAuthState = "";
       authSession = null;
       projectItems = [];
@@ -1545,6 +1548,7 @@
       renderProjectBrowser();
       setStatus("Restored your EazyUI session. Loading projects...", "success");
       void loadProjects({ keepSelection: true });
+      startPendingImportPolling();
     }
 
     function generateAuthState() {
@@ -1563,6 +1567,28 @@
       }
       authPollInFlight = false;
       authPollDeadline = 0;
+    }
+
+    function stopPendingImportPolling() {
+      if (pendingImportPollHandle) {
+        window.clearInterval(pendingImportPollHandle);
+        pendingImportPollHandle = null;
+      }
+      pendingImportPollInFlight = false;
+    }
+
+    function startPendingImportPolling() {
+      if (!authSession || isAuthSessionExpired(authSession)) {
+        stopPendingImportPolling();
+        return;
+      }
+      if (pendingImportPollHandle) {
+        return;
+      }
+      pendingImportPollHandle = window.setInterval(() => {
+        void pollPendingPluginImport();
+      }, 4000);
+      void pollPendingPluginImport();
     }
 
     function getProjectUserLabel() {
@@ -1735,6 +1761,70 @@
       renderProjectBrowser();
       setStatus("EazyUI account connected. Loading projects...", "success");
       void loadProjects();
+      startPendingImportPolling();
+    }
+
+    async function pollPendingPluginImport() {
+      if (!authSession || isAuthSessionExpired(authSession)) {
+        stopPendingImportPolling();
+        clearAuthSession({ keepStatus: true });
+        return;
+      }
+      if (pendingImportPollInFlight || isBusy) {
+        return;
+      }
+
+      pendingImportPollInFlight = true;
+      try {
+        const response = await fetch(EAZYUI_API_BASE + "/plugin/imports/next", {
+          method: "GET",
+          headers: {
+            Authorization: "Bearer " + authSession.token,
+          },
+        });
+
+        if (response.status === 404) {
+          return;
+        }
+
+        if (response.status === 401 || response.status === 403) {
+          stopPendingImportPolling();
+          clearAuthSession({ keepStatus: true });
+          return;
+        }
+
+        if (response.status >= 500 || !response.ok) {
+          return;
+        }
+
+        const session = await parseJsonResponse(response, "The EazyUI API returned invalid JSON.");
+        if (!session || !session.payload || typeof session.payload !== "object") {
+          return;
+        }
+
+        const source = session.source && typeof session.source === "object" ? session.source : null;
+        const screenNames = source && Array.isArray(source.screenNames)
+          ? source.screenNames.filter((value) => typeof value === "string" && value.trim())
+          : [];
+        const sourceLabel = screenNames.length
+          ? '"' + screenNames[0] + '"' + (screenNames.length > 1 ? " +" + (screenNames.length - 1) : "")
+          : "your queued screen";
+
+        isBusy = true;
+        syncUi({ keepStatus: true });
+        setStatus("Importing " + sourceLabel + " from EazyUI...", "warning");
+        parent.postMessage({
+          pluginMessage: {
+            type: "import-payload",
+            payload: session.payload,
+            settings: getImportSettings(),
+          },
+        }, "*");
+      } catch (_error) {
+        // Ignore transient polling errors.
+      } finally {
+        pendingImportPollInFlight = false;
+      }
     }
 
     async function pollPendingAuthSession() {
@@ -2437,6 +2527,7 @@
         screenImportInFlightId = "";
         renderProjectBrowser();
         syncUi({ keepStatus: true });
+        startPendingImportPolling();
         const assets = message.assets || {};
         const assetSummary = [
           assets.variables ? assets.variables + " vars" : "",
@@ -2457,6 +2548,7 @@
         screenImportInFlightId = "";
         renderProjectBrowser();
         syncUi({ keepStatus: true });
+        startPendingImportPolling();
         setStatus(message.message || "Import failed.", "error");
       }
 
@@ -2476,6 +2568,7 @@
     if (authSession) {
       writeAuthSession(authSession);
       void loadProjects();
+      startPendingImportPolling();
     }
     requestStoredAuthSession();
   </script>

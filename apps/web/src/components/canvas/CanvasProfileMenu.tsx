@@ -28,7 +28,7 @@ import {
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
 import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
-import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, exportScreensToFigmaClipboard, getExportTargetScreens } from '../../utils/exportScreens';
+import { copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, getExportTargetScreens, sendScreensToFigmaPlugin } from '../../utils/exportScreens';
 import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 
@@ -491,26 +491,21 @@ export function CanvasProfileMenu() {
                                 type="button"
                                 className="canvas-profile-menu-item disabled:cursor-not-allowed disabled:opacity-60"
                                 disabled={anyExportBusy}
-                                onClick={() => runExportAction('figma', 'Preparing Figma payload', async () => {
-                                    const result = await exportScreensToFigmaClipboard(exportScreens, spec?.designSystem || null);
-                                    if (result.mode === 'clipboard') {
-                                        pushToast({
-                                            kind: 'guide',
-                                            title: 'Figma payload copied',
-                                            message: 'Open the EazyUI Figma Import plugin in Figma, then paste from clipboard and import.',
-                                            durationMs: 6000,
-                                        });
-                                        return;
-                                    }
+                                onClick={() => runExportAction('figma', 'Sending to Figma plugin', async () => {
+                                    const result = await sendScreensToFigmaPlugin(exportScreens, spec?.designSystem || null, {
+                                        projectId: projectId || undefined,
+                                        projectName: spec?.name || undefined,
+                                    });
                                     pushToast({
                                         kind: 'success',
-                                        title: 'Figma payload exported',
-                                        message: `${result.filename} (${selectionLabel})`,
+                                        title: 'Sent to Figma plugin',
+                                        message: `Queued ${result.screenCount} screen${result.screenCount === 1 ? '' : 's'} for import. Open the plugin in Figma to import automatically.`,
+                                        durationMs: 6000,
                                     });
                                 })}
                             >
                                 {exportActionBusy === 'figma' ? <Loader2 size={14} className="animate-spin" /> : <Settings size={14} />}
-                                <span>{exportActionBusy === 'figma' ? 'Preparing Figma payload...' : 'Copy Figma Payload'}</span>
+                                <span>{exportActionBusy === 'figma' ? 'Sending to Figma plugin...' : 'Send to Figma Plugin'}</span>
                             </button>
                         </div>
                     )}

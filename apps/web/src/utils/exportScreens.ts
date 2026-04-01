@@ -1,4 +1,4 @@
-import type { ProjectDesignSystem } from '../api/client';
+import { apiClient, type ProjectDesignSystem } from '../api/client';
 import { buildFigmaPastePayload } from './htmlToFigmaScene';
 
 type ExportScreen = {
@@ -675,4 +675,25 @@ export async function exportScreensToFigmaClipboard(
     ]);
     downloadBlob(zip, filename);
     return { mode: 'download', filename };
+}
+
+export async function sendScreensToFigmaPlugin(
+    screens: ExportScreen[],
+    designSystem?: ProjectDesignSystem | null,
+    source?: {
+        projectId?: string;
+        projectName?: string;
+    },
+): Promise<{ screenCount: number }> {
+    if (screens.length === 0) throw new Error('No screens to export.');
+
+    const payload = await buildFigmaPastePayload(screens, designSystem);
+    await apiClient.stagePluginImport(payload, {
+        projectId: source?.projectId,
+        projectName: source?.projectName,
+        screenIds: screens.map((screen) => screen.screenId),
+        screenNames: screens.map((screen) => screen.name),
+    });
+
+    return { screenCount: payload.screens.length };
 }

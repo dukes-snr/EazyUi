@@ -4,6 +4,7 @@
 
 import { auth } from '@/lib/firebase';
 import { deleteProjectFirestore, getProjectFirestore, listProjectsFirestore, saveProjectFirestore } from '@/lib/firestoreData';
+import type { EazyUiFigmaScenePayload } from '@/utils/htmlToFigmaScene';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api';
 const COMPOSER_TEMPERATURE_KEY = 'eazyui:composer-temperature';
@@ -1291,6 +1292,23 @@ class ApiClient {
         return this.request<RenderScreenImageResponse>('/render-screen-image', {
             method: 'POST',
             body: JSON.stringify(request),
+            signal,
+        });
+    }
+
+    async stagePluginImport(
+        payload: EazyUiFigmaScenePayload,
+        source?: {
+            projectId?: string;
+            projectName?: string;
+            screenIds?: string[];
+            screenNames?: string[];
+        },
+        signal?: AbortSignal,
+    ): Promise<{ ok: boolean }> {
+        return this.request<{ ok: boolean }>('/plugin/imports', {
+            method: 'POST',
+            body: JSON.stringify({ payload, source }),
             signal,
         });
     }

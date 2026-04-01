@@ -20,6 +20,7 @@ import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from '
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import { consumePluginAuthSession, writePluginAuthSession } from './services/pluginAuthSessions.js';
+import { consumePluginImportSession, writePluginImportSession } from './services/pluginImportSessions.js';
 import { getPluginProjectScreenRenderSource, getPluginProjectScreens, listPluginProjects } from './services/pluginProjects.js';
 import { resolveProjectBrandAssetContext, sanitizeAssetReferences, type AssetReference as RequestAssetReference } from './services/projectAssetContext.js';
 import { renderRequestActivityDashboardHtml } from './services/requestActivityDashboard.js';
@@ -5566,6 +5567,78 @@ fastify.get<{
         fastify.log.error(error);
         return reply.status(500).send({
             error: 'Failed to fetch plugin auth session',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.post<{
+    Body: {
+        payload?: Record<string, unknown>;
+        source?: {
+            projectId?: string;
+            projectName?: string;
+            screenIds?: string[];
+            screenNames?: string[];
+        };
+    };
+}>('/api/plugin/imports', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/imports');
+    if (!user) return reply;
+
+    const payload = request.body?.payload;
+    if (!payload || typeof payload !== 'object') {
+        return reply.status(400).send({
+            error: 'Invalid payload',
+            message: 'A Figma payload is required.',
+        });
+    }
+
+    if (payload.format !== 'eazyui.figma-scene') {
+        return reply.status(400).send({
+            error: 'Invalid payload format',
+            message: 'Only EazyUI Figma scene payloads can be sent to the plugin.',
+        });
+    }
+
+    try {
+        await writePluginImportSession({
+            uid: user.uid,
+            payload,
+            source: {
+                projectId: String(request.body?.source?.projectId || '').trim() || undefined,
+                projectName: String(request.body?.source?.projectName || '').trim() || undefined,
+                screenIds: Array.isArray(request.body?.source?.screenIds) ? request.body!.source!.screenIds!.map((value) => String(value || '').trim()).filter(Boolean) : undefined,
+                screenNames: Array.isArray(request.body?.source?.screenNames) ? request.body!.source!.screenNames!.map((value) => String(value || '').trim()).filter(Boolean) : undefined,
+            },
+        });
+        return { ok: true };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to stage plugin import',
+            message: (error as Error).message,
+        });
+    }
+});
+
+fastify.get('/api/plugin/imports/next', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/plugin/imports/next');
+    if (!user) return reply;
+
+    try {
+        const session = await consumePluginImportSession(user.uid);
+        if (!session) {
+            return reply.status(404).send({
+                error: 'Import pending',
+                message: 'No staged plugin import is available yet.',
+            });
+        }
+        return session;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            error: 'Failed to fetch staged plugin import',
             message: (error as Error).message,
         });
     }
