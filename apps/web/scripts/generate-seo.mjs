@@ -22,6 +22,7 @@ const ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
   { path: '/templates', changefreq: 'weekly', priority: '0.9' },
   { path: '/blog', changefreq: 'weekly', priority: '0.9' },
+  { path: '/blog/figma-integration-from-generated-ui-to-editable-systems', changefreq: 'monthly', priority: '0.84' },
   { path: '/blog/prompt-engineering-for-ai-landing-pages', changefreq: 'monthly', priority: '0.82' },
   { path: '/blog/reference-led-prompts-for-better-ui-first-passes', changefreq: 'monthly', priority: '0.81' },
   { path: '/blog/ai-landing-page-builder-vs-traditional-design-workflow', changefreq: 'monthly', priority: '0.81' },

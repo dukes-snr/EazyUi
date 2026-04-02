@@ -1685,12 +1685,208 @@ async function buildFigmaScenePayloadFromHtml(params: {
                     .trim();
             }
 
+            function getSyntheticTextStyle(element: any, baseCss: any) {
+                if (!baseCss) return baseCss;
+                const tagName = element.tagName.toLowerCase();
+                if (tagName !== 'input' && tagName !== 'textarea') {
+                    return baseCss;
+                }
+                if (String(element.value || '').trim() || !String(element.placeholder || '').trim()) {
+                    return baseCss;
+                }
+                return window.getComputedStyle(element, '::placeholder') || baseCss;
+            }
+
             function hasElementChildren(element: any) {
                 return Array.from(element.children).some((child: any) => !SKIP_TAGS.has(child.tagName.toLowerCase()));
             }
 
-            function hasVisualChrome(css: any) {
-                return css.backgroundColor !== 'rgba(0, 0, 0, 0)'
+            function measureTextNode(textNode: any, fallbackRect: any) {
+                const range = document.createRange();
+                range.selectNodeContents(textNode);
+                const rect = range.getBoundingClientRect();
+                const lineRects = Array.from(range.getClientRects());
+                const targetRect = (rect.width > 0 || rect.height > 0) ? rect : fallbackRect;
+                return {
+                    rect: targetRect,
+                    lineCount: Math.max(1, lineRects.length || 1),
+                };
+            }
+
+            function resolveComputedLineHeightPx(css: any) {
+                const fontSize = Math.max(1, toPx(css.fontSize) || 16);
+                const raw = String(css.lineHeight || '').trim().toLowerCase();
+                if (!raw || raw === 'normal') {
+                    return round2(fontSize * 1.2);
+                }
+                if (raw.endsWith('%')) {
+                    return round2(Math.max(1, (Number.parseFloat(raw) / 100) * fontSize));
+                }
+                return round2(Math.max(1, toPx(raw) || (fontSize * 1.2)));
+            }
+
+            function measureSyntheticFieldText(element: any, baseCss: any, textCss: any) {
+                const fieldRect = element.getBoundingClientRect();
+                const paddingTop = toPx(baseCss.paddingTop);
+                const paddingRight = toPx(baseCss.paddingRight);
+                const paddingBottom = toPx(baseCss.paddingBottom);
+                const paddingLeft = toPx(baseCss.paddingLeft);
+                const contentWidth = Math.max(1, fieldRect.width - paddingLeft - paddingRight);
+                const contentHeight = Math.max(1, fieldRect.height - paddingTop - paddingBottom);
+                const lineHeight = Math.min(contentHeight, resolveComputedLineHeightPx(textCss));
+                const top = fieldRect.top + paddingTop + Math.max(0, (contentHeight - lineHeight) / 2);
+                const left = fieldRect.left + paddingLeft;
+                return {
+                    rect: new DOMRect(left, top, contentWidth, lineHeight),
+                    lineCount: 1,
+                };
+            }
+
+            function isTransparentColor(value: any) {
+                const normalized = String(value || '').trim().toLowerCase();
+                return !normalized
+                    || normalized === 'transparent'
+                    || normalized === 'rgba(0, 0, 0, 0)'
+                    || normalized === 'rgb(0 0 0 / 0)'
+                    || normalized === 'color(srgb 0 0 0 / 0)';
+            }
+
+            function clamp01(value: any) {
+                return Math.max(0, Math.min(1, Number(value) || 0));
+            }
+
+            function parseCssColor(value: any) {
+                const raw = String(value || '').trim();
+                if (!raw) return null;
+
+                const hexMatch = raw.match(/^#([0-9a-f]{3,8})$/i);
+                if (hexMatch) {
+                    const hex = hexMatch[1];
+                    if (hex.length === 3 || hex.length === 4) {
+                        const r = parseInt(hex[0] + hex[0], 16);
+                        const g = parseInt(hex[1] + hex[1], 16);
+                        const b = parseInt(hex[2] + hex[2], 16);
+                        const a = hex.length === 4 ? parseInt(hex[3] + hex[3], 16) / 255 : 1;
+                        return { r, g, b, a };
+                    }
+                    if (hex.length === 6 || hex.length === 8) {
+                        const r = parseInt(hex.slice(0, 2), 16);
+                        const g = parseInt(hex.slice(2, 4), 16);
+                        const b = parseInt(hex.slice(4, 6), 16);
+                        const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+                        return { r, g, b, a };
+                    }
+                }
+
+                const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
+                if (rgbMatch) {
+                    const inner = rgbMatch[1].trim();
+                    const slashParts = inner.split('/').map((part: any) => part.trim());
+                    const colorPart = slashParts[0] || '';
+                    const alphaPart = slashParts[1];
+                    const parts = colorPart.includes(',')
+                        ? colorPart.split(',').map((part: any) => part.trim())
+                        : colorPart.split(/\s+/).filter(Boolean);
+                    if (parts.length >= 3) {
+                        const readChannel = (part: any) => (
+                            String(part).endsWith('%')
+                                ? Math.round(clamp01(Number.parseFloat(part) / 100) * 255)
+                                : Math.round(Math.max(0, Math.min(255, Number.parseFloat(part))))
+                        );
+                        const readAlpha = (part: any) => {
+                            if (!part) return 1;
+                            return String(part).endsWith('%')
+                                ? clamp01(Number.parseFloat(part) / 100)
+                                : clamp01(Number.parseFloat(part));
+                        };
+                        return {
+                            r: readChannel(parts[0]),
+                            g: readChannel(parts[1]),
+                            b: readChannel(parts[2]),
+                            a: readAlpha(alphaPart !== undefined ? alphaPart : parts[3]),
+                        };
+                    }
+                }
+
+                const srgbMatch = raw.match(/^color\(srgb\s+([^)]+)\)$/i);
+                if (srgbMatch) {
+                    const inner = srgbMatch[1].trim();
+                    const slashParts = inner.split('/').map((part: any) => part.trim());
+                    const colorPart = slashParts[0] || '';
+                    const alphaPart = slashParts[1];
+                    const parts = colorPart.split(/\s+/).filter(Boolean);
+                    if (parts.length >= 3) {
+                        return {
+                            r: Math.round(clamp01(Number.parseFloat(parts[0])) * 255),
+                            g: Math.round(clamp01(Number.parseFloat(parts[1])) * 255),
+                            b: Math.round(clamp01(Number.parseFloat(parts[2])) * 255),
+                            a: alphaPart ? clamp01(Number.parseFloat(alphaPart)) : 1,
+                        };
+                    }
+                }
+
+                return null;
+            }
+
+            function formatRgbaColor(color: any) {
+                const alpha = round2(clamp01(color.a));
+                if (alpha >= 0.999) {
+                    return `rgb(${color.r}, ${color.g}, ${color.b})`;
+                }
+                return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+            }
+
+            function resolveTailwindBackgroundColor(element: any, css: any) {
+                const className = String(element.getAttribute('class') || '').trim();
+                if (!className) return null;
+
+                for (const classToken of className.split(/\s+/).reverse()) {
+                    const utility = classToken.split(':').pop() || classToken;
+                    const match = utility.match(/^bg-([a-z0-9_-]+)(?:\/(\d{1,3}(?:\.\d+)?))?$/i);
+                    if (!match) continue;
+
+                    const colorToken = String(match[1] || '').toLowerCase();
+                    const opacityToken = match[2];
+                    let rawColor = '';
+
+                    if (colorToken === 'transparent') {
+                        rawColor = 'rgba(0, 0, 0, 0)';
+                    } else if (colorToken === 'white') {
+                        rawColor = '#ffffff';
+                    } else if (colorToken === 'black') {
+                        rawColor = '#000000';
+                    } else {
+                        rawColor = String(css.getPropertyValue(`--${colorToken}`) || '').trim();
+                        if (!rawColor && element.ownerDocument?.documentElement) {
+                            rawColor = String(window.getComputedStyle(element.ownerDocument.documentElement).getPropertyValue(`--${colorToken}`) || '').trim();
+                        }
+                    }
+
+                    const parsed = parseCssColor(rawColor);
+                    if (!parsed) continue;
+
+                    const opacity = opacityToken !== undefined
+                        ? clamp01(Number.parseFloat(opacityToken) / 100)
+                        : 1;
+
+                    return formatRgbaColor({
+                        ...parsed,
+                        a: parsed.a * opacity,
+                    });
+                }
+
+                return null;
+            }
+
+            function resolveBackgroundColor(element: any, css: any) {
+                if (!isTransparentColor(css.backgroundColor)) {
+                    return css.backgroundColor;
+                }
+                return resolveTailwindBackgroundColor(element, css) || css.backgroundColor || 'rgba(0, 0, 0, 0)';
+            }
+
+            function hasVisualChrome(element: any, css: any) {
+                return !isTransparentColor(resolveBackgroundColor(element, css))
                     || toPx(css.borderTopWidth) > 0
                     || toPx(css.borderRightWidth) > 0
                     || toPx(css.borderBottomWidth) > 0
@@ -1770,7 +1966,7 @@ async function buildFigmaScenePayloadFromHtml(params: {
             function buildVisual(css: any, element: any) {
                 const visual: any = {
                     color: css.color || 'rgb(17, 24, 39)',
-                    backgroundColor: css.backgroundColor || 'rgba(0, 0, 0, 0)',
+                    backgroundColor: resolveBackgroundColor(element, css),
                     backgroundImage: css.backgroundImage && css.backgroundImage !== 'none' ? css.backgroundImage : undefined,
                     backgroundSize: css.backgroundSize && css.backgroundSize !== 'auto' ? css.backgroundSize : undefined,
                     backgroundPosition: css.backgroundPosition && css.backgroundPosition !== '0% 0%' ? css.backgroundPosition : undefined,
@@ -1800,13 +1996,17 @@ async function buildFigmaScenePayloadFromHtml(params: {
             }
 
             function createTextChild(element: any, textNode: any, rootRect: any, nodeId: any): any {
-                const textContent = String(textNode.textContent || '').replace(/\s+/g, ' ').trim();
+                const textContent = textNode
+                    ? String(textNode.textContent || '').replace(/\s+/g, ' ').trim()
+                    : extractDirectText(element);
                 if (!textContent) return null;
-                const range = document.createRange();
-                range.selectNodeContents(textNode);
-                const rect = range.getBoundingClientRect();
-                const targetRect = (rect.width > 0 || rect.height > 0) ? rect : element.getBoundingClientRect();
-                const css = window.getComputedStyle(element);
+                const fallbackRect = element.getBoundingClientRect();
+                const baseCss = window.getComputedStyle(element);
+                const css = textNode ? baseCss : getSyntheticTextStyle(element, baseCss);
+                const measurement = textNode
+                    ? measureTextNode(textNode, fallbackRect)
+                    : measureSyntheticFieldText(element, baseCss, css);
+                const targetRect = measurement.rect;
                 return {
                     id: nodeId,
                     name: `${getNodeName(element)}:text`,
@@ -1833,6 +2033,11 @@ async function buildFigmaScenePayloadFromHtml(params: {
                         boxShadow: 'none',
                     },
                     typography: buildTypography(css),
+                    textMetrics: {
+                        lineCount: measurement.lineCount,
+                        renderedWidth: round2(measurement.rect.width),
+                        renderedHeight: round2(measurement.rect.height),
+                    },
                     textContent,
                     children: [],
                 };
@@ -1886,7 +2091,10 @@ async function buildFigmaScenePayloadFromHtml(params: {
                     };
                 }
 
-                if (TEXT_TAGS.has(tagName) && !hasElementChildren(element) && !hasVisualChrome(css) && directText) {
+                if (TEXT_TAGS.has(tagName) && !hasElementChildren(element) && !hasVisualChrome(element, css) && directText) {
+                    const range = document.createRange();
+                    range.selectNodeContents(element);
+                    const lineRects = Array.from(range.getClientRects());
                     return {
                         id: element.getAttribute('data-uid') || element.getAttribute('id') || `${tagName}-${Math.random().toString(36).slice(2, 10)}`,
                         name: getNodeName(element),
@@ -1897,6 +2105,11 @@ async function buildFigmaScenePayloadFromHtml(params: {
                         border: buildBorder(css),
                         visual: buildVisual(css, element),
                         typography: buildTypography(css),
+                        textMetrics: {
+                            lineCount: Math.max(1, lineRects.length || 1),
+                            renderedWidth: round2(bounds.width),
+                            renderedHeight: round2(bounds.height),
+                        },
                         textContent: directText,
                         children: [],
                     };
@@ -1917,6 +2130,14 @@ async function buildFigmaScenePayloadFromHtml(params: {
                     const nextChild: any = buildSceneNode(childNode, rootRect);
                     if (nextChild) {
                         children.push(nextChild);
+                    }
+                }
+
+                const isFormField = tagName === 'input' || tagName === 'textarea';
+                if (isFormField && directText && !children.some((child: any) => child.nodeType === 'text')) {
+                    const textChild = createTextChild(element, null, rootRect, `${tagName}:text:field`);
+                    if (textChild) {
+                        children.push(textChild);
                     }
                 }
 

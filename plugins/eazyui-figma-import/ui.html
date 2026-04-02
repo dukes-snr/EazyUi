@@ -62,10 +62,17 @@
 
     .masthead {
       position: relative;
-      min-height: 138px;
+      min-height: 96px;
       padding: 0;
       border-bottom: 1px solid var(--border);
       overflow: hidden;
+      background: #1f1f1f;
+    }
+
+    .masthead::before {
+      content: "";
+      position: absolute;
+      inset: 0;
       --u: 5px;
       --c1: #ededee;
       --c2: #000000;
@@ -103,88 +110,120 @@
         ) var(--gp),
         conic-gradient(from -58deg at 50% 28.125%, var(--c1) 0 116deg, #fff0 0 100%) var(--gp),
         linear-gradient(90deg, var(--c2) 0 50%, var(--c3) 0 100%) var(--gp);
-    }
-
-    .masthead::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(90deg, rgba(17, 17, 17, 0.12), rgba(17, 17, 17, 0.76) 34%, rgba(17, 17, 17, 0.92) 100%);
+      transform: scaleX(-1);
+      transform-origin: center;
       pointer-events: none;
     }
 
     .masthead::after {
       content: "";
       position: absolute;
-      inset: auto 0 0;
-      height: 42px;
-      background: linear-gradient(180deg, rgba(22, 22, 22, 0), rgba(22, 22, 22, 0.82));
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(17, 17, 17, 0.92), rgba(17, 17, 17, 0.76) 66%, rgba(17, 17, 17, 0.12) 100%);
       pointer-events: none;
     }
 
     .masthead-content {
       position: relative;
       z-index: 1;
-      height: 100%;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding: 18px 16px 0 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: start;
+      padding: 12px 16px 10px;
     }
 
     .brand-copy {
       display: grid;
-      gap: 0;
-      font-size: 18px;
-      line-height: 0.96;
+      gap: 6px;
+    }
+
+    .brand-copy strong {
+      font-size: 19px;
+      line-height: 1;
+      letter-spacing: -0.04em;
       font-weight: 800;
-      letter-spacing: -0.06em;
-      text-transform: lowercase;
-      text-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
     }
 
     .brand-copy span {
-      font-size: 31px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #c9c9c9;
+      max-width: 320px;
     }
 
-    .brand-meta {
-      display: grid;
-      gap: 12px;
-      justify-items: end;
-      text-align: right;
-    }
+      .brand-meta {
+        display: grid;
+        gap: 6px;
+        justify-items: end;
+        justify-self: start;
+        align-self: start;
+      }
 
-    .brand-meta small {
-      font-size: 11px;
-      color: #e2e2e2;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
-    }
+      .brand-meta small {
+        margin-top: -24px;
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .header-actions {
+        position: absolute;
+        top: 12px;
+        right: 16px;
+        z-index: 2;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
 
     .promo {
-      padding: 10px 14px;
-      background: #ffd65a;
-      color: #1f1f1f;
+      min-height: 36px;
+      padding: 0 12px;
+      background: var(--panel-3);
+      color: var(--text);
       font-weight: 700;
-      border-radius: 0;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+      border: 1px solid #505050;
+      border-radius: 10px;
     }
+
+      .header-link {
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--panel-3);
+      color: var(--text);
+      border: 1px solid #505050;
+    }
+
+      .header-link svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+      }
 
     .tabs {
       display: flex;
-      gap: 2px;
-      padding: 10px 14px 0;
+      gap: 6px;
+      padding: 8px 16px 10px;
       border-bottom: 1px solid var(--border);
-      background: var(--panel);
+      background: #262626;
     }
 
     .tab {
       padding: 9px 12px 10px;
       color: var(--muted);
       background: transparent;
-      border-radius: 8px 8px 0 0;
+      border-radius: 10px;
       transition: background-color 160ms var(--ease), color 160ms var(--ease);
     }
 
@@ -202,9 +241,9 @@
     .view {
       position: absolute;
       inset: 0;
-      padding: 16px 14px 18px;
+      padding: 12px;
       display: grid;
-      gap: 16px;
+      gap: 12px;
       align-content: start;
       overflow: auto;
       opacity: 0;
@@ -220,8 +259,11 @@
     }
 
     .section-title {
-      font-size: 16px;
+      font-size: 12px;
       font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
     }
 
     .import-box,
@@ -232,11 +274,33 @@
       background: var(--panel);
     }
 
+    .payload-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .payload-main,
+    .payload-side {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .payload-side {
+      position: sticky;
+      top: 0;
+      align-content: start;
+    }
+
     .editor-shell {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 96px;
       gap: 12px;
       align-items: start;
+      padding: 14px;
+      border: 1px solid var(--border);
+      background: var(--panel);
     }
 
     .editor-main {
@@ -276,7 +340,7 @@
     }
 
     .editor {
-      min-height: 270px;
+      min-height: 240px;
       padding: 12px;
       background: #2d3440;
       border: 1px solid #38404e;
@@ -321,6 +385,36 @@
     .action-stack {
       display: grid;
       gap: 10px;
+      position: sticky;
+      top: 0;
+      align-self: start;
+    }
+
+    .action-card {
+      padding: 14px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      display: grid;
+      gap: 12px;
+    }
+
+    .action-card h2,
+    .action-card h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .action-card p {
+      margin: 0;
+      line-height: 1.5;
+      color: #c9c9c9;
+      font-size: 12px;
+    }
+
+    .inline-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
     .button {
@@ -360,7 +454,6 @@
 
     .stats {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
       gap: 12px;
       padding: 14px;
       align-items: start;
@@ -369,7 +462,7 @@
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px 18px;
+      gap: 12px;
     }
 
     .stat label {
@@ -389,30 +482,6 @@
     .stat span {
       font-size: 12px;
       color: #c0c0c0;
-    }
-
-    .divider {
-      position: relative;
-      text-align: center;
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .divider::before {
-      content: "";
-      position: absolute;
-      top: 50%;
-      left: 0;
-      right: 0;
-      border-top: 1px solid var(--border);
-    }
-
-    .divider span {
-      position: relative;
-      padding: 0 10px;
-      background: var(--panel);
     }
 
     .card {
@@ -613,7 +682,7 @@
       grid-template-columns: 10px minmax(0, 1fr) auto;
       gap: 12px;
       align-items: center;
-      padding: 12px 14px;
+      padding: 12px 16px;
       border-left: 0;
       border-right: 0;
       border-bottom: 0;
@@ -658,9 +727,36 @@
       font-weight: 700;
     }
 
+      @media (max-width: 760px) {
+      .payload-layout,
+      .projects-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .payload-side {
+        position: static;
+      }
+
+        .masthead-content {
+          grid-template-columns: 1fr;
+        }
+
+        .brand-meta {
+          justify-items: stretch;
+          padding-top: 48px;
+        }
+
+        .header-actions {
+          left: 16px;
+          right: 16px;
+          justify-content: flex-end;
+        }
+      }
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
+      z-index: 100;
       background: rgba(0, 0, 0, 0.45);
       display: grid;
       place-items: center;
@@ -945,13 +1041,21 @@
     <header class="masthead">
       <div class="masthead-content">
         <div class="brand-copy">
-          <span>eazyui.</span>
-          <span>to.</span>
-          <span>figma.</span>
+          <strong>EazyUI to Figma</strong>
+          <span>Import editable scene payloads, browse project screens, and control design-system assets from one place.</span>
         </div>
         <div class="brand-meta">
+          <div class="header-actions">
+            <button id="siteButton" class="header-link" type="button" aria-label="Open EazyUI website">
+              <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <circle cx="8" cy="8" r="5.75" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M2.8 8H13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M8 2.4C9.4 3.9 10.2 5.9 10.2 8C10.2 10.1 9.4 12.1 8 13.6C6.6 12.1 5.8 10.1 5.8 8C5.8 5.9 6.6 3.9 8 2.4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="promo" type="button" data-open-modal>Import config</button>
+          </div>
           <small>payload importer</small>
-          <button class="promo" type="button" data-open-modal>Import config</button>
         </div>
       </div>
     </header>
@@ -1301,6 +1405,7 @@
     };
 
     const payloadInput = document.getElementById("payload");
+    const siteButton = document.getElementById("siteButton");
     const importButton = document.getElementById("importButton");
     const pasteButton = document.getElementById("pasteButton");
     const pasteLabel = document.getElementById("pasteLabel");
@@ -1381,6 +1486,10 @@
       } catch (_error) {
         throw new Error(fallbackMessage || "The EazyUI API returned invalid JSON.");
       }
+    }
+
+    function openEazyUiWebsite() {
+      parent.postMessage({ pluginMessage: { type: "open-external-url", url: EAZYUI_APP_ORIGIN } }, "*");
     }
 
     function escapeHtml(value) {
@@ -2357,6 +2466,12 @@
     projectLogoutButton.addEventListener("click", () => {
       clearAuthSession();
     });
+    if (siteButton) {
+      siteButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        openEazyUiWebsite();
+      });
+    }
 
     projectsList.addEventListener("click", (event) => {
       const trigger = event.target.closest("[data-project-id]");

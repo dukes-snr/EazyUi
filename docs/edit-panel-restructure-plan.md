@@ -52,6 +52,36 @@ Current gaps:
 - no layout-intent model
 - panel is organized around implementation details instead of user tasks
 
+## Current Codebase Findings
+
+Researching the current implementation shows the redesign should be incremental, not a greenfield rewrite.
+
+### What exists today
+
+- `EditPanel.tsx` is currently a large inspector-style panel with raw controls for width, height, rotation, layout mode, position type, offsets, padding, margin, z-index, typography, colors, and image/link attributes
+- the current panel writes directly to low-level patches such as `set_text`, `set_style`, `set_attr`, `set_classes`, and `delete_node`
+- `EditWorkspaceOverlay.tsx` already gives the app a strong shell for a Figma-like layout: canvas in the middle, layers drawer on the left, editor panel on the right
+- `LayersPanel.tsx` already parses the editable HTML tree and supports layer selection by `data-uid`
+- `DeviceNode.tsx` already posts useful selection metadata back to the app: `elementType`, `classList`, `attributes`, `inlineStyle`, computed styles, bounding rect, and breadcrumbs
+- `htmlToFigmaScene.ts` already performs meaningful scene/layout inference from rendered HTML, including bounds, flex direction, gap, padding, margin, overflow, width mode, height mode, and a `safeAutoLayout` heuristic
+
+### What is missing in the current implementation
+
+- `SelectedElementInfo` does not include parent uid, sibling order, child order, inferred role, repeated-set membership, scroll behavior, or constraint intent
+- the iframe patch application path in `DeviceNode.tsx` mirrors the same primitive patch set as `htmlPatcher.ts`, so structural edits need support in both places
+- the current panel is monolithic, which makes it harder to ship a beginner-first `Quick Edit` path while preserving existing dev controls
+- the app already has a separate shared patch model in `packages/shared/src/types/patch.ts`; the HTML edit patch system should stay clearly separated unless there is a deliberate unification later
+
+### Product implication
+
+The fastest path is:
+
+1. preserve today's inspector as `Advanced`
+2. extract a much simpler `Quick Edit` shell on top
+3. expand selection metadata and design-graph inference incrementally
+4. add structural patch ops only when the UX needs them
+5. reuse existing scene/layout inference where possible instead of rebuilding it from zero
+
 ## Figma-Like Requirement
 
 The editing experience should behave more like a design tool than a CSS inspector.
@@ -77,9 +107,59 @@ This means:
 - fixed nav bars and anchored sections should retain constraints during edits
 - repeated structures should support "edit this one" and later "edit all similar"
 
+## Research Principles From Figma
+
+The redesign should borrow the interaction model that makes Figma feel easy, while translating it into layman language.
+
+### Principle 1: selection drives the UI
+
+Figma's right sidebar changes based on what is selected. This app should do the same.
+
+- selecting text should prioritize text editing, emphasis, alignment, and sizing
+- selecting an image should prioritize replace, fit, crop intent, roundness, and caption/alt content
+- selecting a stack/list should prioritize reorder, spacing between items, alignment, and distribution
+- selecting a card/frame should prioritize fill, padding, size, radius, border, and shadow
+- selecting a progress bar should prioritize value, label, and fill appearance instead of raw width utilities
+
+### Principle 2: auto-layout behavior should be the default mental model
+
+Figma makes repeated UI easier by treating containers as layout systems. The app should infer that model for generated Tailwind screens.
+
+- buttons should resize with text
+- lists should reorder as list items, not as arbitrary positioned DOM nodes
+- stack spacing should be edited at the container level
+- fill, hug, and fixed sizing should be first-class editing concepts
+
+### Principle 3: the canvas should stay primary
+
+The panel should support the canvas, not replace it.
+
+- double click text to edit inline
+- click image to replace
+- drag within a stack to reorder
+- drag resize handles for size changes
+- use arrow keys for nudge actions
+- show a lightweight floating toolbar near the selection for common actions
+
+### Principle 4: advanced mechanics should be progressively disclosed
+
+Figma keeps powerful detail controls available, but the first interaction is rarely a CSS-like inspector. This app should do the same.
+
+- default to plain-language outcomes
+- expose raw controls only in `Advanced`
+- explain ambiguous actions in simple language before falling back to AI
+
+### Principle 5: layer order must respect layout context
+
+Figma treats layer order differently inside auto-layout containers than in free positioning. The app should match that principle.
+
+- inside inferred stacks, move before/after should reorder siblings
+- outside stacked layout, bring forward/send backward should affect overlap order
+- the UI should explain which behavior is happening
+
 ## Product Architecture
 
-Introduce a 3-layer editing system:
+Introduce a 4-layer editing system:
 
 ### 1. Intent Layer
 
@@ -143,6 +223,16 @@ Suggested responsibilities:
 
 This layer is the key to making HTML feel like a Figma document instead of a DOM tree.
 
+### Implementation note: reuse existing scene inference
+
+Do not build the design graph from scratch if existing utilities already solve part of the problem.
+
+- use `DeviceNode.tsx` selection metadata as the live per-selection entry point
+- extend that payload with structural context needed by quick actions
+- reuse or adapt `htmlToFigmaScene.ts` layout inference for bounds, layout mode, padding, margin, overflow, and size-mode signals
+- add a lighter `buildDesignGraph` layer that is optimized for editing decisions, not export fidelity
+- keep export-oriented scene types and edit-oriented graph types separate even if they share helper functions
+
 ## UX Restructure
 
 ## New Edit Mode Layout
@@ -155,6 +245,7 @@ Edit mode should have two primary modes:
 
 - `Content`
 - `Layout`
+- `Space`
 - `Style`
 - `Images`
 - `Arrange`
@@ -171,6 +262,8 @@ Edit mode should have two primary modes:
 
 ## Quick Edit behavior
 
+Quick Edit should be adaptive. The panel should not show the same controls for every selected node.
+
 ### Content
 
 Expose:
@@ -182,6 +275,11 @@ Expose:
 Prefer:
 - inline canvas editing for text
 - direct image click to replace
+
+Also support:
+- plain-language rename for buttons, tabs, labels, and chips
+- simple link editing like "Open this when clicked"
+- semantic controls for known components like progress values and nav labels
 
 ### Layout
 
@@ -244,6 +342,19 @@ Use presets where possible:
 - Pill
 - Outline
 
+### Role-based Quick Edit cards
+
+Instead of one giant generic form, Quick Edit should compose small cards based on inferred role.
+
+- `TextQuickActions`: edit copy, tone/emphasis, align, text size presets
+- `ImageQuickActions`: replace, fit mode, roundness, alt/caption helpers
+- `FrameQuickActions`: size, fill, padding, radius, shadow, border
+- `StackQuickActions`: reorder, space between, align children, distribute
+- `ProgressQuickActions`: value, label, fill/track style
+- `NavQuickActions`: reorder items, preserve pinning, maintain safe-area behavior
+
+The user should feel like they selected "a thing with relevant actions", not "an element with every possible field."
+
 ## Manipulation Model
 
 ## Design Graph Requirements For Generated HTML
@@ -253,14 +364,20 @@ For generated Tailwind screens, every selected node should expose more than curr
 The editor should know:
 - parent uid
 - sibling index
+- sibling count
 - child order
+- child uids
 - inferred role: frame, text, icon, button, image, list, card, nav, progress, chip
 - inferred layout mode: none, row, column, grid
+- inferred primary axis
 - inferred scroll behavior: static, horizontal-scroll, vertical-scroll
 - inferred size mode: hug, fill, fixed
 - inferred constraints relative to parent
 - whether node belongs to a repeated pattern set
+- repeated pattern signature id
 - whether node is part of a semantic control like progress bar or tab chip group
+- whether node is safe for reorder, resize, align, and direct text edit
+- which quick-action cards should be shown for the selection
 
 Current `buildInfo` in the canvas only exposes basic computed styles and rects. That is not enough for Figma-like manipulation.
 
@@ -318,7 +435,7 @@ Add a new semantic edit operation schema in shared/client code.
 Suggested shape:
 
 ```ts
-type SemanticEditOp =
+type BaseSemanticEditOp =
   | { type: 'move'; uid: string; direction: 'up' | 'down' | 'left' | 'right'; amount: 'xs' | 'sm' | 'md' | 'lg' }
   | { type: 'align'; uid: string; axis: 'x' | 'y'; value: 'start' | 'center' | 'end' | 'stretch' }
   | { type: 'space'; uid: string; target: 'around' | 'inside' | 'between-children'; amount: 'less' | 'more' }
@@ -327,10 +444,22 @@ type SemanticEditOp =
   | { type: 'duplicate'; uid: string }
   | { type: 'replace-image'; uid: string; src: string }
   | { type: 'set-text'; uid: string; text: string }
+  | { type: 'set-link'; uid: string; href: string }
+  | { type: 'set-image-fit'; uid: string; fit: 'cover' | 'contain' | 'fill' | 'none' | 'scale-down' }
+  | { type: 'set-progress-value'; uid: string; value: number }
   | { type: 'style-preset'; uid: string; preset: 'flat' | 'soft' | 'elevated' | 'pill' | 'outline' }
+
+type SemanticEditOp =
+  | BaseSemanticEditOp
+  | { type: 'apply-to-similar'; uid: string; sourceOp: BaseSemanticEditOp }
 ```
 
 The UI should only produce semantic ops in Quick Edit.
+
+Notes:
+
+- component-aware ops are necessary if the product wants progress bars, repeated cards, chips, and nav groups to feel editable like design objects
+- `apply-to-similar` should not ship first, but the graph and resolver should reserve room for it
 
 ## Tailwind + HTML Mutation Strategy
 
@@ -441,6 +570,11 @@ These are required for:
 - insert reusable blocks
 - safer structure changes without full AI edits
 
+Implementation requirement:
+
+- `htmlPatcher.ts` and the iframe patch application inside `DeviceNode.tsx` must be updated together
+- undo/redo in `edit-store.ts` should treat grouped semantic actions as one logical history step
+
 Add one more deterministic layer above raw patches:
 
 ```ts
@@ -522,9 +656,24 @@ If multiple siblings share the same structural signature:
 - default to editing only the selected item
 - later support "apply to all similar items"
 
+### Confidence and fallback rules
+
+The resolver should score whether an action is safe to apply deterministically.
+
+- high confidence: apply immediately
+- medium confidence: apply with a short explanatory hint in the UI
+- low confidence: do not guess silently; offer AI or a clearer user choice
+
+Examples of low-confidence situations:
+
+- mixed flex + absolute positioning in the same parent
+- a repeated list where siblings have materially different structure
+- stacked spacing that comes from a combination of margins, transforms, and wrapper divs
+- a node that visually looks like a component but lacks a stable structural signature
+
 ## Quick Edit Controls To Ship First
 
-Phase 1 controls should cover the majority of common edits:
+The first shipped Quick Edit controls should cover the majority of common edits:
 
 - Edit Text
 - Replace Image
@@ -541,6 +690,11 @@ Phase 1 controls should cover the majority of common edits:
 - Delete
 
 These solve most beginner editing needs without showing CSS.
+
+Add two more low-risk controls if they can be supported cleanly:
+
+- Edit Link
+- Fit Image
 
 ## Canvas Interaction Additions
 
@@ -594,6 +748,7 @@ Create a new edit panel structure:
 - `QuickEditPanel`
 - `AdvancedEditPanel`
 - `SelectionSummaryCard`
+- `ContentQuickActions`
 - `LayoutQuickActions`
 - `SpaceQuickActions`
 - `ArrangeQuickActions`
@@ -620,6 +775,36 @@ When no element is selected:
 - show a simple "Select something to edit"
 - show top 3 actions
 - show keyboard hints
+
+### Suggested summary card content
+
+The summary card should turn technical DOM details into plain language.
+
+Examples:
+
+- "Button in horizontal stack"
+- "Card in vertical list"
+- "Image inside hero section"
+- "Bottom navigation bar pinned to screen"
+
+Helpful metadata to show:
+
+- selection name
+- inferred role
+- parent context
+- whether editing affects only this item or a repeated set
+- the top 2 or 3 most likely actions
+
+### Command-style actions
+
+Later, add a small action search box inspired by Figma's actions menu:
+
+- search "center"
+- search "make wider"
+- search "replace image"
+- search "more space"
+
+This can map typed user intent to semantic ops without exposing CSS terms.
 
 ## AI Role After Restructure
 
@@ -651,6 +836,8 @@ Those should be deterministic.
 - `apps/web/src/utils/semanticEditResolver.ts`
 - `apps/web/src/components/edit/QuickEditPanel.tsx`
 - `apps/web/src/components/edit/AdvancedEditPanel.tsx`
+- `apps/web/src/components/edit/SelectionSummaryCard.tsx`
+- `apps/web/src/components/edit/quick/ContentQuickActions.tsx`
 - `apps/web/src/components/edit/quick/LayoutQuickActions.tsx`
 - `apps/web/src/components/edit/quick/SpaceQuickActions.tsx`
 - `apps/web/src/components/edit/quick/ArrangeQuickActions.tsx`
@@ -665,8 +852,17 @@ Those should be deterministic.
 - `apps/web/src/components/canvas/DeviceNode.tsx`
 - `apps/web/src/stores/edit-store.ts`
 - `apps/web/src/utils/htmlPatcher.ts`
+- `apps/web/src/utils/htmlToFigmaScene.ts`
 - `apps/web/src/utils/editMessaging.ts`
 - `packages/shared/src/types/patch.ts` if patch types are shared
+
+### Reuse before adding new abstraction
+
+Before adding entirely new helpers, evaluate whether these can be extended:
+
+- `apps/web/src/utils/htmlToFigmaScene.ts` for layout and size-mode inference
+- `apps/web/src/components/canvas/DeviceNode.tsx` for selection metadata capture
+- `apps/web/src/components/edit/EditPanel.tsx` as the source of today's advanced controls that should be preserved behind a toggle
 
 ### Test fixtures to add
 
@@ -681,49 +877,71 @@ Those should be deterministic.
 
 ## Phase 0: Preparation
 
-- audit the current advanced controls and mark what stays advanced
+- audit the current advanced controls in `EditPanel.tsx` and mark what stays advanced
 - define semantic operation schema
 - define design graph schema
 - define safe Tailwind utility groups
 - add test fixtures for representative generated screens, including the budgeting sample shape
+- document the current edit/store/iframe patch flow so new quick actions do not bypass undo/redo
 
 Deliverable:
 - semantic op type definitions
 - design graph type definitions
 - mutation rules document
 
-## Phase 1: Semantic engine foundation
+## Phase 1: Panel split without behavior loss
+
+- extract the existing inspector UI into `AdvancedEditPanel`
+- keep current behavior intact for text, image, style, spacing, layout, and z-index controls
+- add a new `QuickEditPanel` shell and `SelectionSummaryCard`
+- make `Quick Edit` the default, with `Advanced` clearly available
+
+Deliverable:
+- panel architecture that supports a beginner-first path without losing current power-user controls
+
+## Phase 2: Quick Edit MVP on top of existing safe patch ops
+
+- ship beginner actions that can already map safely to current patch ops:
+  - edit text
+  - replace image
+  - edit link
+  - fit image
+  - align left/center/right for safe cases
+  - full width / hug content for safe cases
+  - more/less space around
+  - more/less space inside
+  - delete
+- keep behavior scoped to deterministic cases only
+- explain unsupported cases instead of silently doing the wrong thing
+
+Deliverable:
+- default layman-friendly panel for the most common edits
+
+## Phase 3: Semantic engine foundation
 
 - extend `HtmlPatch` with structural patch ops
 - add design graph extraction and layout inference
 - add deterministic semantic resolver
 - add Tailwind class resolver for spacing, size, alignment, radius, shadow
-- keep existing panel unchanged while engine is introduced
+- extend selection metadata in `DeviceNode.tsx`
+- reuse `htmlToFigmaScene.ts` helpers where it reduces risk
 
 Deliverable:
 - `resolveSemanticEditOp`
 - `buildDesignGraph`
 - unit tests for common actions
 
-## Phase 2: Quick Edit MVP
+## Phase 4: Structural editing and list behavior
 
-- replace current main panel body with `Quick Edit`
-- move current technical controls into `Advanced`
-- ship beginner actions:
-  - move
-  - align
-  - size
-  - space
-  - content
-  - image replace
-  - duplicate
-  - delete
+- add `duplicate_node`, `move_node`, and `batch`
+- support reorder within inferred stacks/lists
+- support duplicate for cards, rows, chips, and buttons
+- add repeated-set detection for "this item" vs future "all similar" flows
 
 Deliverable:
-- default layman-friendly panel
-- existing dev controls still accessible
+- card/list editing that feels much closer to Figma auto layout behavior
 
-## Phase 3: Direct manipulation
+## Phase 5: Direct manipulation
 
 - add drag-to-move
 - add reorder-on-drag inside inferred stacks
@@ -734,17 +952,18 @@ Deliverable:
 Deliverable:
 - canvas-first editing flow
 
-## Phase 4: Smarter layout actions
+## Phase 6: Smarter layout actions and component-aware controls
 
 - support reorder within parent
 - support distribute/equal spacing actions
 - support "match sibling spacing"
 - support "convert to stack/row" helpers when deterministic
+- add component-aware quick controls for progress, nav groups, chips, and repeated cards
 
 Deliverable:
 - better editing of grouped layouts
 
-## Phase 5: AI fallback integration
+## Phase 7: AI fallback integration
 
 - connect unresolved semantic intents to AI edit fallback
 - show user-friendly explanation before fallback
@@ -779,18 +998,19 @@ This plan does not try to:
 
 Ship the smallest useful version first:
 
-1. semantic op schema
-2. design graph extraction for generated Tailwind screens
-3. Tailwind resolver for spacing/size/alignment
-4. structural patch support for duplicate + reorder
-5. `Quick Edit` panel with:
-   - Move
-   - Align
-   - Size
-   - Space
-   - Content
-   - Images
-   - Arrange
-6. move current raw controls into `Advanced`
+1. extract current inspector into `AdvancedEditPanel`
+2. ship `QuickEditPanel` + `SelectionSummaryCard`
+3. map safe beginner actions to existing patch ops:
+   - Edit Text
+   - Replace Image
+   - Edit Link
+   - Fit Image
+   - Align Left / Center / Right where safe
+   - Full Width / Hug Content where safe
+   - More Space Around
+   - More Space Inside
+   - Delete
+4. extend selection metadata with parent/sibling/layout context
+5. add semantic resolver and structural patches next
 
-That delivers the main product change without requiring a full canvas interaction rewrite first.
+That delivers a visible product improvement fast, preserves current advanced controls, and creates a stable path toward more Figma-like editing instead of delaying value until the full engine rewrite is finished.

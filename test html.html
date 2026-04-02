@@ -1,0 +1,220 @@
+<!DOCTYPE html><html lang="en" class="light" data-editable="true" data-uid="uid_mngkhn5n_0"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProposeAI - Proposal Detail</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0">
+
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Theme Configuration -->
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        bg: "var(--bg)",
+                        surface: "var(--surface)",
+                        surface2: "var(--surface2)",
+                        text: "var(--text)",
+                        muted: "var(--muted)",
+                        stroke: "var(--stroke)",
+                        accent: "var(--accent)",
+                        accent2: "var(--accent2)",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "sans-serif"],
+                        sans: ["Inter", "sans-serif"],
+                    },
+                    boxShadow: {
+                        'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 12px -4px rgba(0, 0, 0, 0.05)',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        :root {
+            --bg: #FAFAFA;
+            --surface: #FFFFFF;
+            --surface2: #F4F4F5;
+            --text: #18181B;
+            --muted: #71717A;
+            --stroke: #E4E4E7;
+            --accent: #0F766E;
+            --accent2: #D97706;
+        }
+        .dark {
+            --bg: #FAFAFA;
+            --surface: #18181B;
+            --surface2: #F4F4F5;
+            --text: #FAFAFA;
+            --muted: #71717A;
+            --stroke: #E4E4E7;
+            --accent: #0F766E;
+            --accent2: #D97706;
+        }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            -webkit-font-smoothing: antialiased;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-surface2" data-editable="true" data-uid="body-detail" data-screen-root="true">
+
+    <!-- Sticky Header -->
+    <header class="bg-surface border-b border-stroke sticky top-0 z-40" data-eazyui-safe-top="force" data-editable="true" data-uid="header-detail" style="padding-top: 0px">
+        <div class="flex items-center justify-between px-4 h-16" data-editable="true" data-uid="header-flex-detail">
+            <button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface2 transition-colors text-text" data-editable="true" data-uid="btn-back">
+                <span class="material-symbols-rounded text-[24px]" data-editable="true" data-uid="icon-back">arrow_back</span>
+            </button>
+            <div class="text-center flex-1 px-4 truncate" data-editable="true" data-uid="header-title-container">
+                <p class="text-[10px] font-semibold text-muted uppercase tracking-wider mb-0.5" data-editable="true" data-uid="header-eyebrow">Proposal</p>
+                <h1 class="text-sm font-semibold text-text truncate" data-editable="true" data-uid="header-title">E-commerce Redesign</h1>
+            </div>
+            <button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface2 transition-colors text-text" data-editable="true" data-uid="btn-more">
+                <span class="material-symbols-rounded text-[24px]" data-editable="true" data-uid="icon-more">more_vert</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto pb-32" data-editable="true" data-uid="main-detail">
+        
+        <!-- Document Preview Thumbnail Area -->
+        <section class="bg-surface px-6 pt-8 pb-10 flex justify-center border-b border-stroke shadow-sm relative overflow-hidden" data-editable="true" data-uid="section-preview" style="padding-bottom: 43px; padding-top: 30px; margin-bottom: -1px; height: 442px">
+            <!-- subtle background pattern -->
+            <div class="absolute inset-0 opacity-30" style="background-image: radial-gradient(var(--stroke) 1px, transparent 1px); background-size: 16px 16px; height: 447px; padding-bottom: 1px" data-editable="true" data-uid="preview-bg-pattern"></div>
+            
+            <div class="relative z-10 w-full max-w-[240px] aspect-[1/1.4] bg-surface rounded-xl border border-stroke shadow-lg p-4 flex flex-col" data-editable="true" data-uid="doc-paper" style="margin-bottom: 0px">
+                <div class="w-1/3 h-2 bg-surface2 rounded mb-6" data-editable="true" data-uid="paper-line-1"></div>
+                <div class="w-3/4 h-4 bg-text/10 rounded mb-3" data-editable="true" data-uid="paper-line-2"></div>
+                <div class="w-1/2 h-4 bg-text/10 rounded mb-8" data-editable="true" data-uid="paper-line-3"></div>
+                
+                <div class="space-y-2 flex-1" data-editable="true" data-uid="paper-lines-container">
+                    <div class="w-full h-1.5 bg-surface2 rounded" data-editable="true" data-uid="paper-line-4"></div>
+                    <div class="w-full h-1.5 bg-surface2 rounded" data-editable="true" data-uid="paper-line-5"></div>
+                    <div class="w-4/5 h-1.5 bg-surface2 rounded" data-editable="true" data-uid="paper-line-6"></div>
+                    <div class="w-full h-1.5 bg-surface2 rounded mt-4" data-editable="true" data-uid="paper-line-7"></div>
+                    <div class="w-2/3 h-1.5 bg-surface2 rounded" data-editable="true" data-uid="paper-line-8"></div>
+                </div>
+                
+                <div class="mt-auto pt-4 border-t border-stroke/50 flex justify-between items-center" data-editable="true" data-uid="paper-footer">
+                    <div class="w-10 h-1.5 bg-surface2 rounded" data-editable="true" data-uid="paper-line-9"></div>
+                    <div class="w-6 h-6 rounded-full bg-accent/10 border border-accent/20" data-editable="true" data-uid="paper-stamp"></div>
+                </div>
+            </div>
+
+            <!-- Floating Status Badge -->
+            <div class="absolute bottom-[-16px] left-1/2 -translate-x-1/2 bg-surface border border-stroke shadow-soft px-4 py-2 rounded-full flex items-center gap-2 z-20" data-editable="true" data-uid="floating-status" style="margin-bottom: 19px; margin-top: 0px">
+                <span class="w-2 h-2 rounded-full bg-accent animate-pulse" data-editable="true" data-uid="status-dot"></span>
+                <span class="text-xs font-semibold text-text" data-editable="true" data-uid="status-text">Client is viewing now</span>
+            </div>
+        </section>
+
+        <!-- Meta Details -->
+        <section class="p-6 space-y-6 bg-surface" data-editable="true" data-uid="section-meta" style="margin-top: 0px">
+            
+            <div class="flex justify-between items-end" data-editable="true" data-uid="meta-value-row">
+                <div data-editable="true" data-uid="meta-value-container">
+                    <p class="text-sm font-medium text-muted mb-1" data-editable="true" data-uid="meta-value-label">Total Contract Value</p>
+                    <h2 class="text-3xl font-semibold tracking-tight text-text" data-editable="true" data-uid="meta-value">$8,500<span class="text-lg text-muted font-normal ml-1" data-editable="true" data-uid="meta-currency">USD</span></h2>
+                </div>
+            </div>
+
+            <div class="h-px w-full bg-stroke" data-editable="true" data-uid="divider-meta-1"></div>
+
+            <!-- Client Info Row -->
+            <div class="flex items-center justify-between" data-editable="true" data-uid="client-row">
+                <div class="flex items-center gap-3" data-editable="true" data-uid="client-info">
+                    <div class="w-10 h-10 rounded-full bg-surface2 border border-stroke flex items-center justify-center text-text font-semibold text-sm" data-editable="true" data-uid="client-avatar">
+                        N
+                    </div>
+                    <div data-editable="true" data-uid="client-text">
+                        <p class="text-sm font-semibold text-text" data-editable="true" data-uid="client-name">Nova Design Studio</p>
+                        <p class="text-xs text-muted" data-editable="true" data-uid="client-email">sarah@novadesign.co</p>
+                    </div>
+                </div>
+                <button class="w-8 h-8 rounded-full bg-surface2 flex items-center justify-center text-text hover:bg-stroke transition-colors" data-editable="true" data-uid="btn-email-client">
+                    <span class="material-symbols-rounded text-[18px]" data-editable="true" data-uid="icon-mail">mail</span>
+                </button>
+            </div>
+
+            <div class="h-px w-full bg-stroke" data-editable="true" data-uid="divider-meta-2"></div>
+
+            <!-- Activity Timeline -->
+            <div data-editable="true" data-uid="timeline-container">
+                <h3 class="text-sm font-semibold text-text mb-4" data-editable="true" data-uid="timeline-title">Activity</h3>
+                
+                <div class="space-y-0 relative before:absolute before:inset-0 before:ml-[11px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-stroke" data-editable="true" data-uid="timeline-list">
+                    
+                    <!-- Item 1 (Active) -->
+                    <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active pb-6" data-editable="true" data-uid="timeline-item-1">
+                        <div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-surface bg-accent text-surface shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10" data-editable="true" data-uid="timeline-dot-1">
+                            <span class="material-symbols-rounded text-[12px]" data-editable="true" data-uid="icon-timeline-1">visibility</span>
+                        </div>
+                        <div class="w-[calc(100%-3rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0 md:group-odd:pr-4 md:group-even:pl-4" data-editable="true" data-uid="timeline-content-1">
+                            <div class="flex flex-col md:items-end md:group-even:items-start" data-editable="true" data-uid="timeline-text-1">
+                                <p class="text-sm font-semibold text-text" data-editable="true" data-uid="timeline-title-1">Viewed by Client</p>
+                                <p class="text-xs text-muted mt-0.5" data-editable="true" data-uid="timeline-time-1">Today, 10:42 AM</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Item 2 -->
+                    <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group pb-6" data-editable="true" data-uid="timeline-item-2">
+                        <div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-surface bg-surface2 text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10" data-editable="true" data-uid="timeline-dot-2">
+                            <span class="material-symbols-rounded text-[12px]" data-editable="true" data-uid="icon-timeline-2">send</span>
+                        </div>
+                        <div class="w-[calc(100%-3rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0 md:group-odd:pr-4 md:group-even:pl-4" data-editable="true" data-uid="timeline-content-2">
+                            <div class="flex flex-col md:items-end md:group-even:items-start" data-editable="true" data-uid="timeline-text-2">
+                                <p class="text-sm font-medium text-text" data-editable="true" data-uid="timeline-title-2">Sent for Review</p>
+                                <p class="text-xs text-muted mt-0.5" data-editable="true" data-uid="timeline-time-2">Yesterday, 4:15 PM</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Item 3 -->
+                    <div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group" data-editable="true" data-uid="timeline-item-3">
+                        <div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-surface bg-surface2 text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10" data-editable="true" data-uid="timeline-dot-3">
+                            <span class="material-symbols-rounded text-[12px]" data-editable="true" data-uid="icon-timeline-3">magic_button</span>
+                        </div>
+                        <div class="w-[calc(100%-3rem)] md:w-[calc(50%-2.5rem)] pl-4 md:pl-0 md:group-odd:pr-4 md:group-even:pl-4" data-editable="true" data-uid="timeline-content-3">
+                            <div class="flex flex-col md:items-end md:group-even:items-start" data-editable="true" data-uid="timeline-text-3">
+                                <p class="text-sm font-medium text-text" data-editable="true" data-uid="timeline-title-3">Generated with AI</p>
+                                <p class="text-xs text-muted mt-0.5" data-editable="true" data-uid="timeline-time-3">Yesterday, 3:30 PM</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Persistent Bottom Action Area -->
+    <div class="fixed bottom-0 left-0 w-full bg-surface border-t border-stroke p-4 pb-safe shadow-[0_-4px_24px_rgba(0,0,0,0.05)] z-50" data-editable="true" data-uid="bottom-action-area">
+        <div class="flex gap-3 max-w-md mx-auto" data-editable="true" data-uid="action-buttons">
+            <button class="flex-1 bg-surface2 text-text font-semibold py-3.5 px-4 rounded-full border border-stroke hover:bg-stroke transition-colors text-sm" data-editable="true" data-uid="btn-edit">
+                Edit Draft
+            </button>
+            <button class="flex-[2] bg-accent text-surface font-semibold py-3.5 px-4 rounded-full shadow-glow hover:bg-accent/90 transition-colors flex items-center justify-center gap-2 text-sm" data-editable="true" data-uid="btn-follow-up">
+                <span class="material-symbols-rounded text-[18px]" data-editable="true" data-uid="icon-send">schedule_send</span>
+                Send Follow-up
+            </button>
+        </div>
+    </div>
+
+
+</body></html>

@@ -614,17 +614,25 @@ textarea::placeholder {
 }
 
 .landing-hero-backdrop.is-animated::before {
-  background: none;
+  background:
+    linear-gradient(
+      180deg,
+      #050505 0%,
+      #050505 20%,
+      rgba(5, 5, 5, 0.72) 36%,
+      rgba(5, 5, 5, 0.18) 56%,
+      transparent 100%
+    );
 }
 
 .landing-hero-backdrop.is-animated::after {
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--landing-hero-bg-top) 96%, transparent) 0%,
-      color-mix(in srgb, var(--landing-hero-bg-top) 24%, transparent) 22%,
-      rgba(255, 255, 255, 0) 52%,
-      color-mix(in srgb, var(--landing-hero-grid-fade) 34%, transparent) 72%,
-      color-mix(in srgb, var(--landing-hero-bg-bottom) 92%, transparent) 100%);
+      rgba(5, 5, 5, 0.94) 0%,
+      rgba(5, 5, 5, 0.52) 18%,
+      rgba(255, 255, 255, 0) 42%,
+      rgba(12, 12, 12, 0.34) 72%,
+      rgba(5, 5, 5, 0.92) 100%);
 }
 
 .landing-hero-animated-scene,
@@ -635,16 +643,33 @@ textarea::placeholder {
 
 .landing-hero-animated-scene {
   z-index: 1;
-  background: linear-gradient(180deg, var(--landing-hero-bg-top) 0%, var(--landing-hero-bg-mid) 48%, var(--landing-hero-bg-bottom) 100%);
-}
-
-.landing-hero-animated-grid {
-  position: absolute;
-  inset: -28% -14%;
-  height: 210%;
-  transform: skewY(12deg);
-  mask-image: radial-gradient(880px circle at center, white, transparent);
-  -webkit-mask-image: radial-gradient(880px circle at center, white, transparent);
+  inset: -1em;
+  --c: 9px;
+  background-color: #000;
+  background-image:
+    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
+    radial-gradient(circle at 50% 50%, #0000 1.5px, #000 0 var(--c), #0000 var(--c)),
+    radial-gradient(circle at 50% 50%, rgba(255, 56, 56, 1), rgba(255, 0, 0, 0) 74%),
+    radial-gradient(circle at 50% 50%, rgba(255, 241, 92, 1), rgba(255, 255, 0, 0) 76%),
+    radial-gradient(circle at 50% 50%, rgba(88, 255, 120, 1), rgba(0, 255, 0, 0) 74%),
+    radial-gradient(ellipse at 50% 50%, rgba(88, 132, 255, 1), rgba(0, 0, 255, 0) 76%);
+  background-size:
+    12px 20.7846097px,
+    12px 20.7846097px,
+    200% 200%,
+    200% 200%,
+    200% 200%,
+    200% 20.7846097px;
+  --p: 0px 0px, 6px 10.39230485px;
+  background-position:
+    var(--p),
+    0% 0%,
+    0% 0%,
+    0% 0%,
+    0% 0%;
+  animation:
+    landingHeroWee 40s linear infinite,
+    landingHeroFilt 6s linear infinite;
 }
 
 .landing-hero-animated-fade {
@@ -652,10 +677,40 @@ textarea::placeholder {
   inset: 0;
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--landing-hero-bg-top) 92%, transparent) 0%,
-      color-mix(in srgb, var(--landing-hero-bg-top) 10%, transparent) 26%,
-      color-mix(in srgb, var(--landing-hero-bg-mid) 8%, transparent) 74%,
-      color-mix(in srgb, var(--landing-hero-bg-bottom) 96%, transparent) 100%);
+      rgba(5, 5, 5, 0.86) 0%,
+      rgba(5, 5, 5, 0.58) 24%,
+      rgba(10, 10, 10, 0.08) 78%,
+      rgba(5, 5, 5, 0.96) 100%);
+}
+
+@keyframes landingHeroFilt {
+  0% {
+    filter: saturate(1.45) brightness(1.22) contrast(1.08) hue-rotate(0deg);
+  }
+
+  to {
+    filter: saturate(1.45) brightness(1.22) contrast(1.08) hue-rotate(360deg);
+  }
+}
+
+@keyframes landingHeroWee {
+  0% {
+    background-position:
+      var(--p),
+      800% 400%,
+      1000% -400%,
+      -1200% -600%,
+      400% 41.5692194px;
+  }
+
+  to {
+    background-position:
+      var(--p),
+      0% 0%,
+      0% 0%,
+      0% 0%,
+      0% 0%;
+  }
 }
 
 .landing-hero-backdrop.is-image::before {
@@ -676,6 +731,7 @@ textarea::placeholder {
 }
 
 .landing-nav-on-dark {
+  color-scheme: dark;
   --ui-text: #f8fbff;
   --ui-text-muted: rgba(232, 240, 255, 0.76);
   --ui-text-subtle: rgba(224, 233, 255, 0.5);
@@ -684,6 +740,25 @@ textarea::placeholder {
   --ui-surface-1: rgba(4, 8, 20, 0.78);
   --ui-surface-2: rgba(7, 12, 30, 0.74);
   --ui-surface-3: rgba(12, 18, 39, 0.82);
+}
+
+.landing-top-stage-dark {
+  color-scheme: dark;
+  --ui-bg: #0f0f0f;
+  --ui-surface-1: #1b1b1b;
+  --ui-surface-2: #171717;
+  --ui-surface-3: #1f1f1f;
+  --ui-surface-4: #212429;
+  --ui-popover: #171717;
+  --ui-border: #2A3140;
+  --ui-border-light: #3A4250;
+  --ui-text: #E8ECF2;
+  --ui-text-muted: #8B95A5;
+  --ui-text-subtle: #5A6472;
+  --ui-primary: #01a6cb;
+  --ui-primary-hover: #818CF8;
+  --ui-error: #EF4444;
+  --ui-tab-active-bg: #2a2f37;
 }
 
 .landing-hero-section {

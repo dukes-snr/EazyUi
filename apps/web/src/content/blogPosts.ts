@@ -79,6 +79,63 @@ export type BlogPost = {
 
 export const BLOG_POSTS: BlogPost[] = [
     {
+        slug: 'figma-integration-from-generated-ui-to-editable-systems',
+        title: 'From Generated UI to Editable Figma Files',
+        seoTitle: 'EazyUI Figma Integration: From Generated UI to Editable Figma Files',
+        seoDescription: 'See how the new EazyUI Figma integration moves generated screens and design systems into editable Figma files without rebuilding everything by hand.',
+        coverImage: getCoverImageForIndex(6),
+        category: 'Workflow',
+        excerpt: 'EazyUI now pushes both generated screens and active design systems into Figma, closing one of the biggest gaps between AI output and real design workflow.',
+        readTime: '9 min read',
+        publishedAt: 'April 02, 2026',
+        eyebrow: 'Product story',
+        status: 'New',
+        accent: {
+            a: '#01a6cb',
+            b: '#4f46e5',
+            c: '#1a2238',
+            d: '#0f0f0f',
+        },
+        tags: ['Figma plugin', 'design workflow', 'AI UI handoff'],
+        sections: [
+            {
+                heading: 'The gap was never generation. It was handoff.',
+                paragraphs: [
+                    'A lot of AI UI products can generate screens. Far fewer can help a team do the next obvious thing with them. That next step is usually not admiration. It is handoff, editing, review, iteration, and collaboration inside the design tools teams already use every day.',
+                    'That is the real context for the new EazyUI Figma integration. The point is not to celebrate that a screen exists. The point is to make generated work usable after the first pass, in a place where designers can inspect it, reorganize it, compare versions, and move it into the rest of the product workflow.',
+                ],
+            },
+            {
+                heading: 'Screens can now move into Figma as editable payloads',
+                paragraphs: [
+                    'The first part of the integration is a dedicated Figma plugin flow for importing editable EazyUI screen payloads. Instead of treating generated UI as a dead-end visual, the plugin gives teams a cleaner path into Figma where the structure can keep evolving.',
+                    'That matters because most teams do not stop at first output. They adjust hierarchy, swap modules, test alternate copy, refine spacing, and compare states. Moving screens into Figma more directly means those reviews can happen faster and with less of the quiet rework that usually sits between AI generation and actual design operations.',
+                ],
+            },
+            {
+                heading: 'The design system can travel too',
+                paragraphs: [
+                    'The more important second layer is that the active design system can now export into Figma as its own visual board. Colors, typography, radius, spacing, motion, and the broader system setup no longer have to live only as settings inside the product. They can become an artifact a team can point at, discuss, and refine.',
+                    'This changes the quality of the handoff. A screen without the system around it often forces people to infer too much. A screen plus a visible system board gives more context. It tells a better story about why the interface looks the way it does and what should stay consistent as the work expands.',
+                ],
+            },
+            {
+                heading: 'Why this matters for real teams',
+                paragraphs: [
+                    'In practice, the hardest part of AI-assisted design is often not generation quality. It is workflow credibility. Product teams need to know whether output can survive contact with critique, iteration, and cross-functional review. If the answer is no, the generation step stays interesting but operationally weak.',
+                    'Figma remains one of the places where those decisions become concrete. That is why this integration is less about novelty and more about legitimacy. It helps generated work behave more like part of a real pipeline and less like a polished artifact that has to be rebuilt before anyone can truly use it.',
+                ],
+            },
+            {
+                heading: 'The bigger picture is continuity',
+                paragraphs: [
+                    'The larger ambition here is continuity across the whole product loop: prompt, generate, review, refine, export, and collaborate. Every time a team has to reconstruct the same work in another tool, momentum drops. Every time context gets lost, quality becomes harder to protect.',
+                    'The Figma integration is a move in the opposite direction. It keeps more of the design intent intact as work crosses tools. For teams using EazyUI seriously, that is the meaningful shift. The output is no longer only something to look at. It is something you can carry forward.',
+                ],
+            },
+        ],
+    },
+    {
         slug: 'prompt-engineering-for-ai-landing-pages',
         title: 'Prompt Engineering for AI Landing Pages That Feel Intentional',
         seoTitle: 'Prompt Engineering for AI Landing Pages | EazyUI Blog',

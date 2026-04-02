@@ -86,6 +86,8 @@ type FigmaSceneTypography = {
     textTransform: string;
     textDecoration: string;
     whiteSpace: string;
+    textOverflow?: string;
+    lineClamp?: number;
     fontVariationSettings?: string;
 };
 
@@ -310,8 +312,198 @@ function measureTextNode(textNode: Text, fallbackRect: DOMRect): { rect: DOMRect
     };
 }
 
-function hasVisualChrome(css: CSSStyleDeclaration): boolean {
-    return css.backgroundColor !== 'rgba(0, 0, 0, 0)'
+function resolveComputedLineHeightPx(css: CSSStyleDeclaration): number {
+    const fontSize = Math.max(1, toPx(css.fontSize) || 16);
+    const raw = String(css.lineHeight || '').trim().toLowerCase();
+    if (!raw || raw === 'normal') {
+        return round2(fontSize * 1.2);
+    }
+    if (raw.endsWith('%')) {
+        return round2(Math.max(1, (Number.parseFloat(raw) / 100) * fontSize));
+    }
+    return round2(Math.max(1, toPx(raw) || (fontSize * 1.2)));
+}
+
+function measureSyntheticFieldText(
+    element: HTMLElement,
+    baseCss: CSSStyleDeclaration,
+    textCss: CSSStyleDeclaration,
+): { rect: DOMRect; lineCount: number } {
+    const fieldRect = element.getBoundingClientRect();
+    const paddingTop = toPx(baseCss.paddingTop);
+    const paddingRight = toPx(baseCss.paddingRight);
+    const paddingBottom = toPx(baseCss.paddingBottom);
+    const paddingLeft = toPx(baseCss.paddingLeft);
+    const contentWidth = Math.max(1, fieldRect.width - paddingLeft - paddingRight);
+    const contentHeight = Math.max(1, fieldRect.height - paddingTop - paddingBottom);
+    const lineHeight = Math.min(contentHeight, resolveComputedLineHeightPx(textCss));
+    const top = fieldRect.top + paddingTop + Math.max(0, (contentHeight - lineHeight) / 2);
+    const left = fieldRect.left + paddingLeft;
+    return {
+        rect: new DOMRect(left, top, contentWidth, lineHeight),
+        lineCount: 1,
+    };
+}
+
+function isTransparentColor(value: string | undefined): boolean {
+    const normalized = String(value || '').trim().toLowerCase();
+    const parsed = parseCssColor(normalized);
+    if (parsed) {
+        return clamp01(parsed.a) <= 0.001;
+    }
+    return !normalized
+        || normalized === 'transparent'
+        || normalized === 'rgba(0, 0, 0, 0)'
+        || normalized === 'rgb(0 0 0 / 0)'
+        || normalized === 'color(srgb 0 0 0 / 0)';
+}
+
+function clamp01(value: number): number {
+    return Math.max(0, Math.min(1, value));
+}
+
+function parseCssColor(value: string | undefined): { r: number; g: number; b: number; a: number } | null {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    const hexMatch = raw.match(/^#([0-9a-f]{3,8})$/i);
+    if (hexMatch) {
+        const hex = hexMatch[1];
+        if (hex.length === 3 || hex.length === 4) {
+            const r = parseInt(hex[0] + hex[0], 16);
+            const g = parseInt(hex[1] + hex[1], 16);
+            const b = parseInt(hex[2] + hex[2], 16);
+            const a = hex.length === 4 ? parseInt(hex[3] + hex[3], 16) / 255 : 1;
+            return { r, g, b, a };
+        }
+        if (hex.length === 6 || hex.length === 8) {
+            const r = parseInt(hex.slice(0, 2), 16);
+            const g = parseInt(hex.slice(2, 4), 16);
+            const b = parseInt(hex.slice(4, 6), 16);
+            const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+            return { r, g, b, a };
+        }
+    }
+
+    const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgbMatch) {
+        const inner = rgbMatch[1].trim();
+        const slashParts = inner.split('/').map((part) => part.trim());
+        const colorPart = slashParts[0] || '';
+        const alphaPart = slashParts[1];
+        const parts = colorPart.includes(',')
+            ? colorPart.split(',').map((part) => part.trim())
+            : colorPart.split(/\s+/).filter(Boolean);
+        if (parts.length >= 3) {
+            const readChannel = (part: string) => (
+                part.endsWith('%')
+                    ? Math.round(clamp01(Number.parseFloat(part) / 100) * 255)
+                    : Math.round(Math.max(0, Math.min(255, Number.parseFloat(part))))
+            );
+            const readAlpha = (part: string | undefined) => {
+                if (!part) return 1;
+                return part.endsWith('%')
+                    ? clamp01(Number.parseFloat(part) / 100)
+                    : clamp01(Number.parseFloat(part));
+            };
+            return {
+                r: readChannel(parts[0]),
+                g: readChannel(parts[1]),
+                b: readChannel(parts[2]),
+                a: readAlpha(alphaPart !== undefined ? alphaPart : parts[3]),
+            };
+        }
+    }
+
+    const srgbMatch = raw.match(/^color\(srgb\s+([^)]+)\)$/i);
+    if (srgbMatch) {
+        const inner = srgbMatch[1].trim();
+        const slashParts = inner.split('/').map((part) => part.trim());
+        const colorPart = slashParts[0] || '';
+        const alphaPart = slashParts[1];
+        const parts = colorPart.split(/\s+/).filter(Boolean);
+        if (parts.length >= 3) {
+            return {
+                r: Math.round(clamp01(Number.parseFloat(parts[0])) * 255),
+                g: Math.round(clamp01(Number.parseFloat(parts[1])) * 255),
+                b: Math.round(clamp01(Number.parseFloat(parts[2])) * 255),
+                a: alphaPart ? clamp01(Number.parseFloat(alphaPart)) : 1,
+            };
+        }
+    }
+
+    return null;
+}
+
+function formatRgbaColor(color: { r: number; g: number; b: number; a: number }): string {
+    const alpha = round2(clamp01(color.a));
+    if (alpha >= 0.999) {
+        return `rgb(${color.r}, ${color.g}, ${color.b})`;
+    }
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+}
+
+function resolveTailwindBackgroundColor(
+    element: Element,
+    css: CSSStyleDeclaration,
+): string | null {
+    const className = String(element.getAttribute('class') || '').trim();
+    if (!className) return null;
+
+    for (const classToken of className.split(/\s+/).reverse()) {
+        if (classToken.includes(':')) continue;
+        const utility = classToken;
+        const match = utility.match(/^bg-([a-z0-9_-]+)(?:\/(\d{1,3}(?:\.\d+)?))?$/i);
+        if (!match) continue;
+
+        const [, colorToken, opacityToken] = match;
+        const normalizedToken = String(colorToken || '').toLowerCase();
+        let rawColor = '';
+
+        if (normalizedToken === 'transparent') {
+            rawColor = 'rgba(0, 0, 0, 0)';
+        } else if (normalizedToken === 'white') {
+            rawColor = '#ffffff';
+        } else if (normalizedToken === 'black') {
+            rawColor = '#000000';
+        } else {
+            rawColor = css.getPropertyValue(`--${normalizedToken}`).trim();
+            if (!rawColor) {
+                const rootCss = element.ownerDocument?.documentElement
+                    ? window.getComputedStyle(element.ownerDocument.documentElement)
+                    : null;
+                rawColor = rootCss?.getPropertyValue(`--${normalizedToken}`).trim() || '';
+            }
+        }
+
+        const parsed = parseCssColor(rawColor);
+        if (!parsed) continue;
+
+        const opacity = opacityToken !== undefined
+            ? clamp01(Number.parseFloat(opacityToken) / 100)
+            : 1;
+
+        return formatRgbaColor({
+            ...parsed,
+            a: parsed.a * opacity,
+        });
+    }
+
+    return null;
+}
+
+function resolveBackgroundColor(
+    element: Element,
+    css: CSSStyleDeclaration,
+): string {
+    if (!isTransparentColor(css.backgroundColor)) {
+        return css.backgroundColor;
+    }
+    return resolveTailwindBackgroundColor(element, css) || css.backgroundColor || 'rgba(0, 0, 0, 0)';
+}
+
+function hasVisualChrome(element: Element, css: CSSStyleDeclaration): boolean {
+    return !isTransparentColor(resolveBackgroundColor(element, css))
         || toPx(css.borderTopWidth) > 0
         || toPx(css.borderRightWidth) > 0
         || toPx(css.borderBottomWidth) > 0
@@ -332,7 +524,7 @@ function inferNodeType(element: HTMLElement, css: CSSStyleDeclaration): EazyUiFi
     const tagName = element.tagName.toLowerCase();
     const hasText = Boolean(extractDirectText(element));
     if (tagName === 'img') return 'image';
-    if (TEXT_TAGS.has(tagName) && !hasElementChildren(element) && !hasVisualChrome(css)) {
+    if (TEXT_TAGS.has(tagName) && !hasElementChildren(element) && !hasVisualChrome(element, css)) {
         return 'text';
     }
     if ((tagName === 'input' || tagName === 'textarea') && hasText) {
@@ -402,6 +594,13 @@ function inferSafeAutoLayout(
     if (position === 'absolute' || position === 'fixed') return false;
     if (css.flexWrap === 'wrap' || css.flexWrap === 'wrap-reverse') return false;
     if (children.length < 2) return false;
+
+    const positiveGrowValues = children
+        .map((child) => Number(child.layout?.flexGrow) || 0)
+        .filter((value) => value > 0.01);
+    const distinctGrowValues = new Set(positiveGrowValues.map((value) => round2(value)));
+    if (distinctGrowValues.size > 1) return false;
+
     return !children.some((child) => {
         const childPosition = String(child.layout?.position || '').toLowerCase();
         const margin = child.layout?.margin || { top: 0, right: 0, bottom: 0, left: 0 };
@@ -444,6 +643,8 @@ function buildBorder(css: CSSStyleDeclaration): FigmaSceneBorder {
 }
 
 function buildTypography(css: CSSStyleDeclaration): FigmaSceneTypography {
+    const webkitLineClampRaw = String((css as CSSStyleDeclaration & { webkitLineClamp?: string }).webkitLineClamp || '').trim();
+    const lineClamp = Number.parseFloat(webkitLineClampRaw);
     return {
         fontFamily: css.fontFamily,
         fontSize: css.fontSize,
@@ -455,6 +656,8 @@ function buildTypography(css: CSSStyleDeclaration): FigmaSceneTypography {
         textTransform: css.textTransform,
         textDecoration: css.textDecorationLine || css.textDecoration,
         whiteSpace: css.whiteSpace,
+        textOverflow: css.textOverflow && css.textOverflow !== 'clip' ? css.textOverflow : undefined,
+        lineClamp: Number.isFinite(lineClamp) && lineClamp > 0 ? Math.round(lineClamp) : undefined,
         fontVariationSettings: css.fontVariationSettings || undefined,
     };
 }
@@ -610,7 +813,7 @@ function buildVisual(css: CSSStyleDeclaration, element: Element): FigmaSceneVisu
     const webkitMaskSize = (css as CSSStyleDeclaration & { webkitMaskSize?: string }).webkitMaskSize;
     const base: FigmaSceneVisual = {
         color: css.color,
-        backgroundColor: css.backgroundColor,
+        backgroundColor: resolveBackgroundColor(element, css),
         backgroundImage: css.backgroundImage && css.backgroundImage !== 'none'
             ? css.backgroundImage
             : undefined,
@@ -717,16 +920,18 @@ function createTextChild(
     if (!textContent) return null;
 
     const fallbackRect = element.getBoundingClientRect();
-    const measurement = textNode
-        ? measureTextNode(textNode, fallbackRect)
-        : {
-            rect: fallbackRect,
-            lineCount: 1,
-        };
-    const targetRect = measurement.rect;
     const view = element.ownerDocument.defaultView;
     const baseCss = view?.getComputedStyle(element);
     const css = textNode ? baseCss : getSyntheticTextStyle(element, baseCss);
+    const measurement = textNode
+        ? measureTextNode(textNode, fallbackRect)
+        : (baseCss && css
+            ? measureSyntheticFieldText(element, baseCss, css)
+            : {
+                rect: fallbackRect,
+                lineCount: 1,
+            });
+    const targetRect = measurement.rect;
     return {
         id: nodeId,
         name: `${getNodeName(element)}:text`,

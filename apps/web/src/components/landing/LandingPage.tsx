@@ -17,7 +17,6 @@ import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
 import { MarketingHeader } from '../marketing/MarketingHeader';
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
-import { AnimatedGridPattern } from '../ui/animated-grid-pattern';
 import { CallToAction } from '../ui/cta-3';
 import { Orb } from '../ui/Orb';
 import { StaggerTestimonials, type StaggerTestimonial } from '../ui/stagger-testimonials';
@@ -385,9 +384,13 @@ export function LandingPage(props: LandingPageProps) {
     const { onStart, onNavigate } = props;
     const theme = useUiStore((state) => state.theme);
     const toggleTheme = useUiStore((state) => state.toggleTheme);
-    const heroWordmark = theme === 'light' ? eazyuiWordmarkLight : eazyuiWordmark;
     const heroBackgroundMode = HERO_BACKGROUND_CONFIG.mode;
     const useDarkHeroForeground = heroBackgroundMode === 'animated' || heroBackgroundMode === 'image';
+    const heroWordmark = useDarkHeroForeground
+        ? eazyuiWordmark
+        : theme === 'light'
+            ? eazyuiWordmarkLight
+            : eazyuiWordmark;
     const [prompt, setPrompt] = useState('');
     const [activeSuggestionTab, setActiveSuggestionTab] = useState<LandingSuggestionTabKey | null>(null);
     const [activeSuggestionPrompt, setActiveSuggestionPrompt] = useState<string>(LANDING_SUGGESTION_TABS[0].prompts[1]);
@@ -955,15 +958,6 @@ export function LandingPage(props: LandingPageProps) {
                         </div>
                     ) : (
                         <div className="landing-hero-animated-scene" aria-hidden="true">
-                            <AnimatedGridPattern
-                                width={86}
-                                height={86}
-                                numSquares={34}
-                                maxOpacity={1}
-                                duration={1.2}
-                                repeatDelay={0.65}
-                                className="landing-hero-animated-grid"
-                            />
                             <div className="landing-hero-animated-fade" />
                         </div>
                     )}
@@ -987,7 +981,7 @@ export function LandingPage(props: LandingPageProps) {
                     }}
                 >
                     <div className="landing-hero-section-inner relative z-10 mx-auto -mt-15 flex w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
-                        <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em]">
+                        <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em] text-[var(--ui-text)]">
                             Design better UI with{' '}
                             <span className="relative inline-flex align-baseline">
                                 <span className="sr-only">EazyUI</span>

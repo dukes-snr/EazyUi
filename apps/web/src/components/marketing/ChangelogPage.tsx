@@ -23,6 +23,91 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
 
     const timelineData = useMemo<TimelineEntry[]>(() => [
         {
+            title: 'v1.9.1',
+            content: (
+                <div>
+                    <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                        Apr 02, 2026 - Feature
+                    </p>
+                    <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
+                        Design systems can now export straight into Figma
+                    </h3>
+                    <div className="mt-5 space-y-4">
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            The active design system in EazyUI can now generate a Figma-ready board with colors, typography, radius, spacing, motion, and the other system settings already arranged for review.
+                        </p>
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            It is a faster way to carry the feel of a project into Figma without rebuilding the system by hand.
+                        </p>
+                    </div>
+                    <div className="mt-8 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        {[
+                            {
+                                label: 'Export',
+                                title: 'One-click system board',
+                                description: 'Use the Design System tab to export the active token set into a presentation-ready Figma board.',
+                            },
+                            {
+                                label: 'Coverage',
+                                title: 'Tokens stay represented',
+                                description: 'Colors, type, radius, spacing, motion, and system notes all carry through into the exported board.',
+                            },
+                            {
+                                label: 'Handoff',
+                                title: 'Cleaner review workflow',
+                                description: 'Design systems can move into Figma as a usable visual artifact instead of a loose list of values.',
+                            },
+                        ].map((item) => (
+                            <div
+                                key={item.title}
+                                className="rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4"
+                            >
+                                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">{item.label}</p>
+                                <p className="mt-2 text-[16px] font-semibold text-[var(--ui-text)]">{item.title}</p>
+                                <p className="mt-2 text-[14px] leading-6 text-[var(--ui-text-muted)]">{item.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            title: 'v1.9.0',
+            content: (
+                <div>
+                    <p className="mb-3 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-primary)]">
+                        Apr 02, 2026 - Feature
+                    </p>
+                    <h3 className="max-w-[22ch] text-[28px] font-semibold leading-[1.06] tracking-[-0.04em] text-[var(--ui-text)] md:text-[36px]">
+                        Figma plugin now imports screens directly from EazyUI
+                    </h3>
+                    <div className="mt-5 space-y-4">
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            EazyUI now has a Figma plugin flow for pulling editable screen payloads into Figma, so you can move generated work into design files with less manual rebuilding.
+                        </p>
+                        <p className="text-[15px] leading-8 text-[var(--ui-text-muted)]">
+                            The plugin also gives you a clearer way to manage payload import, project browsing, and import settings from one place.
+                        </p>
+                    </div>
+                    <div className="mt-8 space-y-3">
+                        {[
+                            'Import editable screen payloads into Figma from EazyUI',
+                            'Browse project screens and pull the ones you want',
+                            'Keep import controls and diagnostics close while you work',
+                        ].map((item) => (
+                            <div
+                                key={item}
+                                className="flex items-center gap-3 rounded-[16px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-[14px] text-[var(--ui-text-muted)]"
+                            >
+                                <span className="h-2 w-2 rounded-full bg-[var(--ui-primary)]" />
+                                {item}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ),
+        },
+        {
             title: 'v1.8.6',
             content: (
                 <div>

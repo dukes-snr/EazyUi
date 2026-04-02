@@ -261,6 +261,24 @@ function linearGradientHandles(angleDeg) {
   return [start, end, widthHandle];
 }
 
+function gradientHandlesToTransform(handles) {
+  if (!Array.isArray(handles) || handles.length < 3) {
+    return [
+      [1, 0, 0],
+      [0, 1, 0],
+    ];
+  }
+
+  const start = handles[0] || { x: 0, y: 0 };
+  const end = handles[1] || { x: 1, y: 0 };
+  const width = handles[2] || { x: 0, y: 1 };
+
+  return [
+    [end.x - start.x, width.x - start.x, start.x],
+    [end.y - start.y, width.y - start.y, start.y],
+  ];
+}
+
 function buildGradientStops(tokens) {
   const colorTokens = tokens.filter((token) => /(rgba?\(|#|color\(srgb)/i.test(token));
   return colorTokens
@@ -288,7 +306,7 @@ function parseLinearGradientPaint(input) {
   return {
     type: "GRADIENT_LINEAR",
     gradientStops: stops,
-    gradientHandlePositions: linearGradientHandles(angle),
+    gradientTransform: gradientHandlesToTransform(linearGradientHandles(angle)),
   };
 }
 
@@ -315,11 +333,11 @@ function parseRadialGradientPaint(input, width = 1, height = 1) {
   return {
     type: "GRADIENT_RADIAL",
     gradientStops: stops,
-    gradientHandlePositions: [
+    gradientTransform: gradientHandlesToTransform([
       center,
       { x: clamp(center.x + 0.5, 0, 1), y: center.y },
       { x: center.x, y: clamp(center.y + 0.5, 0, 1) },
-    ],
+    ]),
   };
 }
 
@@ -521,12 +539,70 @@ async function parseBackgroundImageFills(value, width, height, options = {}) {
   return fills;
 }
 
-async function buildFillPaints(nodeDef) {
+function resolveDesignTokenValue(designSystem, tokenName) {
+  if (!designSystem || !tokenName) return "";
+  const mode = String(designSystem.themeMode || "light").toLowerCase() === "dark" ? "dark" : "light";
+  if (designSystem.tokenModes && designSystem.tokenModes[mode] && designSystem.tokenModes[mode][tokenName]) {
+    return String(designSystem.tokenModes[mode][tokenName] || "").trim();
+  }
+  if (designSystem.tokens && designSystem.tokens[tokenName]) {
+    return String(designSystem.tokens[tokenName] || "").trim();
+  }
+  if (designSystem.savedPalette && designSystem.savedPalette[mode] && designSystem.savedPalette[mode][tokenName]) {
+    return String(designSystem.savedPalette[mode][tokenName] || "").trim();
+  }
+  return "";
+}
+
+function buildBackdropFallbackFill(nodeDef, context) {
+  const visual = nodeDef && nodeDef.visual ? nodeDef.visual : {};
+  const backdropFilter = String(visual.backdropFilter || "").trim().toLowerCase();
+  if (!backdropFilter || backdropFilter === "none") {
+    return null;
+  }
+  if (parseColor(visual.backgroundColor)) {
+    return null;
+  }
+
+  const tagName = String(nodeDef && nodeDef.tagName || "").toLowerCase();
+  const name = String(nodeDef && nodeDef.name || "").toLowerCase();
+  const position = String(nodeDef && nodeDef.layout && nodeDef.layout.position || "").toLowerCase();
+  const designSystem = context && context.designSystem ? context.designSystem : null;
+
+  let tokenName = "surface";
+  let fallbackColor = "#ffffff";
+  let opacity = 0.88;
+
+  if (tagName === "header" || name.startsWith("header.")) {
+    tokenName = "bg";
+    fallbackColor = "#fafafa";
+    opacity = 0.8;
+  } else if (tagName === "nav" || name.startsWith("nav.")) {
+    tokenName = "surface";
+    fallbackColor = "#ffffff";
+    opacity = 0.9;
+  } else if (position === "fixed" || position === "sticky") {
+    tokenName = "surface";
+    fallbackColor = "#ffffff";
+    opacity = 0.88;
+  }
+
+  const parsed = parseColor(resolveDesignTokenValue(designSystem, tokenName) || fallbackColor);
+  if (!parsed) {
+    return null;
+  }
+
+  return solidPaint(parsed.color, clamp((parsed.opacity !== undefined ? parsed.opacity : 1) * opacity, 0, 1));
+}
+
+async function buildFillPaints(nodeDef, context) {
   const visual = nodeDef && nodeDef.visual ? nodeDef.visual : {};
   const bounds = getBounds(nodeDef);
   const fills = [];
   const solid = parseColor(visual.backgroundColor);
   if (solid) fills.push(solid);
+  const backdropFallback = !solid ? buildBackdropFallbackFill(nodeDef, context) : null;
+  if (backdropFallback) fills.push(backdropFallback);
   if (visual.backgroundImage) {
     const backgroundFills = await parseBackgroundImageFills(visual.backgroundImage, bounds.width, bounds.height, {
       backgroundSize: visual.backgroundSize,
@@ -556,6 +632,35 @@ function parseLineHeight(value, fontSize) {
     unit: "PIXELS",
     value: Math.max(1, numeric),
   };
+}
+
+function resolveCssLineHeightPx(value, fontSize) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || raw === "normal") {
+    return Math.max(1, fontSize * 1.2);
+  }
+  if (raw.endsWith("%")) {
+    return Math.max(1, (parseFloat(raw) / 100) * fontSize);
+  }
+  return Math.max(1, parsePx(raw, fontSize * 1.2));
+}
+
+function resolveTextLineHeight(value, fontSize, textMetrics) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw && raw !== "normal") {
+    return parseLineHeight(value, fontSize);
+  }
+
+  const renderedHeight = toNumber(textMetrics && textMetrics.renderedHeight, 0);
+  const lineCount = Math.max(1, toNumber(textMetrics && textMetrics.lineCount, 1));
+  if (renderedHeight > 0) {
+    return {
+      unit: "PIXELS",
+      value: clamp(renderedHeight / lineCount, 1, fontSize * 4),
+    };
+  }
+
+  return parseLineHeight(value, fontSize);
 }
 
 function parseLetterSpacing(value, fontSize) {
@@ -1184,7 +1289,7 @@ function applyNodePosition(node, nodeDef, parentBounds, parentIsAutoLayout) {
   }
 }
 
-async function applyGeometry(node, nodeDef) {
+async function applyGeometry(node, nodeDef, context) {
   const visual = nodeDef.visual || {};
   const border = nodeDef.border || {};
   const topBorder = border.top || {};
@@ -1213,7 +1318,7 @@ async function applyGeometry(node, nodeDef) {
     || visual.outlineStyle
     || ""
   ).toLowerCase();
-  const fills = await buildFillPaints(nodeDef);
+  const fills = await buildFillPaints(nodeDef, context);
 
   if ("fills" in node) {
     node.fills = fills;
@@ -1294,6 +1399,83 @@ function sanitizeLayoutAlignValue(value) {
   return "INHERIT";
 }
 
+function sanitizeLayoutGrowValue(value) {
+  return toNumber(value, 0) > 0 ? 1 : 0;
+}
+
+function approximatelyEqual(a, b, tolerance = 1) {
+  return Math.abs(toNumber(a, 0) - toNumber(b, 0)) <= tolerance;
+}
+
+function isLegacyFieldTextPayload(nodeDef, parentNodeDef) {
+  if (!nodeDef || !parentNodeDef) return false;
+  if (String(nodeDef.nodeType || "") !== "text") return false;
+  if (String(nodeDef.tagName || "") !== "#text") return false;
+
+  const parentTag = String(parentNodeDef.tagName || "").toLowerCase();
+  if (parentTag !== "input" && parentTag !== "textarea") return false;
+
+  const bounds = getBounds(nodeDef);
+  const parentBounds = getBounds(parentNodeDef);
+  const textMetrics = nodeDef.textMetrics || {};
+  const renderedHeight = toNumber(textMetrics.renderedHeight, 0);
+
+  return approximatelyEqual(bounds.x, parentBounds.x)
+    && approximatelyEqual(bounds.y, parentBounds.y)
+    && approximatelyEqual(bounds.width, parentBounds.width)
+    && approximatelyEqual(bounds.height, parentBounds.height)
+    && approximatelyEqual(renderedHeight || bounds.height, parentBounds.height);
+}
+
+function normalizeLegacyFieldTextNode(nodeDef, parentNodeDef) {
+  if (!isLegacyFieldTextPayload(nodeDef, parentNodeDef)) {
+    return nodeDef;
+  }
+
+  const parentBounds = getBounds(parentNodeDef);
+  const parentLayout = parentNodeDef.layout || {};
+  const padding = parentLayout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+  const left = Math.max(0, toNumber(padding.left, 0));
+  const right = Math.max(0, toNumber(padding.right, 0));
+  const top = Math.max(0, toNumber(padding.top, 0));
+  const bottom = Math.max(0, toNumber(padding.bottom, 0));
+  const contentWidth = Math.max(1, parentBounds.width - left - right);
+  const contentHeight = Math.max(1, parentBounds.height - top - bottom);
+  const parentTag = String(parentNodeDef.tagName || "").toLowerCase();
+  const typography = nodeDef.typography || parentNodeDef.typography || {};
+  const fontSize = Math.max(1, parsePx(typography.fontSize, 16));
+  const lineHeight = resolveCssLineHeightPx(typography.lineHeight, fontSize);
+  const singleLineHeight = Math.min(contentHeight, lineHeight);
+
+  const nextBounds = parentTag === "textarea"
+    ? {
+      x: parentBounds.x + left,
+      y: parentBounds.y + top,
+      width: contentWidth,
+      height: contentHeight,
+    }
+    : {
+      x: parentBounds.x + left,
+      y: parentBounds.y + top + Math.max(0, (contentHeight - singleLineHeight) / 2),
+      width: contentWidth,
+      height: singleLineHeight,
+    };
+
+  const textMetrics = nodeDef.textMetrics || {};
+  const nextTextMetrics = Object.assign({}, textMetrics, {
+    renderedWidth: contentWidth,
+    renderedHeight: parentTag === "textarea" ? contentHeight : singleLineHeight,
+    lineCount: parentTag === "textarea"
+      ? Math.max(2, toNumber(textMetrics.lineCount, 2))
+      : 1,
+  });
+
+  return Object.assign({}, nodeDef, {
+    bounds: nextBounds,
+    textMetrics: nextTextMetrics,
+  });
+}
+
 function parseLayoutAlign(value) {
   const normalized = String(value || "").toLowerCase();
   return sanitizeLayoutAlignValue(normalized === "stretch" ? "STRETCH" : "INHERIT");
@@ -1304,7 +1486,7 @@ function applyLayoutChildProps(node, nodeDef, parentIsAutoLayout) {
   const layout = nodeDef.layout || {};
 
   if ("layoutGrow" in node) {
-    const grow = Math.max(0, toNumber(layout.flexGrow, 0));
+    const grow = sanitizeLayoutGrowValue(layout.flexGrow);
     node.layoutGrow = grow;
   }
 
@@ -1468,7 +1650,146 @@ function createMaskWrapper(nodeDef) {
   return wrapper;
 }
 
-async function createImageNode(nodeDef) {
+function trimTrailingWhitespace(value) {
+  return String(value || "").replace(/\s+$/g, "");
+}
+
+function truncateSingleLineTextToFit(textNode, textContent, maxWidth) {
+  const original = String(textContent || "");
+  const tolerance = 0.75;
+  if (!original || textNode.width <= maxWidth + tolerance) {
+    return false;
+  }
+
+  const ellipsis = "…";
+  textNode.characters = ellipsis;
+  if (textNode.width > maxWidth + tolerance) {
+    textNode.characters = "";
+    return true;
+  }
+
+  let low = 0;
+  let high = original.length;
+  let best = ellipsis;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const prefix = trimTrailingWhitespace(original.slice(0, mid));
+    const candidate = mid < original.length ? `${prefix}${ellipsis}` : prefix;
+    textNode.characters = candidate;
+    if (textNode.width <= maxWidth + tolerance) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  textNode.characters = best;
+  return best !== original;
+}
+
+function truncateMultilineTextToFit(textNode, textContent, maxWidth, maxHeight) {
+  const original = String(textContent || "");
+  const tolerance = 0.75;
+  if (!original) {
+    return false;
+  }
+
+  const applyCandidate = (candidate) => {
+    textNode.characters = candidate;
+    try {
+      textNode.textAutoResize = "HEIGHT";
+      textNode.resize(maxWidth, Math.max(1, textNode.height));
+    } catch (_error) {
+      // Keep current metrics when resize fails.
+    }
+  };
+
+  if (textNode.height <= maxHeight + tolerance) {
+    return false;
+  }
+
+  const ellipsis = "…";
+  applyCandidate(ellipsis);
+  if (textNode.height > maxHeight + tolerance) {
+    textNode.characters = "";
+    return true;
+  }
+
+  let low = 0;
+  let high = original.length;
+  let best = ellipsis;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const prefix = trimTrailingWhitespace(original.slice(0, mid));
+    const candidate = mid < original.length ? `${prefix}${ellipsis}` : prefix;
+    applyCandidate(candidate);
+    if (textNode.height <= maxHeight + tolerance) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  applyCandidate(best);
+  return best !== original;
+}
+
+function createTextClipWrapper(nodeDef) {
+  const bounds = getBounds(nodeDef);
+  const wrapper = figma.createFrame();
+  wrapper.name = `${String(nodeDef.name || nodeDef.tagName || "Text")}:clip`;
+  wrapper.resize(bounds.width, bounds.height);
+  wrapper.fills = [];
+  wrapper.strokes = [];
+  wrapper.effects = [];
+  wrapper.layoutMode = "NONE";
+  wrapper.clipsContent = true;
+  return wrapper;
+}
+
+function createOverflowTextWrapper(textNode, nodeDef) {
+  const bounds = getBounds(nodeDef);
+  const typography = nodeDef.typography || {};
+  const layout = nodeDef.layout || {};
+  const whiteSpace = String(typography.whiteSpace || "").toLowerCase();
+  const textOverflow = String(typography.textOverflow || "").toLowerCase();
+  const lineClamp = Math.max(0, toNumber(typography.lineClamp, 0));
+  const overflowX = String(layout.overflowX || "").toLowerCase();
+  const overflowY = String(layout.overflowY || "").toLowerCase();
+  const originalText = String(nodeDef.textContent || "");
+  const isSingleLine = whiteSpace.includes("nowrap");
+  const shouldSingleLineTruncate = isSingleLine && textOverflow === "ellipsis";
+  const shouldMultilineTruncate = lineClamp > 0;
+  const shouldClip = shouldSingleLineTruncate
+    || shouldMultilineTruncate
+    || overflowX === "hidden"
+    || overflowY === "hidden";
+
+  if (!shouldClip) {
+    return null;
+  }
+
+  if (shouldSingleLineTruncate) {
+    truncateSingleLineTextToFit(textNode, originalText, bounds.width);
+  } else if (shouldMultilineTruncate) {
+    truncateMultilineTextToFit(textNode, originalText, bounds.width, bounds.height);
+  }
+
+  const tolerance = 0.75;
+  const overflowsWidth = textNode.width > bounds.width + tolerance;
+  const overflowsHeight = textNode.height > bounds.height + tolerance;
+  if (!overflowsWidth && !overflowsHeight) {
+    return null;
+  }
+
+  return createTextClipWrapper(nodeDef);
+}
+
+async function createImageNode(nodeDef, context) {
   if (nodeDef.image && nodeDef.image.kind === "icon-raster" && nodeDef.textContent) {
     const iconSvg = await fetchMaterialIconSvg(nodeDef);
     if (iconSvg) {
@@ -1479,7 +1800,7 @@ async function createImageNode(nodeDef) {
   }
 
   const rect = figma.createRectangle();
-  await applyGeometry(rect, nodeDef);
+  await applyGeometry(rect, nodeDef, context);
   const bounds = getBounds(nodeDef);
   rect.resize(bounds.width, bounds.height);
 
@@ -1553,7 +1874,7 @@ async function createTextNode(nodeDef) {
   textNode.fontName = fontName;
   textNode.characters = String(nodeDef.textContent || "");
   textNode.fontSize = fontSize;
-  textNode.lineHeight = parseLineHeight(typography.lineHeight, fontSize);
+  textNode.lineHeight = resolveTextLineHeight(typography.lineHeight, fontSize, textMetrics);
   textNode.letterSpacing = parseLetterSpacing(typography.letterSpacing, fontSize);
   textNode.textAlignHorizontal = parseTextAlign(typography.textAlign);
   textNode.textCase = parseTextCase(typography.textTransform);
@@ -1572,70 +1893,80 @@ async function createTextNode(nodeDef) {
   return textNode;
 }
 
-async function createFrameNode(nodeDef) {
+async function createFrameNode(nodeDef, context) {
   const frame = figma.createFrame();
   frame.name = String(nodeDef.name || nodeDef.tagName || "Frame");
   const bounds = getBounds(nodeDef);
   frame.resize(bounds.width, bounds.height);
   frame.clipsContent = false;
-  await applyGeometry(frame, nodeDef);
+  await applyGeometry(frame, nodeDef, context);
   applyAutoLayout(frame, nodeDef);
   return frame;
 }
 
-async function instantiateNode(nodeDef, parent, parentBounds, parentIsAutoLayout, context) {
-  const nodeType = String(nodeDef.nodeType || "frame");
+async function instantiateNode(nodeDef, parent, parentBounds, parentIsAutoLayout, context, parentNodeDef = null) {
+  const normalizedNodeDef = normalizeLegacyFieldTextNode(nodeDef, parentNodeDef);
+  const nodeType = String(normalizedNodeDef.nodeType || "frame");
   let node;
 
   if (nodeType === "text") {
-    node = await createTextNode(nodeDef);
+    node = await createTextNode(normalizedNodeDef);
   } else if (nodeType === "image") {
-    node = await createImageNode(nodeDef);
+    node = await createImageNode(normalizedNodeDef, context);
   } else if (nodeType === "svg") {
-    node = await createSvgNode(nodeDef);
+    node = await createSvgNode(normalizedNodeDef);
   } else {
-    node = await createFrameNode(nodeDef);
+    node = await createFrameNode(normalizedNodeDef, context);
   }
 
-  node.name = String(nodeDef.name || nodeDef.tagName || nodeType);
+  node.name = String(normalizedNodeDef.name || normalizedNodeDef.tagName || nodeType);
   let positionedNode = node;
   let returnedNode = node;
+  const overflowTextWrapper = nodeType === "text" ? createOverflowTextWrapper(node, normalizedNodeDef) : null;
 
-  if (needsMaskWrapper(nodeDef)) {
-    const maskNode = await createMaskNode(nodeDef);
+  if (needsMaskWrapper(normalizedNodeDef)) {
+    const maskNode = await createMaskNode(normalizedNodeDef);
     if (maskNode) {
-      const wrapper = createMaskWrapper(nodeDef);
+      const wrapper = createMaskWrapper(normalizedNodeDef);
       parent.appendChild(wrapper);
-      applyNodePosition(wrapper, nodeDef, parentBounds, parentIsAutoLayout);
-      applyLayoutChildProps(wrapper, nodeDef, parentIsAutoLayout);
+      applyNodePosition(wrapper, normalizedNodeDef, parentBounds, parentIsAutoLayout);
+      applyLayoutChildProps(wrapper, normalizedNodeDef, parentIsAutoLayout);
       wrapper.appendChild(maskNode);
       if ("x" in maskNode) maskNode.x = 0;
       if ("y" in maskNode) maskNode.y = 0;
       returnedNode = wrapper;
       wrapper.appendChild(node);
-      applyNodePosition(node, nodeDef, getBounds(nodeDef), false);
+      applyNodePosition(node, normalizedNodeDef, getBounds(normalizedNodeDef), false);
       positionedNode = node;
     } else {
       parent.appendChild(node);
-      applyNodePosition(node, nodeDef, parentBounds, parentIsAutoLayout);
-      applyLayoutChildProps(node, nodeDef, parentIsAutoLayout);
+      applyNodePosition(node, normalizedNodeDef, parentBounds, parentIsAutoLayout);
+      applyLayoutChildProps(node, normalizedNodeDef, parentIsAutoLayout);
     }
+  } else if (overflowTextWrapper) {
+    parent.appendChild(overflowTextWrapper);
+    applyNodePosition(overflowTextWrapper, normalizedNodeDef, parentBounds, parentIsAutoLayout);
+    applyLayoutChildProps(overflowTextWrapper, normalizedNodeDef, parentIsAutoLayout);
+    overflowTextWrapper.appendChild(node);
+    applyNodePosition(node, normalizedNodeDef, getBounds(normalizedNodeDef), false);
+    returnedNode = overflowTextWrapper;
+    positionedNode = node;
   } else {
     parent.appendChild(node);
-    applyNodePosition(node, nodeDef, parentBounds, parentIsAutoLayout);
-    applyLayoutChildProps(node, nodeDef, parentIsAutoLayout);
+    applyNodePosition(node, normalizedNodeDef, parentBounds, parentIsAutoLayout);
+    applyLayoutChildProps(node, normalizedNodeDef, parentIsAutoLayout);
   }
 
   context.nodeRecords.push({
-    nodeDef,
+    nodeDef: normalizedNodeDef,
     node: returnedNode,
   });
 
-  if ("children" in node && Array.isArray(nodeDef.children) && nodeDef.children.length > 0) {
+  if ("children" in node && Array.isArray(normalizedNodeDef.children) && normalizedNodeDef.children.length > 0) {
     const isAutoLayout = node.type === "FRAME" && node.layoutMode !== "NONE";
-    const nodeBounds = getBounds(nodeDef);
-    for (const childDef of nodeDef.children) {
-      await instantiateNode(childDef, positionedNode, nodeBounds, isAutoLayout, context);
+    const nodeBounds = getBounds(normalizedNodeDef);
+    for (const childDef of normalizedNodeDef.children) {
+      await instantiateNode(childDef, positionedNode, nodeBounds, isAutoLayout, context, normalizedNodeDef);
     }
   }
 
@@ -1782,7 +2113,7 @@ function applyPlacementSnapshot(node, snapshot) {
     node.layoutPositioning = snapshot.layoutPositioning;
   }
   if ("layoutGrow" in node && snapshot.layoutGrow !== null) {
-    node.layoutGrow = snapshot.layoutGrow;
+    node.layoutGrow = sanitizeLayoutGrowValue(snapshot.layoutGrow);
   }
   if ("layoutAlign" in node && snapshot.layoutAlign) {
     node.layoutAlign = sanitizeLayoutAlignValue(snapshot.layoutAlign);
@@ -1981,6 +2312,7 @@ function promoteRepeatedNodesToComponents(context) {
     if (!records || records.length < 2) continue;
     const masterRecord = records[0];
     if (!masterRecord.node || masterRecord.node.removed || !masterRecord.node.parent) continue;
+    const masterNodeName = sanitizeImportName(masterRecord.node.name, "Component");
 
     let component;
     try {
@@ -1989,7 +2321,7 @@ function promoteRepeatedNodesToComponents(context) {
       continue;
     }
 
-    component.name = `${IMPORT_ASSET_PREFIX}/Component/${sanitizeImportName(masterRecord.node.name, "Component")}`;
+    component.name = `${IMPORT_ASSET_PREFIX}/Component/${masterNodeName}`;
     const masterSnapshot = snapshotNodePlacement(component);
     const masterInstance = component.createInstance();
     applyPlacementSnapshot(masterInstance, masterSnapshot);
@@ -2080,6 +2412,7 @@ async function importPayload(payload, importSettings) {
   const settings = normalizeImportSettings(importSettings);
   const designSystemSummary = await createDesignSystemAssets(payload, settings);
   const context = {
+    designSystem: payload && payload.designSystem ? payload.designSystem : null,
     settings,
     nodeRecords: [],
   };
@@ -2094,7 +2427,7 @@ async function importPayload(payload, importSettings) {
     screenFrame.fills = [];
     screenFrame.clipsContent = true;
     screenFrame.layoutMode = "NONE";
-    await applyGeometry(screenFrame, rootDef);
+    await applyGeometry(screenFrame, rootDef, context);
     const contentParent = await createRootContentContainer(screenFrame, rootDef);
 
     for (const child of getChildren(rootDef)) {
@@ -2168,14 +2501,23 @@ figma.ui.onmessage = async (message) => {
     }
 
     if (message.type === "open-auth-url") {
-      const url = typeof message.url === "string" ? message.url.trim() : "";
-      if (!url) {
-        throw new Error("Missing auth URL.");
+        const url = typeof message.url === "string" ? message.url.trim() : "";
+        if (!url) {
+          throw new Error("Missing auth URL.");
+        }
+        figma.openExternal(url);
+        figma.notify("Opened EazyUI sign-in in your browser.");
+        return;
       }
-      figma.openExternal(url);
-      figma.notify("Opened EazyUI sign-in in your browser.");
-      return;
-    }
+
+      if (message.type === "open-external-url") {
+        const url = typeof message.url === "string" ? message.url.trim() : "";
+        if (!url) {
+          throw new Error("Missing external URL.");
+        }
+        figma.openExternal(url);
+        return;
+      }
 
     if (message.type === "load-auth-session") {
       const session = await figma.clientStorage.getAsync(AUTH_SESSION_STORAGE_KEY);

@@ -29,6 +29,7 @@ import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { AssetsPanel } from './AssetsPanel';
 import { buildAssetReference } from '../../lib/firestoreData';
+import { copyDesignSystemBoardToFigmaClipboard } from '../../utils/exportScreens';
 import appLogo from '../../assets/Ui-logo.png';
 
 const FEEDBACK_BUCKETS = {
@@ -2438,6 +2439,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [chatPanelView, setChatPanelView] = useState<'chat' | 'design-system' | 'assets'>('chat');
     const [isDesignSystemEditing, setIsDesignSystemEditing] = useState(false);
     const [designSystemDraft, setDesignSystemDraft] = useState<ProjectDesignSystem | null>(null);
+    const [designSystemExportBusy, setDesignSystemExportBusy] = useState(false);
     const [activeTokenEditor, setActiveTokenEditor] = useState<DesignTokenKey | null>(null);
     const [designSystemInspectorTab, setDesignSystemInspectorTab] = useState<'colors' | 'fonts' | 'corners'>('colors');
     const [openPaletteDropdown, setOpenPaletteDropdown] = useState(false);
@@ -2905,6 +2907,34 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
         notifySuccess('Design system updated', 'Future screens will follow the updated design system.');
     };
+
+    const exportDesignSystemBoard = useCallback(async () => {
+        const currentDesignSystem = designSystemDraft
+            ? normalizeProjectDesignSystemModes(designSystemDraft)
+            : (useDesignStore.getState().spec?.designSystem
+                ? normalizeProjectDesignSystemModes(useDesignStore.getState().spec!.designSystem!)
+                : null);
+        if (!currentDesignSystem) {
+            notifyError('No design system', 'Generate or load a design system before exporting.');
+            return;
+        }
+
+        try {
+            setDesignSystemExportBusy(true);
+            await copyDesignSystemBoardToFigmaClipboard(currentDesignSystem);
+            notifySuccess(
+                'Figma board copied',
+                'Copied a design-system board payload. Paste or import it with the EazyUI Figma plugin.'
+            );
+        } catch (error) {
+            notifyError(
+                'Export failed',
+                (error as Error)?.message || 'Could not prepare the design-system Figma payload.'
+            );
+        } finally {
+            setDesignSystemExportBusy(false);
+        }
+    }, [designSystemDraft, notifyError, notifySuccess]);
 
     const updateDesignSystemDraft = (updater: (current: ProjectDesignSystem) => ProjectDesignSystem) => {
         setDesignSystemDraft((current) => {
@@ -7843,29 +7873,47 @@ Return a polished, consistent screen without introducing a new navigation patter
                     </>
                     ) : chatPanelView === 'design-system' ? (
                         <div className="mx-4 mb-6 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3.5">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-between gap-3">
                                 <button
                                     type="button"
-                                    onClick={cancelDesignSystemEdit}
-                                    disabled={!hasDesignSystemDraftChanges}
-                                    className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges
-                                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]'
+                                    onClick={() => void exportDesignSystemBoard()}
+                                    disabled={!designSystemForPanel || designSystemExportBusy}
+                                    className={`min-w-[92px] px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${designSystemForPanel && !designSystemExportBusy
+                                        ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-2))] text-[var(--ui-primary)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-surface-2))]'
                                         : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
                                         }`}
                                 >
-                                    Cancel
+                                    {designSystemExportBusy ? (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Loader2 size={12} className="animate-spin" />
+                                            Exporting
+                                        </span>
+                                    ) : 'Export'}
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={saveDesignSystemEdit}
-                                    disabled={!hasDesignSystemDraftChanges}
-                                    className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges
-                                        ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
-                                        : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
-                                        }`}
-                                >
-                                    Save & Apply
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={cancelDesignSystemEdit}
+                                        disabled={!hasDesignSystemDraftChanges || designSystemExportBusy}
+                                        className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges && !designSystemExportBusy
+                                            ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)]'
+                                            : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
+                                            }`}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={saveDesignSystemEdit}
+                                        disabled={!hasDesignSystemDraftChanges || designSystemExportBusy}
+                                        className={`px-3 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${hasDesignSystemDraftChanges && !designSystemExportBusy
+                                            ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
+                                            : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)] ring-[var(--ui-border)] cursor-not-allowed'
+                                            }`}
+                                    >
+                                        Save & Apply
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     ) : null}

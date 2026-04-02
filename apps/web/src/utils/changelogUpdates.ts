@@ -4,6 +4,8 @@ const CHANGELOG_STORAGE_KEY = 'eazyui:changelog-last-seen-id';
 const CHANGELOG_SEEN_EVENT = 'eazyui:changelog-seen';
 
 export const CHANGELOG_ENTRY_IDS = [
+    'v1.9.1',
+    'v1.9.0',
     'v1.8.6',
     'v1.8.0',
     'v1.7.4',
