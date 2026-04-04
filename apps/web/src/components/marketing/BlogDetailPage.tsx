@@ -1,4 +1,4 @@
-import { useMemo, useRef, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
 import { getBlogPostBySlug, getRelatedBlogPosts } from '../../content/blogPosts';
@@ -22,6 +22,10 @@ export function BlogDetailPage({ slug, onNavigate, onOpenApp }: BlogDetailPagePr
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const post = getBlogPostBySlug(slug);
     const relatedPosts = useMemo(() => getRelatedBlogPosts(slug, 3), [slug]);
+
+    useEffect(() => {
+        scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    }, [slug]);
 
     if (!post) {
         return (

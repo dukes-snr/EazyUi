@@ -305,7 +305,7 @@ const IconButton = ({ icon, active, onClick, title }: { icon: React.ReactNode, a
 );
 
 const DropdownMenu = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-    <div className={`absolute z-[100] rounded-2xl border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-popover))] p-1.5 shadow-2xl animate-in fade-in zoom-in duration-200 ${className}`}>
+    <div className={`absolute z-[100] rounded-2xl border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_4%,var(--ui-popover))] p-1.5 shadow-[0_10px_24px_rgba(0,0,0,0.14)] animate-in fade-in zoom-in duration-200 ${className}`}>
         {children}
     </div>
 );

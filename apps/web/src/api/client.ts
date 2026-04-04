@@ -1324,7 +1324,7 @@ class ApiClient {
         return this.request<BillingCatalogResponse>('/billing/catalog', {
             method: 'GET',
             signal,
-        });
+        }, false);
     }
 
     async getBillingLedger(limit = 50, signal?: AbortSignal): Promise<{ items: BillingLedgerItem[] }> {

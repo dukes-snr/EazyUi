@@ -27,6 +27,7 @@ import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { CanvasProfileMenu } from './CanvasProfileMenu';
 import { dispatchClearSelection, dispatchDeleteSelected } from '../../utils/editMessaging';
+import { apiClient } from '../../api/client';
 
 // Define custom node types
 const nodeTypes = {
@@ -71,7 +72,7 @@ function createCopiedScreenName(sourceName: string, usedNames: Set<string>): str
 // Inner component to use React Flow hooks if needed
 function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit-workspace' }) {
     const { spec, addScreens, removeScreen } = useDesignStore();
-    const { projectId, isHydrating } = useProjectStore();
+    const { projectId, isHydrating, isSaving, markSaved, setSaving } = useProjectStore();
     const {
         doc,
         selectNodes,
@@ -88,8 +89,8 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         setActiveTool,
     } = useCanvasStore();
     const { isEditMode, screenId: editScreenId, exitEdit, selected: editSelected } = useEditStore();
-    const { isGenerating } = useChatStore();
-    const { pushToast, requestConfirmation } = useUiStore();
+    const { isGenerating, messages } = useChatStore();
+    const { pushToast, removeToast, requestConfirmation } = useUiStore();
     const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
     const viewport = useViewport();
@@ -98,6 +99,42 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const editWorkspaceFocusedScreenRef = useRef<string | null>(null);
     const copiedScreensRef = useRef<CopiedScreenPayload[]>([]);
     const pasteCountRef = useRef(0);
+
+    const handleManualSave = useCallback(async () => {
+        if (!spec || isHydrating || isSaving) return;
+
+        const loadingToastId = pushToast({
+            kind: 'loading',
+            title: 'Saving canvas',
+            message: 'Persisting screens, chat, and canvas state...',
+            durationMs: 0,
+        });
+
+        try {
+            setSaving(true);
+            const saved = await apiClient.save({
+                projectId: projectId || undefined,
+                designSpec: spec as any,
+                canvasDoc: doc,
+                chatState: { messages },
+            });
+            markSaved(saved.projectId, saved.savedAt);
+            pushToast({
+                kind: 'success',
+                title: 'Project saved',
+                message: `Project ${saved.projectId.slice(0, 8)} updated.`,
+            });
+        } catch (error) {
+            pushToast({
+                kind: 'error',
+                title: 'Save failed',
+                message: (error as Error).message || 'Unable to save project.',
+            });
+        } finally {
+            removeToast(loadingToastId);
+            setSaving(false);
+        }
+    }, [doc, isHydrating, isSaving, markSaved, messages, projectId, pushToast, removeToast, setSaving, spec]);
 
     const getNodeSize = useCallback((node: Node) => {
         const width = node.measured?.width ?? (node.data?.width as number) ?? 402;
@@ -129,6 +166,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
             sidePadding?: number;
             topPadding?: number;
             bottomPadding?: number;
+            maxZoom?: number;
         },
         verticalAlign: 'top' | 'center' = 'top'
     ) => {
@@ -156,11 +194,12 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
 
         const availableWidth = Math.max(120, viewport.width - sidePadding * 2);
         const availableHeight = Math.max(120, viewport.height - topPadding - bottomPadding);
+        const maxZoom = paddingOverrides?.maxZoom ?? 1.1;
 
         // Fit by both width/height so multi-screen focus reliably keeps all frames visible.
         const zoomByWidth = availableWidth / boundsWidth;
         const zoomByHeight = availableHeight / boundsHeight;
-        const zoom = Math.max(0.05, Math.min(1.1, Math.min(zoomByWidth, zoomByHeight)));
+        const zoom = Math.max(0.05, Math.min(maxZoom, Math.min(zoomByWidth, zoomByHeight)));
 
         const frameCenterX = sidePadding + availableWidth / 2;
         const contentCenterX = minX + boundsWidth / 2;
@@ -313,11 +352,11 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         const frame = window.requestAnimationFrame(() => {
             if (cancelled) return;
             // First fit pass immediately after nodes are mounted.
-            focusNodesTopAligned(targetNodes, 900, true, undefined, 'center');
+            focusNodesTopAligned(targetNodes, 900, true, { maxZoom: 0.82 }, 'center');
             // Second pass settles final dimensions for a stable centered view.
             delayedPass = window.setTimeout(() => {
                 if (cancelled) return;
-                focusNodesTopAligned(targetNodes, 520, true, undefined, 'center');
+                focusNodesTopAligned(targetNodes, 520, true, { maxZoom: 0.82 }, 'center');
                 autoFocusedProjectIdRef.current = projectId;
             }, 220);
         });
@@ -683,7 +722,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 return;
             }
 
-            if (primary && key === 'f') {
+            if (!primary && key === 'f') {
                 const selectedIds = Array.from(new Set(useCanvasStore.getState().doc.selection.selectedNodeIds || []));
                 if (selectedIds.length > 0) {
                     if (selectedIds.length === 1) {
@@ -693,6 +732,12 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                     }
                     event.preventDefault();
                 }
+                return;
+            }
+
+            if (primary && key === 's') {
+                event.preventDefault();
+                void handleManualSave();
                 return;
             }
 
@@ -803,6 +848,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         redoSnapshot,
         selectNodes,
         setActiveTool,
+        handleManualSave,
         undoSnapshot,
         zoomIn,
         zoomOut,
@@ -832,7 +878,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         <div className="canvas-workspace relative h-full w-full">
             {!isEditWorkspace && (
                 <div className="absolute left-4 top-4 z-50">
-                    <div className="ml-[50px] inline-flex items-center gap-1 px-3 py-2 text-[12px] text-[var(--ui-text-muted)]  backdrop-blur-md">
+                    <div className="inline-flex items-center gap-1 px-3 py-2 text-[12px] text-[var(--ui-text-muted)] backdrop-blur-md">
                         <button
                             type="button"
                             onClick={() => navigateTo('/app')}

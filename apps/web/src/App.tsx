@@ -2,7 +2,7 @@
 // Main App Component
 // ============================================================================
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { ChatPanel } from './components/chat/ChatPanel';
 import { CanvasWorkspace } from './components/canvas/CanvasWorkspace';
@@ -11,6 +11,7 @@ import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { LandingPage } from './components/landing/LandingPage';
 import { BlogDetailPage } from './components/marketing/BlogDetailPage';
 import { BlogPage } from './components/marketing/BlogPage';
+import { FloatingMarketingNotifications } from './components/marketing/FloatingMarketingNotifications';
 import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
@@ -733,6 +734,13 @@ function App() {
         return new URLSearchParams(window.location.search).get('prompt')?.trim() || '';
     }, [isCanvasRoute]);
 
+    const renderPublicPage = (page: ReactNode) => (
+        <>
+            {page}
+            <FloatingMarketingNotifications onNavigate={(path) => navigate(path)} />
+        </>
+    );
+
     useEffect(() => {
         if (!isCanvasRoute) return;
         const staged = window.sessionStorage.getItem(LANDING_DRAFT_KEY);
@@ -1049,7 +1057,7 @@ function App() {
     }, [pushToast]);
 
     if (route.kind === 'landing') {
-        return (
+        return renderPublicPage(
             <LandingPage
                 userProfile={authUser ? {
                     name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
@@ -1100,24 +1108,24 @@ function App() {
             return renderBrandedLoader();
         }
         if (route.kind === 'templates') {
-            return <TemplatesPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<TemplatesPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
         if (route.kind === 'blog') {
-            return <BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
         if (route.kind === 'blog-detail') {
-            return <BlogDetailPage slug={route.slug} onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<BlogDetailPage slug={route.slug} onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
         if (route.kind === 'pricing') {
-            return <PricingPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<PricingPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
         if (route.kind === 'changelog') {
-            return <ChangelogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<ChangelogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
         if (route.kind === 'contact') {
-            return <ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+            return renderPublicPage(<ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
         }
-        return <BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />;
+        return renderPublicPage(<BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
     }
 
     if (route.kind === 'app-project-canvas' && isMobileCanvasViewport) {
@@ -1154,11 +1162,11 @@ function App() {
 
     return (
         <div className={`app-layout ${isEditMode ? 'edit-mode' : ''} ${route.kind === 'app-project-settings' ? 'project-settings-active' : ''}`}>
-            <ChatPanel initialRequest={initialRequest} />
             <div className="app-canvas-shell">
                 {!isEditMode && <CanvasWorkspace mode="default" />}
                 {!isEditMode && showInspector && <InspectorPanel />}
             </div>
+            <ChatPanel initialRequest={initialRequest} />
             {route.kind !== 'app-project-settings' && <EditWorkspaceOverlay />}
             {route.kind === 'app-project-settings' && (
                 <div className="project-settings-overlay">

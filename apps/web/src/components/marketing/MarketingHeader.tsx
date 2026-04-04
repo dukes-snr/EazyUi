@@ -1,6 +1,6 @@
 import { useMotionValueEvent, useScroll } from 'framer-motion';
 import { ArrowUp, Menu, Moon, Sun, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { User } from 'firebase/auth';
 import appLogo from '../../assets/Ui-logo.png';
@@ -24,11 +24,58 @@ const NAV_ITEMS = [
     { label: "What's New", path: '/changelog' },
 ] as const;
 
-const ANNOUNCEMENT_BAR = {
-    label: 'Announcement',
-    text: 'New: save images to your project library and reuse them across prompts and edits.',
-    path: '/changelog',
+type AnnouncementBarItem = {
+    id: string;
+    label: string;
+    text: string;
+    path: string;
+    showUnseenCount?: boolean;
+    bgHue: number;
+    bgSaturation?: string;
+    bgLightness?: string;
+    textColor?: string;
+    chipBackground?: string;
+    chipBorder?: string;
+    chipTextColor?: string;
+    countBackground?: string;
+    countTextColor?: string;
+    iconSrc?: string;
+    iconAlt?: string;
 };
+
+const ANNOUNCEMENT_BARS: AnnouncementBarItem[] = [
+    {
+        id: 'figma-design-system-export',
+        label: 'Figma',
+        text: 'New: export the active design system into a Figma-ready board with colors, typography, spacing, motion, and system notes intact.',
+        path: '/changelog',
+        showUnseenCount: true,
+        bgHue: 214,
+        bgSaturation: '78%',
+        bgLightness: '48%',
+        textColor: '#FFFFFF',
+        chipBackground: 'rgba(255,255,255,0.14)',
+        chipBorder: 'rgba(255,255,255,0.24)',
+        chipTextColor: '#FFFFFF',
+        countBackground: '#FFFFFF',
+        countTextColor: 'hsl(214 78% 36%)',
+    },
+    {
+        id: 'figma-plugin-import',
+        label: 'Plugin',
+        text: 'Figma plugin: pull editable EazyUI screens into Figma, browse project screens first, and import with less manual rebuilding.',
+        path: '/changelog',
+        bgHue: 22,
+        bgSaturation: '82%',
+        bgLightness: '42%',
+        textColor: '#FFF7ED',
+        chipBackground: 'rgba(255,247,237,0.14)',
+        chipBorder: 'rgba(255,247,237,0.26)',
+        chipTextColor: '#FFF7ED',
+        countBackground: '#FFF7ED',
+        countTextColor: 'hsl(22 82% 30%)',
+    },
+];
 
 export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, tone = 'default', topStageDark = false }: MarketingHeaderProps) {
     const theme = useUiStore((state) => state.theme);
@@ -39,6 +86,8 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
     const [verificationBusy, setVerificationBusy] = useState(false);
     const [verificationSent, setVerificationSent] = useState(false);
     const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+    const [activeAnnouncementIndex, setActiveAnnouncementIndex] = useState(0);
+    const [announcementPaused, setAnnouncementPaused] = useState(false);
     const unseenChangelogCount = useChangelogUnseenCount();
     const { scrollY } = useScroll({ container: scrollContainerRef as RefObject<HTMLElement> | undefined });
 
@@ -82,6 +131,39 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
         || authUser?.providerData.find((provider) => Boolean(provider?.photoURL))?.photoURL
         || `https://ui-avatars.com/api/?name=${encodeURIComponent(authDisplayName)}&background=111827&color=ffffff&size=128&rounded=true`
     ), [authDisplayName, authUser]);
+    const announcementBars = useMemo(() => (
+        ANNOUNCEMENT_BARS.filter((item) => item.text.trim().length > 0)
+    ), []);
+    const activeAnnouncement = announcementBars[activeAnnouncementIndex] || null;
+    const activeAnnouncementStyle = useMemo(() => {
+        if (!activeAnnouncement) return undefined;
+        return {
+            ['--announcement-hue' as string]: activeAnnouncement.bgHue,
+            ['--announcement-saturation' as string]: activeAnnouncement.bgSaturation || '78%',
+            ['--announcement-lightness' as string]: activeAnnouncement.bgLightness || '46%',
+            ['--announcement-text' as string]: activeAnnouncement.textColor || '#FFFFFF',
+            ['--announcement-chip-bg' as string]: activeAnnouncement.chipBackground || 'rgba(255,255,255,0.16)',
+            ['--announcement-chip-border' as string]: activeAnnouncement.chipBorder || 'rgba(255,255,255,0.3)',
+            ['--announcement-chip-text' as string]: activeAnnouncement.chipTextColor || activeAnnouncement.textColor || '#FFFFFF',
+            ['--announcement-count-bg' as string]: activeAnnouncement.countBackground || '#FFFFFF',
+            ['--announcement-count-text' as string]: activeAnnouncement.countTextColor || `hsl(${activeAnnouncement.bgHue} 78% 34%)`,
+        } as CSSProperties;
+    }, [activeAnnouncement]);
+
+    useEffect(() => {
+        setActiveAnnouncementIndex((current) => {
+            if (announcementBars.length === 0) return 0;
+            return Math.min(current, announcementBars.length - 1);
+        });
+    }, [announcementBars.length]);
+
+    useEffect(() => {
+        if (announcementBars.length <= 1 || announcementPaused) return;
+        const timer = window.setInterval(() => {
+            setActiveAnnouncementIndex((current) => (current + 1) % announcementBars.length);
+        }, 5600);
+        return () => window.clearInterval(timer);
+    }, [announcementBars.length, announcementPaused]);
     const mobileNavOverlay = isMobileNavOpen && typeof document !== 'undefined'
         ? createPortal(
             <div className="fixed inset-0 z-[9999] bg-[var(--ui-surface-1)] lg:hidden">
@@ -224,23 +306,53 @@ export function MarketingHeader({ onNavigate, onOpenApp, scrollContainerRef, ton
     return (
         <>
             <header className={`landing-nav-shell ${isNavScrolled ? 'is-scrolled' : ''} ${tone === 'surface' ? 'is-surface' : ''} ${topStageDark ? 'landing-top-stage-dark' : ''}`}>
-                <button
-                    type="button"
-                    onClick={() => onNavigate(ANNOUNCEMENT_BAR.path)}
-                    className="marketing-announcement-bar flex min-h-12 w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 px-3 py-2 text-center sm:h-10 sm:min-h-0 sm:flex-nowrap sm:gap-2 sm:px-6 sm:py-0"
-                >
-                    <span className="rounded-full border border-white/30 bg-white/16 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
-                        {ANNOUNCEMENT_BAR.label}
-                    </span>
-                    <span className="max-w-[28rem] text-[11px] leading-5 text-white sm:max-w-none sm:text-[13px]">
-                        {ANNOUNCEMENT_BAR.text}
-                    </span>
-                    {unseenChangelogCount > 0 && (
-                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#C85A14]">
-                            {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
-                        </span>
-                    )}
-                </button>
+                {activeAnnouncement && (
+                    <div
+                        className="marketing-announcement-stack"
+                        onMouseEnter={() => setAnnouncementPaused(true)}
+                        onMouseLeave={() => setAnnouncementPaused(false)}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => onNavigate(activeAnnouncement.path)}
+                            className="marketing-announcement-bar flex min-h-12 w-full items-center justify-center px-3 py-2 text-center sm:h-10 sm:min-h-0 sm:px-6 sm:py-0"
+                            style={activeAnnouncementStyle}
+                        >
+                            <div key={activeAnnouncement.id} className="marketing-announcement-bar__content">
+                                {activeAnnouncement.iconSrc && (
+                                    <span className="marketing-announcement-bar__icon-shell" aria-hidden="true">
+                                        <img
+                                            src={activeAnnouncement.iconSrc}
+                                            alt={activeAnnouncement.iconAlt || ''}
+                                            className="marketing-announcement-bar__icon"
+                                        />
+                                    </span>
+                                )}
+                                <span className="marketing-announcement-bar__chip">
+                                    {activeAnnouncement.label}
+                                </span>
+                                <span className="marketing-announcement-bar__text">
+                                    {activeAnnouncement.text}
+                                </span>
+                                {activeAnnouncement.showUnseenCount && unseenChangelogCount > 0 && (
+                                    <span className="marketing-announcement-bar__count">
+                                        {unseenChangelogCount > 9 ? '9+' : unseenChangelogCount}
+                                    </span>
+                                )}
+                                {announcementBars.length > 1 && (
+                                    <span className="marketing-announcement-bar__dots" aria-hidden="true">
+                                        {announcementBars.map((item, index) => (
+                                            <span
+                                                key={item.id}
+                                                className={`marketing-announcement-bar__dot ${index === activeAnnouncementIndex ? 'is-active' : ''}`}
+                                            />
+                                        ))}
+                                    </span>
+                                )}
+                            </div>
+                        </button>
+                    </div>
+                )}
                 <div className="landing-nav-frame">
                     <div className="mx-auto flex h-14 max-w-[1160px] items-center justify-between px-4 sm:px-6">
                     <button

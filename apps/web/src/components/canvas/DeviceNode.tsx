@@ -1301,7 +1301,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const removeBoard = useCanvasStore((state) => state.removeBoard);
     const setFocusNodeId = useCanvasStore((state) => state.setFocusNodeId);
     const setFocusNodeIds = useCanvasStore((state) => state.setFocusNodeIds);
-    const hoverNode = useCanvasStore((state) => state.hoverNode);
+    const setEditorPrefs = useCanvasStore((state) => state.setEditorPrefs);
     const selectedNodeIds = useCanvasStore((state) => state.doc.selection.selectedNodeIds);
     const deviceDisplayMode = useCanvasStore((state) => ((state.doc.editorPrefs as EditorPrefs & { deviceDisplayMode?: 'framed' | 'clean' }).deviceDisplayMode || 'framed'));
     const isEditMode = useEditStore((state) => state.isEditMode);
@@ -1335,23 +1335,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const [contentHeight, setContentHeight] = useState(initialHeight);
     const [isGeneratingImages, setIsGeneratingImages] = useState(false);
     const persistedHeightRef = useRef(initialHeight);
-    const hoverExitTimeoutRef = useRef<number | null>(null);
-    const [isNodeHovered, setIsNodeHovered] = useState(false);
-    const [isToolbarHovered, setIsToolbarHovered] = useState(false);
 
     useEffect(() => {
         persistedHeightRef.current = initialHeight;
         setContentHeight(initialHeight);
     }, [data.screenId, initialHeight]);
-
-    useEffect(() => {
-        return () => {
-            if (hoverExitTimeoutRef.current !== null) {
-                window.clearTimeout(hoverExitTimeoutRef.current);
-            }
-            hoverNode(null);
-        };
-    }, [hoverNode]);
 
     const handleAction = useCallback(async (action: string, payload?: any) => {
         if (!data.screenId) return;
@@ -1365,6 +1353,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 break;
             case 'mobile':
                 updateScreen(data.screenId as string, data.html as string, undefined, 402, 874);
+                break;
+            case 'display-mode':
+                if (payload?.mode === 'framed' || payload?.mode === 'clean') {
+                    setEditorPrefs({ deviceDisplayMode: payload.mode });
+                }
                 break;
             case 'submit-edit':
                 const editPayload = typeof payload === 'string'
@@ -1544,48 +1537,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const isStreaming = data.status === 'streaming';
     const isEditingScreen = isEditMode && editScreenId === data.screenId;
     const canGenerateScreenImages = !isStreaming && data.status === 'complete' && hasPlaceholderImages(htmlString);
-    const isToolbarVisible = !isEditMode && (
-        (selected && selectedCount === 1)
-        || isNodeHovered
-        || isToolbarHovered
-    );
-
-    const clearHoverExitTimeout = useCallback(() => {
-        if (hoverExitTimeoutRef.current !== null) {
-            window.clearTimeout(hoverExitTimeoutRef.current);
-            hoverExitTimeoutRef.current = null;
-        }
-    }, []);
-
-    const handleNodeMouseEnter = useCallback(() => {
-        clearHoverExitTimeout();
-        setIsNodeHovered(true);
-        hoverNode(String(data.screenId || ''));
-    }, [clearHoverExitTimeout, data.screenId, hoverNode]);
-
-    const handleNodeMouseLeave = useCallback(() => {
-        clearHoverExitTimeout();
-        hoverExitTimeoutRef.current = window.setTimeout(() => {
-            setIsNodeHovered(false);
-            if (!isToolbarHovered) {
-                hoverNode(null);
-            }
-            hoverExitTimeoutRef.current = null;
-        }, 90);
-    }, [clearHoverExitTimeout, hoverNode, isToolbarHovered]);
-
-    const handleToolbarMouseEnter = useCallback(() => {
-        clearHoverExitTimeout();
-        setIsToolbarHovered(true);
-        hoverNode(String(data.screenId || ''));
-    }, [clearHoverExitTimeout, data.screenId, hoverNode]);
-
-    const handleToolbarMouseLeave = useCallback(() => {
-        setIsToolbarHovered(false);
-        if (!isNodeHovered) {
-            hoverNode(null);
-        }
-    }, [hoverNode, isNodeHovered]);
+    const isToolbarVisible = !isEditMode && selected && selectedCount === 1;
 
     const handleGenerateScreenImages = useCallback(async () => {
         if (!data.screenId || isGeneratingImages) return;
@@ -1954,20 +1906,17 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     return (
         <div
             className={`device-node-container relative transition-all duration-300 group ${isEditMode && !isEditingScreen ? 'opacity-40' : ''}`}
-            onMouseEnter={handleNodeMouseEnter}
-            onMouseLeave={handleNodeMouseLeave}
         >
             <NodeToolbar
                 isVisible={isToolbarVisible}
                 position={Position.Top}
                 offset={50}
             >
-                <div
-                    onMouseEnter={handleToolbarMouseEnter}
-                    onMouseLeave={handleToolbarMouseLeave}
-                >
+                <div>
                     <DeviceToolbar
                         screenId={data.screenId as string}
+                        currentDevice={isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile'}
+                        currentDisplayMode={deviceDisplayMode}
                         onAction={handleAction}
                     />
                 </div>
@@ -1998,11 +1947,11 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                         : {
                             borderRadius: shellRadius,
                             border: selected
-                                ? '1px solid color-mix(in srgb, var(--ui-primary) 44%, var(--ui-border))'
+                                ? '1px solid color-mix(in srgb, var(--ui-primary) 72%, var(--ui-border))'
                                 : '1px solid var(--ui-border)',
                             background: 'color-mix(in srgb, var(--ui-surface-2) 92%, transparent)',
                             boxShadow: selected
-                                ? '0 0 0 2px color-mix(in srgb, var(--ui-primary) 28%, transparent), 0 26px 60px rgba(0, 0, 0, 0.24)'
+                                ? '0 0 0 2px color-mix(in srgb, var(--ui-primary) 52%, transparent), 0 0 0 5px color-mix(in srgb, var(--ui-primary) 18%, transparent), 0 26px 60px rgba(0, 0, 0, 0.24)'
                                 : '0 24px 54px rgba(0, 0, 0, 0.22)',
                             overflow: 'hidden',
                         }),

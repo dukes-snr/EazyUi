@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta, type AssetReference, type AssetRecord, type AssetScope } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, ArrowDown, Plus, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronLeft, ChevronDown, PanelLeftClose, PanelLeftOpen, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, Zap, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon, RotateCcw } from 'lucide-react';
+import { ArrowUp, ArrowDown, Paperclip, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronRight, ChevronDown, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon, RotateCcw } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -30,7 +30,7 @@ import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { AssetsPanel } from './AssetsPanel';
 import { buildAssetReference } from '../../lib/firestoreData';
 import { copyDesignSystemBoardToFigmaClipboard } from '../../utils/exportScreens';
-import appLogo from '../../assets/Ui-logo.png';
+import { observeAuthState } from '../../lib/auth';
 
 const FEEDBACK_BUCKETS = {
     early: [
@@ -2376,12 +2376,131 @@ type ChatPanelProps = {
     } | null;
 };
 
+type ChatDisplayMode = 'expanded' | 'collapsed' | 'popped';
+type OpenChatDisplayMode = Exclude<ChatDisplayMode, 'collapsed'>;
+type ChatLauncherInteraction = 'idle' | 'hovered' | 'pressed';
+
 type ComposerAttachmentMeta = {
     origin: 'saved' | 'upload';
     name: string;
     scope?: AssetScope;
     assetRef?: AssetReference;
 };
+
+const CHAT_LAUNCHER_GRID = [
+    [0, 0, 1, 1, 1, 1, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 1, 1, 1, 1, 0, 1],
+    [1, 1, 0, 1, 1, 0, 1, 1],
+    [1, 1, 1, 0, 0, 1, 1, 1],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 1, 0, 0],
+] as const;
+
+const CHAT_LAUNCHER_ACCENTS = new Set([
+    '1-3',
+    '1-4',
+    '2-2',
+    '2-5',
+    '3-1',
+    '3-6',
+    '4-3',
+    '4-4',
+]);
+
+const CHAT_LAUNCHER_HOVER_ACCENTS = new Set([
+    '1-5',
+    '2-5',
+    '2-6',
+    '3-5',
+    '3-6',
+    '3-7',
+    '4-5',
+    '4-6',
+    '4-7',
+    '5-0',
+    '5-1',
+    '6-1',
+]);
+
+const CHAT_LAUNCHER_PRESSED_ACCENTS = new Set([
+    '1-4',
+    '2-4',
+    '2-5',
+    '3-4',
+    '3-5',
+    '4-0',
+    '4-1',
+    '5-0',
+    '5-1',
+    '6-1',
+]);
+
+function ChatLauncherGlyph({ interaction }: { interaction: ChatLauncherInteraction }) {
+    const pixelSize = 2.8421052631578947;
+    const pixelStep = 4.7368421052631575;
+    const accentSet = interaction === 'pressed'
+        ? CHAT_LAUNCHER_PRESSED_ACCENTS
+        : interaction === 'hovered'
+            ? CHAT_LAUNCHER_HOVER_ACCENTS
+            : CHAT_LAUNCHER_ACCENTS;
+    const svgTransform = interaction === 'pressed'
+        ? 'scale(0.94) rotate(-3deg)'
+        : interaction === 'hovered'
+            ? 'scale(1.05) rotate(2deg)'
+            : 'scale(1) rotate(0deg)';
+
+    return (
+        <svg
+            width="36"
+            height="36"
+            viewBox="0 0 36 36"
+            overflow="visible"
+            className="relative shrink-0 transition-transform duration-200 ease-out"
+            aria-hidden="true"
+            style={{ transform: svgTransform, touchAction: 'none' }}
+        >
+            <g style={{ pointerEvents: 'none' }}>
+                {CHAT_LAUNCHER_GRID.flatMap((row, rowIndex) => row.map((cell, colIndex) => (
+                    <rect
+                        key={`base-${rowIndex}-${colIndex}`}
+                        x={colIndex * pixelStep}
+                        y={rowIndex * pixelStep}
+                        width={pixelSize}
+                        height={pixelSize}
+                        rx={1}
+                        opacity={cell ? 1 : 0}
+                        style={{
+                            fill: 'color-mix(in srgb, var(--ui-text-muted) 68%, transparent)',
+                            transition: 'opacity 180ms cubic-bezier(0.4, 0, 0.2, 1), fill 180ms cubic-bezier(0.4, 0, 0.2, 1)',
+                        }}
+                    />
+                )))}
+            </g>
+            <g style={{ pointerEvents: 'none', filter: 'drop-shadow(0 0 4px color-mix(in srgb, var(--ui-primary) 42%, transparent))' }}>
+                {CHAT_LAUNCHER_GRID.flatMap((row, rowIndex) => row.map((cell, colIndex) => {
+                    const isAccent = accentSet.has(`${rowIndex}-${colIndex}`);
+                    return (
+                        <rect
+                            key={`accent-${rowIndex}-${colIndex}`}
+                            x={colIndex * pixelStep}
+                            y={rowIndex * pixelStep}
+                            width={pixelSize}
+                            height={pixelSize}
+                            rx={1}
+                            opacity={cell && isAccent ? 1 : 0}
+                            style={{
+                                fill: 'var(--ui-primary)',
+                                transition: 'opacity 180ms cubic-bezier(0.4, 0, 0.2, 1), fill 180ms cubic-bezier(0.4, 0, 0.2, 1)',
+                            }}
+                        />
+                    );
+                }))}
+            </g>
+        </svg>
+    );
+}
 
 function dedupeAssetReferences(assetRefs: AssetReference[]): AssetReference[] {
     const seen = new Set<string>();
@@ -2404,10 +2523,16 @@ async function readComposerImageAsDataUrl(file: File): Promise<string> {
 
 export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const PLAN_MODE_STORAGE_KEY = 'eazyui:plan-mode';
+    const CHAT_DISPLAY_MODE_STORAGE_KEY = 'eazyui:chat-display-mode';
+    const CHAT_LAST_OPEN_MODE_STORAGE_KEY = 'eazyui:chat-last-open-mode';
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [composerAttachmentMeta, setComposerAttachmentMeta] = useState<ComposerAttachmentMeta[]>([]);
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>(() => {
+        if (typeof window === 'undefined') return 'expanded';
+        const stored = window.localStorage.getItem(CHAT_DISPLAY_MODE_STORAGE_KEY);
+        return stored === 'collapsed' || stored === 'popped' || stored === 'expanded' ? stored : 'expanded';
+    });
     const [planMode, setPlanMode] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
         return window.localStorage.getItem('eazyui:plan-mode') === '1';
@@ -2445,8 +2570,16 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [openPaletteDropdown, setOpenPaletteDropdown] = useState(false);
     const [openFontDropdown, setOpenFontDropdown] = useState<'display' | 'body' | null>(null);
     const [openRadiusDropdown, setOpenRadiusDropdown] = useState<keyof ProjectDesignSystem['radius'] | null>(null);
+    const [launcherInteraction, setLauncherInteraction] = useState<ChatLauncherInteraction>('idle');
     const [, setClockTick] = useState(0);
+    const [authFirstName, setAuthFirstName] = useState('there');
     const autoCollapsedRef = useRef(false);
+    const autoCollapsedRestoreModeRef = useRef<OpenChatDisplayMode>('expanded');
+    const lastOpenChatModeRef = useRef<OpenChatDisplayMode>((() => {
+        if (typeof window === 'undefined') return 'expanded';
+        const stored = window.localStorage.getItem(CHAT_LAST_OPEN_MODE_STORAGE_KEY);
+        return stored === 'popped' ? 'popped' : 'expanded';
+    })());
     const copyResetTimersRef = useRef<Record<string, number>>({});
     const hydrationPinTimersRef = useRef<number[]>([]);
     const initialLoadAutoScrollTimersRef = useRef<number[]>([]);
@@ -2479,6 +2612,42 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { projectId, markSaved, setSaving } = useProjectStore();
     const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
     const assistantMsgIdRef = useRef<string>('');
+    const isCollapsed = chatDisplayMode === 'collapsed';
+    const isPoppedOut = chatDisplayMode === 'popped';
+
+    const setChatMode = useCallback((nextMode: ChatDisplayMode) => {
+        setChatDisplayMode(nextMode);
+        if (nextMode !== 'collapsed') {
+            lastOpenChatModeRef.current = nextMode;
+        }
+    }, []);
+
+    const openLastChatMode = useCallback(() => {
+        setChatMode(lastOpenChatModeRef.current);
+    }, [setChatMode]);
+
+    const collapseChatPanel = useCallback(() => {
+        setChatMode('collapsed');
+    }, [setChatMode]);
+
+    const togglePoppedOutMode = useCallback(() => {
+        setChatMode(isPoppedOut ? 'expanded' : 'popped');
+    }, [isPoppedOut, setChatMode]);
+
+    useEffect(() => {
+        const unsub = observeAuthState((user) => {
+            const rawName = user?.displayName || user?.email?.split('@')[0] || 'there';
+            const firstName = rawName.trim().split(/\s+/)[0] || 'there';
+            setAuthFirstName(firstName);
+        });
+        return () => unsub();
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(CHAT_DISPLAY_MODE_STORAGE_KEY, chatDisplayMode);
+        window.localStorage.setItem(CHAT_LAST_OPEN_MODE_STORAGE_KEY, lastOpenChatModeRef.current);
+    }, [CHAT_DISPLAY_MODE_STORAGE_KEY, CHAT_LAST_OPEN_MODE_STORAGE_KEY, chatDisplayMode]);
     const notificationGuideShownRef = useRef(false);
     const generationLoadingToastRef = useRef<string | null>(null);
     const editLoadingToastRef = useRef<string | null>(null);
@@ -3471,13 +3640,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     useEffect(() => {
         if (isEditMode && !isCollapsed) {
             autoCollapsedRef.current = true;
-            setIsCollapsed(true);
+            autoCollapsedRestoreModeRef.current = isPoppedOut ? 'popped' : 'expanded';
+            setChatMode('collapsed');
         }
         if (!isEditMode && autoCollapsedRef.current) {
             autoCollapsedRef.current = false;
-            setIsCollapsed(false);
+            setChatMode(autoCollapsedRestoreModeRef.current);
         }
-    }, [isEditMode, isCollapsed]);
+    }, [isCollapsed, isEditMode, isPoppedOut, setChatMode]);
 
     const closeMentionMenu = () => {
         setIsMentionOpen(false);
@@ -6335,6 +6505,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     : CircleStar;
     const styleButtonTone = 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-[color:color-mix(in_srgb,var(--ui-primary)_34%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,var(--ui-surface-4))]';
     const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
+    const greetingLabel = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
     const designSystem = spec?.designSystem;
     const normalizedStoredDesignSystem = designSystem ? normalizeProjectDesignSystemModes(designSystem) : null;
     const normalizedDesignSystemDraft = designSystemDraft ? normalizeProjectDesignSystemModes(designSystemDraft) : null;
@@ -6415,96 +6586,181 @@ Return a polished, consistent screen without introducing a new navigation patter
         { key: 'design-system' as const, label: 'Design System', icon: Palette, disabled: !hasDesignSystem },
         { key: 'assets' as const, label: 'Assets', icon: Copy, disabled: false },
     ];
+    const emptyStatePrompts = [
+        'Design a modern SaaS dashboard for a finance startup',
+        'Create a luxury skincare landing page with strong conversion sections',
+        'Design a mobile banking app onboarding and home flow',
+        'Build an ecommerce product page for premium sneakers',
+    ];
+    const launcherModeLabel = lastOpenChatModeRef.current === 'popped' ? 'Pop out' : 'Expand';
+    const shellWidthClass = isCollapsed || isPoppedOut ? 'w-0' : 'w-[var(--chat-width)]';
+    const collapsedOpenMode = lastOpenChatModeRef.current;
+    const chatShellClassName = 'fixed z-[98] flex flex-col overflow-hidden bg-[color:color-mix(in_srgb,var(--ui-surface-1)_96%,#181818)] backdrop-blur-2xl will-change-[transform,opacity,width,height,border-radius,right,bottom,top] transition-[transform,opacity,width,height,border-radius,right,bottom,top,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
+    const chatShellStyle = isCollapsed
+        ? collapsedOpenMode === 'popped'
+            ? {
+                right: '16px',
+                bottom: '8px',
+                top: 'auto',
+                width: 'min(var(--chat-width), calc(100vw - 2rem))',
+                maxWidth: 'calc(100vw - 2rem)',
+                height: 'min(78vh, 760px)',
+                borderRadius: '26px',
+                borderStyle: 'solid',
+                borderColor: 'var(--ui-border-card)',
+                borderWidth: '1px',
+                boxShadow: '0 12px 40px rgba(0,0,0,0.14)',
+                opacity: 0,
+                transform: 'translateY(20px) scale(0.97)',
+                pointerEvents: 'none' as const,
+            }
+            : {
+                right: '8px',
+                bottom: '8px',
+                top: '8px',
+                width: 'calc(var(--chat-width) - 8px)',
+                height: 'calc(100vh - 16px)',
+                borderRadius: '24px',
+                borderStyle: 'solid',
+                borderColor: 'var(--ui-border-card)',
+                borderWidth: '1px',
+                boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+                opacity: 0,
+                transform: 'translateX(24px) scale(0.985)',
+                pointerEvents: 'none' as const,
+            }
+        : isPoppedOut
+            ? {
+                right: '16px',
+                bottom: '8px',
+                top: 'auto',
+                width: 'min(var(--chat-width), calc(100vw - 2rem))',
+                maxWidth: 'calc(100vw - 2rem)',
+                height: 'min(78vh, 760px)',
+                borderRadius: '26px',
+                borderStyle: 'solid',
+                borderColor: 'var(--ui-border-card)',
+                borderWidth: '1px',
+                boxShadow: '0 32px 90px rgba(0,0,0,0.42)',
+                opacity: 1,
+                transform: 'translateY(0) scale(1)',
+                pointerEvents: 'auto' as const,
+            }
+            : {
+                right: '8px',
+                bottom: '8px',
+                top: '8px',
+                width: 'calc(var(--chat-width) - 8px)',
+                height: 'calc(100vh - 16px)',
+                borderRadius: '15px',
+                borderStyle: 'solid',
+                borderColor: 'var(--ui-border-card)',
+                borderWidth: '1px',
+                boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+                opacity: 1,
+                transform: 'translateX(0) scale(1)',
+                pointerEvents: 'auto' as const,
+            };
 
     return (
         <>
             <div
-                className={`group relative flex h-full shrink-0 flex-col overflow-visible bg-transparent font-sans text-[var(--ui-text)] transition-all duration-300 ease-in-out ${isCollapsed ? 'w-0' : 'w-[var(--chat-width)]'
-                    }`}
+                className={`group relative flex h-full shrink-0 flex-col overflow-visible bg-transparent font-sans text-[var(--ui-text)] transition-all duration-300 ease-in-out ${shellWidthClass}`}
             >
                 {!isEditMode && isCollapsed && (
-                    <button
-                        type="button"
-                        onClick={() => setIsCollapsed(false)}
-                        className="fixed left-4 top-4 z-[90] inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-4)] text-[var(--ui-text-muted)] shadow-xl transition-colors hover:text-[var(--ui-text)]"
-                        title="Expand Sidebar"
+                    <div
+                        data-testid="chat-launcher-container"
+                        className="fixed bottom-2 right-2 z-[102] flex w-12 items-center overflow-hidden opacity-100 transition-[width,opacity] duration-200 ease-out"
                     >
-                        <PanelLeftOpen size={18} />
-                    </button>
-                )}
-                {/* Collapse Button Header */}
-                {!isEditMode && !isCollapsed && (
-                    <div className="absolute top-4 -right-12 z-20">
-                        <button
-                            onClick={() => setIsCollapsed(true)}
-                            className="rounded-lg bg-[var(--ui-surface-4)] p-2 text-[var(--ui-text-muted)] shadow-xl transition-all hover:text-[var(--ui-text)] opacity-0 group-hover:opacity-100"
-                            title="Collapse Sidebar"
+                        <div
+                            aria-hidden="false"
+                            className="flex w-12 items-center overflow-hidden opacity-100 transition-[width,opacity] duration-200 ease-out"
                         >
-                            <PanelLeftClose size={18} />
-                        </button>
+                            <button
+                                type="button"
+                                onClick={openLastChatMode}
+                                onPointerEnter={() => setLauncherInteraction('hovered')}
+                                onPointerLeave={() => setLauncherInteraction('idle')}
+                                onPointerDown={() => setLauncherInteraction('pressed')}
+                                onPointerUp={() => setLauncherInteraction('hovered')}
+                                onPointerCancel={() => setLauncherInteraction('idle')}
+                                onBlur={() => setLauncherInteraction('idle')}
+                                aria-label={`Open ${launcherModeLabel.toLowerCase()} chat`}
+                                aria-expanded="false"
+                                aria-haspopup="dialog"
+                                className="pointer-events-auto relative box-border flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--ui-text)] transition-transform duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ui-surface-1)]"
+                                title={`Open chat in ${launcherModeLabel.toLowerCase()} view`}
+                                style={{
+                                    transform: launcherInteraction === 'pressed'
+                                        ? 'scale(0.94)'
+                                        : launcherInteraction === 'hovered'
+                                            ? 'scale(1.04)'
+                                            : 'scale(1)',
+                                }}
+                            >
+                                <div className="relative flex h-12 w-12 items-center justify-center">
+                                    <div
+                                        className="pointer-events-none absolute inset-0 rounded-full border backdrop-blur-[0.25rem] transition-[background-color,border-color,transform] duration-200 ease-out"
+                                        style={{
+                                            borderColor: launcherInteraction === 'pressed'
+                                                ? 'color-mix(in srgb, var(--ui-primary) 58%, var(--ui-border-card))'
+                                                : launcherInteraction === 'hovered'
+                                                    ? 'color-mix(in srgb, var(--ui-primary) 46%, var(--ui-border-card))'
+                                                    : 'color-mix(in srgb, var(--ui-primary) 36%, var(--ui-border-card))',
+                                            backgroundColor: launcherInteraction === 'pressed'
+                                                ? 'color-mix(in srgb, var(--ui-surface-1) 84%, transparent)'
+                                                : launcherInteraction === 'hovered'
+                                                    ? 'color-mix(in srgb, var(--ui-surface-1) 74%, transparent)'
+                                                    : 'color-mix(in srgb, var(--ui-surface-1) 72%, transparent)',
+                                        }}
+                                    />
+                                    <ChatLauncherGlyph interaction={launcherInteraction} />
+                                </div>
+                            </button>
+                        </div>
                     </div>
                 )}
 
-                <div className={`relative flex flex-col h-full w-[var(--chat-width)] overflow-hidden transition-opacity duration-200 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-                    {/* Header / Date */}
-                    <div className="sticky top-0 z-10 bg-transparent px-4 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="leading-tight group/title">
-                                <div className="inline-flex items-center gap-2">
-                                    <img src={appLogo} alt="EazyUI logo" className="h-4 w-4 object-contain" />
-                                    {isTitleEditing ? (
-                                        <input
-                                            autoFocus
-                                            value={titleDraft}
-                                            onChange={(event) => setTitleDraft(event.target.value)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    void commitProjectTitle();
-                                                }
-                                                if (event.key === 'Escape') {
-                                                    setIsTitleEditing(false);
-                                                    setTitleDraft(spec?.name?.trim() || '');
-                                                }
-                                            }}
-                                            onBlur={() => void commitProjectTitle()}
-                                            className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold tracking-wide text-[var(--ui-text)] outline-none"
-                                            placeholder="Project name"
-                                            disabled={isTitleSaving}
-                                        />
-                                    ) : (
-                                        <>
-                                            <p className="text-[12px] font-semibold text-[var(--ui-text)] tracking-wide">{spec?.name?.trim() || 'Chat'}</p>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setTitleDraft(spec?.name?.trim() || '');
-                                                    setIsTitleEditing(true);
-                                                }}
-                                                className="p-1 rounded-md text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] opacity-0 group-hover/title:opacity-100 transition-opacity"
-                                                title="Edit project name"
-                                            >
-                                                <Pencil size={12} />
-                                            </button>
-                                        </>
-                                    )}
-                                </div>
-                                <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
-                                    {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                </p>
+                <div className={chatShellClassName} style={chatShellStyle}>
+                    <div className="sticky top-0 z-10 bg-[color:color-mix(in_srgb,var(--ui-surface-1)_94%,#171717)] px-3 py-3 backdrop-blur-xl">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+                            <div className="min-w-0 pl-2 leading-none">
+                                {isTitleEditing ? (
+                                    <input
+                                        autoFocus
+                                        value={titleDraft}
+                                        onChange={(event) => setTitleDraft(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault();
+                                                void commitProjectTitle();
+                                            }
+                                            if (event.key === 'Escape') {
+                                                setIsTitleEditing(false);
+                                                setTitleDraft(spec?.name?.trim() || '');
+                                            }
+                                        }}
+                                        onBlur={() => void commitProjectTitle()}
+                                        className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold text-[var(--ui-text)] outline-none"
+                                        placeholder="Project name"
+                                        disabled={isTitleSaving}
+                                    />
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setTitleDraft(spec?.name?.trim() || '');
+                                            setIsTitleEditing(true);
+                                        }}
+                                        className="inline-flex max-w-full items-center gap-1 text-[13px] font-semibold text-[var(--ui-text)]"
+                                        title="Edit project name"
+                                    >
+                                        <span className="truncate">{spec?.name?.trim() || 'New Chat'}</span>
+                                        <ChevronDown size={12} className="text-[var(--ui-text-subtle)]" />
+                                    </button>
+                                )}
                             </div>
-                            {!isEditMode && (
-                                <button
-                                    onClick={() => setIsCollapsed(true)}
-                                    className="rounded-lg p-2 text-[var(--ui-text-subtle)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text-muted)]"
-                                    title="Collapse Sidebar"
-                                >
-                                    <ChevronLeft size={16} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="mt-2">
-                            <div className="inline-flex w-full items-center gap-0.5 rounded-[14px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-surface-2)_94%,transparent)] p-[3px]">
+                            <div className="flex items-center justify-center gap-1">
                                 {chatPanelTabs.map((tab) => {
                                     const Icon = tab.icon;
                                     const active = chatPanelView === tab.key;
@@ -6514,19 +6770,37 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             type="button"
                                             onClick={() => setChatPanelView(tab.key)}
                                             disabled={tab.disabled}
-                                            className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[11px] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${active
-                                                ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                                                : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
-                                                } ${tab.disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-[var(--ui-text-muted)]' : ''}`}
-                                            title={tab.disabled ? 'Generate a screen first to create a design system' : undefined}
+                                            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${active
+                                                ? 'bg-[rgba(255,255,255,0.1)] text-[var(--ui-text)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
+                                                : 'bg-[rgba(255,255,255,0.03)] text-[var(--ui-text-muted)] hover:bg-[rgba(255,255,255,0.07)] hover:text-[var(--ui-text)]'
+                                                } ${tab.disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-[var(--ui-text-subtle)]' : ''}`}
+                                            title={tab.label}
                                         >
-                                            <span className={`inline-flex h-5 w-5 items-center justify-center rounded-[7px] ${active ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
-                                                <Icon size={12} />
-                                            </span>
-                                            <span className="truncate">{tab.label}</span>
+                                            <Icon size={15} strokeWidth={2.1} />
                                         </button>
                                     );
                                 })}
+                            </div>
+                            <div className="flex items-center justify-self-end gap-1">
+                                {!isEditMode && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={togglePoppedOutMode}
+                                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${isPoppedOut ? 'bg-[rgba(255,255,255,0.1)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--ui-text)]'}`}
+                                            title={isPoppedOut ? 'Dock in sidebar' : 'Pop out panel'}
+                                        >
+                                            <Square size={13} />
+                                        </button>
+                                        <button
+                                            onClick={collapseChatPanel}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--ui-text-subtle)] transition-colors hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--ui-text)]"
+                                            title="Collapse Sidebar"
+                                        >
+                                            <ChevronRight size={14} />
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -6535,7 +6809,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <div
                         ref={messagesContainerRef}
-                        className="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-7 scrollbar-hide"
+                        className="chat-panel-scroll flex flex-1 flex-col gap-7 overflow-y-auto px-4 pb-5 pt-6"
                     >
                         {hiddenMessageCount > 0 && (
                             <div className="flex justify-center">
@@ -6550,13 +6824,29 @@ Return a polished, consistent screen without introducing a new navigation patter
                         )}
 
                         {messages.length === 0 && (
-                            <div className="flex flex-col items-center justify-center h-full text-[#A1A1AA] text-center px-4 opacity-0 animate-fade-in" style={{ animationFillMode: 'forwards' }}>
-                                <div className="w-full max-w-[300px] p-5 rounded-2xl bg-transparent shadow-none">
-                                    <div className="w-12 h-12 rounded-2xl bg-transparent flex items-center justify-center mx-auto mb-3">
-                                        <ArrowUp size={20} className="text-[var(--ui-text-muted)]" />
+                            <div className="flex min-h-full flex-col justify-end px-3 pb-5 text-left">
+                                <div className="w-full">
+                                    <h2 className="text-[25px] font-medium tracking-[-0.045em] text-[var(--ui-text)]">
+                                        {greetingLabel}, {authFirstName}.
+                                    </h2>
+                                    <div className="mt-6 space-y-3">
+                                        {emptyStatePrompts.map((item) => (
+                                            <button
+                                                key={item}
+                                                type="button"
+                                                onClick={() => {
+                                                    setPrompt(item);
+                                                    textareaRef.current?.element?.focus();
+                                                }}
+                                                className="flex w-full items-center gap-2.5 text-left text-[12px] text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text)]"
+                                            >
+                                                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--ui-border-card)_88%,transparent)] text-[var(--ui-text-subtle)]">
+                                                    <ArrowUp size={9} className="rotate-45" />
+                                                </span>
+                                                <span className="text-[var(--ui-text-muted)]">{item}</span>
+                                            </button>
+                                        ))}
                                     </div>
-                                    <h2 className="text-lg font-medium text-[var(--ui-text)] mb-1">What are we building?</h2>
-                                    <p className="text-sm text-[var(--ui-text-muted)] leading-relaxed">Describe your app idea to generate screens.</p>
                                 </div>
                             </div>
                         )}
@@ -7011,7 +7301,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         <div ref={messagesEndRef} />
                     </div>
                     ) : chatPanelView === 'design-system' ? (
-                        <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 scrollbar-hide">
+                        <div className="chat-panel-scroll flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
                             {!designSystemForPanel ? (
                                 <div className="flex h-full items-center justify-center px-2">
                                     <div className="w-full rounded-[28px] border border-[var(--ui-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-surface-2)_96%,transparent),var(--ui-surface-1))] p-5 text-left">
@@ -7603,7 +7893,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <>
                     {/* Chat Input Container */}
-                    <div className="relative mx-4 mb-6 overflow-visible">
+                    <div className="relative mx-3 mb-3 overflow-visible">
                         <ComposerAttachmentStack
                             images={images}
                             onRemove={removeImage}
@@ -7613,18 +7903,19 @@ Return a polished, consistent screen without introducing a new navigation patter
                                 tone: attachment.origin === 'saved' ? 'saved' : 'upload',
                             }))}
                         />
-                        <div className="relative flex flex-col gap-2 rounded-[20px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-1)),var(--ui-surface-1))] p-3 transition-all">
+                        <div className="relative flex flex-col gap-2 rounded-[18px] border bg-[color:color-mix(in_srgb,var(--ui-surface-2)_92%,#222222)] px-3 py-2.5 transition-all"
+                            style={{ borderColor: 'color-mix(in srgb, var(--ui-primary) 18%, var(--ui-border-card))' }}>
                             <button
                                 type="button"
                                 onClick={togglePlanMode}
-                                className={`absolute -top-10 right-1 sm:right-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold ring-1 transition-colors ${planMode
-                                    ? 'bg-[var(--ui-primary)] text-white ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[var(--ui-primary-hover)]'
-                                    : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] ring-[var(--ui-border)] hover:bg-[var(--ui-surface-4)] hover:text-[var(--ui-text)]'
+                                className={`absolute -top-10 right-1 inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold ring-1 transition-colors sm:right-2 ${planMode
+                                    ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-surface-2))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-surface-2))]'
+                                    : 'bg-[rgba(255,255,255,0.03)] text-[var(--ui-text-muted)] ring-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ui-text)]'
                                     }`}
                                 title={planMode ? 'Disable plan mode' : 'Enable plan mode'}
                             >
-                                <Sparkles size={12} />
-                                <span>Plan mode</span>
+                                {planMode && <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-primary)]" />}
+                                <span>Assist</span>
                             </button>
 
 
@@ -7647,8 +7938,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         ))}
                                     </div>
                                 )}
-                                <div className="flex items-start gap-2 px-1">
-                                    <div className="-mt-1 -ml-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] p-[2px]">
+                                <div className="flex items-start gap-2 px-0.5">
+                                    <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.03)] p-[2px]">
                                         <Orb
                                             className="h-full w-full"
                                             colors={composerOrbColors}
@@ -7667,12 +7958,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             onSelectionChange={syncMentionState}
                                             onReferenceClick={handleReferenceTokenClick}
                                             onKeyDown={handleKeyDown}
-                                            placeholder="Describe your UI you want to create... (type @ to reference a URL or screen)"
-                                            placeholderClassName="pr-2 py-1 leading-relaxed"
+                                            placeholder="Build anything. Use '@' to mention screens or URLs."
+                                            placeholderClassName="pr-2 py-1 leading-relaxed text-[var(--ui-text-subtle)]"
                                             disabled={isGenerating}
                                             allowScreen
                                             screens={availableMentionScreens}
-                                            className="no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[16px] min-h-[48px] max-h-[200px] overflow-y-auto outline-none pr-2 py-1 leading-relaxed"
+                                            className="chat-panel-scroll no-focus-ring w-full bg-transparent text-[var(--ui-text)] text-[15px] min-h-[42px] max-h-[200px] overflow-y-auto outline-none pr-2 py-1 leading-relaxed"
                                         />
                                     </div>
                                 </div>
@@ -7705,28 +7996,43 @@ Return a polished, consistent screen without introducing a new navigation patter
                             </div>
 
                             {/* Bottom Controls Row */}
-                            <div className="flex items-center justify-between pt-1">
+                            <div className="flex items-center justify-between gap-2 pt-1">
 
                             {/* Left: Attach & Platform */}
-                            <div className="flex items-center gap-2">
-                                {/* Attach Button */}
-                                <button
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))] text-[var(--ui-text-muted)] transition-all ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] hover:text-[var(--ui-primary)]"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    title="Add Image"
-                                >
-                                    <Plus size={18} />
-                                </button>
-
+                            <div className="flex items-center gap-1.5">
+                                <div className="inline-flex h-7 items-center rounded-full bg-[rgba(255,255,255,0.03)] p-1 ring-1 ring-[rgba(255,255,255,0.06)]">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('fast')}
+                                        className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold transition-all ${modelProfile === 'fast'
+                                            ? 'bg-[rgba(255,255,255,0.09)] text-[var(--ui-text)]'
+                                            : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'
+                                            }`}
+                                        title="Fast model"
+                                    >
+                                        Fast
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelProfile('quality')}
+                                        className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold transition-all ${modelProfile === 'quality'
+                                            ? 'bg-[rgba(255,255,255,0.09)] text-[var(--ui-text)]'
+                                            : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'
+                                            }`}
+                                        title="Quality model"
+                                    >
+                                        Pro
+                                    </button>
+                                </div>
                                 {/* Platform Selector (Pill) */}
-                                <div className="flex items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] p-1 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))]">
+                                <div className="flex items-center rounded-full bg-[rgba(255,255,255,0.03)] p-1 ring-1 ring-[rgba(255,255,255,0.06)]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
                                             onClick={() => setPlatform(p)}
-                                            className={`p-1.5 rounded-full transition-all ${selectedPlatform === p
-                                                ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_26%,transparent)]'
-                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
+                                            className={`rounded-full p-1.5 transition-all ${selectedPlatform === p
+                                                ? 'bg-[rgba(255,255,255,0.09)] text-[var(--ui-text)]'
+                                                : 'text-[var(--ui-text-subtle)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--ui-text)]'
                                                 }`}
                                             title={`Generate for ${p}`}
                                         >
@@ -7739,41 +8045,24 @@ Return a polished, consistent screen without introducing a new navigation patter
                             </div>
 
                             {/* Right: Send Button */}
-                            <div className="flex items-center gap-3">
-                                <div className="flex items-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_7%,var(--ui-surface-3))] p-1 ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))]">
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelProfile('fast')}
-                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]'
-                                            : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
-                                            }`}
-                                        title="Fast model"
-                                    >
-                                        <Zap size={12} />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelProfile('quality')}
-                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_28%,transparent)]'
-                                            : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-3))]'
-                                            }`}
-                                        title="Quality model"
-                                    >
-                                        <Sparkles size={12} />
-                                    </button>
-                                </div>
+                            <div className="flex items-center gap-1.5">
+                                <button
+                                    className="flex h-7 w-7 items-center justify-center rounded-full bg-transparent text-[var(--ui-text-subtle)] transition-all hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--ui-text)]"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    title="Add Image"
+                                >
+                                    <Paperclip size={14} />
+                                </button>
                                 <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
                                     <button
                                         onClick={() => setShowStyleMenu(v => !v)}
-                                        className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
+                                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-all ${styleButtonTone}`}
                                         title="Select style preset"
                                     >
-                                        <StyleIcon size={14} />
+                                        <StyleIcon size={12} />
                                     </button>
                                     {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 w-56 bg-[var(--ui-popover)] border border-[var(--ui-border)] rounded-xl shadow-2xl p-2 z-50">
+                                        <div className="absolute bottom-12 right-0 z-50 w-56 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-2 shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
                                             {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
                                                 <button
                                                     key={preset}
@@ -7827,13 +8116,13 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         handleMicToggle();
                                     }}
                                     disabled={actionDisabled}
-                                    className={`w-9 h-9 rounded-[12px] flex items-center justify-center transition-all ${requestInFlight
-                                        ? 'bg-[var(--ui-surface-4)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border-light)]'
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${requestInFlight
+                                        ? 'bg-[rgba(255,255,255,0.10)] text-[var(--ui-text)] hover:bg-[rgba(255,255,255,0.10)]'
                                         : isRecording
-                                            ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
+                                            ? 'bg-rose-500/20 text-rose-200'
                                             : showSendAction
-                                                ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]'
-                                                : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] ring-1 ring-[var(--ui-border)]'
+                                                ? 'bg-[#f3f3f0] text-[#121212] hover:bg-white'
+                                                : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--ui-text)]'
                                         }`}
                                     title={isAwaitingAssistantDecision
                                         ? 'Preparing response...'
@@ -7852,9 +8141,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     ) : actionIsStop ? (
                                         <Square size={14} className="fill-current" />
                                     ) : showSendAction ? (
-                                        <ArrowUp size={20} className="text-[var(--ui-text)]" />
+                                        <ArrowUp size={16} />
                                     ) : (
-                                        <Mic size={15} />
+                                        <Mic size={14} />
                                     )}
                                 </button>
                             </div>

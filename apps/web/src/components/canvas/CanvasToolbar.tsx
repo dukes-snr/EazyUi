@@ -1,21 +1,36 @@
-import { useCanvasStore, useDesignStore, useHistoryStore } from '../../stores';
+import { useReactFlow } from '@xyflow/react';
 import {
-    MousePointer2,
     Hand,
+    Maximize,
+    MousePointer2,
+    Redo2,
+    Undo2,
     ZoomIn,
     ZoomOut,
-    Maximize,
-    Undo2,
-    Redo2,
 } from 'lucide-react';
-import { useReactFlow, useViewport } from '@xyflow/react';
+
+import { useCanvasStore, useDesignStore, useHistoryStore } from '../../stores';
+import { CanvasProfileDock } from './CanvasProfileDock';
+
+function railButtonClass(active = false, prominent = false) {
+    if (prominent) {
+        return `inline-flex items-center justify-center rounded-full transition-all duration-150 ${active
+            ? 'h-10 w-10 bg-[#f4f4f1] text-[#1b1b1b] shadow-[0_2px_8px_rgba(0,0,0,0.18)]'
+            : 'h-10 w-10 bg-[rgba(255,255,255,0.04)] text-[#a8a8a6] hover:bg-[rgba(255,255,255,0.08)] hover:text-[#f2f2ef]'
+            }`;
+    }
+
+    return `inline-flex h-8 w-8 items-center justify-center rounded-full transition-all duration-150 ${active
+        ? 'bg-[rgba(255,255,255,0.08)] text-[#f3f3f0]'
+        : 'bg-transparent text-[#9a9a97] hover:bg-[rgba(255,255,255,0.06)] hover:text-[#f3f3f0]'
+        }`;
+}
 
 export function CanvasToolbar() {
     const { activeTool, setActiveTool, setDoc, triggerExternalUpdate } = useCanvasStore();
     const { setSpec } = useDesignStore();
     const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { zoomIn, zoomOut, fitView } = useReactFlow();
-    const viewport = useViewport();
 
     const handleUndo = () => {
         const snapshot = undoSnapshot();
@@ -34,87 +49,77 @@ export function CanvasToolbar() {
     };
 
     return (
-        <div className="absolute bottom-1 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-surface-1)_92%,transparent)] px-2.5 py-2 backdrop-blur-xl">
-            {/* History Group */}
-            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] pr-2">
+        <div className="absolute left-3 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-[28px] border border-[rgba(255,255,255,0.06)] bg-[#232323] px-[7px] py-[8px] shadow-[0_10px_28px_rgba(0,0,0,0.28)]">
+            <button
+                onClick={() => setActiveTool('select')}
+                className={railButtonClass(activeTool === 'select', true)}
+                title="Select tool"
+                aria-label="Select tool"
+            >
+                <MousePointer2 size={18} strokeWidth={2.1} />
+            </button>
+
+            <div className="mt-[10px] flex flex-col items-center gap-[10px]">
+                <button
+                    onClick={() => setActiveTool('hand')}
+                    className={railButtonClass(activeTool === 'hand')}
+                    title="Pan tool"
+                    aria-label="Pan tool"
+                >
+                    <Hand size={16} strokeWidth={2} />
+                </button>
+
                 <button
                     onClick={handleUndo}
                     disabled={!canUndo()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] disabled:cursor-not-allowed disabled:opacity-35"
+                    className={`${railButtonClass()} disabled:cursor-not-allowed disabled:opacity-35`}
                     title="Undo"
+                    aria-label="Undo"
                 >
-                    <Undo2 size={18} />
+                    <Undo2 size={16} strokeWidth={2} />
                 </button>
+
                 <button
                     onClick={handleRedo}
                     disabled={!canRedo()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] disabled:cursor-not-allowed disabled:opacity-35"
+                    className={`${railButtonClass()} disabled:cursor-not-allowed disabled:opacity-35`}
                     title="Redo"
+                    aria-label="Redo"
                 >
-                    <Redo2 size={18} />
+                    <Redo2 size={16} strokeWidth={2} />
                 </button>
-            </div>
 
-            {/* Tools Group */}
-            <div className="flex items-center gap-1 border-r border-[color:color-mix(in_srgb,var(--ui-border)_88%,transparent)] pr-2">
-                <button
-                    onClick={() => setActiveTool('select')}
-                    className={`inline-flex h-10 items-center gap-2 rounded-[14px] px-3 transition-colors ${activeTool === 'select'
-                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
-                        }`}
-                    title="Select Tool (Shift+Drag to Select)"
-                >
-                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-[10px] ${activeTool === 'select' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
-                        <MousePointer2 size={15} />
-                    </span>
-                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Select</span>
-                </button>
-                <button
-                    onClick={() => setActiveTool('hand')}
-                    className={`inline-flex h-10 items-center gap-2 rounded-[14px] px-3 transition-colors ${activeTool === 'hand'
-                        ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]'
-                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'
-                        }`}
-                    title="Pan Tool (Drag to Move)"
-                >
-                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-[10px] ${activeTool === 'hand' ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] text-[var(--ui-primary)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
-                        <Hand size={15} />
-                    </span>
-                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Pan</span>
-                </button>
-            </div>
-
-            {/* View Controls Group */}
-            <div className="flex items-center gap-1 pl-1">
                 <button
                     onClick={() => zoomOut()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-                    title="Zoom Out"
+                    className={railButtonClass()}
+                    title="Zoom out"
+                    aria-label="Zoom out"
                 >
-                    <ZoomOut size={18} />
+                    <ZoomOut size={16} strokeWidth={2} />
                 </button>
-                <span className="min-w-[52px] select-none text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text-subtle)]">
-                    {Math.round(viewport.zoom * 100)}%
-                </span>
+
                 <button
                     onClick={() => zoomIn()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-                    title="Zoom In"
+                    className={railButtonClass()}
+                    title="Zoom in"
+                    aria-label="Zoom in"
                 >
-                    <ZoomIn size={18} />
+                    <ZoomIn size={16} strokeWidth={2} />
                 </button>
+
                 <button
-                    onClick={() => fitView({ padding: 0.15, duration: 800 })}
-                    className="inline-flex h-10 items-center gap-2 rounded-[14px] px-3 text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
-                    title="Fit to Screen"
+                    onClick={() => fitView({ padding: 0.28, duration: 500, maxZoom: 0.9 })}
+                    className={railButtonClass()}
+                    title="Fit to screen"
+                    aria-label="Fit to screen"
                 >
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]">
-                        <Maximize size={15} />
-                    </span>
-                    <span className="hidden text-[12px] font-medium tracking-[0.01em] sm:inline">Fit</span>
+                    <Maximize size={16} strokeWidth={2} />
                 </button>
             </div>
+
+            <div className="my-[10px] h-px w-[28px] bg-[rgba(255,255,255,0.08)]" />
+
+            <CanvasProfileDock />
         </div>
     );
 }

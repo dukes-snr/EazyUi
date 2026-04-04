@@ -8,7 +8,7 @@ export function ToastViewport() {
     return (
         <>
             <GooeyToaster
-                position="bottom-right"
+                position="bottom-left"
                 offset="20px"
                 gap={12}
                 theme={theme}
