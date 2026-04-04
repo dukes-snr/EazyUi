@@ -1,9 +1,8 @@
-import { ArrowUp, Check, ChevronLeft, ChevronRight, CircleStar, FolderOpen, Gem, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronLeft, ChevronRight, CircleHelp, CircleStar, FolderOpen, Gem, Home, LayoutGrid, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient, type BillingSummary } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
-import logo from '../../assets/Ui-logo.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import type { User } from 'firebase/auth';
@@ -45,8 +44,8 @@ type ProjectListItem = {
 };
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
-const SIDEBAR_EXPANDED_WIDTH = 288;
-const SIDEBAR_COLLAPSED_WIDTH = 88;
+const SIDEBAR_EXPANDED_WIDTH = 290;
+const SIDEBAR_COLLAPSED_WIDTH = 48;
 const WORKSPACE_GUIDE_ID = 'workspace-first-run';
 
 const WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
@@ -79,29 +78,6 @@ const WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
     placement: 'top',
   },
 ];
-
-const workspaceSignals = [
-  {
-    id: 'upgrade-plan',
-    title: 'Upgrade plan',
-    detail: 'Unlock faster queues, larger credit caps, and premium workspace tools.',
-    actionLabel: 'View plans',
-    accentClassName: 'border-amber-300/20 bg-amber-400/10 text-amber-100',
-    iconClassName: 'border-amber-300/25 bg-amber-400/12 text-amber-200',
-    Icon: Gem,
-    path: '/pricing',
-  },
-  // {
-  //   id: 'new-feature',
-  //   title: 'New feature',
-  //   detail: 'Project-aware planning is live for sharper first drafts and cleaner flows.',
-  //   actionLabel: 'more',
-  //   accentClassName: 'border-indigo-300/20 bg-indigo-400/10 text-indigo-100',
-  //   iconClassName: 'border-indigo-300/25 bg-indigo-400/12 text-indigo-200',
-  //   Icon: Sparkles,
-  //   path: '/changelog',
-  // },
-] as const;
 
 function formatDate(value: string) {
   try {
@@ -245,11 +221,37 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const sidebarLabelClassName = sidebarExpanded
     ? 'min-w-0 max-w-[184px] translate-x-0 opacity-100'
     : 'pointer-events-none max-w-0 -translate-x-2 opacity-0';
-  const avatarMenuPositionClassName = sidebarExpanded ? 'bottom-full left-0 right-0 mb-3' : 'bottom-0 left-full ml-3';
-  const avatarMenuWidthClassName = sidebarExpanded ? 'w-full' : 'w-[260px]';
+  const workspaceOwnerLabel = authDisplayName === 'User' ? 'Your workspace' : `${authDisplayName}'s workspace`;
+  const sidebarRecentProjects = projects.slice(0, 3);
+  const sidebarPrimaryLabel = projects[0]?.name || 'Projects';
+  const avatarMenuPositionClassName = 'top-[50px] left-full ml-5';
+  const avatarMenuWidthClassName = 'w-[260px]';
   const shellBadgeClassName = isLight
     ? 'border-slate-300/70 bg-white/85 text-slate-700'
     : 'border-white/10 bg-white/[0.04] text-slate-300';
+  const avatarMenuCardClassName = isLight
+    ? 'border-black/10 bg-[var(--ui-surface-3)] text-slate-700'
+    : 'border-white/[0.08] bg-[var(--ui-surface-3)] text-slate-200';
+  const avatarMenuDividerClassName = isLight ? 'bg-black/10' : 'bg-white/[0.08]';
+  const avatarMenuRowClassName = isLight
+    ? 'text-slate-700 hover:bg-black/[0.03]'
+    : 'text-slate-200 hover:bg-white/[0.04]';
+  const avatarMenuMutedIconClassName = isLight ? 'text-slate-400' : 'text-slate-500';
+  const avatarMenuStrongTextClassName = isLight ? 'text-slate-900' : 'text-slate-50';
+  const avatarMenuMutedTextClassName = isLight ? 'text-slate-500' : 'text-slate-400';
+  const desktopWorkspaceBgClassName = 'bg-[var(--color-bg)]';
+  const desktopSidebarClassName = isLight ? 'border-r border-black/[0.08] bg-[var(--color-bg)]' : 'border-r border-white/[0.06] bg-[var(--color-bg)]';
+  const desktopSidebarToggleClassName = isLight
+    ? 'border-black/[0.08] bg-[#ebe4d8] text-slate-500 hover:text-slate-900'
+    : 'border-white/[0.08] bg-[#1f2024] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]';
+  const desktopSidebarHoverClassName = isLight ? 'hover:bg-black/[0.04]' : 'hover:bg-white/[0.03]';
+  const desktopSidebarSurfaceClassName = isLight ? 'bg-black/[0.05] hover:bg-black/[0.08]' : 'bg-white/[0.06] hover:bg-white/[0.09]';
+  const desktopSidebarDividerClassName = isLight ? 'bg-black/[0.08]' : 'bg-white/[0.06]';
+  const desktopSidebarInlineHoverClassName = isLight ? 'hover:bg-black/[0.04] hover:text-slate-900' : 'hover:bg-white/[0.04] hover:text-[var(--ui-text)]';
+  const projectWorkspaceSurfaceClassName = 'bg-[var(--color-bg)]';
+  const projectPreviewShellClassName = isLight ? 'bg-[#ebe4d8]' : 'bg-[var(--workspace-soft-strong)]';
+  const projectPreviewFrameClassName = isLight ? 'border-black/10 bg-[#ddd6ca]' : 'border-white/15 bg-[#080A12]';
+  const projectPreviewInsetClassName = isLight ? 'bg-[#faf7f1]' : 'bg-[#121623]';
   const accentButtonClassName = 'border-[var(--ui-primary)] bg-[var(--ui-primary)] text-white shadow-[0_14px_34px_color-mix(in_srgb,var(--ui-primary)_26%,transparent)] hover:bg-[var(--ui-primary-hover)]';
   const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
   const hasSeenWorkspaceGuide = seenGuideIds.includes(WORKSPACE_GUIDE_ID);
@@ -549,11 +551,6 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     await performDelete(uniqueIds);
   };
 
-  const creditBalanceLabel = billingSummary
-    ? `${billingSummary.balanceCredits.toLocaleString()} credits`
-    : 'Credits unavailable';
-  const creditPlanLabel = billingSummary?.planLabel || 'Free plan';
-
   const toggleProjectSelection = (projectId: string) => {
     if (deletingIdSet.has(projectId)) return;
     setSelectedProjectIds((prev) => (
@@ -639,444 +636,481 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   }
 
   return (
-    <div className="h-screen w-screen text-[var(--ui-text)]">
+    <div className={`h-screen w-screen overflow-hidden text-[var(--ui-text)] ${desktopWorkspaceBgClassName}`}>
       {isMobileViewport && isMobileSidebarOpen && (
         <div
           className="fixed inset-0 z-[120] bg-[color:color-mix(in_srgb,var(--workspace-backdrop)_82%,black)]/85 backdrop-blur-md lg:hidden"
           onClick={() => setIsMobileSidebarOpen(false)}
         >
           <div
-            className="flex h-full w-full max-w-[23rem] flex-col border-r border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] px-3 pb-4 pt-3"
+            className={`flex h-full w-full max-w-[15rem] flex-col border-r ${desktopSidebarClassName}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_62%,transparent)] p-3">
-              <div className="flex items-start justify-between gap-3">
+            <div className="flex h-full min-h-0 flex-col px-3 py-4">
+              <div className="relative z-20">
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSidebarOpen(false);
+                      onNavigate('/app/projects');
+                    }}
+                    className={`flex min-w-0 flex-1 items-center gap-3 rounded-[14px] px-1 py-1 text-left transition-colors ${desktopSidebarHoverClassName}`}
+                    title="Account"
+                  >
+                    <span className={`h-9 w-9 shrink-0 overflow-hidden rounded-[11px] border ${isLight ? 'border-black/[0.08] bg-[#ece4d8]' : 'border-white/[0.08] bg-[#24262d]'}`}>
+                      <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
+                    </span>
+                    <span className="min-w-0 overflow-hidden">
+                      <span className="block truncate text-[13px] font-medium text-[var(--ui-text)]">{workspaceOwnerLabel}</span>
+                      <span className="block text-[11px] text-[var(--ui-text-muted)]">1 Member</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                    className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${desktopSidebarToggleClassName}`}
+                    aria-label="Close menu"
+                    title="Close menu"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileSidebarOpen(false);
+                  if (projects[0]?.id) {
+                    onOpenProject(projects[0].id);
+                    return;
+                  }
+                  onNavigate('/app/projects');
+                }}
+                className={`mt-4 flex items-center justify-between rounded-[10px] px-3 py-2.5 transition-colors ${desktopSidebarSurfaceClassName}`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="grid h-4 w-4 place-items-center rounded-full bg-white/10 text-[8px] text-[var(--ui-text-subtle)]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  </span>
+                  <span className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)]">{sidebarPrimaryLabel}</span>
+                </span>
+                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-300">New</span>
+              </button>
+
+              <div className={`mt-4 h-px ${desktopSidebarDividerClassName}`} />
+
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <nav className="mt-4 flex flex-col gap-1">
+                  {sidebarNavItems.map(({ id, label, Icon, active, onClick, iconClassName }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setIsMobileSidebarOpen(false);
+                        onClick();
+                      }}
+                      className={`group flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition-colors ${active
+                        ? `${desktopSidebarSurfaceClassName} text-[var(--ui-text)]`
+                        : `text-[var(--ui-text-muted)] ${desktopSidebarInlineHoverClassName}`}`}
+                    >
+                      <span className="grid h-4 w-4 place-items-center text-[var(--ui-text-subtle)]">
+                        <Icon size={14} className={iconClassName} />
+                      </span>
+                      <span className="truncate text-[14px] font-medium">{label}</span>
+                    </button>
+                  ))}
+                </nav>
+
+                <div className="mt-5 space-y-5 pb-4">
+                  <div>
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Favorites</p>
+                    <p className="mt-3 text-[12px] text-[var(--ui-text-subtle)]">No favorites yet</p>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Recent Projects</p>
+                    <div className="mt-3 space-y-2">
+                      {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          type="button"
+                          onClick={() => {
+                            setIsMobileSidebarOpen(false);
+                            onOpenProject(project.id);
+                          }}
+                          className={`block w-full truncate rounded-[10px] px-2 py-1 text-left text-[13px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                          title={project.name}
+                        >
+                          {project.name || 'Untitled project'}
+                        </button>
+                      )) : (
+                        <p className="text-[12px] text-[var(--ui-text-subtle)]">No recent projects yet</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Workspace</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMobileSidebarOpen(false);
+                        onNavigate('/app/projects');
+                      }}
+                      className={`mt-3 flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                    >
+                      <LayoutGrid size={14} className="text-[var(--ui-text-subtle)]" />
+                      <span className="text-[14px] font-medium">All Workspace</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Private</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMobileSidebarOpen(false);
+                        onNavigate('/app/projects');
+                      }}
+                      className={`mt-3 flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                    >
+                      <LayoutGrid size={14} className="text-[var(--ui-text-subtle)]" />
+                      <span className="text-[14px] font-medium">All Private</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => {
                     setIsMobileSidebarOpen(false);
                     onNavigate('/');
                   }}
-                  className="flex items-center gap-3 rounded-[20px] text-left transition-colors hover:bg-[var(--workspace-soft)]"
+                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
+                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
+                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
+                  title="Home"
                 >
-                  <span className="grid h-11 w-11 place-items-center rounded-[18px] bg-[var(--workspace-soft)]">
-                    <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
-                  </span>
-                  <span>
-                    <span className="block text-base font-semibold tracking-[-0.03em] text-[var(--ui-text)]">EazyUI</span>
-                    <span className="block text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Project workspace</span>
-                  </span>
+                  <Home size={15} />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsMobileSidebarOpen(false)}
-                  className="grid h-11 w-11 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text)]"
-                  aria-label="Close menu"
+                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
+                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
+                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
+                  title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
                 >
-                  <X size={18} />
+                  {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
                 </button>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between rounded-[20px] bg-[var(--workspace-soft)] px-3 py-2">
-                <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Library</span>
-                <span className="text-sm font-semibold text-[var(--ui-text)]">{projects.length} projects</span>
-              </div>
-            </div>
-
-            <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                <div className="rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] p-2">
-                  <p className="px-2 pb-2 pt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
-                  <nav className="flex flex-col gap-1.5">
-                    {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          setIsMobileSidebarOpen(false);
-                          onClick();
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-[22px] px-3 py-3 text-left transition-all ${active
-                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                          : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}
-                      >
-                        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-[18px] ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
-                          <Icon size={16} className={iconClassName} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
-                          <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </nav>
-                </div>
-              </div>
-
-              <div className="mt-4 shrink-0">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {workspaceSignals.map(({ id, title, detail, actionLabel, accentClassName, iconClassName, Icon, path }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        setIsMobileSidebarOpen(false);
-                        onNavigate(path);
-                      }}
-                      className={`flex min-w-0 items-start gap-2.5 rounded-[20px] border px-3 py-2.5 text-left transition-colors ${accentClassName}`}
-                    >
-                      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-[14px] border ${iconClassName}`}>
-                        <Icon size={15} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[13px] font-semibold leading-snug text-[var(--ui-text)]">{title}</span>
-                        <span className="mt-0.5 line-clamp-2 block text-[10px] leading-4 text-[var(--ui-text-muted)]">{detail}</span>
-                        <span className="mt-1.5 inline-flex text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ui-text)]">
-                          {actionLabel}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-4 rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_54%,transparent)] p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
-                      <p className="mt-1 text-sm font-medium text-[var(--ui-text)]">Theme</p>
-                    </div>
-                    {theme === 'light' ? <Sun size={15} className="text-[var(--ui-text-subtle)]" /> : <Moon size={15} className="text-[var(--ui-text-subtle)]" />}
-                  </div>
-                  <div className="mt-2.5 grid grid-cols-1 gap-1.5 rounded-[18px] bg-[var(--workspace-soft-strong)] p-1 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => setTheme('light')}
-                      className={`inline-flex h-10 items-center justify-between gap-2 rounded-[13px] px-3 text-[13px] font-medium transition-colors sm:justify-center ${theme === 'light'
-                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                        : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[color:color-mix(in_srgb,var(--workspace-soft)_82%,transparent)] hover:text-[var(--ui-text)]'}`}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Sun size={14} />
-                        Light
-                      </span>
-                      {theme === 'light' ? <Check size={13} className="text-[var(--ui-primary)]" /> : null}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTheme('dark')}
-                      className={`inline-flex h-10 items-center justify-between gap-2 rounded-[13px] px-3 text-[13px] font-medium transition-colors sm:justify-center ${theme === 'dark'
-                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                        : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[color:color-mix(in_srgb,var(--workspace-soft)_82%,transparent)] hover:text-[var(--ui-text)]'}`}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Moon size={14} />
-                        Dark
-                      </span>
-                      {theme === 'dark' ? <Check size={13} className="text-[var(--ui-primary)]" /> : null}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] p-3">
-                <div className="flex items-center gap-3 rounded-[22px] bg-[var(--workspace-soft)] px-3 py-3 text-left">
-                  <span className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
-                    <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
-                    <span className="block truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
-                  </span>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMobileSidebarOpen(false);
-                      onNavigate('/pricing');
-                    }}
-                    className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)]"
-                  >
-                    Billing
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMobileSidebarOpen(false);
-                      void handleSignOut();
-                    }}
-                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 px-3 text-xs font-medium uppercase tracking-[0.08em] text-rose-200"
-                  >
-                    <LogOut size={13} />
-                    Logout
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileSidebarOpen(false);
+                    startGuide(WORKSPACE_GUIDE_ID);
+                  }}
+                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
+                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
+                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
+                  title="Get help"
+                >
+                  <CircleHelp size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileSidebarOpen(false);
+                    void handleSignOut();
+                  }}
+                  className="grid h-9 w-9 place-items-center rounded-[12px] border border-rose-400/18 bg-rose-500/10 text-rose-300 transition-colors hover:bg-rose-500/16"
+                  title="Logout"
+                >
+                  <LogOut size={16} />
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
-      <div className="workspace-shell-frame flex h-full overflow-hidden p-2 md:p-3">
+      <div className="workspace-shell-frame flex h-full overflow-hidden">
         <aside
-          className="hidden h-full min-h-0 shrink-0 flex-col overflow-visible rounded-[28px] bg-transparent transition-[width] duration-300 ease-out lg:flex"
+          className={`relative z-30 hidden h-full min-h-0 shrink-0 flex-col overflow-visible transition-[width] duration-300 ease-out lg:flex ${desktopSidebarClassName}`}
           style={{ width: sidebarWidth }}
         >
-          <div className={`flex h-full min-h-0 flex-col ${sidebarExpanded ? 'gap-3' : 'items-center gap-3'}`}>
-            <div className={`shrink-0 rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_58%,transparent)] ${sidebarExpanded ? 'p-3.5' : 'px-2 py-3'}`}>
-              <div className={`flex ${sidebarExpanded ? 'items-start justify-between gap-3' : 'flex-col items-center gap-3'}`}>
+          <button
+            type="button"
+            onClick={() => setSidebarExpanded((expanded) => !expanded)}
+            className={`absolute right-0 top-5 z-[110] grid h-8 w-8 translate-x-[150%] place-items-center rounded-full border transition-colors ${desktopSidebarToggleClassName}`}
+            aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {sidebarExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+          </button>
+          <div className={`flex h-full min-h-0 flex-col ${sidebarExpanded ? 'px-3 py-4' : 'items-center px-2 py-4'}`}>
+            <div className="relative z-20" ref={avatarMenuRef}>
+              <div className="flex">
                 <button
                   type="button"
-                  onClick={() => onNavigate('/')}
-                  className={`group flex items-center rounded-[22px] text-left transition-colors ${sidebarExpanded ? 'gap-3' : 'flex-col gap-2'}`}
-                  title="Go to home"
+                  onClick={() => setOpenAvatarMenu((open) => !open)}
+                  className={`flex min-w-0 flex-1 items-center text-left transition-colors ${sidebarExpanded ? `gap-3 rounded-[14px] px-1 py-1 ${desktopSidebarHoverClassName}` : 'justify-center'}`}
+                  title="Account"
                 >
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[18px] bg-[var(--workspace-soft)]">
-                    <img src={logo} alt="EazyUI logo" className="h-5 w-5 object-contain" />
+                  <span className={`h-9 w-9 shrink-0 overflow-hidden rounded-[11px] border ${isLight ? 'border-black/[0.08] bg-[#ece4d8]' : 'border-white/[0.08] bg-[#24262d]'}`}>
+                    <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
                   </span>
-                  <span className={`min-w-0 overflow-hidden text-left transition-all duration-300 ${sidebarLabelClassName}`}>
-                    <span className="block text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Workspace</span>
-                    <span className="mt-1 block text-lg font-semibold tracking-[-0.03em] text-[var(--ui-text)]">EazyUI</span>
-                    <span className="block text-[11px] text-[var(--ui-text-muted)]">Project control center</span>
+                  <span className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarLabelClassName}`}>
+                    <span className="block truncate text-[13px] font-medium text-[var(--ui-text)]">{workspaceOwnerLabel}</span>
+                    <span className="block text-[11px] text-[var(--ui-text-muted)]">1 Member</span>
                   </span>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSidebarExpanded((expanded) => !expanded)}
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-subtle)] transition-colors hover:text-[var(--ui-text)]"
-                  aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-                  title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-                >
-                  {sidebarExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-                </button>
               </div>
-
-              {sidebarExpanded ? (
-                <div className="mt-3 flex items-center justify-between rounded-[20px] bg-[var(--workspace-soft)] px-3 py-2">
-                  <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Projects</span>
-                  <span className="text-sm font-semibold text-[var(--ui-text)]">{projects.length}</span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_52%,transparent)] ${sidebarExpanded ? 'p-3' : 'px-2 py-3'}`}>
-              {sidebarExpanded ? (
-                <p className="px-2 pb-2 pt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">Menu</p>
-              ) : (
-                <div className="mx-auto mb-3 h-6 w-px rounded-full bg-[var(--workspace-sidebar-border)]" />
-              )}
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                <nav className={`flex flex-col ${sidebarExpanded ? 'gap-1.5' : 'items-center gap-2.5'}`}>
-                  {sidebarNavItems.map(({ id, label, subtitle, Icon, active, onClick, iconClassName }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={onClick}
-                      data-guide-id={id === 'new-project' ? 'workspace-nav-new-project' : undefined}
-                      className={`group flex items-center transition-all duration-300 ${sidebarExpanded
-                        ? `w-full gap-3 rounded-[22px] px-3 py-3 text-left ${active
-                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                          : 'text-[var(--ui-text-muted)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`
-                        : `h-12 w-12 justify-center rounded-[18px] ${active
-                          ? 'border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                          : 'text-[var(--ui-text-subtle)] hover:bg-[var(--workspace-soft)] hover:text-[var(--ui-text)]'}`}`}
-                      title={label}
-                    >
-                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-[16px] ${active ? 'bg-[var(--workspace-soft)] text-[var(--ui-text)]' : 'bg-transparent text-current'} transition-colors`}>
-                        <Icon size={16} className={iconClassName} />
-                      </span>
-                      <span className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarLabelClassName}`}>
-                        <span className="block text-sm font-medium text-[var(--ui-text)]">{label}</span>
-                        <span className="block text-[11px] text-[var(--ui-text-subtle)]">{subtitle}</span>
-                      </span>
-                    </button>
-                  ))}
-                </nav>
-              </div>
-
-              <div className="mt-4 shrink-0">
-                <div className="flex flex-col gap-3 pb-1">
-                  {sidebarExpanded ? (
-                    <>
-                      <div className="rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft)_92%,transparent)] p-2.5">
-                        <div className="flex items-start gap-3">
-                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[14px] border border-amber-300/20 bg-amber-400/10 text-amber-200">
-                            <Sparkles size={14} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Workspace signals</p>
-                            <p className="mt-0.5 text-[13px] font-semibold text-[var(--ui-text)]">Plans and updates</p>
-                          </div>
-                        </div>
-                        <div className="mt-2.5 flex flex-col gap-1.5">
-                          {workspaceSignals.map(({ id, title, detail, actionLabel, path, Icon, iconClassName }) => (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => onNavigate(path)}
-                              className="flex min-w-0 items-start gap-2.5 rounded-[16px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--ui-surface-1)]"
-                            >
-                              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-[12px] border ${iconClassName}`}>
-                                <Icon size={13} />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="flex items-center justify-between gap-2">
-                                  <span className="block text-[12px] font-semibold leading-snug text-[var(--ui-text)]">{title}</span>
-                                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">{actionLabel}</span>
-                                </span>
-                                <span className="mt-0.5 block text-[10px] leading-4 text-[var(--ui-text-muted)]">{detail}</span>
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="rounded-[22px] border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft)_88%,transparent)] p-2.5">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Appearance</p>
-                            <p className="mt-0.5 text-[13px] font-medium text-[var(--ui-text)]">Theme</p>
-                          </div>
-                          {theme === 'light' ? <Sun size={15} className="text-[var(--ui-text-subtle)]" /> : <Moon size={15} className="text-[var(--ui-text-subtle)]" />}
-                        </div>
-                        <div className="mt-2.5 flex flex-col gap-1.5 rounded-[18px] bg-[var(--workspace-soft-strong)] p-1">
-                          <button
-                            type="button"
-                            onClick={() => setTheme('light')}
-                            className={`inline-flex h-9 items-center justify-between gap-3 rounded-[13px] px-3 text-left text-[12px] font-medium transition-colors ${theme === 'light'
-                              ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                              : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[color:color-mix(in_srgb,var(--workspace-soft)_82%,transparent)] hover:text-[var(--ui-text)]'}`}
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <Sun size={14} />
-                              <span>Light</span>
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">
-                              <span>Clear</span>
-                              {theme === 'light' ? <Check size={12} className="text-[var(--ui-primary)]" /> : null}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setTheme('dark')}
-                            className={`inline-flex h-9 items-center justify-between gap-3 rounded-[13px] px-3 text-left text-[12px] font-medium transition-colors ${theme === 'dark'
-                              ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)]'
-                              : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[color:color-mix(in_srgb,var(--workspace-soft)_82%,transparent)] hover:text-[var(--ui-text)]'}`}
-                          >
-                            <span className="inline-flex items-center gap-2">
-                              <Moon size={14} />
-                              <span>Dark</span>
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">
-                              <span>Focus</span>
-                              {theme === 'dark' ? <Check size={12} className="text-[var(--ui-primary)]" /> : null}
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      {workspaceSignals.map(({ id, title, Icon, path }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => onNavigate(path)}
-                          className="grid h-12 w-12 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-text)]"
-                          title={title}
-                        >
-                          <Icon size={16} />
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                        className="grid h-12 w-12 place-items-center rounded-[18px] border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-text)]"
-                        title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-                      >
-                        {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="relative z-20 shrink-0" ref={avatarMenuRef}>
-              <button
-                type="button"
-                onClick={() => setOpenAvatarMenu((open) => !open)}
-                className={`flex w-full items-center overflow-hidden border border-[var(--workspace-sidebar-border)] bg-[color:color-mix(in_srgb,var(--workspace-soft-strong)_56%,transparent)] text-[12px] font-medium text-[var(--ui-text)] transition-all hover:bg-[var(--workspace-soft)] ${sidebarExpanded ? 'gap-3 rounded-[24px] px-2.5 py-2.5 text-left' : 'h-14 w-14 justify-center rounded-[22px]'}`}
-                title="Account"
-              >
-                <span className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-[var(--workspace-sidebar-border)] bg-[var(--ui-surface-2)]">
-                  <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-                </span>
-                <span className={`min-w-0 overflow-hidden transition-all duration-300 ${sidebarLabelClassName}`}>
-                  <span className="block text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</span>
-                  <span className="block text-[11px] text-[var(--ui-text-muted)]">{authEmail}</span>
-                </span>
-              </button>
               {openAvatarMenu && (
-                <div className={`absolute z-40 ${avatarMenuPositionClassName} ${avatarMenuWidthClassName} rounded-[24px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-popover)_94%,transparent)] p-3 shadow-[0_28px_60px_rgba(0,0,0,0.28)] backdrop-blur-xl`}>
-                  <div className="flex items-center gap-2">
-                    <div className="h-9 w-9 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                <div className={`absolute z-[120] ${avatarMenuPositionClassName} ${avatarMenuWidthClassName} rounded-[22px] border p-4 ${avatarMenuCardClassName}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={`truncate text-[15px] font-semibold ${avatarMenuStrongTextClassName}`}>{authDisplayName}</p>
+                      <p className={`mt-1 truncate text-[13px] ${avatarMenuMutedTextClassName}`}>{authEmail}</p>
+                    </div>
+                    <div className={`h-12 w-12 overflow-hidden rounded-full ${isLight ? 'bg-[#dff6f8]' : 'bg-[#2a2c34]'}`}>
                       <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{authDisplayName}</p>
-                      <p className="truncate text-[11px] text-[var(--ui-text-muted)]">{authEmail}</p>
-                    </div>
                   </div>
-                  <div className="mt-3 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)]/80 px-3 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Current plan</p>
-                        <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditPlanLabel}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ui-text-subtle)]">Balance</p>
-                        <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{creditBalanceLabel}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+
+                  <div className={`mt-4 h-px ${avatarMenuDividerClassName}`} />
+
+                  <div className="mt-2 space-y-1">
                     <button
                       type="button"
                       onClick={() => {
                         setOpenAvatarMenu(false);
                         onNavigate('/pricing');
                       }}
-                      className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                      className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
                     >
-                      Billing
+                      <span className="inline-flex items-center gap-3">
+                        <Gem size={16} className={avatarMenuMutedIconClassName} />
+                        <span className="text-[14px] font-medium">Credits</span>
+                      </span>
+                      <span className={`inline-flex items-center gap-3 text-[14px] ${avatarMenuMutedTextClassName}`}>
+                        <span>{billingSummary?.balanceCredits ?? '...'}</span>
+                        <ChevronRight size={16} />
+                      </span>
+                    </button>
+                    <div className={`h-px ${avatarMenuDividerClassName}`} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenAvatarMenu(false);
+                        onNavigate('/app/projects');
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
+                    >
+                      <FolderOpen size={16} className={avatarMenuMutedIconClassName} />
+                      <span className="text-[14px] font-medium">Workspace</span>
+                    </button>
+                    <div className={`h-px ${avatarMenuDividerClassName}`} />
+                    <button
+                      type="button"
+                      onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                      className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${isLight ? 'bg-black/[0.04]' : 'bg-white/[0.05]'} ${avatarMenuRowClassName}`}
+                    >
+                      <span className="inline-flex items-center gap-3">
+                        <Palette size={16} className={avatarMenuMutedIconClassName} />
+                        <span className={`text-[14px] font-medium ${avatarMenuStrongTextClassName}`}>Settings</span>
+                      </span>
+                      <span className={`text-[12px] ${avatarMenuMutedTextClassName}`}>{theme === 'light' ? 'Light' : 'Dark'}</span>
+                    </button>
+                    <div className={`h-px ${avatarMenuDividerClassName}`} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenAvatarMenu(false);
+                        onNavigate('/');
+                      }}
+                      className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
+                    >
+                      <span className="inline-flex items-center gap-3">
+                        <Home size={16} className={avatarMenuMutedIconClassName} />
+                        <span className="text-[14px] font-medium">Homepage</span>
+                      </span>
+                      <ChevronRight size={16} className={avatarMenuMutedIconClassName} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void loadProjects()}
+                      className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
+                    >
+                      <span className="inline-flex items-center gap-3">
+                        <RefreshCcw size={16} className={`${avatarMenuMutedIconClassName} ${loading ? 'animate-spin' : ''}`} />
+                        <span className="text-[14px] font-medium">Refresh Projects</span>
+                      </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        void loadBillingSummary();
+                        setOpenAvatarMenu(false);
+                        startGuide(WORKSPACE_GUIDE_ID);
                       }}
-                      className="inline-flex h-10 items-center justify-center rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                      className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
                     >
-                      Refresh
+                      <span className="inline-flex items-center gap-3">
+                        <CircleHelp size={16} className={avatarMenuMutedIconClassName} />
+                        <span className="text-[14px] font-medium">Get Help</span>
+                      </span>
+                      <ChevronRight size={16} className={avatarMenuMutedIconClassName} />
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleSignOut()}
-                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-rose-300/30 bg-rose-500/10 text-xs font-medium uppercase tracking-[0.08em] text-rose-200 transition-colors hover:bg-rose-500/20"
-                  >
-                    <LogOut size={13} />
-                    Logout
-                  </button>
+
+                  <div className={`mt-3 border-t pt-2 ${isLight ? 'border-black/10' : 'border-white/[0.08]'}`}>
+                    <button
+                      type="button"
+                      onClick={() => void handleSignOut()}
+                      className={`flex w-full items-center gap-3 rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
+                    >
+                      <LogOut size={16} className={avatarMenuMutedIconClassName} />
+                      <span className="text-[14px] font-medium">Sign Out</span>
+                    </button>
+                  </div>
                 </div>
               )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('/app/projects/new')}
+              data-guide-id="workspace-nav-new-project"
+              className={`mt-4 flex items-center justify-between transition-colors ${sidebarExpanded ? `rounded-[10px] px-3 py-2.5 ${desktopSidebarSurfaceClassName}` : 'h-11 w-11 justify-center bg-transparent'}`}
+              title="Start new project"
+            >
+              <span className={`flex min-w-0 items-center gap-2 ${sidebarExpanded ? '' : 'w-full justify-center'}`}>
+                <span className={`grid h-4 w-4 place-items-center text-[8px] ${sidebarExpanded ? 'rounded-full bg-white/10 text-[var(--ui-text-subtle)]' : 'mx-auto text-[var(--ui-text-muted)]'}`}>
+                  <Plus size={10} />
+                </span>
+                <span className={`truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] ${sidebarExpanded ? '' : 'hidden'}`}>{sidebarPrimaryLabel}</span>
+              </span>
+              {sidebarExpanded ? (
+                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">New</span>
+              ) : null}
+            </button>
+
+            <div className={`mt-4 h-px ${desktopSidebarDividerClassName} ${sidebarExpanded ? '' : 'w-8'}`} />
+
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <nav className={`mt-4 flex flex-col ${sidebarExpanded ? 'gap-1' : 'items-center gap-4'}`}>
+                {sidebarNavItems.map(({ id, label, Icon, active, onClick, iconClassName }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={onClick}
+                    className={`group flex items-center transition-colors ${sidebarExpanded
+                      ? `gap-3 rounded-[10px] px-2 py-2 text-left ${desktopSidebarInlineHoverClassName}`
+                      : 'h-5 w-5 justify-center bg-transparent'}`}
+                    title={label}
+                  >
+                    <span className={`grid h-4 w-4 shrink-0 place-items-center ${active ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)] group-hover:text-[var(--ui-text)]'}`}>
+                      <Icon size={14} className={iconClassName} />
+                    </span>
+                    <span className={`min-w-0 overflow-hidden text-[13px] ${active ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'} ${sidebarLabelClassName}`}>
+                      {label}
+                    </span>
+                  </button>
+                ))}
+              </nav>
+
+              {sidebarExpanded ? (
+                <>
+                  <div className="mt-6">
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Favorites</p>
+                    <p className="mt-3 text-[12px] text-[var(--ui-text-subtle)]/80">No favorites yet</p>
+                  </div>
+
+                  <div className="mt-6">
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Recent Projects</p>
+                    <div className="mt-3 flex flex-col gap-2">
+                      {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          type="button"
+                          onClick={() => onOpenProject(project.id)}
+                          className={`truncate rounded-[8px] px-2 py-1.5 text-left text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                          title={project.name || 'Untitled project'}
+                        >
+                          {project.name || 'Untitled project'}
+                        </button>
+                      )) : (
+                        <p className="text-[12px] text-[var(--ui-text-subtle)]/80">No recent projects</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Workspace</p>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('/app/projects')}
+                      className={`mt-3 inline-flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                    >
+                      <FolderOpen size={13} />
+                      All Workspace
+                    </button>
+                  </div>
+
+                  <div className="mt-5">
+                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Private</p>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('/pricing')}
+                      className={`mt-3 inline-flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                    >
+                      <Gem size={13} />
+                      All Private
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div className={`mt-4 ${sidebarExpanded ? 'flex items-center justify-end gap-2.5' : 'flex flex-col items-end gap-4'}`}>
+              <button
+                type="button"
+                onClick={() => onNavigate('/pricing')}
+                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
+                  ? `rounded-[12px] border border-[color:color-mix(in_srgb,var(--ui-text)_12%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-text)_7%,transparent)] text-[var(--ui-text)] ${desktopSidebarInlineHoverClassName}`
+                  : 'text-[var(--ui-text)] hover:text-[var(--ui-primary)]'}`}
+                title="Billing"
+              >
+                <Gem size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
+                  ? `rounded-[12px] border border-[color:color-mix(in_srgb,var(--ui-text)_12%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-text)_7%,transparent)] text-[var(--ui-text)] ${desktopSidebarInlineHoverClassName}`
+                  : 'text-[var(--ui-text)] hover:text-[var(--ui-primary)]'}`}
+                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+              >
+                {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
+                  ? 'rounded-[12px] border border-rose-400/18 bg-rose-500/10 text-rose-300 hover:bg-rose-500/16'
+                  : 'text-rose-300 hover:text-rose-200'}`}
+                title="Logout"
+              >
+                <LogOut size={16} />
+              </button>
             </div>
           </div>
         </aside>
 
-        <div className="min-w-0 flex-1 lg:pl-3">
-          <div className="flex h-full flex-col overflow-hidden rounded-[30px] bg-[var(--ui-surface-1)] shadow-[var(--workspace-content-shadow)]">
+        <div className="min-w-0 flex-1">
+          <div className={`flex h-full flex-col overflow-hidden ${projectWorkspaceSurfaceClassName}`}>
             <div className="px-4 py-4 md:px-7">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -1159,14 +1193,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.62, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
                   >
-            <div className="relative mx-auto w-full overflow-visible">
+            <div className="relative isolate mx-auto w-full overflow-visible">
               <ComposerAttachmentStack
                 images={starterImages}
                 onRemove={(index) => setStarterImages((prev) => prev.filter((_, i) => i !== index))}
               />
               <div
                 data-guide-id="workspace-starter-prompt"
-                className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--workspace-soft)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4"
+                className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--ui-surface-3)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4"
               >
                 <input
                   ref={fileInputRef}
@@ -1501,18 +1535,18 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         );
                       }
                       return (
-                        <div className="relative flex h-[210px] items-center justify-center gap-2 overflow-hidden rounded-[18px] bg-[var(--workspace-soft-strong)] px-2 py-3 sm:h-[260px] sm:gap-3 sm:rounded-[20px] sm:px-3 sm:py-4">
+                        <div className={`relative flex h-[210px] items-center justify-center gap-2 overflow-hidden rounded-[18px] px-2 py-3 sm:h-[260px] sm:gap-3 sm:rounded-[20px] sm:px-3 sm:py-4 ${projectPreviewShellClassName}`}>
                           {frameImages.map((imageUrl, index) => (
                             <div
                               key={`${project.id}-preview-${index}`}
-                              className={`relative overflow-hidden rounded-[18px] border border-white/15 bg-[#080A12] shadow-[0_16px_30px_rgba(0,0,0,0.5)] ${frameImages.length > 1
+                              className={`relative overflow-hidden rounded-[18px] border shadow-[0_16px_30px_rgba(0,0,0,0.5)] ${projectPreviewFrameClassName} ${frameImages.length > 1
                                 ? index === 0
                                   ? 'h-[170px] w-[82px] -rotate-3 sm:h-[220px] sm:w-[108px]'
                                   : 'h-[170px] w-[82px] rotate-3 sm:h-[220px] sm:w-[108px]'
                                 : 'h-[182px] w-[92px] sm:h-[230px] sm:w-[116px]'
                                 }`}
                             >
-                              <div className="absolute inset-[3px] overflow-hidden rounded-[15px] bg-[#121623]">
+                              <div className={`absolute inset-[3px] overflow-hidden rounded-[15px] ${projectPreviewInsetClassName}`}>
                                 <img
                                   src={imageUrl}
                                   alt={`${project.name} preview ${index + 1}`}

@@ -3,7 +3,8 @@ import { AlertTriangle, ArrowLeft, BarChart3, Check, Copy, CreditCard, Download,
 import type { User as FirebaseUser } from 'firebase/auth';
 import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
-import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
+import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
+import { resetProjectHistorySnapshot } from '../../utils/projectHistory';
 import type { EditorPrefs } from '@eazyui/shared';
 import {
     buildBillingUsageActivityRows,
@@ -11,6 +12,7 @@ import {
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
 type DeviceDisplayMode = 'framed' | 'clean';
+type CanvasScrollWheelMode = 'zoom' | 'pan';
 
 const ACCOUNT_NAV: Array<{ key: SettingsTab; label: string; icon: typeof UserIcon }> = [
     { key: 'profile', label: 'Profile', icon: UserIcon },
@@ -49,7 +51,6 @@ export function ProjectSettingsPage({
     const { doc, setEditorPrefs, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
-    const { clearHistory } = useHistoryStore();
     const { dirty, markSaved, setSaving, resetProjectState } = useProjectStore();
 
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
@@ -78,6 +79,7 @@ export function ProjectSettingsPage({
     const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'You';
     const authPhotoUrl = resolveUserPhotoUrl(authUser);
     const deviceDisplayMode = ((doc.editorPrefs as EditorPrefs & { deviceDisplayMode?: DeviceDisplayMode }).deviceDisplayMode || 'framed') as DeviceDisplayMode;
+    const canvasScrollWheelMode = ((doc.editorPrefs as EditorPrefs & { canvasScrollWheelMode?: CanvasScrollWheelMode }).canvasScrollWheelMode || 'zoom') as CanvasScrollWheelMode;
 
     useEffect(() => {
         setSettingsTab(normalizeTab(initialTab));
@@ -272,7 +274,7 @@ export function ProjectSettingsPage({
         resetCanvas();
         exitEdit();
         clearMessages();
-        clearHistory();
+        resetProjectHistorySnapshot(null, useCanvasStore.getState().doc);
         resetProjectState();
         onNavigate('/app/projects/new');
     };
@@ -305,6 +307,43 @@ export function ProjectSettingsPage({
         } catch (error) {
             setEditorPrefs({ deviceDisplayMode: previousMode } as any);
             pushToast({ kind: 'error', title: 'Update failed', message: (error as Error).message || 'Could not update canvas display mode.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleCanvasScrollWheelModeChange = async (nextMode: CanvasScrollWheelMode) => {
+        const previousMode = (((useCanvasStore.getState().doc.editorPrefs as EditorPrefs & { canvasScrollWheelMode?: CanvasScrollWheelMode }).canvasScrollWheelMode) || 'zoom') as CanvasScrollWheelMode;
+        if (previousMode === nextMode) return;
+
+        setEditorPrefs({ canvasScrollWheelMode: nextMode } as any);
+
+        if (!spec) {
+            pushToast({
+                kind: 'success',
+                title: 'Canvas wheel updated',
+                message: nextMode === 'zoom' ? 'Mouse wheel now zooms the canvas.' : 'Mouse wheel now scrolls the canvas.',
+            });
+            return;
+        }
+
+        try {
+            setSaving(true);
+            const saved = await apiClient.save({
+                projectId: projectId || undefined,
+                designSpec: spec as any,
+                canvasDoc: useCanvasStore.getState().doc,
+                chatState: { messages },
+            });
+            markSaved(saved.projectId, saved.savedAt);
+            pushToast({
+                kind: 'success',
+                title: 'Canvas wheel updated',
+                message: nextMode === 'zoom' ? 'Mouse wheel now zooms the canvas.' : 'Mouse wheel now scrolls the canvas.',
+            });
+        } catch (error) {
+            setEditorPrefs({ canvasScrollWheelMode: previousMode } as any);
+            pushToast({ kind: 'error', title: 'Update failed', message: (error as Error).message || 'Could not update canvas wheel mode.' });
         } finally {
             setSaving(false);
         }
@@ -718,6 +757,32 @@ export function ProjectSettingsPage({
                                     <p className="mt-2 text-sm text-[var(--ui-text-subtle)]">
                                         `Framed` keeps the current physical device chrome. `Clean` removes bezels, hardware buttons, and browser/device shell while preserving the screen dimensions.
                                     </p>
+                                    <Row
+                                        label="Mouse wheel on canvas"
+                                        value={(
+                                            <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleCanvasScrollWheelModeChange('zoom')}
+                                                    className={`inline-flex h-8 items-center gap-1.5 px-3 text-xs transition-colors ${canvasScrollWheelMode === 'zoom' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
+                                                >
+                                                    Zoom
+                                                    {canvasScrollWheelMode === 'zoom' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleCanvasScrollWheelModeChange('pan')}
+                                                    className={`inline-flex h-8 items-center gap-1.5 border-l border-[var(--ui-border)] px-3 text-xs transition-colors ${canvasScrollWheelMode === 'pan' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'cursor-pointer text-[var(--ui-text-subtle)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'}`}
+                                                >
+                                                    Scroll
+                                                    {canvasScrollWheelMode === 'pan' ? <Check size={11} className="text-[var(--ui-primary)]" /> : null}
+                                                </button>
+                                            </div>
+                                        )}
+                                    />
+                                    <p className="mt-2 text-sm text-[var(--ui-text-subtle)]">
+                                        `Zoom` uses the mouse wheel to zoom in and out. `Scroll` uses the wheel to pan around the canvas instead.
+                                    </p>
                                 </SectionCard>
 
                                 <SectionCard title="MCP API Keys">
@@ -733,7 +798,7 @@ export function ProjectSettingsPage({
                                                 onChange={(event) => setMcpKeyLabel(event.target.value)}
                                                 placeholder="AI IDE"
                                                 maxLength={80}
-                                                className="h-9 min-w-[220px] flex-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm outline-none focus:border-emerald-400/60"
+                                                className="h-9 min-w-[220px] flex-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm outline-none focus:border-[var(--ui-focus-border)]"
                                             />
                                             <button
                                                 type="button"

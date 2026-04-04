@@ -25,20 +25,53 @@ type BubbleLayout = {
     tail: { top: number; left: number; rotation: string };
 };
 
-const BUBBLE_WIDTH = 320;
-const VIEWPORT_PADDING = 16;
-const TARGET_MARGIN = 18;
-const TAIL_SIZE = 14;
+type FocusMaskRect = {
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+};
+
+const BUBBLE_WIDTH = 280;
+const VIEWPORT_PADDING = 18;
+const TARGET_MARGIN = 22;
+const TAIL_SIZE = 16;
+const FOCUS_PADDING = 12;
+const SMALL_TARGET_CIRCLE_MAX_SIZE = 72;
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
+}
+
+function resolveFocusMaskRect(targetRect: DOMRect): FocusMaskRect {
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
+    const top = clamp(targetRect.top - FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportHeight - VIEWPORT_PADDING));
+    const left = clamp(targetRect.left - FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING));
+    const right = clamp(targetRect.right + FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING));
+    const bottom = clamp(targetRect.bottom + FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportHeight - VIEWPORT_PADDING));
+
+    return {
+        top,
+        left,
+        right,
+        bottom,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top),
+    };
+}
+
+function shouldUseCircularFocus(targetRect: DOMRect) {
+    return Math.max(targetRect.width, targetRect.height) <= SMALL_TARGET_CIRCLE_MAX_SIZE;
 }
 
 function resolveBubbleLayout(targetRect: DOMRect, placement: GuideBubblePlacement): BubbleLayout {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
     const bubbleWidth = Math.min(BUBBLE_WIDTH, Math.max(280, viewportWidth - (VIEWPORT_PADDING * 2)));
-    const bubbleHeightEstimate = 188;
+    const bubbleHeightEstimate = 212;
 
     let top = 0;
     let left = 0;
@@ -131,25 +164,70 @@ export function GuideBubbleOverlay({
         if (!step || !targetRect) return null;
         return resolveBubbleLayout(targetRect, step.placement || 'bottom');
     }, [step, targetRect]);
+    const focusMaskRect = useMemo(() => {
+        if (!targetRect) return null;
+        return resolveFocusMaskRect(targetRect);
+    }, [targetRect]);
+    const useCircularFocus = useMemo(() => {
+        if (!targetRect) return false;
+        return shouldUseCircularFocus(targetRect);
+    }, [targetRect]);
+    const circularFocusMaskStyle = useMemo(() => {
+        if (!targetRect || !useCircularFocus) return null;
+        const centerX = targetRect.left + (targetRect.width / 2);
+        const centerY = targetRect.top + (targetRect.height / 2);
+        const radius = Math.max(targetRect.width, targetRect.height) / 2 + FOCUS_PADDING;
+        const maskImage = `radial-gradient(circle ${radius}px at ${centerX}px ${centerY}px, transparent ${Math.max(0, radius - 0.5)}px, black ${radius + 0.5}px)`;
 
-    if (!step || !targetRect || !layout) return null;
+        return {
+            WebkitMaskImage: maskImage,
+            maskImage,
+        } as const;
+    }, [targetRect, useCircularFocus]);
+
+    if (!step || !targetRect || !layout || !focusMaskRect) return null;
 
     const isLastStep = stepIndex >= stepCount - 1;
 
     return (
         <div className="pointer-events-none fixed inset-0 z-[160]">
-            <div className="absolute inset-0 bg-[rgba(6,8,12,0.46)] backdrop-blur-[1px]" />
+            {useCircularFocus && circularFocusMaskStyle ? (
+                <div
+                    className="absolute inset-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                    style={circularFocusMaskStyle}
+                />
+            ) : (
+                <>
+                    <div
+                        className="absolute left-0 right-0 top-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                        style={{ height: focusMaskRect.top }}
+                    />
+                    <div
+                        className="absolute bottom-0 left-0 right-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                        style={{ top: focusMaskRect.bottom }}
+                    />
+                    <div
+                        className="absolute bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                        style={{
+                            top: focusMaskRect.top,
+                            left: 0,
+                            width: focusMaskRect.left,
+                            height: focusMaskRect.height,
+                        }}
+                    />
+                    <div
+                        className="absolute bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                        style={{
+                            top: focusMaskRect.top,
+                            left: focusMaskRect.right,
+                            right: 0,
+                            height: focusMaskRect.height,
+                        }}
+                    />
+                </>
+            )}
             <div
-                className="absolute rounded-[26px] border border-[color:color-mix(in_srgb,var(--ui-primary)_34%,white)] shadow-[0_0_0_9999px_rgba(6,8,12,0.18),0_28px_80px_rgba(2,6,23,0.34)]"
-                style={{
-                    top: targetRect.top - 8,
-                    left: targetRect.left - 8,
-                    width: targetRect.width + 16,
-                    height: targetRect.height + 16,
-                }}
-            />
-            <div
-                className="absolute h-3.5 w-3.5 rounded-[4px] border border-[color:color-mix(in_srgb,var(--ui-primary)_26%,white)] bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-popover))] shadow-[0_12px_28px_rgba(2,6,23,0.22)]"
+                className="absolute h-3.5 w-3.5 rounded-[2px] border border-[var(--ui-border)] bg-[var(--ui-popover)]"
                 style={{
                     top: layout.tail.top,
                     left: layout.tail.left,
@@ -157,7 +235,7 @@ export function GuideBubbleOverlay({
                 }}
             />
             <div
-                className="pointer-events-auto absolute rounded-[30px] border border-[color:color-mix(in_srgb,var(--ui-primary)_28%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-popover)_96%,rgba(9,14,22,0.14))] p-4 shadow-[0_28px_80px_rgba(2,6,23,0.34)] backdrop-blur-xl"
+                className="pointer-events-auto absolute rounded-lg border border-[var(--ui-border)] bg-[var(--ui-popover)] px-3 py-2 text-sm text-[var(--ui-text)]"
                 style={{
                     top: layout.bubble.top,
                     left: layout.bubble.left,
@@ -166,36 +244,36 @@ export function GuideBubbleOverlay({
             >
                 <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-primary)]">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">
                             Workspace guide
                         </p>
-                        <h3 className="mt-2 text-[18px] font-semibold leading-6 tracking-[-0.03em] text-[var(--ui-text)]">
+                        <h3 className="mt-1.5 text-[16px] font-semibold leading-5 tracking-[-0.02em] text-[var(--ui-text)]">
                             {step.title}
                         </h3>
                     </div>
                     <button
                         type="button"
                         onClick={onSkip}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text)]"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
                         aria-label="Close guide"
                     >
                         <X size={14} />
                     </button>
                 </div>
 
-                <p className="mt-3 text-[14px] leading-6 text-[var(--ui-text-muted)]">
+                <p className="mt-2 text-[13px] leading-5 text-[var(--ui-text-muted)]">
                     {step.body}
                 </p>
 
-                <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="mt-3 flex items-center justify-between gap-3">
                     <span className="text-[12px] font-medium text-[var(--ui-text-subtle)]">
-                        {stepIndex + 1} / {stepCount}
+                        {stepIndex + 1} of {stepCount}
                     </span>
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
                             onClick={onSkip}
-                            className="inline-flex h-9 items-center justify-center rounded-full px-3 text-[12px] font-medium text-[var(--ui-text-muted)] transition-colors hover:text-[var(--ui-text)]"
+                            className="inline-flex h-8 items-center justify-center rounded-md px-2 text-[12px] font-medium text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
                         >
                             Skip
                         </button>
@@ -203,7 +281,7 @@ export function GuideBubbleOverlay({
                             <button
                                 type="button"
                                 onClick={onPrev}
-                                className="inline-flex h-9 items-center gap-1 rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-[12px] font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
+                                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-popover)] px-2.5 text-[12px] font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-2)]"
                             >
                                 <ChevronLeft size={14} />
                                 Back
@@ -212,7 +290,7 @@ export function GuideBubbleOverlay({
                         <button
                             type="button"
                             onClick={onNext}
-                            className="inline-flex h-9 items-center gap-1 rounded-full bg-[var(--ui-primary)] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[var(--ui-primary-hover)]"
+                            className="inline-flex h-8 items-center gap-1 rounded-md bg-[var(--ui-surface-2)] px-2.5 text-[12px] font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
                         >
                             {isLastStep ? 'Done' : 'Next'}
                             {!isLastStep && <ChevronRight size={14} />}

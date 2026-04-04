@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
     AlertTriangle,
     BarChart3,
@@ -26,11 +26,12 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
+import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyFigmaPayloadToClipboard, copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, getExportTargetScreens } from '../../utils/exportScreens';
 import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
+import { resetProjectHistorySnapshot } from '../../utils/projectHistory';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
 type ExportAction = 'zip' | 'images' | 'code' | 'figma';
@@ -66,10 +67,9 @@ function heatClass(level: number): string {
 export function CanvasProfileMenu() {
     const { theme, setTheme, pushToast, removeToast, requestConfirmation, toasts } = useUiStore();
     const { spec, reset: resetDesign } = useDesignStore();
-    const { doc, reset: resetCanvas } = useCanvasStore();
+    const { doc, setEditorPrefs, reset: resetCanvas } = useCanvasStore();
     const { messages, clearMessages } = useChatStore();
     const { exitEdit } = useEditStore();
-    const { clearHistory } = useHistoryStore();
     const { projectId, dirty, isSaving, markSaved, setSaving, resetProjectState } = useProjectStore();
 
     const [openProfile, setOpenProfile] = useState(false);
@@ -88,6 +88,7 @@ export function CanvasProfileMenu() {
     const [exportActionBusy, setExportActionBusy] = useState<ExportAction | null>(null);
     const [saveLabel, setSaveLabel] = useState<'saving' | 'saved' | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const canvasScrollWheelMode = ((doc.editorPrefs as { canvasScrollWheelMode?: 'zoom' | 'pan' }).canvasScrollWheelMode || 'zoom') as 'zoom' | 'pan';
     const saveLabelTimerRef = useRef<number | null>(null);
     const billingRetryBlockedUntilRef = useRef(0);
 
@@ -311,7 +312,7 @@ export function CanvasProfileMenu() {
         resetCanvas();
         exitEdit();
         clearMessages();
-        clearHistory();
+        resetProjectHistorySnapshot(null, useCanvasStore.getState().doc);
         resetProjectState();
         setOpenSettingsModal(false);
         window.history.pushState({}, '', '/app/projects/new');
@@ -405,15 +406,26 @@ export function CanvasProfileMenu() {
         .slice(-8)
         .reverse();
 
-    const goToHelp = () => {
-        setOpenProfile(false);
-        window.history.pushState({}, '', '/blog');
-        window.dispatchEvent(new PopStateEvent('popstate'));
+    const goToHelp = (event: ReactMouseEvent<HTMLButtonElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        window.dispatchEvent(new CustomEvent('eazyui:open-canvas-help', {
+            detail: {
+                panel: 'launcher',
+                anchorRect: {
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    left: rect.left,
+                    width: rect.width,
+                    height: rect.height,
+                },
+            },
+        }));
     };
 
     return (
         <>
-            <div ref={menuRef} className="pointer-events-auto relative flex items-center gap-2">
+            <div ref={menuRef} data-guide-id="canvas-project-controls" className="pointer-events-auto relative flex items-center gap-2">
                 <button
                     type="button"
                     onClick={() => void handleSaveNow()}
@@ -745,6 +757,12 @@ export function CanvasProfileMenu() {
                                                 <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]">
                                                     <button type="button" onClick={() => setTheme('light')} className={`inline-flex h-9 items-center gap-2 px-3 text-sm ${theme === 'light' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><Sun size={14} /><span>Light</span></button>
                                                     <button type="button" onClick={() => setTheme('dark')} className={`inline-flex h-9 items-center gap-2 border-l border-[var(--ui-border)] px-3 text-sm ${theme === 'dark' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><Moon size={14} /><span>Dark</span></button>
+                                                </div>
+                                            </SettingsRow>
+                                            <SettingsRow label="Mouse wheel on canvas" detail="Choose whether the wheel zooms or scrolls the canvas.">
+                                                <div className="inline-flex overflow-hidden rounded-lg border border-[var(--ui-border)]">
+                                                    <button type="button" onClick={() => setEditorPrefs({ canvasScrollWheelMode: 'zoom' } as any)} className={`inline-flex h-9 items-center gap-2 px-3 text-sm ${canvasScrollWheelMode === 'zoom' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><span>Zoom</span></button>
+                                                    <button type="button" onClick={() => setEditorPrefs({ canvasScrollWheelMode: 'pan' } as any)} className={`inline-flex h-9 items-center gap-2 border-l border-[var(--ui-border)] px-3 text-sm ${canvasScrollWheelMode === 'pan' ? 'bg-white/10 text-white' : 'bg-transparent text-[var(--ui-text-subtle)] hover:bg-white/5'}`}><span>Scroll</span></button>
                                                 </div>
                                             </SettingsRow>
                                         </SectionCard>

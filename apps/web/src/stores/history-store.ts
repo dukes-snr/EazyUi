@@ -4,6 +4,7 @@ import type { CanvasDoc } from '@eazyui/shared';
 type SnapshotSpec = {
     id: string;
     name: string;
+    designSystem?: unknown;
     screens: {
         screenId: string;
         name: string;
@@ -42,6 +43,42 @@ function cloneSnapshot(snapshot: CanvasHistorySnapshot): CanvasHistorySnapshot {
     return JSON.parse(JSON.stringify(snapshot));
 }
 
+function toComparableSnapshot(snapshot: CanvasHistorySnapshot) {
+    const comparableSpec = snapshot.spec
+        ? {
+            id: snapshot.spec.id,
+            name: snapshot.spec.name,
+            designSystem: snapshot.spec.designSystem || null,
+            screens: snapshot.spec.screens.map((screen) => ({
+                screenId: screen.screenId,
+                name: screen.name,
+                html: screen.html,
+                width: screen.width,
+                height: screen.height,
+                status: screen.status || null,
+            })),
+        }
+        : null;
+
+    return {
+        spec: comparableSpec,
+        doc: {
+            boards: snapshot.doc.boards.map((board) => ({
+                boardId: board.boardId,
+                screenId: board.screenId,
+                x: board.x,
+                y: board.y,
+                width: board.width,
+                height: board.height,
+                deviceFrame: board.deviceFrame,
+                locked: board.locked,
+                visible: board.visible,
+            })),
+            editorPrefs: snapshot.doc.editorPrefs,
+        },
+    };
+}
+
 export const useHistoryStore = create<HistoryState>((set, get) => ({
     past: [],
     future: [],
@@ -53,7 +90,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         if (isRestoring) return;
         const normalized = cloneSnapshot(snapshot);
         const last = past[past.length - 1];
-        if (last && stableStringify(last) === stableStringify(normalized)) return;
+        if (last && stableStringify(toComparableSnapshot(last)) === stableStringify(toComparableSnapshot(normalized))) return;
 
         const nextPast = [...past, normalized];
         const trimmedPast = nextPast.length > maxEntries ? nextPast.slice(nextPast.length - maxEntries) : nextPast;
@@ -92,4 +129,3 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 
     clearHistory: () => set({ past: [], future: [], isRestoring: false }),
 }));
-

@@ -321,7 +321,7 @@ RULES:
     if (!isEditMode) return null;
 
     return (
-        <div className="edit-ai-composer-shell">
+        <div className="edit-ai-composer-shell" data-guide-id="edit-ai-composer">
             <div className="edit-ai-composer">
                 <div className="edit-ai-context-row">
                     {selectionLabel ? (

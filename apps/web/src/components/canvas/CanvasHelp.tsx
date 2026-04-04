@@ -1,8 +1,23 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { BookOpen, Bot, ChevronRight, CircleHelp, Heart, Search, Sparkles, X } from 'lucide-react';
-import { useUiStore } from '../../stores';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { BookOpen, Bot, ChevronRight, CircleHelp, Heart, Keyboard, Search, Sparkles, X } from 'lucide-react';
+import { useOnboardingStore, useUiStore } from '../../stores';
+import { CANVAS_SHORTCUT_GROUPS, formatShortcutKeys } from './canvasShortcuts';
 
 type HelpTab = 'get-started' | 'ask' | 'docs' | 'guides';
+type HelpAnchorRect = {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+    width: number;
+    height: number;
+};
+
+type CanvasHelpOpenDetail = {
+    panel?: 'launcher' | 'help' | 'shortcuts';
+    tab?: HelpTab;
+    anchorRect?: HelpAnchorRect;
+};
 
 type DocFeature = {
     name: string;
@@ -22,6 +37,19 @@ type Guide = {
     title: string;
     steps: string[];
 };
+
+type InteractiveTour = {
+    id: string;
+    title: string;
+    description: string;
+    guideId: string;
+    requiresTargetId?: string;
+    unavailableMessage?: string;
+};
+
+const CANVAS_WORKSPACE_GUIDE_ID = 'canvas-workspace-first-run';
+const EDIT_WORKSPACE_GUIDE_ID = 'edit-workspace-first-run';
+const CHAT_PANEL_GUIDE_ID = 'chat-panel-first-run';
 
 type QuickAnswer = {
     question: string;
@@ -188,6 +216,29 @@ const GUIDES: Guide[] = [
     },
 ];
 
+const INTERACTIVE_TOURS: InteractiveTour[] = [
+    {
+        id: 'tour-canvas',
+        title: 'Canvas Workspace Tour',
+        description: 'Walk through the main canvas dock, stage, save controls, and help entry points.',
+        guideId: CANVAS_WORKSPACE_GUIDE_ID,
+    },
+    {
+        id: 'tour-chat',
+        title: 'Chat Panel Tour',
+        description: 'Learn the composer, prompt flow, platform/style controls, and chat layout controls.',
+        guideId: CHAT_PANEL_GUIDE_ID,
+    },
+    {
+        id: 'tour-edit',
+        title: 'Edit Mode Tour',
+        description: 'Walk through layers, live preview, AI edit controls, and the right-side inspector.',
+        guideId: EDIT_WORKSPACE_GUIDE_ID,
+        requiresTargetId: 'edit-preview-canvas',
+        unavailableMessage: 'Open Edit mode first to run the edit tour.',
+    },
+];
+
 const QUICK_ANSWERS: QuickAnswer[] = [
     {
         question: 'How do I reference an existing screen in a prompt?',
@@ -232,11 +283,28 @@ function getGreeting() {
     return 'Evening';
 }
 
+function isSameAnchorRect(a: HelpAnchorRect | null | undefined, b: HelpAnchorRect | null | undefined) {
+    if (!a || !b) return false;
+    return a.top === b.top
+        && a.right === b.right
+        && a.bottom === b.bottom
+        && a.left === b.left
+        && a.width === b.width
+        && a.height === b.height;
+}
+
 export function CanvasHelp() {
-    const { theme } = useUiStore();
+    const launcherWidth = 360;
+    const launcherGap = 16;
+    const viewportPadding = 16;
+    const estimatedLauncherHeight = 430;
+    const { theme, pushToast } = useUiStore();
+    const startGuide = useOnboardingStore((state) => state.startGuide);
     const isLight = theme === 'light';
     const [launcherOpen, setLauncherOpen] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
+    const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [launcherAnchorRect, setLauncherAnchorRect] = useState<HelpAnchorRect | null>(null);
     const [tab, setTab] = useState<HelpTab>('get-started');
     const [search, setSearch] = useState('');
 
@@ -271,17 +339,106 @@ export function CanvasHelp() {
         });
     }, [search]);
 
+    const launcherStyle = useMemo<CSSProperties>(() => {
+        if (!launcherAnchorRect || typeof window === 'undefined') {
+            return {
+                position: 'fixed',
+                right: viewportPadding,
+                bottom: viewportPadding + 56,
+                width: launcherWidth,
+                maxHeight: `calc(100vh - ${viewportPadding * 2}px)`,
+                zIndex: 1290,
+            };
+        }
+
+        let left = launcherAnchorRect.right + launcherGap;
+        if (left + launcherWidth > window.innerWidth - viewportPadding) {
+            left = Math.max(viewportPadding, launcherAnchorRect.left - launcherWidth - launcherGap);
+        }
+
+        const targetTop = launcherAnchorRect.top + launcherAnchorRect.height / 2 - estimatedLauncherHeight / 2;
+        const maxTop = Math.max(viewportPadding, window.innerHeight - estimatedLauncherHeight - viewportPadding);
+        const top = Math.min(Math.max(targetTop, viewportPadding), maxTop);
+
+        return {
+            position: 'fixed',
+            left,
+            top,
+            width: launcherWidth,
+            maxHeight: `calc(100vh - ${viewportPadding * 2}px)`,
+            zIndex: 1290,
+        };
+    }, [launcherAnchorRect]);
+
     const openHelp = (nextTab: HelpTab) => {
         setTab(nextTab);
         setHelpOpen(true);
         setLauncherOpen(false);
     };
 
+    const openShortcuts = () => {
+        setShortcutsOpen(true);
+        setLauncherOpen(false);
+    };
+
+    const launchInteractiveTour = (tour: InteractiveTour) => {
+        if (tour.requiresTargetId && !document.querySelector(`[data-guide-id="${tour.requiresTargetId}"]`)) {
+            pushToast({
+                kind: 'guide',
+                title: 'Tour unavailable',
+                message: tour.unavailableMessage || 'Open the relevant workspace first.',
+            });
+            return;
+        }
+
+        setHelpOpen(false);
+        setLauncherOpen(false);
+        setShortcutsOpen(false);
+        setSearch('');
+        window.setTimeout(() => {
+            startGuide(tour.guideId);
+        }, 40);
+    };
+
+    useEffect(() => {
+        const handleOpen = (event: Event) => {
+            const customEvent = event as CustomEvent<CanvasHelpOpenDetail>;
+            const detail = customEvent.detail || {};
+            if (detail.panel === 'shortcuts') {
+                setLauncherAnchorRect(detail.anchorRect ?? null);
+                setShortcutsOpen(true);
+                setHelpOpen(false);
+                setLauncherOpen(false);
+                return;
+            }
+            if (detail.panel === 'help') {
+                setLauncherAnchorRect(detail.anchorRect ?? null);
+                openHelp(detail.tab || 'get-started');
+                return;
+            }
+            const nextAnchorRect = detail.anchorRect ?? null;
+            if (launcherOpen && !helpOpen && !shortcutsOpen && isSameAnchorRect(launcherAnchorRect, nextAnchorRect)) {
+                setLauncherOpen(false);
+                setLauncherAnchorRect(nextAnchorRect);
+                return;
+            }
+            setLauncherAnchorRect(nextAnchorRect);
+            setLauncherOpen(true);
+            setHelpOpen(false);
+        };
+
+        window.addEventListener('eazyui:open-canvas-help', handleOpen as EventListener);
+        return () => window.removeEventListener('eazyui:open-canvas-help', handleOpen as EventListener);
+    }, [helpOpen, launcherAnchorRect, launcherOpen, shortcutsOpen]);
+
     return (
         <>
-            <div className="pointer-events-auto relative">
+            <div className="pointer-events-auto">
                 {launcherOpen && !helpOpen && (
-                    <div className={`absolute bottom-[70px] right-0 w-[360px] rounded-[28px] border p-5 backdrop-blur-xl shadow-[0_28px_70px_rgba(0,0,0,0.35)] ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]' : 'border-white/10 bg-[#121317]/95 text-[#ECEEF6]'}`}>
+                    <div
+                        style={launcherStyle}
+                        className={`rounded-[28px] border p-5 backdrop-blur-xl shadow-[0_28px_70px_rgba(0,0,0,0.35)] overflow-y-auto ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]' : 'border-white/10 bg-[#121317]/95 text-[#ECEEF6]'}`}
+                    >
                         <div className="flex items-start justify-between">
                             <div className={`h-10 w-10 rounded-xl inline-flex items-center justify-center ${isLight ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'bg-white text-[#111318]'}`}>
                                 <CircleHelp size={18} />
@@ -306,6 +463,7 @@ export function CanvasHelp() {
                             <LauncherItem icon={<Bot size={14} />} label="Ask a question" onClick={() => openHelp('ask')} />
                             <LauncherItem icon={<BookOpen size={14} />} label="Documentation" onClick={() => openHelp('docs')} />
                             <LauncherItem icon={<Sparkles size={14} />} label="Help Guides" onClick={() => openHelp('guides')} />
+                            <LauncherItem icon={<Keyboard size={14} />} label="Keyboard Shortcuts" onClick={openShortcuts} />
                         </div>
                     </div>
                 )}
@@ -342,6 +500,7 @@ export function CanvasHelp() {
                             <HelpTabButton active={tab === 'ask'} label="Ask a question" onClick={() => setTab('ask')} />
                             <HelpTabButton active={tab === 'docs'} label="Documentation" onClick={() => setTab('docs')} />
                             <HelpTabButton active={tab === 'guides'} label="Help Guides" onClick={() => setTab('guides')} />
+                            <HelpTabButton active={false} label="Shortcuts" onClick={openShortcuts} />
                         </aside>
 
                         <section className="flex-1 min-w-0 flex flex-col">
@@ -352,7 +511,7 @@ export function CanvasHelp() {
                                         value={search}
                                         onChange={(event) => setSearch(event.target.value)}
                                         placeholder="Search by feature, panel, or action..."
-                                        className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm outline-none ${isLight ? 'bg-[var(--ui-surface-1)] border-[var(--ui-border)] focus:border-indigo-400/50' : 'bg-white/5 border-white/15 focus:border-indigo-300/60'}`}
+                                        className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm outline-none ${isLight ? 'bg-[var(--ui-surface-1)] border-[var(--ui-border)] focus:border-[var(--ui-focus-border)]' : 'bg-white/5 border-white/15 focus:border-[var(--ui-focus-border)]'}`}
                                     />
                                 </div>
                                 <button
@@ -372,7 +531,7 @@ export function CanvasHelp() {
                                         <p className={`text-sm max-w-3xl ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>
                                             This workspace combines AI generation, canvas layout, and direct element editing. Use the flow below to go from prompt to shipped UI.
                                         </p>
-                                        {GUIDES.slice(0, 3).map((guide) => (
+                                {GUIDES.slice(0, 3).map((guide) => (
                                             <article key={guide.id} className={`rounded-2xl border p-4 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]' : 'border-white/10 bg-white/5'}`}>
                                                 <h3 className="font-semibold">{guide.title}</h3>
                                                 <ol className={`mt-3 space-y-2 text-sm list-decimal pl-5 ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/75'}`}>
@@ -382,6 +541,24 @@ export function CanvasHelp() {
                                                 </ol>
                                             </article>
                                         ))}
+                                        <div className="pt-2">
+                                            <h3 className="text-lg font-semibold">Interactive walkthroughs</h3>
+                                            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                                {INTERACTIVE_TOURS.map((tour) => (
+                                                    <article key={tour.id} className={`rounded-2xl border p-4 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]' : 'border-white/10 bg-white/5'}`}>
+                                                        <h4 className="font-semibold">{tour.title}</h4>
+                                                        <p className={`mt-2 text-sm ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>{tour.description}</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => launchInteractiveTour(tour)}
+                                                            className={`mt-4 inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold ${isLight ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]' : 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]'}`}
+                                                        >
+                                                            Start tour
+                                                        </button>
+                                                    </article>
+                                                ))}
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 
@@ -435,6 +612,21 @@ export function CanvasHelp() {
                                     <div className="space-y-4">
                                         <h2 className="text-2xl font-semibold">Help Guides</h2>
                                         <p className={`text-sm ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>Step-by-step workflows for common tasks.</p>
+                                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                            {INTERACTIVE_TOURS.map((tour) => (
+                                                <article key={tour.id} className={`rounded-2xl border p-4 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]' : 'border-white/10 bg-white/5'}`}>
+                                                    <h3 className="font-semibold">{tour.title}</h3>
+                                                    <p className={`mt-2 text-sm ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>{tour.description}</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => launchInteractiveTour(tour)}
+                                                        className={`mt-4 inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold ${isLight ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]' : 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]'}`}
+                                                    >
+                                                        Start tour
+                                                    </button>
+                                                </article>
+                                            ))}
+                                        </div>
                                         {GUIDES.map((guide) => (
                                             <article key={guide.id} className={`rounded-2xl border p-4 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]' : 'border-white/10 bg-white/5'}`}>
                                                 <h3 className="font-semibold">{guide.title}</h3>
@@ -449,6 +641,70 @@ export function CanvasHelp() {
                                 )}
                             </div>
                         </section>
+                    </div>
+                </div>
+            )}
+
+            {shortcutsOpen && (
+                <div className="fixed inset-0 z-[1310] pointer-events-auto">
+                    <div
+                        className={`fixed inset-0 ${isLight ? 'bg-slate-900/40' : 'bg-black/70'}`}
+                        onClick={() => setShortcutsOpen(false)}
+                    />
+
+                    <div className={`fixed left-1/2 top-1/2 w-[min(820px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[30px] border shadow-[0_30px_90px_rgba(0,0,0,0.45)] ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)]' : 'border-white/10 bg-[#0F1014] text-[#EAECF6]'}`}>
+                        <div className={`flex items-center justify-between border-b px-6 py-5 ${isLight ? 'border-[var(--ui-border)]' : 'border-white/10'}`}>
+                            <div>
+                                <div className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">
+                                    <Keyboard size={14} />
+                                    <span>Shortcuts</span>
+                                </div>
+                                <h2 className="mt-2 text-[30px] font-semibold leading-none">Canvas keyboard map</h2>
+                                <p className={`mt-2 text-sm ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>
+                                    Every dock tool and the most-used canvas actions in one place.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShortcutsOpen(false)}
+                                className={`h-10 w-10 rounded-xl border inline-flex items-center justify-center ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] hover:bg-[var(--ui-surface-3)]' : 'border-white/15 bg-white/5 hover:bg-white/10'}`}
+                                title="Close shortcuts"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {CANVAS_SHORTCUT_GROUPS.map((group) => (
+                                    <section key={group.id} className={`rounded-2xl border p-4 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)]' : 'border-white/10 bg-white/5'}`}>
+                                        <h3 className="text-base font-semibold">{group.title}</h3>
+                                        <div className="mt-4 space-y-2.5">
+                                            {group.items.map((item) => (
+                                                <div key={`${group.id}-${item.label}`} className={`rounded-xl border px-3 py-3 ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-1)]' : 'border-white/10 bg-black/20'}`}>
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium">{item.label}</p>
+                                                            <p className={`mt-1 text-xs ${isLight ? 'text-[var(--ui-text-muted)]' : 'text-white/70'}`}>{item.description}</p>
+                                                        </div>
+                                                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                                            {item.keys.map((key) => (
+                                                                <kbd key={`${item.label}-${key}`} className={`inline-flex h-7 items-center rounded-lg border px-2.5 text-[11px] font-medium ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)]' : 'border-white/12 bg-white/8 text-white'}`}>
+                                                                    {key}
+                                                                </kbd>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+                                ))}
+                            </div>
+                            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${isLight ? 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)]' : 'border-white/10 bg-white/5 text-white/70'}`}>
+                                Tip: press <strong>{formatShortcutKeys(['?'])}</strong> anywhere on canvas to open this shortcut map instantly.
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

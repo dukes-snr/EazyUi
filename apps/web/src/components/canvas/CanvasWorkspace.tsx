@@ -15,24 +15,69 @@ import {
     NodeChange,
     BackgroundVariant,
     SelectionMode,
+    PanOnScrollMode,
     useReactFlow,
     useViewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ChevronRight } from 'lucide-react';
+import type { EditorPrefs } from '@eazyui/shared';
 
 import { useDesignStore, useCanvasStore, useEditStore, useChatStore, useHistoryStore, useProjectStore, useUiStore } from '../../stores';
+import { useOnboardingStore } from '../../stores/onboarding-store';
 import { DeviceNode } from './DeviceNode';
 import { CanvasToolbar } from './CanvasToolbar';
 import { MultiSelectToolbar } from './MultiSelectToolbar';
 import { CanvasProfileMenu } from './CanvasProfileMenu';
 import { dispatchClearSelection, dispatchDeleteSelected } from '../../utils/editMessaging';
 import { apiClient } from '../../api/client';
+import { recordProjectHistorySnapshot, restoreProjectHistorySnapshot } from '../../utils/projectHistory';
+import { GuideBubbleOverlay, type GuideBubbleStep } from '../ui/GuideBubbleOverlay';
 
 // Define custom node types
 const nodeTypes = {
     device: DeviceNode,
 };
+
+const CANVAS_WORKSPACE_GUIDE_ID = 'canvas-workspace-first-run';
+
+const CANVAS_WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
+    {
+        id: 'canvas-project-breadcrumbs',
+        targetId: 'canvas-project-breadcrumbs',
+        title: 'Project context stays visible',
+        body: 'Use these breadcrumbs to jump back to Home, Projects, or the current project without losing where you are.',
+        placement: 'bottom',
+    },
+    {
+        id: 'canvas-toolbar',
+        targetId: 'canvas-toolbar',
+        title: 'Your main canvas dock',
+        body: 'Switch between select and hand mode, undo or redo changes, zoom, fit the view, and reopen help from this rail.',
+        placement: 'right',
+    },
+    {
+        id: 'canvas-stage',
+        targetId: 'canvas-stage',
+        title: 'Work directly on the canvas',
+        body: 'Drag screens around, select one or many frames, and use screen-level actions from the device toolbar when a frame is selected.',
+        placement: 'top',
+    },
+    {
+        id: 'canvas-project-controls',
+        targetId: 'canvas-project-controls',
+        title: 'Save, export, and manage the project',
+        body: 'The top-right controls handle saving, exports, notifications, profile access, and workspace-level settings.',
+        placement: 'left',
+    },
+    {
+        id: 'canvas-help-trigger',
+        targetId: 'canvas-help-trigger',
+        title: 'Reopen help any time',
+        body: 'Use Help whenever you want guides, docs, or the keyboard shortcut map without leaving the canvas.',
+        placement: 'right',
+    },
+];
 
 type CopiedScreenPayload = {
     name: string;
@@ -87,14 +132,28 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         triggerExternalUpdate,
         activeTool,
         setActiveTool,
+        historyRevision: canvasHistoryRevision,
     } = useCanvasStore();
+    const designHistoryRevision = useDesignStore((state) => state.historyRevision);
     const { isEditMode, screenId: editScreenId, exitEdit, selected: editSelected } = useEditStore();
     const { isGenerating, messages } = useChatStore();
     const { pushToast, removeToast, requestConfirmation } = useUiStore();
-    const { recordSnapshot, undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
+    const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
+    const activeGuideId = useOnboardingStore((state) => state.activeGuideId);
+    const guideStepIndex = useOnboardingStore((state) => state.stepIndex);
+    const seenGuideIds = useOnboardingStore((state) => state.seenGuideIds);
+    const startGuide = useOnboardingStore((state) => state.startGuide);
+    const nextGuideStep = useOnboardingStore((state) => state.nextStep);
+    const prevGuideStep = useOnboardingStore((state) => state.prevStep);
+    const finishGuide = useOnboardingStore((state) => state.finishGuide);
+    const skipGuide = useOnboardingStore((state) => state.skipGuide);
     const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
     const viewport = useViewport();
+    const canvasScrollWheelMode = ((doc.editorPrefs as EditorPrefs & { canvasScrollWheelMode?: 'zoom' | 'pan' }).canvasScrollWheelMode || 'zoom');
     const isEditWorkspace = mode === 'edit-workspace';
+    const hasSeenCanvasGuide = seenGuideIds.includes(CANVAS_WORKSPACE_GUIDE_ID);
+    const isCanvasGuideActive = !isEditWorkspace && !isEditMode && activeGuideId === CANVAS_WORKSPACE_GUIDE_ID;
+    const activeCanvasGuideStep = isCanvasGuideActive ? CANVAS_WORKSPACE_GUIDE_STEPS[guideStepIndex] || null : null;
     const autoFocusedProjectIdRef = useRef<string | null>(null);
     const editWorkspaceFocusedScreenRef = useRef<string | null>(null);
     const copiedScreensRef = useRef<CopiedScreenPayload[]>([]);
@@ -433,37 +492,22 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         }
     }, [initialNodes, setNodes, lastExternalUpdate]); // lastExternalUpdate is key here
 
-    // Global history capture for canvas + design.
-    // Skip while generation/edit is running to avoid noisy intermediate states.
+    // History capture is driven by meaningful canvas/design revisions only.
+    // Skip while hydrating or streaming, then record the settled end state once.
     useEffect(() => {
-        if (isGenerating) return;
-        recordSnapshot({
-            spec: spec ? JSON.parse(JSON.stringify(spec)) : null,
-            doc: JSON.parse(JSON.stringify(doc)),
+        if (isHydrating || isGenerating) return;
+        const frame = window.requestAnimationFrame(() => {
+            recordProjectHistorySnapshot();
         });
-    }, [spec, doc, isGenerating, recordSnapshot]);
+        return () => window.cancelAnimationFrame(frame);
+    }, [canvasHistoryRevision, designHistoryRevision, isGenerating, isHydrating]);
 
     // Handle node changes (dragging, selection)
     const handleNodesChange = useCallback(
         (changes: NodeChange[]) => {
             onNodesChange(changes);
-            const completedPositionChanges = changes.filter(
-                (change): change is NodeChange & { type: 'position'; id: string; position: { x: number; y: number } } =>
-                    change.type === 'position'
-                    && Boolean((change as any).position)
-                    && (change as any).dragging === false
-            );
-            if (completedPositionChanges.length === 0) return;
-
-            const canvasState = useCanvasStore.getState();
-            const positionMap = new Map(completedPositionChanges.map((change) => [change.id, change.position]));
-            const nextBoards = canvasState.doc.boards.map((board) => {
-                const nextPos = positionMap.get(board.screenId) || positionMap.get(board.boardId);
-                return nextPos ? { ...board, x: nextPos.x, y: nextPos.y } : board;
-            });
-            setBoards(nextBoards);
         },
-        [onNodesChange, setBoards]
+        [onNodesChange]
     );
 
     // Sync React Flow selection to store
@@ -754,9 +798,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 if (!canUndo()) return;
                 const snapshot = undoSnapshot();
                 if (!snapshot) return;
-                useDesignStore.getState().setSpec(snapshot.spec as any);
-                useCanvasStore.getState().setDoc(snapshot.doc);
-                useCanvasStore.getState().triggerExternalUpdate();
+                restoreProjectHistorySnapshot(snapshot);
                 event.preventDefault();
                 return;
             }
@@ -765,9 +807,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 if (!canRedo()) return;
                 const snapshot = redoSnapshot();
                 if (!snapshot) return;
-                useDesignStore.getState().setSpec(snapshot.spec as any);
-                useCanvasStore.getState().setDoc(snapshot.doc);
-                useCanvasStore.getState().triggerExternalUpdate();
+                restoreProjectHistorySnapshot(snapshot);
                 event.preventDefault();
                 return;
             }
@@ -798,6 +838,14 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
 
             if (!primary && key === '2') {
                 setActiveTool('hand');
+                event.preventDefault();
+                return;
+            }
+
+            if (!primary && event.key === '?') {
+                window.dispatchEvent(new CustomEvent('eazyui:open-canvas-help', {
+                    detail: { panel: 'shortcuts' },
+                }));
                 event.preventDefault();
                 return;
             }
@@ -874,10 +922,18 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
         return 24;
     }, [viewport.zoom]);
 
+    useEffect(() => {
+        if (isEditWorkspace || isEditMode || isHydrating || hasSeenCanvasGuide || activeGuideId || !spec?.screens?.length) return;
+        const timeoutId = window.setTimeout(() => {
+            startGuide(CANVAS_WORKSPACE_GUIDE_ID);
+        }, 650);
+        return () => window.clearTimeout(timeoutId);
+    }, [activeGuideId, hasSeenCanvasGuide, isEditMode, isEditWorkspace, isHydrating, spec?.screens?.length, startGuide]);
+
     return (
         <div className="canvas-workspace relative h-full w-full">
             {!isEditWorkspace && (
-                <div className="absolute left-4 top-4 z-50">
+                <div className="absolute left-4 top-4 z-50" data-guide-id="canvas-project-breadcrumbs">
                     <div className="inline-flex items-center gap-1 px-3 py-2 text-[12px] text-[var(--ui-text-muted)] backdrop-blur-md">
                         <button
                             type="button"
@@ -910,51 +966,54 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 </div>
             )}
 
-            <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={handleNodesChange}
-                onEdgesChange={onEdgesChange}
-                onNodeDragStop={onNodeDragStop}
-                onPaneClick={onPaneClick}
-                onSelectionChange={onSelectionChange}
-                onMoveEnd={onMoveEnd}
-                nodeTypes={nodeTypes}
-                fitView
-                fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
-                minZoom={0.05}
-                maxZoom={isEditWorkspace ? 4 : 2}
+            <div data-guide-id="canvas-stage" className="h-full w-full">
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={handleNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onNodeDragStop={onNodeDragStop}
+                    onPaneClick={onPaneClick}
+                    onSelectionChange={onSelectionChange}
+                    onMoveEnd={onMoveEnd}
+                    nodeTypes={nodeTypes}
+                    fitView
+                    fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+                    minZoom={0.05}
+                    maxZoom={isEditWorkspace ? 4 : 2}
 
-                // Interaction Logic
-                panOnDrag={panOnDrag}
-                panActivationKeyCode={panActivationKeyCode}
-                selectionOnDrag={selectionOnDrag}
-                selectionKeyCode={null} // Disable modifier key requirement for selection when in Select mode
-                selectionMode={SelectionMode.Partial}
+                    // Interaction Logic
+                    panOnDrag={panOnDrag}
+                    panActivationKeyCode={panActivationKeyCode}
+                    selectionOnDrag={selectionOnDrag}
+                    selectionKeyCode={null} // Disable modifier key requirement for selection when in Select mode
+                    selectionMode={SelectionMode.Partial}
 
-                // Scroll to zoom
-                zoomOnScroll={true}
-                zoomOnDoubleClick={false}
-                panOnScroll={false}
+                    // Scroll wheel behavior
+                    zoomOnScroll={canvasScrollWheelMode === 'zoom'}
+                    zoomOnDoubleClick={false}
+                    panOnScroll={canvasScrollWheelMode === 'pan'}
+                    panOnScrollMode={PanOnScrollMode.Free}
 
-                // Constraints
-                translateExtent={[[-Infinity, -Infinity], [Infinity, Infinity]]}
-                nodesDraggable={!isEditMode && activeTool === 'select'} // Disable dragging while editing
-                proOptions={{ hideAttribution: true }}
-            >
-                <Background
-                    variant={BackgroundVariant.Lines}
-                    gap={gridGap}
-                    size={1}
-                    color="color-mix(in srgb, var(--ui-canvas-dot) 34%, transparent)"
-                />
-                <Controls
-                    className="canvas-controls-hidden hidden" // Hide default controls
-                    showZoom={false}
-                    showFitView={false}
-                    showInteractive={false}
-                />
-            </ReactFlow>
+                    // Constraints
+                    translateExtent={[[-Infinity, -Infinity], [Infinity, Infinity]]}
+                    nodesDraggable={!isEditMode && activeTool === 'select'} // Disable dragging while editing
+                    proOptions={{ hideAttribution: true }}
+                >
+                    <Background
+                        variant={BackgroundVariant.Lines}
+                        gap={gridGap}
+                        size={1}
+                        color="color-mix(in srgb, var(--ui-canvas-dot) 34%, transparent)"
+                    />
+                    <Controls
+                        className="canvas-controls-hidden hidden" // Hide default controls
+                        showZoom={false}
+                        showFitView={false}
+                        showInteractive={false}
+                    />
+                </ReactFlow>
+            </div>
 
             {!isEditWorkspace && <CanvasToolbar />}
 
@@ -969,6 +1028,23 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                 <div className="absolute top-4 right-4 z-50">
                     <CanvasProfileMenu />
                 </div>
+            )}
+
+            {isCanvasGuideActive && activeCanvasGuideStep && (
+                <GuideBubbleOverlay
+                    step={activeCanvasGuideStep}
+                    stepIndex={guideStepIndex}
+                    stepCount={CANVAS_WORKSPACE_GUIDE_STEPS.length}
+                    onPrev={prevGuideStep}
+                    onSkip={skipGuide}
+                    onNext={() => {
+                        if (guideStepIndex >= CANVAS_WORKSPACE_GUIDE_STEPS.length - 1) {
+                            finishGuide();
+                            return;
+                        }
+                        nextGuideStep(CANVAS_WORKSPACE_GUIDE_STEPS.length);
+                    }}
+                />
             )}
         </div>
     );

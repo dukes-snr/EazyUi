@@ -9,6 +9,7 @@ import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectPare
 import { getPreferredTextModel } from '../../constants/designModels';
 import { observeAuthState } from '../../lib/auth';
 import { listUserAssets, uploadUserAssetBase64 } from '../../lib/firestoreData';
+import { recordProjectHistorySnapshot } from '../../utils/projectHistory';
 
 type PaddingValues = { top: string; right: string; bottom: string; left: string };
 type PositionOffsets = { top: string; right: string; bottom: string; left: string };
@@ -152,7 +153,7 @@ const MATERIAL_ICON_FALLBACK_OPTIONS = [
     'local_shipping', 'directions_car', 'flight', 'restaurant', 'local_cafe',
 ];
 
-const inputBase = 'w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-[var(--ui-primary)]';
+const inputBase = 'w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-[var(--ui-focus-border)]';
 const selectBase = `${inputBase} appearance-none bg-[linear-gradient(45deg,transparent_50%,#9ca3af_50%),linear-gradient(135deg,#9ca3af_50%,transparent_50%)] bg-[position:calc(100%-16px)_calc(50%-2px),calc(100%-10px)_calc(50%-2px)] bg-[length:6px_6px,6px_6px] bg-no-repeat pr-8`;
 
 function toPxValue(value?: string) {
@@ -651,7 +652,8 @@ export function EditPanel() {
         if (!screenId) return;
         const rebuilt = rebuildHtml();
         if (rebuilt) {
-            updateScreen(screenId, rebuilt);
+            updateScreen(screenId, rebuilt, undefined, undefined, undefined, undefined, { history: 'skip' });
+            recordProjectHistorySnapshot();
         }
     };
 
@@ -810,12 +812,11 @@ export function EditPanel() {
                     setActiveScreen(incomingScreenId, nextScreen.html);
                 }
             }
-            setFocusNodeId(incomingScreenId);
             setSelected(event.data.payload);
         };
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [isEditMode, screenId, setSelected, setActiveScreen, setFocusNodeId, spec, selected]);
+    }, [isEditMode, screenId, setSelected, setActiveScreen, spec, selected]);
 
     useEffect(() => {
         if (!selected) return;
@@ -901,7 +902,7 @@ export function EditPanel() {
         if (!screenId || !activeScreen) return;
         dispatchPatchToIframe(screenId, patch);
         const rebuilt = applyPatchAndRebuild(patch);
-        if (rebuilt) updateScreen(screenId, rebuilt);
+        if (rebuilt) updateScreen(screenId, rebuilt, undefined, undefined, undefined, undefined, { history: 'skip' });
     };
 
     const buildImageAttrPatch = (nextSrc: string) => ({
@@ -976,13 +977,13 @@ export function EditPanel() {
     const onUndo = () => {
         if (!screenId || !canUndo) return;
         const rebuilt = undoAndRebuild();
-        if (rebuilt) updateScreen(screenId, rebuilt);
+        if (rebuilt) updateScreen(screenId, rebuilt, undefined, undefined, undefined, undefined, { history: 'skip' });
     };
 
     const onRedo = () => {
         if (!screenId || !canRedo) return;
         const rebuilt = redoAndRebuild();
-        if (rebuilt) updateScreen(screenId, rebuilt);
+        if (rebuilt) updateScreen(screenId, rebuilt, undefined, undefined, undefined, undefined, { history: 'skip' });
     };
 
     useEffect(() => {
@@ -1384,7 +1385,7 @@ RULES:
     if (!isEditMode) return <aside className="edit-panel" aria-hidden="true" />;
 
     return (
-        <aside className="edit-panel open">
+        <aside className="edit-panel open" data-guide-id="edit-inspector-pane">
             <div className="h-full flex flex-col bg-[var(--ui-surface-1)] border-l border-[var(--ui-border)] shadow-2xl">
                 <div className="px-4 py-3 border-b border-[var(--ui-border)] flex items-center justify-between">
                     <div>
@@ -1392,6 +1393,7 @@ RULES:
                         <div className="text-sm text-[var(--ui-text)]/95 font-medium">{activeScreen?.name || 'Selected Screen'}</div>
                     </div>
                     <button
+                        data-guide-id="edit-exit-button"
                         onClick={() => {
                             commitActiveScreenEdits();
                             exitEdit();
@@ -1403,7 +1405,7 @@ RULES:
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--ui-border)]">
+                <div data-guide-id="edit-history-controls" className="flex items-center gap-2 px-4 py-2 border-b border-[var(--ui-border)]">
                     <button
                         onClick={onUndo}
                         disabled={!canUndo}
@@ -1422,7 +1424,7 @@ RULES:
                     </button>
                 </div>
 
-                <div className="px-4 pt-3 pb-2 border-b border-[var(--ui-border)]">
+                <div data-guide-id="edit-inspector-tabs" className="px-4 pt-3 pb-2 border-b border-[var(--ui-border)]">
                     <div className="inline-flex rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1 w-full">
                         {(['style', 'symbols'] as const).map((tab) => (
                             <button

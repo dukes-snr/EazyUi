@@ -33,7 +33,8 @@ import { applySeo, getSiteUrl, type SeoConfig } from './lib/seo';
 import type { ChatMessage } from './stores/chat-store';
 import { getBlogPostBySlug } from './content/blogPosts';
 
-import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useHistoryStore, useProjectMemoryStore } from './stores';
+import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from './stores';
+import { resetProjectHistorySnapshot } from './utils/projectHistory';
 import logo from './assets/Ui-logo.png';
 
 import './styles/App.css';
@@ -507,6 +508,7 @@ function App() {
                     useCanvasStore.getState().setDoc(resolvedDoc);
                     useChatStore.getState().hydrateSession(project.chatState as any);
                 });
+                resetProjectHistorySnapshot(project.designSpec as any, resolvedDoc);
                 setProjectMemory(project.projectMemory || null);
                 const loadedMessages = Array.isArray((project.chatState as any)?.messages) ? (project.chatState as any).messages : [];
                 lastSavedFingerprintRef.current = getProjectFingerprint(project.designSpec as any, resolvedDoc, loadedMessages);
@@ -521,8 +523,8 @@ function App() {
                         useDesignStore.getState().reset();
                         useCanvasStore.getState().reset();
                         useChatStore.getState().hydrateSession({ messages: [] });
-                        useHistoryStore.getState().clearHistory();
                     });
+                    resetProjectHistorySnapshot(null, useCanvasStore.getState().doc);
                     resetProjectMemory();
                     lastSavedFingerprintRef.current = '';
                     hydratedProjectIdRef.current = targetProjectId;
@@ -618,6 +620,7 @@ function App() {
                     useCanvasStore.getState().setDoc(resolvedDoc);
                     useChatStore.getState().hydrateSession(project.chatState as any);
                 });
+                resetProjectHistorySnapshot(project.designSpec as any, resolvedDoc);
                 setProjectMemory(project.projectMemory || null);
                 lastSavedFingerprintRef.current = remoteFingerprint;
                 hydratedProjectIdRef.current = project.projectId;
@@ -823,8 +826,8 @@ function App() {
             useDesignStore.getState().reset();
             useCanvasStore.getState().reset();
             useChatStore.getState().clearMessages();
-            useHistoryStore.getState().clearHistory();
         });
+        resetProjectHistorySnapshot(null, useCanvasStore.getState().doc);
         setProjectId(projectId);
         navigate(`/app/projects/${encodeURIComponent(projectId)}/canvas`);
     };
@@ -870,8 +873,8 @@ function App() {
             useDesignStore.getState().reset();
             useCanvasStore.getState().reset();
             useChatStore.getState().clearMessages();
-            useHistoryStore.getState().clearHistory();
         });
+        resetProjectHistorySnapshot(null, useCanvasStore.getState().doc);
         hydratedProjectIdRef.current = null;
         setInitialRequest(null);
         setProjectId(freshProjectId);
@@ -1166,7 +1169,7 @@ function App() {
                 {!isEditMode && <CanvasWorkspace mode="default" />}
                 {!isEditMode && showInspector && <InspectorPanel />}
             </div>
-            <ChatPanel initialRequest={initialRequest} />
+            {route.kind !== 'app-project-settings' && <ChatPanel initialRequest={initialRequest} />}
             {route.kind !== 'app-project-settings' && <EditWorkspaceOverlay />}
             {route.kind === 'app-project-settings' && (
                 <div className="project-settings-overlay">

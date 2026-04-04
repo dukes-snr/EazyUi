@@ -75,6 +75,10 @@ export const DeviceDisplayModeSchema = z.enum(['framed', 'clean']);
 
 export type DeviceDisplayMode = z.infer<typeof DeviceDisplayModeSchema>;
 
+export const CanvasScrollWheelModeSchema = z.enum(['zoom', 'pan']);
+
+export type CanvasScrollWheelMode = z.infer<typeof CanvasScrollWheelModeSchema>;
+
 // Editor Preferences
 export const EditorPrefsSchema = z.object({
     snapToGrid: z.boolean().default(true),
@@ -84,6 +88,7 @@ export const EditorPrefsSchema = z.object({
     showGuides: z.boolean().default(true),
     showBoardLabels: z.boolean().default(true),
     deviceDisplayMode: DeviceDisplayModeSchema.default('framed'),
+    canvasScrollWheelMode: CanvasScrollWheelModeSchema.default('zoom'),
 });
 
 export type EditorPrefs = z.infer<typeof EditorPrefsSchema>;

@@ -24,6 +24,7 @@ const DEVICE_DIMENSIONS: Record<string, { width: number; height: number }> = {
 interface CanvasState {
     // Canvas document
     doc: CanvasDoc;
+    historyRevision: number;
 
     // Computed state
     isSpacePressed: boolean;
@@ -102,6 +103,7 @@ const createDefaultDoc = (): CanvasDoc => ({
         showGuides: true,
         showBoardLabels: true,
         deviceDisplayMode: 'framed',
+        canvasScrollWheelMode: 'zoom',
     } as EditorPrefs & { deviceDisplayMode: 'framed' },
     history: {
         specPatches: [],
@@ -111,8 +113,37 @@ const createDefaultDoc = (): CanvasDoc => ({
     },
 });
 
+function shallowEqualEditorPrefs(left: EditorPrefs, right: EditorPrefs) {
+    return left.snapToGrid === right.snapToGrid
+        && left.gridSize === right.gridSize
+        && left.showRulers === right.showRulers
+        && left.showGrid === right.showGrid
+        && left.showGuides === right.showGuides
+        && left.showBoardLabels === right.showBoardLabels
+        && (left as EditorPrefs & { deviceDisplayMode?: string }).deviceDisplayMode === (right as EditorPrefs & { deviceDisplayMode?: string }).deviceDisplayMode
+        && (left as EditorPrefs & { canvasScrollWheelMode?: string }).canvasScrollWheelMode === (right as EditorPrefs & { canvasScrollWheelMode?: string }).canvasScrollWheelMode;
+}
+
+function areBoardsEqual(left: Board[], right: Board[]) {
+    if (left.length !== right.length) return false;
+    return left.every((board, index) => {
+        const other = right[index];
+        return Boolean(other)
+            && board.boardId === other.boardId
+            && board.screenId === other.screenId
+            && board.x === other.x
+            && board.y === other.y
+            && board.width === other.width
+            && board.height === other.height
+            && board.deviceFrame === other.deviceFrame
+            && board.locked === other.locked
+            && board.visible === other.visible;
+    });
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
     doc: createDefaultDoc(),
+    historyRevision: 0,
     isSpacePressed: false,
     isPanning: false,
     panStart: null,
@@ -263,31 +294,43 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                 ...doc,
                 boards: [...doc.boards, newBoard],
             },
+            historyRevision: get().historyRevision + 1,
         });
     },
 
     updateBoardPosition: (boardId, x, y) => {
         const { doc } = get();
+        let didChange = false;
         set({
             doc: {
                 ...doc,
                 boards: doc.boards.map(b =>
-                    (b.boardId === boardId || b.screenId === boardId) ? { ...b, x, y } : b
+                    (b.boardId === boardId || b.screenId === boardId)
+                        ? (() => {
+                            if (b.x === x && b.y === y) return b;
+                            didChange = true;
+                            return { ...b, x, y };
+                        })()
+                        : b
                 ),
             },
+            historyRevision: didChange ? get().historyRevision + 1 : get().historyRevision,
         });
     },
 
     removeBoard: (boardId) => {
         const { doc } = get();
+        const nextBoards = doc.boards.filter(b => b.boardId !== boardId);
+        if (nextBoards.length === doc.boards.length) return;
         set({
             doc: {
                 ...doc,
-                boards: doc.boards.filter(b => b.boardId !== boardId),
+                boards: nextBoards,
                 selection: doc.selection.selectedBoardId === boardId
                     ? { ...doc.selection, selectedBoardId: null, selectedNodeIds: [] }
                     : doc.selection,
             },
+            historyRevision: get().historyRevision + 1,
         });
     },
 
@@ -323,7 +366,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, x: targetValue } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
             case 'right':
@@ -334,7 +378,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, x: targetValue - b.width } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
             case 'center':
@@ -347,7 +392,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, x: targetValue - b.width / 2 } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
             case 'top':
@@ -358,7 +404,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, y: targetValue } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
             case 'bottom':
@@ -369,7 +416,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, y: targetValue - b.height } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
             case 'middle':
@@ -382,7 +430,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boards: doc.boards.map(b =>
                             selectedNodeIds.includes(b.screenId) ? { ...b, y: targetValue - b.height / 2 } : b
                         ),
-                    }
+                    },
+                    historyRevision: get().historyRevision + 1,
                 });
                 break;
         }
@@ -423,6 +472,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boardPositions.has(b.boardId) ? { ...b, x: boardPositions.get(b.boardId) } : b
                     )
                 },
+                historyRevision: get().historyRevision + 1,
                 lastExternalUpdate: Date.now()
             });
 
@@ -445,6 +495,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         boardPositions.has(b.boardId) ? { ...b, y: boardPositions.get(b.boardId) } : b
                     )
                 },
+                historyRevision: get().historyRevision + 1,
                 lastExternalUpdate: Date.now()
             });
         }
@@ -496,6 +547,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                         : b
                 )
             },
+            historyRevision: get().historyRevision + 1,
             lastExternalUpdate: Date.now()
         });
     },
@@ -514,6 +566,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                     ...doc,
                     boards: [...otherBoards, ...selectedBoards],
                 },
+                historyRevision: get().historyRevision + 1,
                 lastExternalUpdate: Date.now()
             });
         } else {
@@ -522,6 +575,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                     ...doc,
                     boards: [...selectedBoards, ...otherBoards],
                 },
+                historyRevision: get().historyRevision + 1,
                 lastExternalUpdate: Date.now()
             });
         }
@@ -643,11 +697,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     // Editor prefs
     setEditorPrefs: (prefs) => {
         const { doc } = get();
+        const nextEditorPrefs = { ...doc.editorPrefs, ...prefs } as EditorPrefs;
+        if (shallowEqualEditorPrefs(doc.editorPrefs as EditorPrefs, nextEditorPrefs as EditorPrefs)) return;
         set({
             doc: {
                 ...doc,
-                editorPrefs: { ...doc.editorPrefs, ...prefs },
+                editorPrefs: nextEditorPrefs,
             },
+            historyRevision: get().historyRevision + 1,
         });
     },
 
@@ -686,11 +743,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     // Bulk operations
     setBoards: (boards) => {
         const { doc } = get();
+        if (areBoardsEqual(doc.boards, boards)) return;
         set({
             doc: {
                 ...doc,
                 boards,
             },
+            historyRevision: get().historyRevision + 1,
         });
     },
 
@@ -698,6 +757,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     reset: () => set({
         doc: createDefaultDoc(),
+        historyRevision: 0,
         isSpacePressed: false,
         isPanning: false,
         panStart: null,

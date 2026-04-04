@@ -3,10 +3,10 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from '../../stores';
+import { useChatStore, useDesignStore, useCanvasStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore, useOnboardingStore } from '../../stores';
 import { apiClient, type PlannerPlanResponse, type PlannerPostgenResponse, type PlannerRequest, type PlannerRouteResponse, type HtmlScreen, type ProjectDesignSystem, type ProjectMemory, type ReferenceContextMeta, type AssetReference, type AssetRecord, type AssetScope } from '../../api/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowUp, ArrowDown, Paperclip, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronRight, ChevronDown, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon, RotateCcw } from 'lucide-react';
+import { ArrowUp, ArrowDown, Paperclip, Monitor, Smartphone, Sparkles, Tablet, X, Loader2, ChevronRight, ChevronDown, Square, Copy, Check, ThumbsUp, ThumbsDown, Share2, Lightbulb, CircleStar, Mic, LineSquiggle, Palette, Gem, Smile, AlertTriangle, Pencil, Sun, Moon, RotateCcw, PanelRightOpen } from 'lucide-react';
 import { getPreferredTextModel, type DesignModelProfile } from '../../constants/designModels';
 import { notifyWhenInBackground, requestBrowserNotificationPermissionIfNeeded } from '../../utils/browserNotifications';
 import { getUserFacingError, toTaggedErrorMessage } from '../../utils/userFacingErrors';
@@ -27,6 +27,7 @@ import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle }
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
+import { GuideBubbleOverlay, type GuideBubbleStep } from '../ui/GuideBubbleOverlay';
 import { AssetsPanel } from './AssetsPanel';
 import { buildAssetReference } from '../../lib/firestoreData';
 import { copyDesignSystemBoardToFigmaClipboard } from '../../utils/exportScreens';
@@ -2437,6 +2438,54 @@ const CHAT_LAUNCHER_PRESSED_ACCENTS = new Set([
     '6-1',
 ]);
 
+const CANVAS_WORKSPACE_GUIDE_ID = 'canvas-workspace-first-run';
+const CHAT_PANEL_GUIDE_ID = 'chat-panel-first-run';
+
+const CHAT_PANEL_GUIDE_STEPS: GuideBubbleStep[] = [
+    {
+        id: 'chat-header',
+        targetId: 'chat-panel-header',
+        title: 'This is your working chat surface',
+        body: 'Rename the project here, switch between Chat, Design System, and Assets, and control the panel layout from the header.',
+        placement: 'left',
+    },
+    {
+        id: 'chat-messages',
+        targetId: 'chat-message-history',
+        title: 'Your request history lives here',
+        body: 'Review generations, references, retries, and follow-up prompts as the project evolves.',
+        placement: 'left',
+    },
+    {
+        id: 'chat-composer',
+        targetId: 'chat-composer',
+        title: 'Describe what to build',
+        body: 'Write the prompt here, mention existing screens with @, and add context before sending.',
+        placement: 'top',
+    },
+    {
+        id: 'chat-plan-toggle',
+        targetId: 'chat-plan-toggle',
+        title: 'Use planning when needed',
+        body: 'Assist mode helps you structure the request before generating screens.',
+        placement: 'top',
+    },
+    {
+        id: 'chat-platform-controls',
+        targetId: 'chat-platform-controls',
+        title: 'Choose the output target',
+        body: 'Set the model first, then switch between mobile, tablet, and desktop before sending.',
+        placement: 'top',
+    },
+    {
+        id: 'chat-attachment-action',
+        targetId: 'chat-attachment-action',
+        title: 'Attach visual references',
+        body: 'Add screenshots, inspiration, or product images to steer the next result more precisely.',
+        placement: 'left',
+    },
+];
+
 function ChatLauncherGlyph({ interaction }: { interaction: ChatLauncherInteraction }) {
     const pixelSize = 2.8421052631578947;
     const pixelStep = 4.7368421052631575;
@@ -2528,11 +2577,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [composerAttachmentMeta, setComposerAttachmentMeta] = useState<ComposerAttachmentMeta[]>([]);
-    const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>(() => {
-        if (typeof window === 'undefined') return 'expanded';
-        const stored = window.localStorage.getItem(CHAT_DISPLAY_MODE_STORAGE_KEY);
-        return stored === 'collapsed' || stored === 'popped' || stored === 'expanded' ? stored : 'expanded';
-    });
+    const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>('expanded');
     const [planMode, setPlanMode] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
         return window.localStorage.getItem('eazyui:plan-mode') === '1';
@@ -2600,9 +2645,11 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const mentionSearchInputRef = useRef<HTMLInputElement>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement>(null);
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
+    const titleEditorRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
+    const titleCommitInFlightRef = useRef(false);
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
@@ -2611,9 +2658,21 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const { modelProfile, setModelProfile, pushToast, removeToast, requestConfirmation, updateConfirmationDialog, resolveConfirmation } = useUiStore();
     const { projectId, markSaved, setSaving } = useProjectStore();
     const setProjectMemory = useProjectMemoryStore((state) => state.setMemory);
+    const activeGuideId = useOnboardingStore((state) => state.activeGuideId);
+    const guideStepIndex = useOnboardingStore((state) => state.stepIndex);
+    const seenGuideIds = useOnboardingStore((state) => state.seenGuideIds);
+    const startGuide = useOnboardingStore((state) => state.startGuide);
+    const nextGuideStep = useOnboardingStore((state) => state.nextStep);
+    const prevGuideStep = useOnboardingStore((state) => state.prevStep);
+    const finishGuide = useOnboardingStore((state) => state.finishGuide);
+    const skipGuide = useOnboardingStore((state) => state.skipGuide);
     const assistantMsgIdRef = useRef<string>('');
     const isCollapsed = chatDisplayMode === 'collapsed';
     const isPoppedOut = chatDisplayMode === 'popped';
+    const hasSeenCanvasGuide = seenGuideIds.includes(CANVAS_WORKSPACE_GUIDE_ID);
+    const hasSeenChatGuide = seenGuideIds.includes(CHAT_PANEL_GUIDE_ID);
+    const isChatGuideActive = activeGuideId === CHAT_PANEL_GUIDE_ID;
+    const activeChatGuideStep = isChatGuideActive ? CHAT_PANEL_GUIDE_STEPS[guideStepIndex] || null : null;
 
     const setChatMode = useCallback((nextMode: ChatDisplayMode) => {
         setChatDisplayMode(nextMode);
@@ -2648,6 +2707,25 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         window.localStorage.setItem(CHAT_DISPLAY_MODE_STORAGE_KEY, chatDisplayMode);
         window.localStorage.setItem(CHAT_LAST_OPEN_MODE_STORAGE_KEY, lastOpenChatModeRef.current);
     }, [CHAT_DISPLAY_MODE_STORAGE_KEY, CHAT_LAST_OPEN_MODE_STORAGE_KEY, chatDisplayMode]);
+
+    useEffect(() => {
+        if (isEditMode || isCollapsed || !hasSeenCanvasGuide || hasSeenChatGuide || activeGuideId) return;
+        const timeoutId = window.setTimeout(() => {
+            startGuide(CHAT_PANEL_GUIDE_ID);
+        }, 550);
+        return () => window.clearTimeout(timeoutId);
+    }, [activeGuideId, hasSeenCanvasGuide, hasSeenChatGuide, isCollapsed, isEditMode, startGuide]);
+
+    useEffect(() => {
+        if (!isChatGuideActive) return;
+        if (isCollapsed) {
+            setChatMode(lastOpenChatModeRef.current);
+        }
+        if (chatPanelView !== 'chat') {
+            setChatPanelView('chat');
+        }
+    }, [chatPanelView, isChatGuideActive, isCollapsed, setChatMode]);
+
     const notificationGuideShownRef = useRef(false);
     const generationLoadingToastRef = useRef<string | null>(null);
     const editLoadingToastRef = useRef<string | null>(null);
@@ -3282,19 +3360,26 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         }
     }, [chatPanelView, isDesignSystemEditing, spec?.designSystem, designSystemDraft]);
 
-    const commitProjectTitle = async () => {
+    const cancelProjectTitleEdit = useCallback(() => {
+        setTitleDraft(spec?.name?.trim() || '');
+        setIsTitleEditing(false);
+    }, [spec?.name]);
+
+    const commitProjectTitle = useCallback(async () => {
+        if (titleCommitInFlightRef.current) return;
         if (!spec) return;
         const nextName = titleDraft.trim();
+        const currentName = (spec.name || '').trim();
+        titleCommitInFlightRef.current = true;
         if (!nextName) {
-            pushToast({
-                kind: 'error',
-                title: 'Project name required',
-                message: 'Enter a project name before saving.',
-            });
+            setTitleDraft(currentName);
+            setIsTitleEditing(false);
+            titleCommitInFlightRef.current = false;
             return;
         }
-        if (nextName === (spec.name || '').trim()) {
+        if (nextName === currentName) {
             setIsTitleEditing(false);
+            titleCommitInFlightRef.current = false;
             return;
         }
 
@@ -3331,8 +3416,19 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             });
         } finally {
             setIsTitleSaving(false);
+            titleCommitInFlightRef.current = false;
         }
-    };
+    }, [doc, markSaved, messages, projectId, pushToast, setSaving, spec, titleDraft]);
+
+    useEffect(() => {
+        if (!isTitleEditing) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            if (titleEditorRef.current?.contains(event.target as Node)) return;
+            void commitProjectTitle();
+        };
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+    }, [commitProjectTitle, isTitleEditing]);
 
     const setActiveBranchForUser = (userId: string, assistantId: string) => {
         setActiveAssistantByUser((prev) => ({ ...prev, [userId]: assistantId }));
@@ -6596,6 +6692,8 @@ Return a polished, consistent screen without introducing a new navigation patter
     const shellWidthClass = isCollapsed || isPoppedOut ? 'w-0' : 'w-[var(--chat-width)]';
     const collapsedOpenMode = lastOpenChatModeRef.current;
     const chatShellClassName = 'fixed z-[98] flex flex-col overflow-hidden bg-[color:color-mix(in_srgb,var(--ui-surface-1)_96%,#181818)] backdrop-blur-2xl will-change-[transform,opacity,width,height,border-radius,right,bottom,top] transition-[transform,opacity,width,height,border-radius,right,bottom,top,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
+    const expandedChatHeight = 'calc(100vh - 16px)';
+    const poppedChatHeight = 'min(52vh, 520px)';
     const chatShellStyle = isCollapsed
         ? collapsedOpenMode === 'popped'
             ? {
@@ -6604,7 +6702,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 top: 'auto',
                 width: 'min(var(--chat-width), calc(100vw - 2rem))',
                 maxWidth: 'calc(100vw - 2rem)',
-                height: 'min(78vh, 760px)',
+                height: poppedChatHeight,
                 borderRadius: '26px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
@@ -6617,9 +6715,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             : {
                 right: '8px',
                 bottom: '8px',
-                top: '8px',
+                top: 'auto',
                 width: 'calc(var(--chat-width) - 8px)',
-                height: 'calc(100vh - 16px)',
+                height: expandedChatHeight,
                 borderRadius: '24px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
@@ -6636,7 +6734,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 top: 'auto',
                 width: 'min(var(--chat-width), calc(100vw - 2rem))',
                 maxWidth: 'calc(100vw - 2rem)',
-                height: 'min(78vh, 760px)',
+                height: poppedChatHeight,
                 borderRadius: '26px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
@@ -6649,9 +6747,9 @@ Return a polished, consistent screen without introducing a new navigation patter
             : {
                 right: '8px',
                 bottom: '8px',
-                top: '8px',
+                top: 'auto',
                 width: 'calc(var(--chat-width) - 8px)',
-                height: 'calc(100vh - 16px)',
+                height: expandedChatHeight,
                 borderRadius: '15px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
@@ -6722,29 +6820,39 @@ Return a polished, consistent screen without introducing a new navigation patter
                 )}
 
                 <div className={chatShellClassName} style={chatShellStyle}>
-                    <div className="sticky top-0 z-10 bg-[color:color-mix(in_srgb,var(--ui-surface-1)_94%,#171717)] px-3 py-3 backdrop-blur-xl">
+                    <div data-guide-id="chat-panel-header" className="sticky top-0 z-10 bg-[color:color-mix(in_srgb,var(--ui-surface-1)_94%,#171717)] px-3 py-3 backdrop-blur-xl">
                         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
-                            <div className="min-w-0 pl-2 leading-none">
+                            <div ref={titleEditorRef} className="min-w-0 pl-2 leading-none">
                                 {isTitleEditing ? (
-                                    <input
-                                        autoFocus
-                                        value={titleDraft}
-                                        onChange={(event) => setTitleDraft(event.target.value)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter') {
-                                                event.preventDefault();
-                                                void commitProjectTitle();
-                                            }
-                                            if (event.key === 'Escape') {
-                                                setIsTitleEditing(false);
-                                                setTitleDraft(spec?.name?.trim() || '');
-                                            }
-                                        }}
-                                        onBlur={() => void commitProjectTitle()}
-                                        className="h-7 min-w-[170px] rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2 text-[13px] font-semibold text-[var(--ui-text)] outline-none"
-                                        placeholder="Project name"
-                                        disabled={isTitleSaving}
-                                    />
+                                    <div className="inline-flex min-w-[196px] items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] pr-1">
+                                        <input
+                                            autoFocus
+                                            value={titleDraft}
+                                            onChange={(event) => setTitleDraft(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    void commitProjectTitle();
+                                                }
+                                                if (event.key === 'Escape') {
+                                                    event.preventDefault();
+                                                    cancelProjectTitleEdit();
+                                                }
+                                            }}
+                                            onBlur={() => void commitProjectTitle()}
+                                            className="h-7 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-semibold text-[var(--ui-text)] outline-none"
+                                            placeholder="Project name"
+                                            disabled={isTitleSaving}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={cancelProjectTitleEdit}
+                                            className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-[var(--ui-text-subtle)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]"
+                                            title="Cancel rename"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
                                 ) : (
                                     <button
                                         type="button"
@@ -6756,11 +6864,11 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         title="Edit project name"
                                     >
                                         <span className="truncate">{spec?.name?.trim() || 'New Chat'}</span>
-                                        <ChevronDown size={12} className="text-[var(--ui-text-subtle)]" />
+                                        <Pencil size={12} className="text-[var(--ui-text-subtle)]" />
                                     </button>
                                 )}
                             </div>
-                            <div className="flex items-center justify-center gap-1">
+                            <div data-guide-id="chat-panel-tabs" className="flex items-center justify-center gap-1">
                                 {chatPanelTabs.map((tab) => {
                                     const Icon = tab.icon;
                                     const active = chatPanelView === tab.key;
@@ -6790,7 +6898,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${isPoppedOut ? 'bg-[rgba(255,255,255,0.1)] text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--ui-text)]'}`}
                                             title={isPoppedOut ? 'Dock in sidebar' : 'Pop out panel'}
                                         >
-                                            <Square size={13} />
+                                            <PanelRightOpen size={13} />
                                         </button>
                                         <button
                                             onClick={collapseChatPanel}
@@ -6809,6 +6917,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <div
                         ref={messagesContainerRef}
+                        data-guide-id="chat-message-history"
                         className="chat-panel-scroll flex flex-1 flex-col gap-7 overflow-y-auto px-4 pb-5 pt-6"
                     >
                         {hiddenMessageCount > 0 && (
@@ -7893,21 +8002,21 @@ Return a polished, consistent screen without introducing a new navigation patter
                     {chatPanelView === 'chat' ? (
                     <>
                     {/* Chat Input Container */}
-                    <div className="relative mx-3 mb-3 overflow-visible">
+                    <div data-guide-id="chat-composer" className="relative isolate mx-3 mb-3 overflow-visible">
                         <ComposerAttachmentStack
                             images={images}
                             onRemove={removeImage}
-                            size="compact"
                             badges={composerAttachmentMeta.map((attachment) => ({
                                 label: attachment.origin === 'saved' ? 'Saved' : 'Upload',
                                 tone: attachment.origin === 'saved' ? 'saved' : 'upload',
                             }))}
                         />
-                        <div className="relative flex flex-col gap-2 rounded-[18px] border bg-[color:color-mix(in_srgb,var(--ui-surface-2)_92%,#222222)] px-3 py-2.5 transition-all"
+                        <div className="relative z-10 flex flex-col gap-2 rounded-[18px] border bg-[var(--ui-surface-2)] px-3 py-2.5 transition-all"
                             style={{ borderColor: 'color-mix(in srgb, var(--ui-primary) 18%, var(--ui-border-card))' }}>
                             <button
                                 type="button"
                                 onClick={togglePlanMode}
+                                data-guide-id="chat-plan-toggle"
                                 className={`absolute -top-10 right-1 inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold ring-1 transition-colors sm:right-2 ${planMode
                                     ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-surface-2))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_44%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-surface-2))]'
                                     : 'bg-[rgba(255,255,255,0.03)] text-[var(--ui-text-muted)] ring-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ui-text)]'
@@ -8025,7 +8134,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                     </button>
                                 </div>
                                 {/* Platform Selector (Pill) */}
-                                <div className="flex items-center rounded-full bg-[rgba(255,255,255,0.03)] p-1 ring-1 ring-[rgba(255,255,255,0.06)]">
+                                <div data-guide-id="chat-platform-controls" className="flex items-center rounded-full bg-[rgba(255,255,255,0.03)] p-1 ring-1 ring-[rgba(255,255,255,0.06)]">
                                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                                         <button
                                             key={p}
@@ -8047,6 +8156,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                             {/* Right: Send Button */}
                             <div className="flex items-center gap-1.5">
                                 <button
+                                    data-guide-id="chat-attachment-action"
                                     className="flex h-7 w-7 items-center justify-center rounded-full bg-transparent text-[var(--ui-text-subtle)] transition-all hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--ui-text)]"
                                     onClick={() => fileInputRef.current?.click()}
                                     title="Add Image"
@@ -8208,6 +8318,22 @@ Return a polished, consistent screen without introducing a new navigation patter
                     ) : null}
                 </div>
             </div>
+            {isChatGuideActive && activeChatGuideStep && (
+                <GuideBubbleOverlay
+                    step={activeChatGuideStep}
+                    stepIndex={guideStepIndex}
+                    stepCount={CHAT_PANEL_GUIDE_STEPS.length}
+                    onPrev={prevGuideStep}
+                    onSkip={skipGuide}
+                    onNext={() => {
+                        if (guideStepIndex >= CHAT_PANEL_GUIDE_STEPS.length - 1) {
+                            finishGuide();
+                            return;
+                        }
+                        nextGuideStep(CHAT_PANEL_GUIDE_STEPS.length);
+                    }}
+                />
+            )}
             {viewerImage && (
                 <div
                     className="fixed inset-0 z-[120] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"

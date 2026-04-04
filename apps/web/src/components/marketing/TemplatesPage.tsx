@@ -82,7 +82,7 @@ export function TemplatesPage({ onNavigate, onOpenApp }: TemplatesPageProps) {
                                         }
                                     }}
                                     placeholder="Enter your email"
-                                    className="h-14 w-full rounded-[1.1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-white px-5 text-[15px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-primary)] dark:bg-[var(--ui-surface-2)]"
+                                    className="h-14 w-full rounded-[1.1rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] bg-white px-5 text-[15px] text-[var(--ui-text)] outline-none transition-colors placeholder:text-[var(--ui-text-subtle)] focus:border-[var(--ui-focus-border)] dark:bg-[var(--ui-surface-2)]"
                                 />
                             </label>
                             <button

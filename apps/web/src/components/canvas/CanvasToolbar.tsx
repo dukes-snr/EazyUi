@@ -1,5 +1,7 @@
 import { useReactFlow } from '@xyflow/react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
+    CircleHelp,
     Hand,
     Maximize,
     MousePointer2,
@@ -9,8 +11,10 @@ import {
     ZoomOut,
 } from 'lucide-react';
 
-import { useCanvasStore, useDesignStore, useHistoryStore } from '../../stores';
+import { useCanvasStore, useHistoryStore } from '../../stores';
+import { CANVAS_DOCK_SHORTCUTS, formatShortcutKeys } from './canvasShortcuts';
 import { CanvasProfileDock } from './CanvasProfileDock';
+import { restoreProjectHistorySnapshot } from '../../utils/projectHistory';
 
 function railButtonClass(active = false, prominent = false) {
     if (prominent) {
@@ -27,34 +31,49 @@ function railButtonClass(active = false, prominent = false) {
 }
 
 export function CanvasToolbar() {
-    const { activeTool, setActiveTool, setDoc, triggerExternalUpdate } = useCanvasStore();
-    const { setSpec } = useDesignStore();
+    const { activeTool, setActiveTool } = useCanvasStore();
     const { undoSnapshot, redoSnapshot, canUndo, canRedo } = useHistoryStore();
     const { zoomIn, zoomOut, fitView } = useReactFlow();
 
     const handleUndo = () => {
         const snapshot = undoSnapshot();
         if (!snapshot) return;
-        setSpec(snapshot.spec as any);
-        setDoc(snapshot.doc);
-        triggerExternalUpdate();
+        restoreProjectHistorySnapshot(snapshot);
     };
 
     const handleRedo = () => {
         const snapshot = redoSnapshot();
         if (!snapshot) return;
-        setSpec(snapshot.spec as any);
-        setDoc(snapshot.doc);
-        triggerExternalUpdate();
+        restoreProjectHistorySnapshot(snapshot);
+    };
+
+    const openHelpLauncher = (event: ReactMouseEvent<HTMLButtonElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        window.dispatchEvent(new CustomEvent('eazyui:open-canvas-help', {
+            detail: {
+                panel: 'launcher',
+                anchorRect: {
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    left: rect.left,
+                    width: rect.width,
+                    height: rect.height,
+                },
+            },
+        }));
     };
 
     return (
-        <div className="absolute left-3 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-[28px] border border-[rgba(255,255,255,0.06)] bg-[#232323] px-[7px] py-[8px] shadow-[0_10px_28px_rgba(0,0,0,0.28)]">
+        <div
+            data-guide-id="canvas-toolbar"
+            className="absolute left-3 top-1/2 z-50 flex -translate-y-1/2 flex-col items-center rounded-[28px] border border-[rgba(255,255,255,0.06)] bg-[#232323] px-[7px] py-[8px] shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
+        >
             <button
                 onClick={() => setActiveTool('select')}
                 className={railButtonClass(activeTool === 'select', true)}
-                title="Select tool"
-                aria-label="Select tool"
+                title={`Select tool (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.select])})`}
+                aria-label={`Select tool (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.select])})`}
             >
                 <MousePointer2 size={18} strokeWidth={2.1} />
             </button>
@@ -63,8 +82,8 @@ export function CanvasToolbar() {
                 <button
                     onClick={() => setActiveTool('hand')}
                     className={railButtonClass(activeTool === 'hand')}
-                    title="Pan tool"
-                    aria-label="Pan tool"
+                    title={`Pan tool (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.hand])})`}
+                    aria-label={`Pan tool (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.hand])})`}
                 >
                     <Hand size={16} strokeWidth={2} />
                 </button>
@@ -73,8 +92,8 @@ export function CanvasToolbar() {
                     onClick={handleUndo}
                     disabled={!canUndo()}
                     className={`${railButtonClass()} disabled:cursor-not-allowed disabled:opacity-35`}
-                    title="Undo"
-                    aria-label="Undo"
+                    title={`Undo (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.undo])})`}
+                    aria-label={`Undo (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.undo])})`}
                 >
                     <Undo2 size={16} strokeWidth={2} />
                 </button>
@@ -83,8 +102,8 @@ export function CanvasToolbar() {
                     onClick={handleRedo}
                     disabled={!canRedo()}
                     className={`${railButtonClass()} disabled:cursor-not-allowed disabled:opacity-35`}
-                    title="Redo"
-                    aria-label="Redo"
+                    title={`Redo (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.redo])})`}
+                    aria-label={`Redo (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.redo])})`}
                 >
                     <Redo2 size={16} strokeWidth={2} />
                 </button>
@@ -92,8 +111,8 @@ export function CanvasToolbar() {
                 <button
                     onClick={() => zoomOut()}
                     className={railButtonClass()}
-                    title="Zoom out"
-                    aria-label="Zoom out"
+                    title={`Zoom out (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.zoomOut])})`}
+                    aria-label={`Zoom out (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.zoomOut])})`}
                 >
                     <ZoomOut size={16} strokeWidth={2} />
                 </button>
@@ -101,8 +120,8 @@ export function CanvasToolbar() {
                 <button
                     onClick={() => zoomIn()}
                     className={railButtonClass()}
-                    title="Zoom in"
-                    aria-label="Zoom in"
+                    title={`Zoom in (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.zoomIn])})`}
+                    aria-label={`Zoom in (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.zoomIn])})`}
                 >
                     <ZoomIn size={16} strokeWidth={2} />
                 </button>
@@ -110,10 +129,20 @@ export function CanvasToolbar() {
                 <button
                     onClick={() => fitView({ padding: 0.28, duration: 500, maxZoom: 0.9 })}
                     className={railButtonClass()}
-                    title="Fit to screen"
-                    aria-label="Fit to screen"
+                    title={`Fit to screen (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.fit])})`}
+                    aria-label={`Fit to screen (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.fit])})`}
                 >
                     <Maximize size={16} strokeWidth={2} />
+                </button>
+
+                <button
+                    onClick={openHelpLauncher}
+                    className={railButtonClass()}
+                    title={`Help & shortcuts (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.help])})`}
+                    aria-label={`Help & shortcuts (${formatShortcutKeys([...CANVAS_DOCK_SHORTCUTS.help])})`}
+                    data-guide-id="canvas-help-trigger"
+                >
+                    <CircleHelp size={16} strokeWidth={2} />
                 </button>
             </div>
 

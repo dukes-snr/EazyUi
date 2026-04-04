@@ -252,7 +252,7 @@ export function FloatingMarketingNotifications({ onNavigate }: FloatingMarketing
     if (dismissed || !activeItem) return null;
 
     return (
-        <div className="pointer-events-none fixed bottom-1 right-4 z-[72] w-[calc(100vw-1.25rem)] max-w-[23rem] sm:bottom-2 sm:right-5 sm:w-[23rem] sm:max-w-[23rem] lg:bottom-2 lg:right-6 lg:w-[23rem] lg:max-w-[23rem]">
+        <div className="pointer-events-none fixed bottom-1 right-4 z-[72] hidden w-[calc(100vw-1.25rem)] max-w-[23rem] sm:block sm:bottom-2 sm:right-5 sm:w-[23rem] sm:max-w-[23rem] lg:bottom-2 lg:right-6 lg:w-[23rem] lg:max-w-[23rem]">
             <AnimatePresence mode="wait">
                 <motion.div
                     key={activeItem.id}

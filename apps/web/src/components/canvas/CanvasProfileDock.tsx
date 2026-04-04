@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import {
     BarChart3,
@@ -89,6 +89,23 @@ export function CanvasProfileDock() {
         }
     };
 
+    const openHelp = (event: ReactMouseEvent<HTMLButtonElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        window.dispatchEvent(new CustomEvent('eazyui:open-canvas-help', {
+            detail: {
+                panel: 'launcher',
+                anchorRect: {
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    left: rect.left,
+                    width: rect.width,
+                    height: rect.height,
+                },
+            },
+        }));
+    };
+
     return (
         <div ref={menuRef} className="pointer-events-auto relative">
             <button
@@ -177,7 +194,7 @@ export function CanvasProfileDock() {
                         <BarChart3 size={14} />
                         <span>Usage</span>
                     </button>
-                    <button type="button" className="canvas-profile-menu-item" onClick={() => navigateTo('/blog')}>
+                    <button type="button" className="canvas-profile-menu-item" onClick={openHelp}>
                         <CircleHelp size={14} />
                         <span>Get Help</span>
                     </button>
