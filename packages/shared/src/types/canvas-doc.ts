@@ -140,6 +140,7 @@ export function createDefaultCanvasDoc(docId: string): CanvasDoc {
             showGuides: true,
             showBoardLabels: true,
             deviceDisplayMode: 'framed',
+            canvasScrollWheelMode: 'zoom',
         },
         history: {
             specPatches: [],
