@@ -22,17 +22,30 @@ const ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
   { path: '/templates', changefreq: 'weekly', priority: '0.9' },
   { path: '/blog', changefreq: 'weekly', priority: '0.9' },
-  { path: '/blog/figma-integration-from-generated-ui-to-editable-systems', changefreq: 'monthly', priority: '0.84' },
-  { path: '/blog/prompt-engineering-for-ai-landing-pages', changefreq: 'monthly', priority: '0.82' },
-  { path: '/blog/reference-led-prompts-for-better-ui-first-passes', changefreq: 'monthly', priority: '0.81' },
-  { path: '/blog/ai-landing-page-builder-vs-traditional-design-workflow', changefreq: 'monthly', priority: '0.81' },
-  { path: '/blog/turning-ai-ui-outputs-into-build-ready-specs', changefreq: 'monthly', priority: '0.8' },
-  { path: '/blog/seo-friendly-landing-pages-generated-with-ai', changefreq: 'monthly', priority: '0.82' },
-  { path: '/blog/pricing-pages-that-convert-with-ai-design', changefreq: 'monthly', priority: '0.8' },
   { path: '/pricing', changefreq: 'weekly', priority: '0.85' },
   { path: '/changelog', changefreq: 'weekly', priority: '0.8' },
   { path: '/contact', changefreq: 'monthly', priority: '0.7' },
 ];
+
+function getDynamicRoutes() {
+  const allRoutes = [...ROUTES];
+  try {
+    const blogPostsFile = path.join(appRoot, 'src', 'content', 'blogPosts.ts');
+    const blogPostsContent = fs.readFileSync(blogPostsFile, 'utf8');
+    const slugRegex = /slug:\s*['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = slugRegex.exec(blogPostsContent)) !== null) {
+      const slug = match[1];
+      const blogPath = `/blog/${slug}`;
+      if (!allRoutes.find(r => r.path === blogPath)) {
+        allRoutes.push({ path: blogPath, changefreq: 'monthly', priority: '0.8' });
+      }
+    }
+  } catch (e) {
+    console.error('[generate-seo] Error reading blog posts for sitemap', e);
+  }
+  return allRoutes;
+}
 
 function readEnvValue(key) {
   for (const filePath of ENV_FILES) {
@@ -72,7 +85,7 @@ function resolveSiteUrl() {
 
 function buildSitemapXml(siteUrl) {
   const lastmod = new Date().toISOString().slice(0, 10);
-  const urls = ROUTES.map(({ path: routePath, changefreq, priority }) => {
+  const urls = getDynamicRoutes().map(({ path: routePath, changefreq, priority }) => {
     const url = `${siteUrl}${routePath === '/' ? '' : routePath}`;
     return [
       '  <url>',

@@ -217,11 +217,13 @@ function buildArticleJsonLd({
     description,
     path,
     publishedAt,
+    imageUrl,
 }: {
     title: string;
     description: string;
     path: string;
     publishedAt: string;
+    imageUrl?: string;
 }) {
     const siteUrl = getSiteUrl();
     const canonicalUrl = `${siteUrl}${path === '/' ? '' : path}`;
@@ -230,6 +232,7 @@ function buildArticleJsonLd({
         '@type': 'Article',
         headline: title,
         description,
+        image: imageUrl ? [imageUrl.startsWith('http') ? imageUrl : `${siteUrl}${imageUrl}`] : [`${siteUrl}/OG-image.png`],
         datePublished: publishedAt,
         dateModified: publishedAt,
         mainEntityOfPage: canonicalUrl,
@@ -307,6 +310,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 description: post.seoDescription,
                 path: articlePath,
                 ogType: 'article',
+                ogImage: post.coverImage,
                 jsonLd: [
                     ...Object.values(getPublicStructuredData(articlePath, `${post.title} | EazyUI`)),
                     buildBreadcrumbJsonLd([
@@ -319,6 +323,7 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                         description: post.seoDescription,
                         path: articlePath,
                         publishedAt: new Date(post.publishedAt).toISOString(),
+                        imageUrl: post.coverImage,
                     }),
                 ],
             };

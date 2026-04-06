@@ -10,6 +10,7 @@ export type SeoConfig = {
     path: string;
     robots?: string;
     ogType?: 'website' | 'article';
+    ogImage?: string;
     jsonLd?: Array<Record<string, unknown>>;
 };
 
@@ -85,7 +86,7 @@ export function applySeo(config: SeoConfig) {
     const description = config.description || DEFAULT_DESCRIPTION;
     const robots = config.robots || 'index,follow';
     const ogType = config.ogType || 'website';
-    const ogImage = `${siteUrl}/OG-image.png`;
+    const ogImage = config.ogImage ? (config.ogImage.startsWith('http') ? config.ogImage : `${siteUrl}${config.ogImage}`) : `${siteUrl}/OG-image.png`;
 
     document.title = title;
 
