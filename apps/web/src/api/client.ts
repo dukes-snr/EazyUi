@@ -976,6 +976,7 @@ class ApiClient {
     async generateStream(
         request: GenerateRequest,
         onChunk: (chunk: string) => void,
+        onOpen?: () => void,
         signal?: AbortSignal
     ): Promise<GenerateStreamResponse> {
         const payload = this.withComposerTemperature(request);
@@ -1006,6 +1007,7 @@ class ApiClient {
             });
         }
         if (!response.body) throw new Error('No response body');
+        onOpen?.();
         const referenceContext = tryParseReferenceContextHeader(response);
 
         const reader = response.body.getReader();
@@ -1094,6 +1096,7 @@ class ApiClient {
     async editStream(
         request: EditRequest,
         onChunk: (chunk: string) => void,
+        onOpen?: () => void,
         signal?: AbortSignal
     ): Promise<EditStreamResponse> {
         const payload = this.withComposerTemperature(request);
@@ -1124,6 +1127,7 @@ class ApiClient {
             });
         }
         if (!response.body) throw new Error('No response body');
+        onOpen?.();
         const referenceContext = tryParseReferenceContextHeader(response);
 
         const reader = response.body.getReader();

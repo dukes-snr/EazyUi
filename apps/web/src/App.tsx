@@ -509,7 +509,7 @@ function App() {
                 if (useProjectStore.getState().projectId !== targetProjectId) return;
                 const resolvedDoc = ensureCanvasDocFromProject(project.canvasDoc, project.designSpec as any);
                 unstable_batchedUpdates(() => {
-                    useDesignStore.getState().setSpec(project.designSpec as any);
+                    useDesignStore.getState().setSpec(project.designSpec as any, { history: 'skip' });
                     useCanvasStore.getState().setDoc(resolvedDoc);
                     useChatStore.getState().hydrateSession(project.chatState as any);
                 });
@@ -621,7 +621,7 @@ function App() {
 
                 const wasDirty = useProjectStore.getState().dirty;
                 unstable_batchedUpdates(() => {
-                    useDesignStore.getState().setSpec(project.designSpec as any);
+                    useDesignStore.getState().setSpec(project.designSpec as any, { history: 'skip' });
                     useCanvasStore.getState().setDoc(resolvedDoc);
                     useChatStore.getState().hydrateSession(project.chatState as any);
                 });

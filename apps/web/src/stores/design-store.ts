@@ -16,7 +16,7 @@ interface DesignState {
     error: string | null;
 
     // Actions
-    setSpec: (spec: HtmlDesignSpec) => void;
+    setSpec: (spec: HtmlDesignSpec, options?: { history?: 'auto' | 'skip' }) => void;
     updateScreen: (screenId: string, html: string, status?: 'streaming' | 'complete', width?: number, height?: number, name?: string, options?: { history?: 'auto' | 'skip' }) => void;
     addScreen: (screen: HtmlScreen, options?: { history?: 'auto' | 'skip' }) => void;
     addScreens: (screens: HtmlScreen[], options?: { history?: 'auto' | 'skip' }) => void;
@@ -43,8 +43,12 @@ export const useDesignStore = create<DesignState>((set, get) => ({
     selectedPlatform: 'mobile',
     setPlatform: (platform) => set({ selectedPlatform: platform }),
 
-    setSpec: (spec) => {
-        set({ spec, error: null });
+    setSpec: (spec, options) => {
+        set({
+            spec,
+            error: null,
+            historyRevision: options?.history === 'skip' ? get().historyRevision : get().historyRevision + 1,
+        });
     },
 
     updateScreen: (screenId, html, status, width, height, name, options) => {

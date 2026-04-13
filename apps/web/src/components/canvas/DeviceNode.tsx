@@ -468,6 +468,106 @@ function injectBodyTopPadding(html: string, paddingTopPx = 30) {
     return `${styleTag}\n${html}`;
 }
 
+function getElementClassText(element: Element | null): string {
+    if (!element) return '';
+    const attr = element.getAttribute('class');
+    return typeof attr === 'string' ? attr : '';
+}
+
+function getElementStyleText(element: Element | null): string {
+    if (!element) return '';
+    const attr = element.getAttribute('style');
+    return typeof attr === 'string' ? attr : '';
+}
+
+function isTopAnchoredOverlayElement(element: Element | null): boolean {
+    if (!element) return false;
+    const classText = getElementClassText(element);
+    const styleText = getElementStyleText(element);
+
+    const classAnchored = /\btop-0\b/.test(classText)
+        && /\b(?:absolute|fixed|sticky)\b/.test(classText)
+        && /\b(?:left-0|right-0|inset-x-0|inset-0)\b/.test(classText);
+
+    const styleAnchored = /position\s*:\s*(?:absolute|fixed|sticky)/i.test(styleText)
+        && /top\s*:\s*0(?:px)?/i.test(styleText)
+        && (
+            /left\s*:\s*0(?:px)?/i.test(styleText)
+            || /right\s*:\s*0(?:px)?/i.test(styleText)
+            || /inset\s*:\s*0(?:px)?/i.test(styleText)
+        );
+
+    return classAnchored || styleAnchored;
+}
+
+function findFirstMeaningfulChild(root: Element | null): Element | null {
+    if (!root) return null;
+    const children = Array.from(root.children);
+    for (const child of children) {
+        const tagName = child.tagName.toLowerCase();
+        if (tagName === 'script' || tagName === 'style' || tagName === 'template') continue;
+        if (child.id === 'eazyui-statusbar-overlay') continue;
+        return child;
+    }
+    return null;
+}
+
+function isImmersiveMediaSection(element: Element | null): boolean {
+    if (!element) return false;
+    const classText = getElementClassText(element);
+    const styleText = getElementStyleText(element);
+    const media = element.querySelector('img, picture, video, canvas');
+    if (!media && !/background-image\s*:/i.test(styleText)) return false;
+
+    const mediaClassText = getElementClassText(media);
+    const hasHeroHeight = /\b(?:h-screen|min-h-screen)\b/.test(classText)
+        || /\bh-\[[^\]]+\]/.test(classText)
+        || /\bmin-h-\[[^\]]+\]/.test(classText)
+        || /\baspect-\[[^\]]+\]/.test(classText)
+        || /height\s*:\s*(?:[2-9]\d|1\d{2,})px/i.test(styleText)
+        || /min-height\s*:\s*(?:[2-9]\d|1\d{2,})px/i.test(styleText);
+    const hasImmersiveMedia = /\bobject-cover\b/.test(mediaClassText)
+        || /\bh-full\b/.test(mediaClassText)
+        || /\bw-full\b/.test(mediaClassText)
+        || /\babsolute\b/.test(mediaClassText)
+        || /\binset-0\b/.test(mediaClassText)
+        || /object-fit\s*:\s*cover/i.test(getElementStyleText(media))
+        || /width\s*:\s*100%/i.test(getElementStyleText(media));
+    const hasHeroShell = /\brelative\b/.test(classText)
+        || /\boverflow-hidden\b/.test(classText)
+        || /\bw-full\b/.test(classText);
+
+    return hasHeroHeight && (hasImmersiveMedia || hasHeroShell);
+}
+
+function shouldInjectBodyTopPadding(html: string): boolean {
+    const source = String(html || '').trim();
+    if (!source) return false;
+
+    try {
+        const parsed = new DOMParser().parseFromString(source, 'text/html');
+        if (!parsed.body) return true;
+
+        if (parsed.body.querySelector('[data-eazyui-safe-top="force"]')) {
+            return false;
+        }
+
+        const topOverlay = Array.from(parsed.body.querySelectorAll('header, [class], [style]'))
+            .some((element) => isTopAnchoredOverlayElement(element));
+        if (topOverlay) return false;
+
+        const contentRoot = parsed.body.querySelector('main') || parsed.body;
+        const firstMeaningful = findFirstMeaningfulChild(contentRoot);
+        if (isImmersiveMediaSection(firstMeaningful)) {
+            return false;
+        }
+    } catch {
+        return true;
+    }
+
+    return true;
+}
+
 function upsertPaddingTopInAttributes(rawAttrs: string, paddingTopPx: number, important = false) {
     const attrs = rawAttrs || '';
     const importantSuffix = important ? ' !important' : '';
@@ -497,10 +597,6 @@ function injectHeaderTopPadding(html: string, paddingTopPx = 20, forcePaddingTop
     if (!safePadding && !safeForcePadding && !safeHeaderPadding) return html;
 
     let nextHtml = html;
-    nextHtml = nextHtml.replace(/<header([^>]*)>/gi, (_fullMatch, rawAttrs: string) => {
-        const nextAttrs = upsertPaddingTopInAttributes(rawAttrs, safeHeaderPadding, true);
-        return `<header${nextAttrs}>`;
-    });
 
     nextHtml = nextHtml.replace(/<([a-zA-Z][\w:-]*)([^>]*\sdata-eazyui-safe-top=(["'])force\3[^>]*)>/gi, (_fullMatch, tagName: string, rawAttrs: string) => {
         const isHeaderTag = String(tagName || '').toLowerCase() === 'header';
@@ -523,14 +619,26 @@ function injectHeaderTopPadding(html: string, paddingTopPx = 20, forcePaddingTop
     );
 
     const styleTag = `<style id="eazyui-header-top-padding-style">
-header{padding-top:${safeHeaderPadding}px !important;}
+header[data-eazyui-safe-top="force"],
+[class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"],
+[class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"],
+[class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"],
+[class~="top-0"][class~="absolute"][class~="inset-x-0"][data-eazyui-safe-top="force"],
+[class~="top-0"][class~="fixed"][class~="inset-x-0"][data-eazyui-safe-top="force"],
+[class~="top-0"][class~="sticky"][class~="inset-x-0"][data-eazyui-safe-top="force"]{padding-top:${safeHeaderPadding}px !important;}
+[class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"]:not(header),
+[class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"]:not(header),
+[class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"][data-eazyui-safe-top="force"]:not(header),
+[class~="top-0"][class~="absolute"][class~="inset-x-0"][data-eazyui-safe-top="force"]:not(header),
+[class~="top-0"][class~="fixed"][class~="inset-x-0"][data-eazyui-safe-top="force"]:not(header),
+[class~="top-0"][class~="sticky"][class~="inset-x-0"][data-eazyui-safe-top="force"]:not(header){padding-top:${safeForcePadding}px !important;}
+[data-eazyui-safe-top="force"]:not(header):not([class~="top-0"]){padding-top:${safeForcePadding}px !important;}
 [class~="top-0"][class~="absolute"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
 [class~="top-0"][class~="fixed"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
 [class~="top-0"][class~="sticky"][class~="left-0"][class~="right-0"]:not(header):not([data-eazyui-safe-top="force"]),
 [class~="top-0"][class~="absolute"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]),
 [class~="top-0"][class~="fixed"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]),
 [class~="top-0"][class~="sticky"][class~="inset-x-0"]:not(header):not([data-eazyui-safe-top="force"]){padding-top:${safePadding}px !important;}
-[data-eazyui-safe-top="force"]:not(header){padding-top:${safeForcePadding}px !important;}
 </style>`;
     if (/<head[^>]*>/i.test(nextHtml)) {
         return nextHtml.replace(/<head([^>]*)>/i, `<head$1>${styleTag}`);
@@ -1666,7 +1774,9 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const injectedHtmlWithNonce = useMemo(() => {
         const normalizedThemeHtml = normalizePreviewColorScheme(htmlString);
         const noScrollbarHtml = injectScrollbarHide(normalizedThemeHtml);
-        const paddedHtml = injectBodyTopPadding(noScrollbarHtml, 30);
+        const paddedHtml = shouldInjectBodyTopPadding(noScrollbarHtml)
+            ? injectBodyTopPadding(noScrollbarHtml, 30)
+            : noScrollbarHtml;
         const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
         const baseHtml = isDesktop
             ? headerPaddedHtml

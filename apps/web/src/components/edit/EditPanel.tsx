@@ -4,7 +4,7 @@ import type { User } from 'firebase/auth';
 import { useEditStore } from '../../stores/edit-store';
 import { apiClient, type AssetRecord, type AssetScope } from '../../api/client';
 import { ensureEditableUids, type HtmlPatch } from '../../utils/htmlPatcher';
-import { ArrowUpLeft, FolderOpen, ImagePlus, Loader2, Maximize2, Minimize2, Pipette, Redo2, Undo2, Upload, UserRound, X } from 'lucide-react';
+import { ArrowUpLeft, Check, ChevronDown, FolderOpen, ImagePlus, Loader2, Maximize2, Minimize2, Pipette, Redo2, Undo2, Upload, UserRound, X } from 'lucide-react';
 import { clearSelectionOnOtherScreens, dispatchPatchToIframe, dispatchSelectParent, dispatchSelectScreenContainer, dispatchSelectUid } from '../../utils/editMessaging';
 import { getPreferredTextModel } from '../../constants/designModels';
 import { observeAuthState } from '../../lib/auth';
@@ -20,6 +20,13 @@ type RGBA = { r: number; g: number; b: number; a: number };
 type HSV = { h: number; s: number; v: number };
 type EyeDropperApi = new () => { open: () => Promise<{ sRGBHex: string }> };
 type ImageFitMode = 'cover' | 'contain' | 'fill' | 'none' | 'scale-down';
+type DesignPaletteTokenKey = 'bg' | 'surface' | 'surface2' | 'text' | 'muted' | 'stroke' | 'accent' | 'accent2';
+type ColorPaletteOption = {
+    key: DesignPaletteTokenKey;
+    label: string;
+    note: string;
+    color: string;
+};
 type ScreenImageItem = {
     uid: string;
     src: string;
@@ -152,6 +159,17 @@ const MATERIAL_ICON_FALLBACK_OPTIONS = [
     'language', 'school', 'work', 'badge', 'payments', 'credit_card', 'receipt_long',
     'local_shipping', 'directions_car', 'flight', 'restaurant', 'local_cafe',
 ];
+const DESIGN_COLOR_TOKEN_META: Record<DesignPaletteTokenKey, { label: string; note: string }> = {
+    bg: { label: 'Background', note: 'Canvas and shell base' },
+    surface: { label: 'Surface', note: 'Cards and primary panes' },
+    surface2: { label: 'Tertiary', note: 'Elevated content and hovers' },
+    text: { label: 'Text', note: 'Primary typography' },
+    muted: { label: 'Neutral', note: 'Muted labels and meta' },
+    stroke: { label: 'Stroke', note: 'Borders and separators' },
+    accent: { label: 'Primary', note: 'Main emphasis color' },
+    accent2: { label: 'Secondary', note: 'Support accent color' },
+};
+const DESIGN_COLOR_TOKEN_ORDER: DesignPaletteTokenKey[] = ['bg', 'surface', 'surface2', 'text', 'muted', 'stroke', 'accent', 'accent2'];
 
 const inputBase = 'w-full rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-text)] outline-none transition-colors focus:border-[var(--ui-focus-border)]';
 const selectBase = `${inputBase} appearance-none bg-[linear-gradient(45deg,transparent_50%,#9ca3af_50%),linear-gradient(135deg,#9ca3af_50%,transparent_50%)] bg-[position:calc(100%-16px)_calc(50%-2px),calc(100%-10px)_calc(50%-2px)] bg-[length:6px_6px,6px_6px] bg-no-repeat pr-8`;
@@ -294,6 +312,64 @@ function rgbaToCss({ r, g, b, a }: RGBA) {
     return `rgba(${rr}, ${gg}, ${bb}, ${aa.toFixed(2)})`;
 }
 
+function normalizeComparableColor(color: string): string {
+    const resolved = resolveColorToRgba(color);
+    if (!resolved) return String(color || '').trim().toLowerCase();
+    return rgbaToCss(resolved).toLowerCase();
+}
+
+function getPaletteOptionPriorityMap(preferredKeys: DesignPaletteTokenKey[] = []) {
+    return new Map(preferredKeys.map((key, index) => [key, index]));
+}
+
+function orderPaletteOptions(
+    paletteOptions: ColorPaletteOption[],
+    preferredKeys: DesignPaletteTokenKey[] = []
+): ColorPaletteOption[] {
+    if (!preferredKeys.length) return paletteOptions;
+    const priority = getPaletteOptionPriorityMap(preferredKeys);
+    return [...paletteOptions].sort((left, right) => {
+        const leftPriority = priority.get(left.key) ?? Number.MAX_SAFE_INTEGER;
+        const rightPriority = priority.get(right.key) ?? Number.MAX_SAFE_INTEGER;
+        return leftPriority - rightPriority;
+    });
+}
+
+function findMatchingPaletteOption(
+    paletteOptions: ColorPaletteOption[],
+    color: string,
+    preferredKeys: DesignPaletteTokenKey[] = []
+): ColorPaletteOption | null {
+    const normalized = normalizeComparableColor(color);
+    const matches = paletteOptions.filter((option) => normalizeComparableColor(option.color) === normalized);
+    if (!matches.length) return null;
+    return orderPaletteOptions(matches, preferredKeys)[0] || null;
+}
+
+function getSemanticTokenFromClassList(
+    classList: string[],
+    family: 'bg' | 'text' | 'border'
+): DesignPaletteTokenKey | null {
+    const ordered = [...classList].reverse();
+    for (const token of ordered) {
+        const normalized = String(token || '').trim();
+        if (!normalized) continue;
+        if (family === 'bg') {
+            const match = normalized.match(/^bg-(bg|surface2|surface|text|muted|stroke|accent2|accent)(?:\/[\d.]+)?$/);
+            if (match?.[1]) return match[1] as DesignPaletteTokenKey;
+        }
+        if (family === 'text') {
+            const match = normalized.match(/^text-(bg|surface2|surface|text|muted|stroke|accent2|accent)(?:\/[\d.]+)?$/);
+            if (match?.[1]) return match[1] as DesignPaletteTokenKey;
+        }
+        if (family === 'border') {
+            const match = normalized.match(/^border-(bg|surface2|surface|text|muted|stroke|accent2|accent)(?:\/[\d.]+)?$/);
+            if (match?.[1]) return match[1] as DesignPaletteTokenKey;
+        }
+    }
+    return null;
+}
+
 function rgbToHsv({ r, g, b }: RGB): HSV {
     const rn = r / 255;
     const gn = g / 255;
@@ -364,8 +440,21 @@ function ScrubNumberInput({
     );
 }
 
-function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+function ColorWheelInput({
+    value,
+    onChange,
+    paletteOptions = [],
+    preferredKeys = [],
+    semanticTokenKey = null,
+}: {
+    value: string;
+    onChange: (next: string) => void;
+    paletteOptions?: ColorPaletteOption[];
+    preferredKeys?: DesignPaletteTokenKey[];
+    semanticTokenKey?: DesignPaletteTokenKey | null;
+}) {
     const [open, setOpen] = useState(false);
+    const [showCustomEditor, setShowCustomEditor] = useState(false);
     const [hsv, setHsv] = useState<HSV>({ h: 0, s: 0, v: 100 });
     const [alpha, setAlpha] = useState(1);
     const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -378,6 +467,20 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
         ? (window as unknown as { EyeDropper?: EyeDropperApi }).EyeDropper
         : undefined;
     const supportsEyeDropper = Boolean(eyeDropperCtor);
+    const semanticPaletteOption = useMemo(
+        () => semanticTokenKey ? (paletteOptions.find((option) => option.key === semanticTokenKey) || null) : null,
+        [paletteOptions, semanticTokenKey]
+    );
+    const orderedPaletteOptions = useMemo(
+        () => orderPaletteOptions(paletteOptions, semanticTokenKey ? [semanticTokenKey, ...preferredKeys] : preferredKeys),
+        [paletteOptions, preferredKeys, semanticTokenKey]
+    );
+    const selectedPaletteOption = useMemo(
+        () => semanticPaletteOption || findMatchingPaletteOption(paletteOptions, value, semanticTokenKey ? [semanticTokenKey, ...preferredKeys] : preferredKeys),
+        [paletteOptions, preferredKeys, semanticPaletteOption, semanticTokenKey, value]
+    );
+    const triggerLabel = selectedPaletteOption?.label || 'Custom';
+    const triggerNote = selectedPaletteOption?.note || value || 'Choose a palette color or enter a custom value';
 
     useEffect(() => {
         const rgba = resolveColorToRgba(value);
@@ -385,6 +488,12 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
         setHsv(rgbToHsv({ r: rgba.r, g: rgba.g, b: rgba.b }));
         setAlpha(rgba.a);
     }, [value]);
+
+    useEffect(() => {
+        if (selectedPaletteOption) {
+            setShowCustomEditor(false);
+        }
+    }, [selectedPaletteOption]);
 
     useEffect(() => {
         if (!open) return;
@@ -460,16 +569,25 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
                 <button
                     type="button"
                     onClick={() => setOpen((v) => !v)}
-                    className="h-8 w-8 rounded-md border border-[var(--ui-border-light)] shadow-inner outline outline-1 outline-[var(--ui-border)]"
-                    style={{
-                        backgroundColor: displayColor,
-                        backgroundImage:
-                            'linear-gradient(45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.14) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.14) 75%)',
-                        backgroundSize: '8px 8px',
-                        backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
-                    }}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-left transition-colors hover:bg-[var(--ui-surface-3)]"
                     title="Open color picker"
-                />
+                >
+                    <span
+                        className="h-8 w-8 shrink-0 rounded-lg border border-[var(--ui-border-light)] shadow-inner outline outline-1 outline-[var(--ui-border)]"
+                        style={{
+                            backgroundColor: displayColor,
+                            backgroundImage:
+                                'linear-gradient(45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.14) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.14) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.14) 75%)',
+                            backgroundSize: '8px 8px',
+                            backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
+                        }}
+                    />
+                    <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-[var(--ui-text)]">{triggerLabel}</span>
+                        <span className="block truncate text-[11px] text-[var(--ui-text-muted)]">{triggerNote}</span>
+                    </span>
+                    <ChevronDown size={14} className={`shrink-0 text-[var(--ui-text-subtle)] transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
                 <button
                     type="button"
                     disabled={!supportsEyeDropper}
@@ -498,38 +616,93 @@ function ColorWheelInput({ value, onChange }: { value: string; onChange: (next: 
             {open && (
                 <div
                     ref={popoverRef}
-                    className="fixed z-[999] w-[220px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-2xl"
+                    className="fixed z-[999] w-[280px] rounded-xl border border-[var(--ui-border)] bg-[var(--ui-popover)] p-3 shadow-2xl"
                     style={{ top: position.top, left: position.left }}
                 >
-                    <div
-                        ref={wheelRef}
-                        onPointerDown={startWheelDrag}
-                        className="relative mx-auto h-[120px] w-[120px] rounded-full cursor-crosshair"
-                        style={{
-                            backgroundImage:
-                                'conic-gradient(from 90deg, red, yellow, lime, cyan, blue, magenta, red), radial-gradient(circle at center, white 0%, rgba(255,255,255,0) 62%)',
-                        }}
-                    >
-                        <div
-                            className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-black/70"
-                            style={{ left: `${knobX}%`, top: `${knobY}%` }}
-                        />
+                    {paletteOptions.length > 0 && (
+                        <div>
+                            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Palette</div>
+                            <div className="mt-2 max-h-52 space-y-1 overflow-y-auto pr-1">
+                                {orderedPaletteOptions.map((option) => {
+                                    const isSelected = selectedPaletteOption?.key === option.key;
+                                    return (
+                                        <button
+                                            key={option.key}
+                                            type="button"
+                                            onClick={() => {
+                                                onChange(option.color);
+                                                setShowCustomEditor(false);
+                                                setOpen(false);
+                                            }}
+                                            className={`flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors ${isSelected
+                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_30%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-2))]'
+                                                : 'border-transparent hover:border-[var(--ui-border)] hover:bg-[var(--ui-surface-2)]'
+                                                }`}
+                                        >
+                                            <span className="h-7 w-7 shrink-0 rounded-md border border-[var(--ui-border-light)]" style={{ background: option.color }} />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate text-xs font-medium text-[var(--ui-text)]">{option.label}</span>
+                                                <span className="block truncate text-[11px] text-[var(--ui-text-muted)]">{option.note}</span>
+                                            </span>
+                                            {isSelected && <Check size={14} className="shrink-0 text-[var(--ui-primary)]" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                    <div className={`${paletteOptions.length > 0 ? 'mt-3 border-t border-[var(--ui-border)] pt-3' : ''}`}>
+                        <button
+                            type="button"
+                            onClick={() => setShowCustomEditor((current) => !current)}
+                            className="flex w-full items-center justify-between rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-left transition-colors hover:bg-[var(--ui-surface-3)]"
+                        >
+                            <span>
+                                <span className="block text-xs font-medium text-[var(--ui-text)]">Custom</span>
+                                <span className="block text-[11px] text-[var(--ui-text-muted)]">Enter any color value</span>
+                            </span>
+                            <ChevronDown size={14} className={`shrink-0 text-[var(--ui-text-subtle)] transition-transform ${showCustomEditor ? 'rotate-180' : ''}`} />
+                        </button>
                     </div>
-                    <div className="mt-3 space-y-2">
-                        <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Opacity</div>
-                        <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={Math.round(alpha * 100)}
-                            onChange={(e) => {
-                                const nextAlpha = clamp(Number(e.target.value) / 100, 0, 1);
-                                setAlpha(nextAlpha);
-                                onChange(rgbaToCss({ ...hsvToRgb(hsv), a: nextAlpha }));
-                            }}
-                            className="w-full accent-[var(--ui-primary)]"
-                        />
-                    </div>
+                    {showCustomEditor && (
+                        <div className="mt-3">
+                            <div
+                                ref={wheelRef}
+                                onPointerDown={startWheelDrag}
+                                className="relative mx-auto h-[120px] w-[120px] rounded-full cursor-crosshair"
+                                style={{
+                                    backgroundImage:
+                                        'conic-gradient(from 90deg, red, yellow, lime, cyan, blue, magenta, red), radial-gradient(circle at center, white 0%, rgba(255,255,255,0) 62%)',
+                                }}
+                            >
+                                <div
+                                    className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-black/70"
+                                    style={{ left: `${knobX}%`, top: `${knobY}%` }}
+                                />
+                            </div>
+                            <div className="mt-3 space-y-2">
+                                <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--ui-text-subtle)]">Opacity</div>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    value={Math.round(alpha * 100)}
+                                    onChange={(e) => {
+                                        const nextAlpha = clamp(Number(e.target.value) / 100, 0, 1);
+                                        setAlpha(nextAlpha);
+                                        onChange(rgbaToCss({ ...hsvToRgb(hsv), a: nextAlpha }));
+                                    }}
+                                    className="w-full accent-[var(--ui-primary)]"
+                                />
+                                <input
+                                    value={value}
+                                    onChange={(e) => onChange(e.target.value)}
+                                    className={inputBase}
+                                    placeholder="#RRGGBB or rgb(...)"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -680,6 +853,31 @@ export function EditPanel() {
         if (!query) return allIconOptions;
         return allIconOptions.filter((name) => name.includes(query));
     }, [iconQuery, allIconOptions]);
+    const colorPaletteOptions = useMemo<ColorPaletteOption[]>(() => {
+        const tokens = spec?.designSystem?.tokens;
+        if (!tokens) return [];
+        return DESIGN_COLOR_TOKEN_ORDER.map((key) => ({
+            key,
+            label: DESIGN_COLOR_TOKEN_META[key].label,
+            note: DESIGN_COLOR_TOKEN_META[key].note,
+            color: tokens[key],
+        })).filter((option) => Boolean(option.color));
+    }, [spec?.designSystem]);
+    const backgroundSemanticToken = useMemo(
+        () => getSemanticTokenFromClassList(selected?.classList || [], 'bg'),
+        [selected?.classList]
+    );
+    const textSemanticToken = useMemo(
+        () => getSemanticTokenFromClassList(selected?.classList || [], 'text'),
+        [selected?.classList]
+    );
+    const borderSemanticToken = useMemo(
+        () => getSemanticTokenFromClassList(selected?.classList || [], 'border'),
+        [selected?.classList]
+    );
+    const fillPreferredKeys: DesignPaletteTokenKey[] = ['surface', 'surface2', 'bg', 'accent', 'accent2', 'stroke', 'muted', 'text'];
+    const textPreferredKeys: DesignPaletteTokenKey[] = ['text', 'muted', 'accent', 'accent2', 'surface2', 'stroke', 'surface', 'bg'];
+    const borderPreferredKeys: DesignPaletteTokenKey[] = ['stroke', 'surface2', 'muted', 'surface', 'bg', 'accent', 'accent2', 'text'];
 
     useEffect(() => {
         setIconActiveIndex(0);
@@ -2035,6 +2233,9 @@ RULES:
                                             <div className="text-xs text-[var(--ui-text-muted)]">Fill</div>
                                             <ColorWheelInput
                                                 value={bgColor}
+                                                paletteOptions={colorPaletteOptions}
+                                                preferredKeys={fillPreferredKeys}
+                                                semanticTokenKey={backgroundSemanticToken}
                                                 onChange={(next) => {
                                                     setBgColor(next);
                                                     patchStyle({ 'background-color': next });
@@ -2047,6 +2248,9 @@ RULES:
                                             <div className="text-xs text-[var(--ui-text-muted)]">Text</div>
                                             <ColorWheelInput
                                                 value={textColor}
+                                                paletteOptions={colorPaletteOptions}
+                                                preferredKeys={textPreferredKeys}
+                                                semanticTokenKey={textSemanticToken}
                                                 onChange={(next) => {
                                                     setTextColor(next);
                                                     patchStyle({ color: next });
@@ -2058,6 +2262,9 @@ RULES:
                                         <div className="text-xs text-[var(--ui-text-muted)]">Border Color</div>
                                         <ColorWheelInput
                                             value={borderColor}
+                                            paletteOptions={colorPaletteOptions}
+                                            preferredKeys={borderPreferredKeys}
+                                            semanticTokenKey={borderSemanticToken}
                                             onChange={(next) => {
                                                 setBorderColor(next);
                                                 patchStyle({ 'border-color': next });

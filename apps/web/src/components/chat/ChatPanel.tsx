@@ -25,6 +25,7 @@ import {
 } from '../../utils/composerReferences';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
+import AgentPlan, { type AgentPlanStatus, type AgentPlanTask } from '../ui/agent-plan';
 import { Orb } from '../ui/Orb';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { GuideBubbleOverlay, type GuideBubbleStep } from '../ui/GuideBubbleOverlay';
@@ -173,6 +174,8 @@ type DesignTokenColorPatch = {
     token: DesignTokenKey;
     from: string;
     to: string;
+    mode: 'light' | 'dark';
+    useLiteralFallback: boolean;
 };
 
 function escapeRegExpLiteral(value: string): string {
@@ -192,14 +195,52 @@ function buildDesignTokenColorPatches(
     next: ProjectDesignSystem
 ): DesignTokenColorPatch[] {
     if (!previous?.tokens || !next?.tokens) return [];
+    const activeMode = resolveActiveThemeMode(next.themeMode);
     const keys = Object.keys(next.tokens) as DesignTokenKey[];
+    const previousValues = keys.map((token) => normalizeTokenColorValue(previous.tokens[token]).toLowerCase()).filter(Boolean);
+    const duplicateCounts = previousValues.reduce<Record<string, number>>((acc, value) => {
+        acc[value] = (acc[value] || 0) + 1;
+        return acc;
+    }, {});
     return keys.reduce<DesignTokenColorPatch[]>((acc, token) => {
         const from = normalizeTokenColorValue(previous.tokens[token]);
         const to = normalizeTokenColorValue(next.tokens[token]);
         if (!from || !to || areTokenColorsEquivalent(from, to)) return acc;
-        acc.push({ token, from, to });
+        acc.push({
+            token,
+            from,
+            to,
+            mode: activeMode,
+            useLiteralFallback: (duplicateCounts[from.toLowerCase()] || 0) <= 1,
+        });
         return acc;
     }, []);
+}
+
+function replaceCssVariableInThemeBlock(
+    html: string,
+    token: DesignTokenKey,
+    nextValue: string,
+    mode: 'light' | 'dark'
+): { html: string; changed: boolean } {
+    const selectorPattern = mode === 'dark' ? /\.dark\s*\{[\s\S]*?\}/i : /:root\s*\{[\s\S]*?\}/i;
+    const variablePattern = new RegExp(`(--color-${escapeRegExpLiteral(token)}\\s*:\\s*)([^;]+)(;)`, 'i');
+    let changed = false;
+    const nextHtml = String(html || '').replace(selectorPattern, (block) => {
+        const nextBlock = block.replace(variablePattern, (fullMatch, prefix: string, current: string, suffix: string) => {
+            if (areTokenColorsEquivalent(current, nextValue)) return fullMatch;
+            changed = true;
+            return `${prefix}${nextValue}${suffix}`;
+        });
+        return nextBlock;
+    });
+    return { html: nextHtml, changed };
+}
+
+function hasDesignTokenContract(html: string): boolean {
+    return /--color-(bg|surface|surface2|text|muted|stroke|accent|accent2)\s*:|var\(--color-(bg|surface|surface2|text|muted|stroke|accent|accent2)\)/i.test(
+        String(html || '')
+    );
 }
 
 function applyDesignTokenColorPatchesToHtml(
@@ -209,9 +250,18 @@ function applyDesignTokenColorPatchesToHtml(
     if (!patches.length) return { html, changed: false };
     let nextHtml = String(html || '');
     let changed = false;
+    const semanticTokenContract = hasDesignTokenContract(nextHtml);
     const replacementTable: Array<{ placeholder: string; value: string }> = [];
 
     patches.forEach((patch, index) => {
+        const variableResult = replaceCssVariableInThemeBlock(nextHtml, patch.token, patch.to, patch.mode);
+        nextHtml = variableResult.html;
+        changed = changed || variableResult.changed;
+
+        if (semanticTokenContract || !patch.useLiteralFallback) {
+            return;
+        }
+
         const placeholder = `__EAZYUI_TOKEN_PATCH_${index}__`;
         const pattern = new RegExp(escapeRegExpLiteral(patch.from), 'gi');
         nextHtml = nextHtml.replace(pattern, () => {
@@ -276,6 +326,31 @@ type DesignSystemPalettePreset = {
 };
 
 const DESIGN_SYSTEM_COLOR_PALETTE_PRESETS: DesignSystemPalettePreset[] = [
+    {
+        key: 'void',
+        label: 'Void',
+        description: 'Pure monochrome theme with black-on-dark, white-on-light, and barely lifted surfaces.',
+        light: {
+            bg: '#FFFFFF',
+            surface: '#FAFAFA',
+            surface2: '#F5F5F5',
+            text: '#050505',
+            muted: '#737373',
+            stroke: '#EAEAEA',
+            accent: '#111111',
+            accent2: '#2A2A2A',
+        },
+        dark: {
+            bg: '#000000',
+            surface: '#050505',
+            surface2: '#0A0A0A',
+            text: '#FFFFFF',
+            muted: '#A3A3A3',
+            stroke: '#151515',
+            accent: '#F5F5F5',
+            accent2: '#D4D4D4',
+        },
+    },
     {
         key: 'ember-slate',
         label: 'Ember Slate',
@@ -399,6 +474,382 @@ const DESIGN_SYSTEM_COLOR_PALETTE_PRESETS: DesignSystemPalettePreset[] = [
             stroke: '#253247',
             accent: '#5B92FF',
             accent2: '#B5E14F',
+        },
+    },
+
+    {
+        key: 'amethyst-fog',
+        label: 'Amethyst Fog',
+        description: 'Refined neutrals lifted by orchid and periwinkle highlights.',
+        light: {
+            bg: '#F6F3FA',
+            surface: '#FFFDFF',
+            surface2: '#E8E0F1',
+            text: '#1E1826',
+            muted: '#786C87',
+            stroke: '#D7CCE4',
+            accent: '#9B5DE5',
+            accent2: '#6D8BFF',
+        },
+        dark: {
+            bg: '#0F0B15',
+            surface: '#17121F',
+            surface2: '#211A2D',
+            text: '#F4EEFB',
+            muted: '#AA9EB8',
+            stroke: '#342B43',
+            accent: '#BC7CFF',
+            accent2: '#94A9FF',
+        },
+    },
+    {
+        key: 'midnight-aurora',
+        label: 'Midnight Aurora',
+        description: 'Velvety midnight tones with vivid teal and aurora green energy.',
+        light: {
+            bg: '#EDF6F6',
+            surface: '#FBFEFE',
+            surface2: '#D8E8E8',
+            text: '#102022',
+            muted: '#63797B',
+            stroke: '#C2D6D7',
+            accent: '#0EA5A4',
+            accent2: '#55C96B',
+        },
+        dark: {
+            bg: '#071112',
+            surface: '#0D181A',
+            surface2: '#122327',
+            text: '#EAF6F6',
+            muted: '#8FA7A8',
+            stroke: '#20363A',
+            accent: '#21C7C4',
+            accent2: '#78E58D',
+        },
+    },
+    {
+        key: 'velvet-ruby',
+        label: 'Velvet Ruby',
+        description: 'Luxurious plum neutrals paired with ruby and blush highlights.',
+        light: {
+            bg: '#F8F1F4',
+            surface: '#FFFDFE',
+            surface2: '#ECDDE4',
+            text: '#24161D',
+            muted: '#826A75',
+            stroke: '#DDCAD3',
+            accent: '#C43D5A',
+            accent2: '#E07AA8',
+        },
+        dark: {
+            bg: '#140B10',
+            surface: '#1B1117',
+            surface2: '#261821',
+            text: '#FAEEF3',
+            muted: '#B296A3',
+            stroke: '#3B2832',
+            accent: '#F05B78',
+            accent2: '#F2A0C4',
+        },
+    },
+    {
+        key: 'jade-noir',
+        label: 'Jade Noir',
+        description: 'Deep mineral surfaces with polished jade and mist accents.',
+        light: {
+            bg: '#EEF5F1',
+            surface: '#FCFEFD',
+            surface2: '#DCE8E0',
+            text: '#15211B',
+            muted: '#687A71',
+            stroke: '#C7D6CC',
+            accent: '#1F9D6A',
+            accent2: '#7CC9B0',
+        },
+        dark: {
+            bg: '#08110D',
+            surface: '#0F1713',
+            surface2: '#16211B',
+            text: '#ECF6F1',
+            muted: '#93A79C',
+            stroke: '#26352D',
+            accent: '#35C989',
+            accent2: '#A1E2CD',
+        },
+    },
+    {
+        key: 'sunset-carbon',
+        label: 'Sunset Carbon',
+        description: 'Elegant carbon neutrals with coral and amber warmth.',
+        light: {
+            bg: '#F8F4F0',
+            surface: '#FFFDFC',
+            surface2: '#EDE2D6',
+            text: '#241A14',
+            muted: '#846F61',
+            stroke: '#DDCFC0',
+            accent: '#E06B4C',
+            accent2: '#D89A2B',
+        },
+        dark: {
+            bg: '#120C09',
+            surface: '#1A1310',
+            surface2: '#251B16',
+            text: '#FAF0E8',
+            muted: '#B49D8D',
+            stroke: '#3A2C24',
+            accent: '#FF8B67',
+            accent2: '#F3B84B',
+        },
+    },
+    {
+        key: 'glacier-violet',
+        label: 'Glacier Violet',
+        description: 'Icy surfaces sharpened by ultraviolet and cool sapphire tones.',
+        light: {
+            bg: '#F2F6FB',
+            surface: '#FCFEFF',
+            surface2: '#E1E8F4',
+            text: '#16202C',
+            muted: '#6A7A8E',
+            stroke: '#CBD6E5',
+            accent: '#6C63FF',
+            accent2: '#3E8BFF',
+        },
+        dark: {
+            bg: '#0A1119',
+            surface: '#101925',
+            surface2: '#182335',
+            text: '#EEF4FB',
+            muted: '#95A4B8',
+            stroke: '#28364B',
+            accent: '#8E87FF',
+            accent2: '#69A8FF',
+        },
+    },
+    {
+        key: 'sandstorm-indigo',
+        label: 'Sandstorm Indigo',
+        description: 'Desert neutrals with confident indigo and bronze contrast.',
+        light: {
+            bg: '#F7F2EA',
+            surface: '#FFFDFC',
+            surface2: '#E8DED1',
+            text: '#221C16',
+            muted: '#7C6F61',
+            stroke: '#D8CCBC',
+            accent: '#4C63D9',
+            accent2: '#B8843A',
+        },
+        dark: {
+            bg: '#120E0A',
+            surface: '#1A1511',
+            surface2: '#241D17',
+            text: '#F7F0E7',
+            muted: '#B09F8D',
+            stroke: '#382E25',
+            accent: '#7690FF',
+            accent2: '#D9A65A',
+        },
+    },
+    {
+        key: 'mint-mercury',
+        label: 'Mint Mercury',
+        description: 'Clean silver neutrals energized with mint and sky blue accents.',
+        light: {
+            bg: '#F1F7F6',
+            surface: '#FCFEFE',
+            surface2: '#DDE8E6',
+            text: '#142021',
+            muted: '#6A7C7E',
+            stroke: '#C7D7D7',
+            accent: '#21B58F',
+            accent2: '#5DA9FF',
+        },
+        dark: {
+            bg: '#091112',
+            surface: '#10191A',
+            surface2: '#172426',
+            text: '#EDF7F7',
+            muted: '#96A8AA',
+            stroke: '#273739',
+            accent: '#42D9B0',
+            accent2: '#82BEFF',
+        },
+    },
+    {
+        key: 'plum-copper',
+        label: 'Plum Copper',
+        description: 'Smoky plum foundations enriched by copper and mauve glow.',
+        light: {
+            bg: '#F7F1F2',
+            surface: '#FFFDFD',
+            surface2: '#EADDE0',
+            text: '#24181B',
+            muted: '#7F6A70',
+            stroke: '#DBCBCF',
+            accent: '#B85A3C',
+            accent2: '#9A5FD6',
+        },
+        dark: {
+            bg: '#130B0D',
+            surface: '#1A1214',
+            surface2: '#25191D',
+            text: '#F8EEF0',
+            muted: '#B39AA1',
+            stroke: '#392A2F',
+            accent: '#DB7A59',
+            accent2: '#BD86FF',
+        },
+    },
+    {
+        key: 'ivory-peacock',
+        label: 'Ivory Peacock',
+        description: 'Soft ivory layers with peacock teal and royal blue accents.',
+        light: {
+            bg: '#F8F6F1',
+            surface: '#FFFDFC',
+            surface2: '#ECE6DB',
+            text: '#1E1C17',
+            muted: '#787164',
+            stroke: '#DCD3C5',
+            accent: '#0F8B8D',
+            accent2: '#355CDE',
+        },
+        dark: {
+            bg: '#110F0B',
+            surface: '#181511',
+            surface2: '#231E18',
+            text: '#F8F3EA',
+            muted: '#ACA291',
+            stroke: '#372F26',
+            accent: '#21B6B8',
+            accent2: '#688BFF',
+        },
+    },
+    {
+        key: 'lavender-steel',
+        label: 'Lavender Steel',
+        description: 'Modern steel-gray palette with lavender and cool blue precision.',
+        light: {
+            bg: '#F3F4F8',
+            surface: '#FDFDFF',
+            surface2: '#E2E5ED',
+            text: '#1A1D24',
+            muted: '#6E7684',
+            stroke: '#CCD3DE',
+            accent: '#8A6CFF',
+            accent2: '#4A8FE7',
+        },
+        dark: {
+            bg: '#0B0E14',
+            surface: '#121620',
+            surface2: '#1A2030',
+            text: '#F0F3FA',
+            muted: '#99A3B4',
+            stroke: '#2A3346',
+            accent: '#AC93FF',
+            accent2: '#73AEFF',
+        },
+    },
+    {
+        key: 'forest-ember',
+        label: 'Forest Ember',
+        description: 'Dark woodland tones with ember orange and herbal green contrast.',
+        light: {
+            bg: '#F2F4EF',
+            surface: '#FCFDFB',
+            surface2: '#E1E6DA',
+            text: '#1A2218',
+            muted: '#6A7666',
+            stroke: '#CBD4C4',
+            accent: '#D46A2F',
+            accent2: '#5E9A4D',
+        },
+        dark: {
+            bg: '#0B120A',
+            surface: '#111912',
+            surface2: '#1A251B',
+            text: '#EEF3EB',
+            muted: '#96A492',
+            stroke: '#2A382C',
+            accent: '#F08A4E',
+            accent2: '#7FC96A',
+        },
+    },
+    {
+        key: 'royal-berry',
+        label: 'Royal Berry',
+        description: 'Sophisticated berry-infused neutrals with royal blue lift.',
+        light: {
+            bg: '#F7F2F8',
+            surface: '#FFFDFE',
+            surface2: '#EADFF0',
+            text: '#211823',
+            muted: '#7D6B81',
+            stroke: '#DACDE0',
+            accent: '#B54DA3',
+            accent2: '#4A6DFF',
+        },
+        dark: {
+            bg: '#120C14',
+            surface: '#19121C',
+            surface2: '#241A2A',
+            text: '#F7EEF8',
+            muted: '#AE9CB3',
+            stroke: '#382B40',
+            accent: '#DA73C7',
+            accent2: '#7894FF',
+        },
+    },
+    {
+        key: 'arctic-coral',
+        label: 'Arctic Coral',
+        description: 'Fresh frosted surfaces balanced with coral and aqua contrast.',
+        light: {
+            bg: '#F2F8F8',
+            surface: '#FCFEFE',
+            surface2: '#DFEBEB',
+            text: '#142021',
+            muted: '#6B7E80',
+            stroke: '#C8DADB',
+            accent: '#F06C62',
+            accent2: '#1CA7A6',
+        },
+        dark: {
+            bg: '#091112',
+            surface: '#10191A',
+            surface2: '#182426',
+            text: '#EDF7F7',
+            muted: '#97ABAD',
+            stroke: '#29383A',
+            accent: '#FF8A80',
+            accent2: '#38CBC9',
+        },
+    },
+    {
+        key: 'obsidian-gold',
+        label: 'Obsidian Gold',
+        description: 'Premium obsidian neutrals with restrained gold and sapphire accents.',
+        light: {
+            bg: '#F6F4EF',
+            surface: '#FFFDFC',
+            surface2: '#E9E2D6',
+            text: '#201A14',
+            muted: '#7A6F62',
+            stroke: '#D8CEBF',
+            accent: '#B7892B',
+            accent2: '#456FE8',
+        },
+        dark: {
+            bg: '#100C08',
+            surface: '#17120E',
+            surface2: '#211A14',
+            text: '#F7F0E8',
+            muted: '#AC9F90',
+            stroke: '#342A21',
+            accent: '#DEAC45',
+            accent2: '#7395FF',
         },
     },
 ];
@@ -867,6 +1318,15 @@ function normalizeProjectDesignSystemModes(system: ProjectDesignSystem): Project
         tokenModes,
         tokens: activeMode === 'dark' ? { ...tokenModes.dark } : { ...tokenModes.light },
     };
+}
+
+function serializeNormalizedDesignSystem(system: ProjectDesignSystem | null | undefined): string | null {
+    if (!system) return null;
+    try {
+        return JSON.stringify(normalizeProjectDesignSystemModes(system));
+    } catch {
+        return null;
+    }
 }
 
 function findMatchingDesignSystemPalettePreset(
@@ -1658,54 +2118,229 @@ function formatTokenUsageLabel(totalTokens: number | null): string {
     return `Tokens used: ${totalTokens.toLocaleString()}`;
 }
 
-type ProcessStepLabel = {
-    present: string;
-    past: string;
-};
-
-function getProcessSteps(message: any): ProcessStepLabel[] {
-    const isEditFlow = Boolean(message?.screenRef);
-    if (isEditFlow) {
-        return [
-            { present: 'Analyzing selected screen', past: 'Analyzed selected screen' },
-            { present: 'Planning targeted updates', past: 'Planned targeted updates' },
-            { present: 'Applying structure and styles', past: 'Applied structure and styles' },
-            { present: 'Finalizing edit output', past: 'Finalized edit output' },
-        ];
+function normalizeStreamActivityStatus(value: unknown): AgentPlanStatus {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'completed' || normalized === 'complete' || normalized === 'done' || normalized === 'finished') {
+        return 'completed';
     }
+    if (normalized === 'in-progress' || normalized === 'in_progress' || normalized === 'active' || normalized === 'working' || normalized === 'running') {
+        return 'in-progress';
+    }
+    if (normalized === 'need-help' || normalized === 'need_help' || normalized === 'blocked') {
+        return 'need-help';
+    }
+    if (normalized === 'failed' || normalized === 'error') {
+        return 'failed';
+    }
+    return 'pending';
+}
+
+function normalizeStreamActivityType(value: unknown): string {
+    return String(value || '').trim().toLowerCase() || 'system';
+}
+
+function toPlanInt(value: unknown): number | null {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+}
+
+const FRONTEND_PLAN_TASK_IDS = {
+    connect: 'frontend-connect-agent',
+    designSystem: 'frontend-creating-design-system',
+    finalize: 'frontend-finalizing',
+    finish: 'frontend-finishing-up',
+} as const;
+
+function createFrontendPlanTasks(startedAt: number): AgentPlanTask[] {
     return [
-        { present: 'Analyzing user intent', past: 'Analyzed user intent' },
-        { present: 'Exploring visual trends', past: 'Explored visual trends' },
-        { present: 'Collecting references', past: 'Collected references' },
-        { present: 'Rendering screens', past: 'Rendered screens' },
+        {
+            id: FRONTEND_PLAN_TASK_IDS.connect,
+            title: 'Connecting to agent',
+            status: 'pending',
+            type: 'system',
+            source: 'frontend',
+            order: 0,
+            plannedAt: startedAt,
+            updatedAt: startedAt,
+            visibleAfterMs: 5000,
+        },
+        {
+            id: FRONTEND_PLAN_TASK_IDS.designSystem,
+            title: 'Creating design system',
+            status: 'pending',
+            type: 'planning',
+            source: 'frontend',
+            order: 1,
+            plannedAt: startedAt,
+            updatedAt: startedAt,
+            visibleAfterMs: 86_400_000,
+        },
+        {
+            id: FRONTEND_PLAN_TASK_IDS.finalize,
+            title: 'Finalizing',
+            status: 'pending',
+            type: 'finalize',
+            source: 'frontend',
+            order: 9000,
+            plannedAt: startedAt,
+            updatedAt: startedAt,
+            visibleAfterMs: 86_400_000,
+        },
+        {
+            id: FRONTEND_PLAN_TASK_IDS.finish,
+            title: 'Finishing up',
+            status: 'pending',
+            type: 'finalize',
+            source: 'frontend',
+            order: 9001,
+            plannedAt: startedAt,
+            updatedAt: startedAt,
+            visibleAfterMs: 86_400_000,
+        },
     ];
 }
 
-function getProcessProgress(message: any, steps: ProcessStepLabel[]): { doneUntil: number; activeAt: number } {
-    if (message?.status === 'complete') {
-        return { doneUntil: steps.length - 1, activeAt: -1 };
+function parseXmlAttributes(source: string): Record<string, string> {
+    const attrs: Record<string, string> = {};
+    const pattern = /([a-zA-Z_:][\w:.-]*)=(['"])(.*?)\2/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(source)) !== null) {
+        attrs[match[1]] = match[3];
     }
-    if (message?.status === 'pending') {
-        return { doneUntil: -1, activeAt: 0 };
-    }
-    if (message?.status === 'streaming') {
-        if (message?.meta?.thinkingStopped) {
-            return { doneUntil: Math.max(0, steps.length - 2), activeAt: steps.length - 1 };
-        }
-        const startMs = Number(message?.meta?.feedbackStart || 0);
-        const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
-        // Reveal a new step about every 12s so all 4 are visible well before 50s.
-        const activeAt = Math.min(steps.length - 1, Math.floor(elapsedMs / 12000));
-        return { doneUntil: activeAt - 1, activeAt };
-    }
-    return { doneUntil: -1, activeAt: -1 };
+    return attrs;
 }
 
-function getProcessVisibleCount(message: any, steps: ProcessStepLabel[]): number {
-    const progress = getProcessProgress(message, steps);
-    if (progress.activeAt >= 0) return Math.min(steps.length, progress.activeAt + 1);
-    if (progress.doneUntil >= 0) return Math.min(steps.length, progress.doneUntil + 1);
-    return 1;
+function getMessagePlanTasks(message: any): AgentPlanTask[] {
+    const raw = Array.isArray(message?.meta?.streamActivities) ? message.meta.streamActivities : [];
+    return raw
+        .map((item: any, index: number) => {
+            if (!item || typeof item !== 'object') return null;
+            const title = String(item.title || item.label || '').trim();
+            if (!title) return null;
+            const description = String(item.description || item.details || '').trim();
+            const target = String(item.target || '').trim();
+            const tools = Array.isArray(item.tools)
+                ? item.tools.map((tool: unknown) => String(tool || '').trim()).filter(Boolean)
+                : undefined;
+            return {
+                id: String(item.id || `activity-${index}`),
+                title,
+                description: description || undefined,
+                status: normalizeStreamActivityStatus(item.status),
+                priority: String(item.priority || 'medium').trim() || 'medium',
+                type: normalizeStreamActivityType(item.type),
+                target: target || undefined,
+                tools,
+                order: toPlanInt(item.order) ?? index + 100,
+                plannedAt: toPlanInt(item.plannedAt) ?? undefined,
+                startedAt: toPlanInt(item.startedAt) ?? undefined,
+                completedAt: toPlanInt(item.completedAt) ?? undefined,
+                updatedAt: toPlanInt(item.updatedAt) ?? undefined,
+                visibleAfterMs: toPlanInt(item.visibleAfterMs) ?? 0,
+                source: String(item.source || '').trim() || undefined,
+            } satisfies AgentPlanTask;
+        })
+        .filter((item: AgentPlanTask | null): item is AgentPlanTask => Boolean(item));
+}
+
+function upsertMessagePlanTask(
+    messageId: string,
+    task: AgentPlanTask,
+    updateMessage: (id: string, updates: any) => void,
+) {
+    const now = Date.now();
+    const normalizedTask: AgentPlanTask = {
+        ...task,
+        id: String(task.id || '').trim(),
+        title: String(task.title || '').trim(),
+        description: String(task.description || '').trim() || undefined,
+        status: normalizeStreamActivityStatus(task.status),
+        priority: String(task.priority || 'medium').trim() || 'medium',
+        type: normalizeStreamActivityType(task.type),
+        target: String(task.target || '').trim() || undefined,
+        tools: Array.isArray(task.tools)
+            ? task.tools.map((tool) => String(tool || '').trim()).filter(Boolean)
+            : undefined,
+        order: toPlanInt(task.order) ?? undefined,
+        plannedAt: toPlanInt(task.plannedAt) ?? now,
+        startedAt: toPlanInt(task.startedAt) ?? undefined,
+        completedAt: toPlanInt(task.completedAt) ?? undefined,
+        updatedAt: now,
+        visibleAfterMs: Math.max(0, toPlanInt(task.visibleAfterMs) ?? 0),
+        source: String(task.source || '').trim() || undefined,
+    };
+    if (!normalizedTask.id || !normalizedTask.title) return;
+
+    const currentMessage = useChatStore.getState().messages.find((message) => message.id === messageId);
+    const existingActivities = Array.isArray(currentMessage?.meta?.streamActivities)
+        ? currentMessage.meta.streamActivities as AgentPlanTask[]
+        : [];
+    const existingIndex = existingActivities.findIndex((item) => String(item?.id || '') === normalizedTask.id);
+    const existingTask = existingIndex >= 0 ? existingActivities[existingIndex] : null;
+    const existingStatus = normalizeStreamActivityStatus(existingTask?.status);
+    const existingWasCompleted = existingStatus === 'completed';
+    const nextStatus = normalizeStreamActivityStatus(normalizedTask.status);
+    const mergedTask: AgentPlanTask = {
+        ...(existingTask || {}),
+        ...normalizedTask,
+        order: normalizedTask.order ?? toPlanInt(existingTask?.order) ?? (existingIndex >= 0 ? existingIndex : existingActivities.length + 100),
+        plannedAt: normalizedTask.plannedAt ?? toPlanInt(existingTask?.plannedAt) ?? now,
+        visibleAfterMs: normalizedTask.visibleAfterMs ?? Math.max(0, toPlanInt(existingTask?.visibleAfterMs) ?? 0),
+        source: normalizedTask.source || String(existingTask?.source || '').trim() || undefined,
+    };
+
+    if (nextStatus === 'in-progress') {
+        mergedTask.startedAt = normalizedTask.startedAt
+            ?? toPlanInt(existingTask?.startedAt)
+            ?? now;
+        mergedTask.completedAt = undefined;
+    } else if (nextStatus === 'completed') {
+        const startedAt = normalizedTask.startedAt
+            ?? toPlanInt(existingTask?.startedAt)
+            ?? toPlanInt(existingTask?.plannedAt)
+            ?? mergedTask.plannedAt
+            ?? now;
+        mergedTask.startedAt = startedAt;
+        mergedTask.completedAt = normalizedTask.completedAt
+            ?? toPlanInt(existingTask?.completedAt)
+            ?? now;
+    } else {
+        mergedTask.startedAt = normalizedTask.startedAt ?? toPlanInt(existingTask?.startedAt) ?? undefined;
+        mergedTask.completedAt = normalizedTask.completedAt ?? toPlanInt(existingTask?.completedAt) ?? undefined;
+        if (existingWasCompleted) {
+            mergedTask.completedAt = undefined;
+        }
+    }
+
+    const nextActivities = existingIndex >= 0
+        ? existingActivities.map((item, index) => (index === existingIndex ? mergedTask : item))
+        : [...existingActivities, mergedTask];
+
+    updateMessage(messageId, {
+        meta: {
+            ...(currentMessage?.meta || {}),
+            streamActivities: nextActivities,
+        },
+    });
+}
+
+function setFrontendPlanTaskStatus(
+    messageId: string,
+    updateMessage: (id: string, updates: any) => void,
+    taskId: string,
+    status: AgentPlanStatus,
+) {
+    const currentMessage = useChatStore.getState().messages.find((message) => message.id === messageId);
+    const existingActivities = Array.isArray(currentMessage?.meta?.streamActivities)
+        ? currentMessage.meta.streamActivities as AgentPlanTask[]
+        : [];
+    const existingTask = existingActivities.find((task) => task.id === taskId);
+    if (!existingTask) return;
+    upsertMessagePlanTask(messageId, {
+        ...existingTask,
+        status,
+        ...(status !== 'pending' ? { visibleAfterMs: 0 } : {}),
+    }, updateMessage);
 }
 
 type ScreenPreviewLike = {
@@ -2067,11 +2702,13 @@ type StreamParserState = {
     openScreenName: string | null;
     openScreenSeq: number | null;
     nextSeq: number;
+    nextActivitySeq: number;
     descriptionSeen: boolean;
 };
 
 type StreamParseEvent =
     | { type: 'description'; text: string }
+    | { type: 'activity'; activity: AgentPlanTask }
     | { type: 'screen_start'; seq: number; name: string }
     | { type: 'screen_preview'; seq: number; name: string; html: string }
     | { type: 'screen_complete'; seq: number; name: string; html: string; rawPartial: string }
@@ -2083,6 +2720,7 @@ function createStreamParserState(): StreamParserState {
         openScreenName: null,
         openScreenSeq: null,
         nextSeq: 0,
+        nextActivitySeq: 0,
         descriptionSeen: false,
     };
 }
@@ -2230,6 +2868,47 @@ function parseDescription(buffer: string): { start: number; end: number; text: s
     };
 }
 
+function parseActivity(
+    buffer: string,
+    state: StreamParserState,
+): { start: number; end: number; activity: AgentPlanTask } | null {
+    const openMatch = /<activity\b([^>]*)>/i.exec(buffer);
+    if (!openMatch || openMatch.index === undefined) return null;
+    const start = openMatch.index;
+    const openTag = openMatch[0];
+    const closeTag = '</activity>';
+    const end = buffer.indexOf(closeTag, start + openTag.length);
+    if (end < 0) return null;
+
+    const attrs = parseXmlAttributes(openMatch[1] || '');
+    const title = buffer.slice(start + openTag.length, end).trim();
+    const activitySeq = state.nextActivitySeq++;
+    const tools = String(attrs.tools || '')
+        .split(',')
+        .map((tool) => tool.trim())
+        .filter(Boolean);
+    const activity: AgentPlanTask = {
+        id: String(attrs.id || `activity-${activitySeq}`).trim(),
+        title: title || 'Working',
+        description: String(attrs.description || attrs.details || '').trim() || undefined,
+        status: normalizeStreamActivityStatus(attrs.status || attrs.state),
+        priority: String(attrs.priority || 'medium').trim() || 'medium',
+        type: normalizeStreamActivityType(attrs.type || attrs.kind),
+        target: String(attrs.target || '').trim() || undefined,
+        order: toPlanInt(attrs.order) ?? activitySeq + 100,
+        plannedAt: Date.now(),
+        visibleAfterMs: Math.max(0, toPlanInt(attrs.visibleAfterMs ?? attrs.visibleafterms) ?? 0),
+        source: 'ai',
+        ...(tools.length > 0 ? { tools } : {}),
+    };
+
+    return {
+        start,
+        end: end + closeTag.length,
+        activity,
+    };
+}
+
 function parseStreamChunk(state: StreamParserState, chunk: string): StreamParseEvent[] {
     const events: StreamParseEvent[] = [];
     state.buffer += chunk;
@@ -2237,9 +2916,30 @@ function parseStreamChunk(state: StreamParserState, chunk: string): StreamParseE
     while (true) {
         if (!state.openScreenName) {
             const description = parseDescription(state.buffer);
+            const activity = parseActivity(state.buffer, state);
             const screenStart = findScreenStart(state.buffer);
 
-            if (description && (!screenStart || description.start < screenStart.index)) {
+            const nextBlock = [
+                description ? { kind: 'description' as const, start: description.start } : null,
+                activity ? { kind: 'activity' as const, start: activity.start } : null,
+                screenStart ? { kind: 'screen' as const, start: screenStart.index } : null,
+            ]
+                .filter((item): item is { kind: 'description' | 'activity' | 'screen'; start: number } => Boolean(item))
+                .sort((left, right) => left.start - right.start)[0];
+
+            if (!nextBlock) {
+                if (state.buffer.length > 20000) {
+                    state.buffer = state.buffer.slice(-8000);
+                }
+                break;
+            }
+
+            if (nextBlock.start > 0) {
+                state.buffer = state.buffer.slice(nextBlock.start);
+                continue;
+            }
+
+            if (nextBlock.kind === 'description' && description) {
                 if (!state.descriptionSeen && description.text) {
                     events.push({ type: 'description', text: description.text });
                     state.descriptionSeen = true;
@@ -2248,18 +2948,13 @@ function parseStreamChunk(state: StreamParserState, chunk: string): StreamParseE
                 continue;
             }
 
-            if (!screenStart) {
-                const descriptionStart = state.buffer.search(/<description(?:\s[^>]*)?>/i);
-                if (descriptionStart >= 0) {
-                    if (descriptionStart > 0) {
-                        state.buffer = state.buffer.slice(descriptionStart);
-                    }
-                } else if (state.buffer.length > 20000) {
-                    state.buffer = state.buffer.slice(-8000);
-                }
-                break;
+            if (nextBlock.kind === 'activity' && activity) {
+                events.push({ type: 'activity', activity: activity.activity });
+                state.buffer = state.buffer.slice(activity.end);
+                continue;
             }
 
+            if (!screenStart) break;
             const seq = state.nextSeq++;
             state.openScreenName = screenStart.name;
             state.openScreenSeq = seq;
@@ -2650,6 +3345,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const titleCommitInFlightRef = useRef(false);
+    const lastCommittedDesignSystemSignatureRef = useRef<string | null>(null);
 
     const { messages, isGenerating, addMessage, updateMessage, setGenerating, setAbortController, abortGeneration } = useChatStore();
     const { updateScreen, spec, selectedPlatform, setPlatform, addScreens, removeScreen } = useDesignStore();
@@ -2940,7 +3636,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         });
     };
 
-    const applyProjectDesignSystem = (designSystem: ProjectDesignSystem | undefined) => {
+    const applyProjectDesignSystem = (
+        designSystem: ProjectDesignSystem | undefined,
+        options?: { history?: 'auto' | 'skip' }
+    ) => {
         if (!designSystem) return;
         const normalizedDesignSystem = normalizeProjectDesignSystemModes(designSystem);
         const currentSpec = useDesignStore.getState().spec;
@@ -2953,14 +3652,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 designSystem: normalizedDesignSystem,
                 createdAt: now,
                 updatedAt: now,
-            });
+            }, options);
             return;
         }
         useDesignStore.getState().setSpec({
             ...currentSpec,
             designSystem: normalizedDesignSystem,
             updatedAt: new Date().toISOString(),
-        });
+        }, options);
     };
 
     const getAuthoritativeProjectDesignSystem = () => {
@@ -3026,8 +3725,9 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         const effective = source || useDesignStore.getState().spec?.designSystem;
         if (!effective) return;
         const normalized = normalizeProjectDesignSystemModes(effective);
-        applyProjectDesignSystem(normalized);
+        applyProjectDesignSystem(normalized, { history: 'skip' });
         setDesignSystemDraft(cloneDesignSystem(normalized));
+        lastCommittedDesignSystemSignatureRef.current = serializeNormalizedDesignSystem(normalized);
         setActiveTokenEditor(null);
         setIsDesignSystemEditing(true);
         setDesignSystemInspectorTab('colors');
@@ -3042,6 +3742,7 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (!current) return;
         const normalized = normalizeProjectDesignSystemModes(current);
         setDesignSystemDraft(cloneDesignSystem(normalized));
+        lastCommittedDesignSystemSignatureRef.current = serializeNormalizedDesignSystem(normalized);
         setActiveTokenEditor(null);
         setOpenPaletteDropdown(false);
         setOpenFontDropdown(null);
@@ -3120,13 +3821,14 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
                 designSystem: normalizedDraft,
                 screens: patchedScreens,
                 updatedAt: new Date().toISOString(),
-            });
+            }, { history: 'auto' });
         } else {
-            applyProjectDesignSystem(normalizedDraft);
+            applyProjectDesignSystem(normalizedDraft, { history: 'auto' });
         }
 
         setIsDesignSystemEditing(true);
         setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
+        lastCommittedDesignSystemSignatureRef.current = serializeNormalizedDesignSystem(normalizedDraft);
         setOpenPaletteDropdown(false);
         setOpenFontDropdown(null);
         setOpenRadiusDropdown(null);
@@ -3353,12 +4055,33 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
         if (spec?.designSystem && !designSystemDraft) {
             const cloned = cloneDesignSystem(normalizeProjectDesignSystemModes(spec.designSystem));
             setDesignSystemDraft(cloned);
+            lastCommittedDesignSystemSignatureRef.current = serializeNormalizedDesignSystem(cloned);
             setActiveTokenEditor((current) => current ?? null);
         }
         if (!isDesignSystemEditing) {
             setIsDesignSystemEditing(true);
         }
     }, [chatPanelView, isDesignSystemEditing, spec?.designSystem, designSystemDraft]);
+
+    useEffect(() => {
+        const authoritative = spec?.designSystem ? normalizeProjectDesignSystemModes(spec.designSystem) : null;
+        const authoritativeSignature = serializeNormalizedDesignSystem(authoritative);
+        const draftSignature = serializeNormalizedDesignSystem(designSystemDraft);
+        if (!authoritative || !designSystemDraft) {
+            if (!authoritative) {
+                lastCommittedDesignSystemSignatureRef.current = null;
+            }
+            return;
+        }
+        if (!lastCommittedDesignSystemSignatureRef.current) {
+            lastCommittedDesignSystemSignatureRef.current = authoritativeSignature;
+            return;
+        }
+        if (draftSignature === lastCommittedDesignSystemSignatureRef.current && draftSignature !== authoritativeSignature) {
+            setDesignSystemDraft(cloneDesignSystem(authoritative));
+            lastCommittedDesignSystemSignatureRef.current = authoritativeSignature;
+        }
+    }, [designSystemDraft, spec?.designSystem]);
 
     const cancelProjectTitleEdit = useCallback(() => {
         setTitleDraft(spec?.name?.trim() || '');
@@ -4736,6 +5459,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             clearComposerAttachments();
         }
 
+        const requestStartedAt = Date.now();
         const userMsgId = existingUserMessageId || addMessage('user', requestPrompt, imagesToSend);
         const assistantMsgId = addMessage('assistant', 'Warming up the studio...');
         assistantMsgIdRef.current = assistantMsgId;
@@ -4756,6 +5480,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                 parentUserId: userMsgId,
                 typedComplete: false,
+                streamActivities: createFrontendPlanTasks(requestStartedAt),
             }
         });
         setActiveBranchForUser(userMsgId, assistantMsgId);
@@ -4800,6 +5525,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             });
             if (!activeProjectDesignSystem) {
                 try {
+                    setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.designSystem, 'in-progress');
                     const designSystemResponse = await apiClient.generateDesignSystem({
                         prompt: appPromptForPlanning,
                         stylePreset: styleToUse,
@@ -4814,6 +5540,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                     });
                     applyReferenceContextFeedback(userMsgId, referenceUrls, designSystemResponse.referenceContext);
                     captureBillingTokens(designSystemResponse.billing);
+                    setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
+                    setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.designSystem, 'completed');
                     activeProjectDesignSystem = designSystemResponse.designSystem;
                     applyProjectDesignSystem(activeProjectDesignSystem);
                     if (shouldNameProjectOnFirstRequest && isGenericProjectName(useDesignStore.getState().spec?.name)) {
@@ -4824,6 +5552,18 @@ Return a polished, consistent screen without introducing a new navigation patter
                         }
                     }
                 } catch (designSystemError) {
+                    const currentMessage = useChatStore.getState().messages.find((message) => message.id === assistantMsgId);
+                    const currentActivities = Array.isArray(currentMessage?.meta?.streamActivities)
+                        ? currentMessage.meta.streamActivities as AgentPlanTask[]
+                        : [];
+                    const designSystemTask = currentActivities.find((task) => task.id === FRONTEND_PLAN_TASK_IDS.designSystem);
+                    if (designSystemTask) {
+                        upsertMessagePlanTask(assistantMsgId, {
+                            ...designSystemTask,
+                            status: 'pending',
+                            visibleAfterMs: 86_400_000,
+                        }, updateMessage);
+                    }
                     console.warn('[UI] design-system pre-gen failed; continuing with backend fallback', designSystemError);
                 }
             }
@@ -4895,6 +5635,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                     }));
                     applyReferenceContextFeedback(userMsgId, referenceUrls, discoveryPlan.referenceContext);
                     captureBillingTokens((discoveryPlan as any)?.billing);
+                    setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
                     if (discoveryPlan.phase === 'plan' || discoveryPlan.phase === 'discovery') {
                         plannerPlan = discoveryPlan;
                         if (!firstRequestProjectNameLocked) {
@@ -4926,6 +5667,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 content: FEEDBACK_BUCKETS.early[0],
                 status: 'streaming',
                 meta: {
+                    ...(useChatStore.getState().messages.find(m => m.id === assistantMsgId)?.meta || {}),
                     feedbackKey: Date.now(),
                     feedbackPhase: 'early',
                     feedbackStart: startTime
@@ -5011,7 +5753,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }, controller.signal);
                 applyReferenceContextFeedback(userMsgId, referenceUrls, regen.referenceContext);
                 captureBillingTokens(regen.billing);
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'in-progress');
 
                 for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
                     const screen = regen.designSpec.screens[index];
@@ -5082,6 +5826,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 const snapshotStyleReference = buildContinuationStyleReference(snapshotScreens);
                 const content = `${regen.designSpec.description || `Generated ${regen.designSpec.screens.length} screens customized to your request.`}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
                 const revertPayload = buildRevertPayloadForScreenIds(generatedIds);
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'completed');
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'in-progress');
 
                 updateMessage(assistantMsgId, {
                     content,
@@ -5118,6 +5864,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 if (generatedIds.length > 0) {
                     setFocusNodeIds(generatedIds);
                 }
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'completed');
                 void persistProjectAfterAiChange('screen generation');
                 notifySuccess(
                     'Generation complete',
@@ -5148,6 +5895,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                         finalDescription = event.text;
                         continue;
                     }
+                    if (event.type === 'activity') {
+                        upsertMessagePlanTask(assistantMsgId, event.activity, updateMessage);
+                        continue;
+                    }
                     if (event.type === 'screen_start') {
                         ensureScreen(event.seq, event.name);
                         continue;
@@ -5163,6 +5914,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                         completedCount += 1;
                     }
                 }
+            }, () => {
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
             }, controller.signal);
             applyReferenceContextFeedback(userMsgId, referenceUrls, streamResult.referenceContext);
             captureBillingTokens(streamResult.billing);
@@ -5171,6 +5924,10 @@ Return a polished, consistent screen without introducing a new navigation patter
             for (const event of finalizeEvents) {
                 if (event.type === 'description') {
                     finalDescription = event.text;
+                    continue;
+                }
+                if (event.type === 'activity') {
+                    upsertMessagePlanTask(assistantMsgId, event.activity, updateMessage);
                     continue;
                 }
                 if (event.type === 'screen_incomplete') {
@@ -5216,7 +5973,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }, controller.signal);
                 applyReferenceContextFeedback(userMsgId, referenceUrls, regen.referenceContext);
                 captureBillingTokens(regen.billing);
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
                 activeProjectDesignSystem = regen.designSpec.designSystem || activeProjectDesignSystem;
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'in-progress');
 
                 for (let index = 0; index < regen.designSpec.screens.length; index += 1) {
                     const screen = regen.designSpec.screens[index];
@@ -5310,6 +6069,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                     .map((_, index) => screenIdBySeq.get(createdSeqs[index] as number))
                     .filter(Boolean) as string[];
                 const revertPayload = buildRevertPayloadForScreenIds(fallbackIds);
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'completed');
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'in-progress');
 
                 updateMessage(assistantMsgId, {
                     content,
@@ -5346,6 +6107,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 if (fallbackIds.length > 0) {
                     setFocusNodeIds(fallbackIds);
                 }
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'completed');
                 void persistProjectAfterAiChange('screen generation');
                 notifySuccess(
                     'Generation complete',
@@ -5381,6 +6143,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 }
             }
             applyProjectDesignSystem(activeProjectDesignSystem);
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'in-progress');
 
             let postgenSummary = '';
             let postgenData: PlannerPostgenResponse | null = null;
@@ -5423,6 +6186,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 .map((seq) => screenIdBySeq.get(seq))
                 .filter(Boolean) as string[];
             const revertPayload = buildRevertPayloadForScreenIds(generatedIds);
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'completed');
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'in-progress');
 
             updateMessage(assistantMsgId, {
                 content: `${responseSummary}${planningSummary}${postgenBlock}`.trim(),
@@ -5459,6 +6224,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             if (generatedIds.length > 0) {
                 setFocusNodeIds(generatedIds);
             }
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'completed');
             void persistProjectAfterAiChange('screen generation');
             notifySuccess(
                 'Generation complete',
@@ -5468,6 +6234,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             console.info('[UI] generate: complete (stream)', { screens: completedCount });
         } catch (error) {
             if ((error as Error).name === 'AbortError') {
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'failed');
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'failed');
                 updateMessage(assistantMsgId, {
                     content: 'Generation stopped.',
                     status: 'error',
@@ -5486,6 +6254,9 @@ Return a polished, consistent screen without introducing a new navigation patter
                 notifyInfo('Generation stopped', 'The request was cancelled.', tokenUsageTotal > 0 ? tokenUsageTotal : null);
                 return;
             }
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'failed');
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'failed');
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'failed');
             updateMessage(assistantMsgId, {
                 content: toTaggedErrorMessage(error),
                 status: 'error',
@@ -5669,6 +6440,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                 feedbackStart: startTime,
                 parentUserId: userMsgId,
                 typedComplete: false,
+                streamActivities: createFrontendPlanTasks(startTime),
             }
         });
         if (!options?.suppressBranchActivation) {
@@ -5719,6 +6491,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                     if (isEditMode && editScreenId === targetScreen.screenId) {
                         setActiveScreen(targetScreen.screenId, normalizedPreview);
                     }
+                }, () => {
+                    setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
                 }, controller.signal);
                 applyReferenceContextFeedback(userMsgId, referenceUrls, streamResponse.referenceContext);
                 captureBillingTokens(streamResponse.billing);
@@ -5728,12 +6502,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                 const response = await apiClient.edit(editRequest, controller.signal);
                 applyReferenceContextFeedback(userMsgId, referenceUrls, response.referenceContext);
                 captureBillingTokens(response.billing);
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'completed');
                 editedHtml = response.html;
                 responseDescription = response.description?.trim() || '';
             }
             if (!editedHtml.trim()) {
                 throw new Error('Edit stream returned no HTML.');
             }
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'in-progress');
 
             const repairedHtml = await runConsistencyRepairIfNeeded(
                 targetScreen,
@@ -5782,6 +6558,8 @@ Return a polished, consistent screen without introducing a new navigation patter
             const content = `${baseDescription}${postgenSummary ? `\n\n${postgenSummary}` : ''}`.trim();
 
             if (!options?.skipFinalMessageUpdate) {
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'completed');
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'in-progress');
                 updateMessage(assistantMsgId, {
                     content,
                     status: 'complete',
@@ -5811,6 +6589,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                         ...(tokenUsageTotal > 0 ? { tokenUsageTotal } : {}),
                     }
                 });
+                setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'completed');
             }
             if (!options?.suppressToasts) {
                 notifySuccess('Edit complete', `${targetScreen.name} was updated successfully.`, tokenUsageTotal > 0 ? tokenUsageTotal : null);
@@ -5827,6 +6606,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         } catch (error) {
             const friendly = getUserFacingError(error);
             updateScreen(targetScreen.screenId, targetScreen.html, 'complete', targetScreen.width, targetScreen.height, targetScreen.name);
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.connect, 'failed');
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finalize, 'failed');
+            setFrontendPlanTaskStatus(assistantMsgId, updateMessage, FRONTEND_PLAN_TASK_IDS.finish, 'failed');
             if (!options?.skipFinalMessageUpdate) {
                 updateMessage(assistantMsgId, {
                     content: toTaggedErrorMessage(error),
@@ -5992,11 +6774,12 @@ Return a polished, consistent screen without introducing a new navigation patter
                     designSystem: normalizedDraft,
                     screens: patchedScreens,
                     updatedAt: new Date().toISOString(),
-                });
+                }, { history: 'auto' });
             } else {
-                applyProjectDesignSystem(normalizedDraft);
+                applyProjectDesignSystem(normalizedDraft, { history: 'auto' });
             }
             setDesignSystemDraft(cloneDesignSystem(normalizedDraft));
+            lastCommittedDesignSystemSignatureRef.current = serializeNormalizedDesignSystem(normalizedDraft);
 
             const summary = patchedScreenCount > 0
                 ? `Design system updated and synced to ${patchedScreenCount} existing screen${patchedScreenCount === 1 ? '' : 's'}.`
@@ -7179,41 +7962,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                             );
                                         })()}
                                         {(message.status === 'pending' || message.status === 'streaming') && (() => {
-                                            const steps = getProcessSteps(message);
-                                            const progress = getProcessProgress(message, steps);
-                                            const visibleCount = getProcessVisibleCount(message, steps);
+                                            const planTasks = getMessagePlanTasks(message);
+                                            if (planTasks.length === 0) return null;
                                             return (
-                                                <div className="px-2 py-1">
-                                                    <ul className="space-y-2.5">
-                                                        {steps.slice(0, visibleCount).map((step, idx) => {
-                                                            const isDone = idx <= progress.doneUntil;
-                                                            const isActive = idx === progress.activeAt;
-                                                            const showConnector = idx < visibleCount - 1;
-                                                            const displayLabel = isDone ? step.past : step.present;
-                                                            return (
-                                                                <li
-                                                                    key={`${message.id}-step-${idx}`}
-                                                                    className="relative flex items-center gap-2.5 text-sm"
-                                                                    style={{ transitionDelay: `${idx * 120}ms` }}
-                                                                >
-                                                                    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center">
-                                                                        {showConnector && (
-                                                                            <span className="absolute top-4 left-1/2 h-4 w-px -translate-x-1/2 bg-[var(--ui-border)]" />
-                                                                        )}
-                                                                        {isDone ? (
-                                                                            <Check size={13} className="text-emerald-400" />
-                                                                        ) : isActive ? (
-                                                                            <Loader2 size={13} className="animate-spin text-[var(--ui-primary)]" />
-                                                                        ) : (
-                                                                            <span className="h-2.5 w-2.5 rounded-sm border border-[var(--ui-border-light)] bg-transparent" />
-                                                                        )}
-                                                                    </span>
-                                                                    <span className={`${isDone || isActive ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'}`}>{displayLabel}</span>
-                                                                </li>
-                                                            );
-                                                        })}
-                                                    </ul>
-                                                </div>
+                                                <AgentPlan tasks={planTasks} />
                                             );
                                         })()}
                                         <div className="space-y-2">
@@ -7559,10 +8311,10 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                         ))}
                                                     </span>
                                                     <div className="min-w-0 flex-1">
-                                                        <p className="text-[12px] font-semibold text-[var(--ui-text)]">
+                                                        <p className="truncate text-[12px] font-semibold text-[var(--ui-text)]">
                                                             {activeDesignSystemPalettePreset?.label || 'Custom palette'}
                                                         </p>
-                                                        <p className="text-[11px] text-[var(--ui-text-muted)]">
+                                                        <p className="truncate text-[11px] text-[var(--ui-text-muted)]">
                                                             {activeDesignSystemPalettePreset?.description || 'Manual token edits are active for this theme.'}
                                                         </p>
                                                     </div>
@@ -7572,8 +8324,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                     />
                                                 </button>
                                                 {openPaletteDropdown && (
-                                                    <div className="absolute inset-x-0 top-[calc(100%+10px)] z-20 rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
-                                                        <div className="space-y-1">
+                                                    <div className="absolute inset-x-0 top-[calc(100%+10px)] z-20 overflow-hidden rounded-[18px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2 shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+                                                        <div className="max-h-[320px] space-y-1 overflow-y-auto overscroll-contain pr-1">
                                                             {designSystemPaletteOptions.map((preset) => {
                                                                 const isSelected = activeDesignSystemPalettePreset?.key === preset.key;
                                                                 return (
@@ -7586,7 +8338,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                             : 'border-transparent hover:border-[var(--ui-border)] hover:bg-[var(--ui-surface-2)]'
                                                                             }`}
                                                                     >
-                                                                        <div className="flex items-start gap-3">
+                                                                        <div className="flex min-w-0 items-start gap-3">
                                                                             <span className="mt-0.5 flex shrink-0 items-center -space-x-1.5">
                                                                                 {[preset.light.bg, preset.light.surface2, preset.light.accent, preset.dark.accent2].map((color, index) => (
                                                                                     <span
@@ -7598,14 +8350,14 @@ Return a polished, consistent screen without introducing a new navigation patter
                                                                             </span>
                                                                             <div className="min-w-0 flex-1">
                                                                                 <div className="flex items-center justify-between gap-3">
-                                                                                    <p className="text-[12px] font-semibold text-[var(--ui-text)]">{preset.label}</p>
+                                                                                    <p className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--ui-text)]">{preset.label}</p>
                                                                                     {isSelected && (
-                                                                                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]">
+                                                                                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[var(--ui-primary)]">
                                                                                             <Check size={12} />
                                                                                         </span>
                                                                                     )}
                                                                                 </div>
-                                                                                <p className="mt-1 text-[11px] leading-5 text-[var(--ui-text-muted)]">{preset.description}</p>
+                                                                                <p className="mt-1 truncate text-[11px] leading-5 text-[var(--ui-text-muted)]">{preset.description}</p>
                                                                             </div>
                                                                         </div>
                                                                     </button>

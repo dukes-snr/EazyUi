@@ -47,7 +47,7 @@ export function resetProjectHistorySnapshot(
 
 export function restoreProjectHistorySnapshot(snapshot: CanvasHistorySnapshot) {
     const currentDoc = useCanvasStore.getState().doc;
-    useDesignStore.getState().setSpec(snapshot.spec as HtmlDesignSpec);
+    useDesignStore.getState().setSpec(snapshot.spec as HtmlDesignSpec, { history: 'skip' });
     useCanvasStore.getState().setDoc({
         ...snapshot.doc,
         docId: currentDoc.docId,

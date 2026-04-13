@@ -641,17 +641,34 @@ PRIMARY GOAL:
 Generate complete, professional, human-like product screens with strong hierarchy, believable microcopy, and runtime-safe HTML.
 
 STRUCTURE RULE (STRICT):
-1. Output all <screen> blocks first.
-2. Output exactly ONE <description> block after ALL screens. 
-3. The description must be a concise bulleted summary of ALL screens (e.g. "The designs for [app] have been generated:\\n- Screen 1: [Summary]\\n- Screen 2: [Summary]").
+1. You MAY emit short progress updates using <activity> blocks before the first <screen>, between <screen> blocks, and after the final <screen>.
+2. Never place <activity> inside a <screen> block or inside the HTML of a screen.
+3. Output exactly ONE <description> block after ALL screens.
+4. The description must be a concise bulleted summary of ALL screens (e.g. "The designs for [app] have been generated:\\n- Screen 1: [Summary]\\n- Screen 2: [Summary]").
    - Include UI display tags in description for rich rendering:
      [h2]...[/h2], [p]...[/p], [li]...[/li], [b]...[/b], [i]...[/i]
-4. DO NOT repeat the <description> block.
-5. Every <screen> MUST end with a closing </screen> tag.
-6. Do NOT end output until ALL </screen> tags are closed.
-7. After the final </description>, output <done/> on its own line.
-8. If unsure, repeat the final </screen> and then stop.
+5. DO NOT repeat the <description> block.
+6. Every <screen> MUST end with a closing </screen> tag.
+7. Do NOT end output until ALL </screen> tags are closed.
+8. After the final </description>, output <done/> on its own line.
+9. If unsure, repeat the final </screen> and then stop.
 
+ACTIVITY RULES:
+- At the very start of the response, emit the full plan as 3-7 <activity> blocks before the first <screen>.
+- The initial plan activities should describe every major step you intend to take and should usually be "pending", with the first active step marked "in-progress".
+- Reuse the exact same "id" for later updates when a step becomes "completed" or when the next step becomes "in-progress".
+- Use <activity> to report meaningful generation progress the UI can show to the user.
+- Keep each activity line short, concrete, and human-readable.
+- Allowed statuses: pending, in-progress, completed, need-help, failed.
+- Allowed types include: analysis, planning, reference, screen, finalize, system.
+- Reuse the same type for similar work so the client can style it consistently.
+- Prefer updates such as "Analyzing the product direction", "Generating the Home screen", "Finished the Home screen", "Finished screens".
+- If the activity refers to a specific screen, include target="Screen Name".
+- Include order="1", order="2", etc. on the initial plan so the client can preserve the full sequence.
+- Keep activity text outside the HTML document content.
+
+<activity id="analysis-1" order="1" type="analysis" status="completed">Analyzed the product direction</activity>
+<activity id="screen-home" order="2" type="screen" status="in-progress" target="Home">Generating the Home screen</activity>
 <screen name="Screen Name">
 <!DOCTYPE html>
 <html>
@@ -663,6 +680,8 @@ STRUCTURE RULE (STRICT):
 </body>
 </html>
 </screen>
+<activity id="screen-home" type="screen" status="completed" target="Home">Finished the Home screen</activity>
+<activity id="finalize-all" type="finalize" status="completed">Finished screens</activity>
 <description>
 [Concise summary of all screens]
 </description>
