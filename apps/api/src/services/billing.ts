@@ -252,7 +252,7 @@ type StripeWebhookEventRow = {
 type BillingExecutor = Pool | PoolClient;
 
 const PLAN_DEFINITIONS: Record<BillingPlanId, PlanDefinition> = {
-    free: { id: 'free', label: 'Free', monthlyCredits: 300, paid: false },
+    free: { id: 'free', label: 'No plan', monthlyCredits: 0, paid: false },
     pro: { id: 'pro', label: 'Pro', monthlyCredits: 3000, paid: true },
     team: { id: 'team', label: 'Team', monthlyCredits: 15000, paid: true },
 };
@@ -1372,8 +1372,14 @@ export function resolveStripePriceIdForPlan(planId: BillingPlanId): string {
 export function resolveTopupCreditsForPriceId(priceId: string | null | undefined): number {
     const normalized = String(priceId || '').trim();
     if (!normalized) return 0;
-    const topup1000 = String(process.env.STRIPE_PRICE_TOPUP_1000 || '').trim();
-    if (topup1000 && normalized === topup1000) return 1000;
+    const creditPackPriceIds: Array<[string, number]> = [
+        [String(process.env.STRIPE_PRICE_CREDITS_1000 || '').trim(), 1000],
+        [String(process.env.STRIPE_PRICE_CREDITS_5000 || '').trim(), 5000],
+        [String(process.env.STRIPE_PRICE_CREDITS_10000 || '').trim(), 10000],
+    ];
+    for (const [configuredPriceId, credits] of creditPackPriceIds) {
+        if (configuredPriceId && normalized === configuredPriceId) return credits;
+    }
     return 0;
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Check, Linkedin, Loader2, Monitor, Moon, Sun, X, Youtube } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
 import appLogo from '../../assets/Ui-logo.png';
-import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse } from '../../api/client';
+import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse, type BillingCreditPackProductKey } from '../../api/client';
 import { useUiStore } from '../../stores';
 
 type PricingPageProps = {
@@ -11,7 +11,8 @@ type PricingPageProps = {
 };
 
 type BillingCadence = 'monthly' | 'annual';
-type CorePlanKey = 'free' | 'pro' | 'team';
+type CorePlanKey = 'pro' | 'team';
+type ComparisonKey = 'pro' | 'team' | 'credits';
 
 type PlanCard = {
     key: CorePlanKey;
@@ -25,25 +26,18 @@ type PlanCard = {
 
 type ComparisonValue = boolean | 'limited' | string;
 
-const FALLBACK_PRICE_CENTS: Record<Exclude<CorePlanKey, 'free'>, { monthly: number; currency: string }> = {
+const FALLBACK_PRICE_CENTS: Record<CorePlanKey, { monthly: number; currency: string }> = {
     pro: { monthly: 2400, currency: 'USD' },
     team: { monthly: 7900, currency: 'USD' },
 };
 
+const FALLBACK_CREDIT_PACKS: Record<BillingCreditPackProductKey, { credits: number; oneTime: number; currency: string }> = {
+    credits_1000: { credits: 1000, oneTime: 1000, currency: 'USD' },
+    credits_5000: { credits: 5000, oneTime: 4000, currency: 'USD' },
+    credits_10000: { credits: 10000, oneTime: 7000, currency: 'USD' },
+};
+
 const PLAN_CARDS: PlanCard[] = [
-    {
-        key: 'free',
-        name: 'Free Plan',
-        caption: 'Best for trying the workflow',
-        description: 'A clean starting point for testing prompts, comparing directions, and understanding the product before upgrading.',
-        buttonLabel: 'Get Started',
-        features: [
-            '300 monthly credits',
-            'Web, mobile, and tablet targets',
-            'Prompt composer with references',
-            'Fast first-pass generation',
-        ],
-    },
     {
         key: 'pro',
         name: 'Pro Plan',
@@ -73,54 +67,38 @@ const PLAN_CARDS: PlanCard[] = [
     },
 ];
 
-const COMPARISON_ROWS: Array<{ label: string; values: Record<CorePlanKey, ComparisonValue> }> = [
+const COMPARISON_ROWS: Array<{ label: string; values: Record<ComparisonKey, ComparisonValue> }> = [
     {
-        label: 'Monthly credits',
-        values: { free: '300', pro: '3,000', team: '15,000' },
+        label: 'Included credits',
+        values: { pro: '3,000 / month', team: '15,000 / month', credits: '1k, 5k, or 10k packs' },
     },
     {
-        label: 'Platform targets',
-        values: { free: 'Web, mobile, tablet', pro: 'Web, mobile, tablet', team: 'Web, mobile, tablet' },
+        label: 'Purchase type',
+        values: { pro: 'Recurring subscription', team: 'Recurring subscription', credits: 'One-time credits' },
     },
     {
         label: 'Prompt composer',
-        values: { free: true, pro: true, team: true },
+        values: { pro: true, team: true, credits: true },
     },
     {
         label: 'Image attachments',
-        values: { free: true, pro: true, team: true },
+        values: { pro: true, team: true, credits: true },
     },
     {
         label: 'Inline URL references',
-        values: { free: 'Limited', pro: true, team: true },
-    },
-    {
-        label: 'Voice input',
-        values: { free: false, pro: true, team: true },
-    },
-    {
-        label: 'Style controls',
-        values: { free: 'Limited', pro: true, team: true },
-    },
-    {
-        label: 'Model modes',
-        values: { free: 'Limited', pro: true, team: true },
-    },
-    {
-        label: 'Priority support',
-        values: { free: false, pro: true, team: true },
+        values: { pro: true, team: true, credits: true },
     },
     {
         label: 'Credits rollover',
-        values: { free: false, pro: true, team: true },
+        values: { pro: true, team: true, credits: false },
     },
     {
         label: 'Shared team rollout capacity',
-        values: { free: false, pro: false, team: true },
+        values: { pro: false, team: true, credits: false },
     },
     {
-        label: 'Faster team-wide iteration',
-        values: { free: false, pro: false, team: true },
+        label: 'Works with any active plan',
+        values: { pro: false, team: false, credits: true },
     },
 ] as const;
 
@@ -264,6 +242,7 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
     const [cadence, setCadence] = useState<BillingCadence>('monthly');
     const [catalog, setCatalog] = useState<BillingCatalogResponse | null>(null);
     const [loadingCatalog, setLoadingCatalog] = useState(true);
+    const [selectedCreditPackKey, setSelectedCreditPackKey] = useState<BillingCreditPackProductKey>('credits_5000');
 
     useEffect(() => {
         const controller = new AbortController();
@@ -282,22 +261,49 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
         return () => controller.abort();
     }, []);
 
+    useEffect(() => {
+        const defaultProductKey = catalog?.creditPacks.defaultProductKey;
+        if (defaultProductKey) {
+            setSelectedCreditPackKey(defaultProductKey);
+        }
+    }, [catalog?.creditPacks.defaultProductKey]);
+
     const pricingCards = useMemo(() => {
         const plans = catalog?.plans;
         return PLAN_CARDS.map((plan) => {
-            if (plan.key === 'free') {
-                return {
-                    ...plan,
-                    price: { amount: '$0', cadenceLabel: '/month' },
-                };
-            }
-
             return {
                 ...plan,
                 price: getDisplayPrice(plans?.[plan.key].price, cadence, FALLBACK_PRICE_CENTS[plan.key]),
             };
         });
     }, [cadence, catalog]);
+
+    const selectedCreditPack = useMemo(() => {
+        const livePack = catalog?.creditPacks.items.find((item) => item.productKey === selectedCreditPackKey);
+        if (livePack) return livePack;
+        const fallback = FALLBACK_CREDIT_PACKS[selectedCreditPackKey];
+        return {
+            productKey: selectedCreditPackKey,
+            label: `${fallback.credits.toLocaleString()} credits`,
+            credits: fallback.credits,
+            price: {
+                productKey: selectedCreditPackKey,
+                priceId: null,
+                configured: false,
+                active: false,
+                currency: fallback.currency,
+                unitAmount: fallback.oneTime,
+                type: 'one_time' as const,
+                interval: null,
+                intervalCount: null,
+            },
+        };
+    }, [catalog, selectedCreditPackKey]);
+
+    const selectedCreditPackPrice = useMemo(() => {
+        const fallback = FALLBACK_CREDIT_PACKS[selectedCreditPackKey];
+        return getDisplayPrice(selectedCreditPack.price, 'monthly', { monthly: fallback.oneTime, currency: fallback.currency });
+    }, [selectedCreditPack, selectedCreditPackKey]);
 
     return (
         <div ref={scrollContainerRef} className="h-screen w-screen overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)]">
@@ -351,9 +357,9 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                                             <p className={`mt-1 text-[12px] ${isFeatured ? 'text-white/58' : 'text-[var(--ui-text-subtle)]'}`}>{plan.caption}</p>
                                             <div className="mt-5 flex items-end gap-2">
                                                 <p className={`text-[44px] font-semibold leading-none tracking-[-0.05em] ${isFeatured ? 'text-white' : 'text-[var(--ui-text)]'}`}>
-                                                    {loadingCatalog && plan.key !== 'free' ? <Loader2 size={34} className="animate-spin" /> : plan.price.amount}
+                                                    {loadingCatalog ? <Loader2 size={34} className="animate-spin" /> : plan.price.amount}
                                                 </p>
-                                                {!loadingCatalog || plan.key === 'free' ? (
+                                                {!loadingCatalog ? (
                                                     <span className={`pb-1 text-[11px] ${isFeatured ? 'text-white/58' : 'text-[var(--ui-text-subtle)]'}`}>{plan.price.cadenceLabel}</span>
                                                 ) : null}
                                             </div>
@@ -383,6 +389,62 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                                         </article>
                                     );
                                 })}
+                                <article className="rounded-[1.8rem] border border-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-surface-1)_90%,white)] p-5 text-[var(--ui-text)] shadow-[0_16px_40px_rgba(15,23,42,0.06)] dark:bg-[color:color-mix(in_srgb,var(--ui-surface-1)_96%,transparent)] dark:shadow-[0_18px_40px_rgba(2,6,23,0.18)] md:p-6">
+                                    <p className="text-[18px] font-semibold tracking-[-0.03em] text-[var(--ui-text)]">Credit Packs</p>
+                                    <p className="mt-1 text-[12px] text-[var(--ui-text-subtle)]">For bursts, launches, and overflow usage</p>
+                                    <div className="mt-5 flex items-end gap-2">
+                                        <p className="text-[44px] font-semibold leading-none tracking-[-0.05em] text-[var(--ui-text)]">
+                                            {loadingCatalog ? <Loader2 size={34} className="animate-spin" /> : selectedCreditPackPrice.amount}
+                                        </p>
+                                    </div>
+                                    <p className="mt-4 min-h-[56px] text-[13px] leading-6 text-[var(--ui-text-muted)]">
+                                        Choose the pack size you need. Credit packs stack on top of your current balance and work alongside any subscription.
+                                    </p>
+                                    <div className="mt-5 grid grid-cols-3 gap-2">
+                                        {(catalog?.creditPacks.items || (Object.keys(FALLBACK_CREDIT_PACKS) as BillingCreditPackProductKey[]).map((key) => ({
+                                            productKey: key,
+                                            label: `${FALLBACK_CREDIT_PACKS[key].credits.toLocaleString()} credits`,
+                                            credits: FALLBACK_CREDIT_PACKS[key].credits,
+                                            price: null as unknown as BillingCatalogPrice,
+                                        }))).map((pack) => (
+                                            <button
+                                                key={pack.productKey}
+                                                type="button"
+                                                onClick={() => setSelectedCreditPackKey(pack.productKey)}
+                                                className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                                                    selectedCreditPackKey === pack.productKey
+                                                        ? 'border-[var(--ui-primary)] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,transparent)]'
+                                                        : 'border-[var(--ui-border)] bg-[var(--ui-surface-1)] hover:bg-[var(--ui-surface-2)]'
+                                                }`}
+                                            >
+                                                <p className="text-[13px] font-semibold text-[var(--ui-text)]">{pack.credits.toLocaleString()}</p>
+                                                <p className="mt-1 text-[11px] text-[var(--ui-text-subtle)]">credits</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={onOpenApp}
+                                        className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-full border-2 border-[var(--ui-primary)] bg-transparent text-[12px] font-semibold text-[var(--ui-primary)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-primary)_22%,transparent)] transition-colors hover:border-[var(--ui-primary-hover)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,transparent)] hover:text-[var(--ui-primary-hover)]"
+                                    >
+                                        Buy credits
+                                    </button>
+                                    <div className="mt-6 space-y-3">
+                                        {[
+                                            `${selectedCreditPack.credits.toLocaleString()} one-time credits`,
+                                            'Stacks with your current balance',
+                                            'Works with Pro or Team',
+                                            'Good for launches and heavy weeks',
+                                        ].map((feature) => (
+                                            <div key={feature} className="flex items-start gap-3">
+                                                <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,transparent)] text-[var(--ui-primary)]">
+                                                    <Check size={11} />
+                                                </span>
+                                                <span className="text-[13px] leading-6 text-[var(--ui-text-muted)]">{feature}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </article>
                             </div>
 
                             <div className="mt-8 rounded-[1.7rem] bg-[#232323] px-5 py-5 text-white md:flex md:items-center md:justify-between md:px-6">
@@ -420,7 +482,12 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                                 <div className="min-w-[860px]">
                                     <div className="grid grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] border-b border-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-border))]">
                                         <div className="px-5 py-6 md:px-8" />
-                                        {pricingCards.map((plan) => {
+                                        {[...pricingCards, {
+                                            key: 'credits',
+                                            name: 'Credit Packs',
+                                            price: selectedCreditPackPrice,
+                                            featured: false,
+                                        }].map((plan) => {
                                             const isFeatured = Boolean(plan.featured);
                                             return (
                                                 <div
@@ -430,7 +497,7 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                                                     <p className={`text-[12px] ${isFeatured ? 'text-white' : 'text-[var(--ui-text-subtle)]'}`}>{plan.name}</p>
                                                     <div className="mt-3 flex items-end justify-center gap-1.5">
                                                         <p className={`text-[34px] font-semibold leading-none tracking-[-0.05em] ${isFeatured ? 'text-white' : 'text-[var(--ui-text)]'}`}>
-                                                            {loadingCatalog && plan.key !== 'free' ? '...' : plan.price.amount}
+                                                            {loadingCatalog ? '...' : plan.price.amount}
                                                         </p>
                                                         <span className={`pb-1 text-[11px] ${isFeatured ? 'text-white' : 'text-[var(--ui-text-subtle)]'}`}>
                                                             {plan.price.cadenceLabel}
@@ -450,7 +517,7 @@ export function PricingPage({ onNavigate, onOpenApp }: PricingPageProps) {
                                                 <div className="px-5 py-4 md:px-8">
                                                     <p className="text-[13px] font-medium text-[var(--ui-text)]">{row.label}</p>
                                                 </div>
-                                                {(['free', 'pro', 'team'] as const).map((planKey) => {
+                                                {(['pro', 'team', 'credits'] as const).map((planKey) => {
                                                     const isFeatured = planKey === 'pro';
                                                     return (
                                                         <div

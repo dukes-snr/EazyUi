@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, BarChart3, Check, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
+import { apiClient, subscribeToBillingUpdates, type BillingCatalogProductKey, type BillingCatalogResponse, type BillingCreditPackProductKey, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { resetProjectHistorySnapshot } from '../../utils/projectHistory';
@@ -58,12 +58,14 @@ export function ProjectSettingsPage({
     const [verificationBusy, setVerificationBusy] = useState(false);
     const [onDemandUsage, setOnDemandUsage] = useState(false);
     const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+    const [billingCatalog, setBillingCatalog] = useState<BillingCatalogResponse | null>(null);
     const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
     const [billingPurchases, setBillingPurchases] = useState<BillingPurchaseItem[]>([]);
     const [billingLoading, setBillingLoading] = useState(false);
-    const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
+    const [billingActionBusy, setBillingActionBusy] = useState<BillingCatalogProductKey | 'portal' | null>(null);
     const [billingBlockingMessage, setBillingBlockingMessage] = useState<string | null>(null);
     const [billingModal, setBillingModal] = useState<null | 'upgrade' | 'purchase'>(null);
+    const [selectedCreditPackKey, setSelectedCreditPackKey] = useState<BillingCreditPackProductKey>('credits_5000');
     const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
     const [mcpApiKeys, setMcpApiKeys] = useState<McpApiKeyItem[]>([]);
     const [mcpKeysLoading, setMcpKeysLoading] = useState(false);
@@ -98,14 +100,16 @@ export function ProjectSettingsPage({
     const refreshBillingData = async () => {
         try {
             setBillingLoading(true);
-            const [summaryRes, ledgerRes, purchasesRes] = await Promise.all([
+            const [summaryRes, ledgerRes, purchasesRes, catalogRes] = await Promise.all([
                 apiClient.getBillingSummary(),
                 apiClient.getBillingLedger(100),
                 apiClient.getBillingPurchases(60),
+                apiClient.getBillingCatalog(),
             ]);
             setBillingSummary(summaryRes.summary);
             setBillingLedger(ledgerRes.items || []);
             setBillingPurchases(purchasesRes.items || []);
+            setBillingCatalog(catalogRes);
         } catch (error) {
             pushToast({ kind: 'error', title: 'Billing unavailable', message: (error as Error).message || 'Unable to load billing details.' });
         } finally {
@@ -182,7 +186,7 @@ export function ProjectSettingsPage({
         }
     };
 
-    const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
+    const handleBillingCheckout = async (productKey: BillingCatalogProductKey) => {
         let redirecting = false;
         try {
             setBillingActionBusy(productKey);
@@ -349,7 +353,17 @@ export function ProjectSettingsPage({
         }
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
+    useEffect(() => {
+        const defaultProductKey = billingCatalog?.creditPacks.defaultProductKey;
+        if (defaultProductKey) {
+            setSelectedCreditPackKey(defaultProductKey);
+        }
+    }, [billingCatalog?.creditPacks.defaultProductKey]);
+
+    const selectedCreditPack = billingCatalog?.creditPacks.items.find((item) => item.productKey === selectedCreditPackKey)
+        || billingCatalog?.creditPacks.items[0]
+        || null;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 0;
     const monthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const usedCredits = Math.max(0, planCreditCap - monthlyCredits);
     const usagePct = Math.max(0, Math.min(100, Math.round((usedCredits / Math.max(planCreditCap, 1)) * 100)));
@@ -396,7 +410,7 @@ export function ProjectSettingsPage({
                 };
             });
     }, [purchaseHistoryRows, billingLedger]);
-    const currentPlanLabel = billingSummary?.planLabel || 'Free';
+    const currentPlanLabel = billingSummary?.planLabel || 'No plan';
     const currentPlanStatus = billingSummary?.status || 'active';
     const creditsBalanceLabel = billingSummary
         ? `${billingSummary.balanceCredits.toLocaleString()} credits`
@@ -1075,7 +1089,7 @@ export function ProjectSettingsPage({
                             <div className="space-y-5">
                                 <SectionCard title="Usage Summary">
                                     <p className="text-sm text-[var(--ui-text-subtle)]">
-                                        You are on {billingSummary?.planLabel || 'Free Plan'}. Usage resets in {daysToReset ?? '--'} days {resetAt ? `on ${resetAt.toLocaleString()}` : ''}.
+                                        You are on {billingSummary?.planLabel || 'No plan'}. Usage resets in {daysToReset ?? '--'} days {resetAt ? `on ${resetAt.toLocaleString()}` : ''}.
                                     </p>
                                     <p className="mt-4 text-5xl font-black leading-none tracking-[-0.02em] text-emerald-300">
                                         {billingSummary ? billingSummary.balanceCredits.toLocaleString() : '--'}
@@ -1257,18 +1271,43 @@ export function ProjectSettingsPage({
                                     </button>
                                 </>
                             ) : (
-                                <button
-                                    type="button"
-                                    onClick={() => void handleBillingCheckout('topup_1000')}
-                                    disabled={billingActionBusy !== null}
-                                    className="flex w-full items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-left hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
-                                >
-                                    <div>
-                                        <p className="text-sm font-semibold text-[var(--ui-text)]">Top-up 1,000 Credits</p>
-                                        <p className="text-xs text-[var(--ui-text-subtle)]">One-time purchase for additional generation capacity</p>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {(billingCatalog?.creditPacks.items || []).map((pack) => (
+                                            <button
+                                                key={pack.productKey}
+                                                type="button"
+                                                onClick={() => setSelectedCreditPackKey(pack.productKey)}
+                                                className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                                                    selectedCreditPackKey === pack.productKey
+                                                        ? 'border-emerald-400/60 bg-emerald-500/10'
+                                                        : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'
+                                                }`}
+                                            >
+                                                <p className="text-sm font-semibold text-[var(--ui-text)]">{pack.credits.toLocaleString()} credits</p>
+                                                <p className="mt-1 text-xs text-[var(--ui-text-subtle)]">
+                                                    {pack.price.unitAmount !== null
+                                                        ? (pack.price.unitAmount / 100).toLocaleString(undefined, { style: 'currency', currency: pack.price.currency || 'USD' })
+                                                        : 'Configured in billing'}
+                                                </p>
+                                            </button>
+                                        ))}
                                     </div>
-                                    <span className="text-xs font-semibold text-emerald-300">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy Now'}</span>
-                                </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => selectedCreditPack ? void handleBillingCheckout(selectedCreditPack.productKey) : undefined}
+                                        disabled={billingActionBusy !== null || !selectedCreditPack}
+                                        className="flex w-full items-center justify-between rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-left hover:bg-[var(--ui-surface-3)] disabled:opacity-60"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--ui-text)]">{selectedCreditPack?.label || 'Credit pack'}</p>
+                                            <p className="text-xs text-[var(--ui-text-subtle)]">One-time purchase for additional generation capacity</p>
+                                        </div>
+                                        <span className="text-xs font-semibold text-emerald-300">
+                                            {selectedCreditPack && billingActionBusy === selectedCreditPack.productKey ? 'Opening...' : 'Buy Now'}
+                                        </span>
+                                    </button>
+                                </div>
                             )}
                         </div>
                     </div>

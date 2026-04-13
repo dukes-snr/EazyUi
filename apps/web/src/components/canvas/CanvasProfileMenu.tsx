@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
-import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingLedgerItem, type BillingSummary } from '../../api/client';
+import { ApiRequestError, apiClient, subscribeToBillingUpdates, type BillingCatalogProductKey, type BillingLedgerItem, type BillingSummary } from '../../api/client';
 import { copyFigmaPayloadToClipboard, copyScreensCodeToClipboard, exportScreensAsImagesZip, exportScreensAsZip, getExportTargetScreens } from '../../utils/exportScreens';
 import { buildBillingUsageActivityRows, extractLedgerModelName } from '../../utils/billingUsage';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
@@ -84,7 +84,7 @@ export function CanvasProfileMenu() {
     const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
     const [billingLedger, setBillingLedger] = useState<BillingLedgerItem[]>([]);
     const [billingLoading, setBillingLoading] = useState(false);
-    const [billingActionBusy, setBillingActionBusy] = useState<'pro' | 'team' | 'topup_1000' | 'portal' | null>(null);
+    const [billingActionBusy, setBillingActionBusy] = useState<BillingCatalogProductKey | 'portal' | null>(null);
     const [exportActionBusy, setExportActionBusy] = useState<ExportAction | null>(null);
     const [saveLabel, setSaveLabel] = useState<'saving' | 'saved' | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -202,7 +202,7 @@ export function CanvasProfileMenu() {
         });
     }, [authUser]);
 
-    const handleBillingCheckout = async (productKey: 'pro' | 'team' | 'topup_1000') => {
+    const handleBillingCheckout = async (productKey: BillingCatalogProductKey) => {
         try {
             setBillingActionBusy(productKey);
             const successUrl = new URL(window.location.href);
@@ -360,7 +360,7 @@ export function CanvasProfileMenu() {
         usage: { title: 'Usage', subtitle: 'Track credit consumption and recent billing events.' },
     };
 
-    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 300;
+    const planCreditCap = billingSummary?.planId === 'team' ? 15000 : billingSummary?.planId === 'pro' ? 3000 : 0;
     const currentMonthlyCredits = billingSummary?.monthlyCreditsRemaining ?? planCreditCap;
     const consumedThisCycle = Math.max(0, planCreditCap - currentMonthlyCredits);
     const cycleUsagePct = Math.max(0, Math.min(100, Math.round((consumedThisCycle / Math.max(planCreditCap, 1)) * 100)));
@@ -601,11 +601,11 @@ export function CanvasProfileMenu() {
                             <button
                                 type="button"
                                 className="canvas-profile-menu-item mt-2"
-                                onClick={() => void handleBillingCheckout('topup_1000')}
+                                onClick={() => void handleBillingCheckout('credits_5000')}
                                 disabled={billingActionBusy !== null}
                             >
                                 <Zap size={14} />
-                                <span>{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Top up credits'}</span>
+                                <span>{billingActionBusy === 'credits_5000' ? 'Opening...' : 'Buy credit pack'}</span>
                             </button>
                             <button
                                 type="button"
@@ -784,12 +784,12 @@ export function CanvasProfileMenu() {
                                 {settingsTab === 'billing' && (
                                     <div className="mx-auto w-full max-w-[920px] space-y-6">
                                         <SectionCard title="Subscription Plan">
-                                            <SettingsRow label="Current plan" detail={billingSummary ? `Status: ${billingSummary.status}` : 'Loading plan status...'}><span className="text-3xl font-semibold text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free'}</span></SettingsRow>
+                                            <SettingsRow label="Current plan" detail={billingSummary ? `Status: ${billingSummary.status}` : 'Loading plan status...'}><span className="text-3xl font-semibold text-[var(--ui-text)]">{billingSummary?.planLabel || 'No plan'}</span></SettingsRow>
                                             <SettingsRow label="Upgrade plan" detail={billingSummary ? `Cycle ends ${new Date(billingSummary.periodEndAt).toLocaleDateString()}` : 'Monthly credits with rollover on paid plans.'}>
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <button type="button" onClick={() => void handleBillingCheckout('pro')} disabled={billingActionBusy !== null} className="h-9 rounded-md bg-[var(--ui-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--ui-primary-hover)] disabled:opacity-60">{billingActionBusy === 'pro' ? 'Opening...' : 'Upgrade plan'}</button>
                                                     <button type="button" onClick={() => void handleBillingCheckout('team')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'team' ? 'Opening...' : 'Team'}</button>
-                                                    <button type="button" onClick={() => void handleBillingCheckout('topup_1000')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">{billingActionBusy === 'topup_1000' ? 'Opening...' : 'Buy 1,000 credits'}</button>
+                                                    <button type="button" onClick={() => void openSettingsAt('billing')} disabled={billingActionBusy !== null} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-3)] px-4 text-sm text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)] disabled:opacity-60">Credit packs</button>
                                                 </div>
                                             </SettingsRow>
                                         </SectionCard>
@@ -817,10 +817,10 @@ export function CanvasProfileMenu() {
 
                                 {settingsTab === 'usage' && (
                                     <div className="mx-auto w-full max-w-[920px] space-y-6">
-                                        <p className="text-[22px] text-[var(--ui-text)]">You are on <span className="font-semibold">{billingSummary?.planLabel || 'Free Plan'}</span>. Usage reset in {daysUntilReset ?? '--'} days on {billingPeriodEnd ? billingPeriodEnd.toLocaleString() : '--'}</p>
+                                        <p className="text-[22px] text-[var(--ui-text)]">You are on <span className="font-semibold">{billingSummary?.planLabel || 'No plan'}</span>. Usage reset in {daysUntilReset ?? '--'} days on {billingPeriodEnd ? billingPeriodEnd.toLocaleString() : '--'}</p>
                                         <SectionCard title="Dollar Usage">
                                             <div className="space-y-3">
-                                                <div className="flex items-center justify-between"><p className="text-sm text-[var(--ui-text)]">{billingSummary?.planLabel || 'Free plan'}</p><p className="text-sm font-semibold text-[var(--ui-text)]">{consumedThisCycle.toLocaleString()} / {planCreditCap.toLocaleString()} credits</p></div>
+                                                <div className="flex items-center justify-between"><p className="text-sm text-[var(--ui-text)]">{billingSummary?.planLabel || 'No plan'}</p><p className="text-sm font-semibold text-[var(--ui-text)]">{consumedThisCycle.toLocaleString()} / {planCreditCap.toLocaleString()} credits</p></div>
                                                 <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-surface-4)]"><div className="h-full rounded-full bg-[var(--ui-primary)] transition-[width] duration-300" style={{ width: `${cycleUsagePct}%` }} /></div>
                                                 <div className="flex items-center justify-between text-xs text-[var(--ui-text-subtle)]"><span>Monthly {billingSummary?.monthlyCreditsRemaining ?? '--'}</span><span>Rollover {billingSummary?.rolloverCredits ?? '--'}</span><span>Top-up {billingSummary?.topupCreditsRemaining ?? '--'}</span><span className="font-semibold text-[var(--ui-primary)]">Balance {billingSummary?.balanceCredits ?? '--'}</span></div>
                                             </div>

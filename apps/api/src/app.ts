@@ -37,7 +37,6 @@ import {
     recordStripeWebhookEvent,
     reserveCredits,
     resolvePlanFromStripePriceId,
-    resolveStripePriceIdForPlan,
     resolveTopupCreditsForPriceId,
     setUserPlan,
     settleReservation,
@@ -65,6 +64,7 @@ import {
     getStripePricingCatalog,
     getStripePublishableKey,
     isStripeConfigured,
+    resolveStripePriceId,
     retrieveCheckoutSessionWithLineItems,
 } from './services/stripeBilling.js';
 import {
@@ -133,6 +133,9 @@ const PLAYWRIGHT_BROWSER_DIR = String(process.env.PLAYWRIGHT_BROWSERS_PATH || '.
 
 type PlatformKind = 'mobile' | 'tablet' | 'desktop';
 type StyleKind = 'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful';
+type BillingSubscriptionProductKey = 'pro' | 'team';
+type BillingCreditPackProductKey = 'credits_1000' | 'credits_5000' | 'credits_10000';
+type BillingCheckoutProductKey = BillingSubscriptionProductKey | BillingCreditPackProductKey;
 const LOG_PREVIEW_MAX = 220;
 const STREAM_BILLING_MARKER_PREFIX = '\u001eEAZYUI_BILLING:';
 const STREAM_BILLING_MARKER_SUFFIX = '\u001e';
@@ -140,6 +143,11 @@ const SERVER_ACTIVITY_LIMIT = 250;
 const REFERENCE_CONTEXT_HEADER = 'x-eazyui-reference-context';
 const STREAM_KEEPALIVE_INTERVAL_MS = 15000;
 const DEFAULT_FRONTEND_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://eazyui.vercel.app'];
+const BILLING_CREDIT_PACKS: Array<{ productKey: BillingCreditPackProductKey; label: string; credits: number }> = [
+    { productKey: 'credits_1000', label: '1,000 credits', credits: 1000 },
+    { productKey: 'credits_5000', label: '5,000 credits', credits: 5000 },
+    { productKey: 'credits_10000', label: '10,000 credits', credits: 10000 },
+];
 
 function parseAllowedFrontendOrigins(rawValue: string | undefined): string[] {
     const parts = String(rawValue || '')
@@ -356,7 +364,9 @@ async function buildBillingOperationsSnapshot() {
                 ? {
                     pro: Boolean(resolvePolarProductId('pro')),
                     team: Boolean(resolvePolarProductId('team')),
-                    topup_1000: Boolean(resolvePolarProductId('topup_1000')),
+                    credits_1000: Boolean(resolvePolarProductId('credits_1000')),
+                    credits_5000: Boolean(resolvePolarProductId('credits_5000')),
+                    credits_10000: Boolean(resolvePolarProductId('credits_10000')),
                 }
                 : undefined,
             priceCatalog: provider === 'polar' ? polarCatalog : stripeCatalog,
@@ -2415,7 +2425,9 @@ fastify.get('/api/health', async (request, reply) => {
             productIdsConfigured: {
                 pro: Boolean(resolvePolarProductId('pro')),
                 team: Boolean(resolvePolarProductId('team')),
-                topup_1000: Boolean(resolvePolarProductId('topup_1000')),
+                credits_1000: Boolean(resolvePolarProductId('credits_1000')),
+                credits_5000: Boolean(resolvePolarProductId('credits_5000')),
+                credits_10000: Boolean(resolvePolarProductId('credits_10000')),
             },
         },
         resend: getResendConfigSummary(),
@@ -2653,8 +2665,32 @@ fastify.get('/api/billing/catalog', async (request, reply) => {
                         interval: null,
                         intervalCount: null,
                     },
-                    topup_1000: {
-                        productKey: 'topup_1000' as const,
+                    credits_1000: {
+                        productKey: 'credits_1000' as const,
+                        productId: null,
+                        priceId: null,
+                        configured: false,
+                        active: false,
+                        currency: null,
+                        unitAmount: null,
+                        type: null,
+                        interval: null,
+                        intervalCount: null,
+                    },
+                    credits_5000: {
+                        productKey: 'credits_5000' as const,
+                        productId: null,
+                        priceId: null,
+                        configured: false,
+                        active: false,
+                        currency: null,
+                        unitAmount: null,
+                        type: null,
+                        interval: null,
+                        intervalCount: null,
+                    },
+                    credits_10000: {
+                        productKey: 'credits_10000' as const,
                         productId: null,
                         priceId: null,
                         configured: false,
@@ -2672,11 +2708,6 @@ fastify.get('/api/billing/catalog', async (request, reply) => {
                 configured: provider === 'polar' ? isPolarConfigured() : provider === 'stripe' ? isStripeConfigured() : false,
             },
             plans: {
-                free: {
-                    productKey: 'free',
-                    label: 'Free',
-                    monthlyCredits: 300,
-                },
                 pro: {
                     productKey: 'pro',
                     label: 'Pro',
@@ -2689,12 +2720,17 @@ fastify.get('/api/billing/catalog', async (request, reply) => {
                     monthlyCredits: 15000,
                     price: prices.team,
                 },
-                topup_1000: {
-                    productKey: 'topup_1000',
-                    label: 'Credits',
-                    credits: 1000,
-                    price: prices.topup_1000,
-                },
+            },
+            creditPacks: {
+                label: 'Credit Packs',
+                defaultProductKey: 'credits_5000' as const,
+                items: BILLING_CREDIT_PACKS.map((pack) => ({
+                    productKey: pack.productKey,
+                    label: pack.label,
+                    credits: pack.credits,
+                    price: prices[pack.productKey],
+                })),
+                note: 'One-time credits stack with your current balance.',
             },
         };
     } catch (error) {
@@ -2885,7 +2921,7 @@ fastify.post<{
 
 fastify.post<{
     Body: {
-        productKey: 'pro' | 'team' | 'topup_1000';
+        productKey: BillingCheckoutProductKey;
         successUrl: string;
         cancelUrl: string;
     };
@@ -2952,11 +2988,7 @@ fastify.post<{
             };
         }
 
-        const planPriceId = productKey === 'pro'
-            ? resolveStripePriceIdForPlan('pro')
-            : productKey === 'team'
-                ? resolveStripePriceIdForPlan('team')
-                : String(process.env.STRIPE_PRICE_TOPUP_1000 || '').trim();
+        const planPriceId = resolveStripePriceId(productKey);
         if (!planPriceId) {
             return reply.status(400).send({
                 error: 'Stripe price id missing',
@@ -2986,10 +3018,10 @@ fastify.post<{
             });
         }
         const inferredMode: 'payment' | 'subscription' = price.type === 'recurring' ? 'subscription' : 'payment';
-        if (productKey === 'topup_1000' && inferredMode !== 'payment') {
+        if ((productKey === 'credits_1000' || productKey === 'credits_5000' || productKey === 'credits_10000') && inferredMode !== 'payment') {
             return reply.status(400).send({
-                error: 'Top-up price misconfigured',
-                message: `Top-up price ${planPriceId} must be one-time (Stripe price.type=one_time).`,
+                error: 'Credit pack price misconfigured',
+                message: `Credit pack price ${planPriceId} must be one-time (Stripe price.type=one_time).`,
             });
         }
         if ((productKey === 'pro' || productKey === 'team') && inferredMode !== 'subscription') {

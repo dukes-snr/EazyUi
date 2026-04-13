@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Loader2 } from 'lucide-react';
-import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse } from '../../api/client';
+import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse, type BillingCatalogProductKey, type BillingCreditPackProductKey } from '../../api/client';
 
 type GlassPricingSectionProps = {
     className?: string;
     onGetStarted?: () => void;
-    onSelectPlan?: (productKey: 'free' | 'pro' | 'team' | 'topup_1000') => void;
+    onSelectPlan?: (productKey: BillingCatalogProductKey) => void;
 };
 
 type BillingCadence = 'monthly' | 'annual';
-type TierKey = 'free' | 'pro' | 'team' | 'topup_1000';
+type TierKey = 'pro' | 'team';
 
-const FALLBACK_PRICE_CENTS: Record<Exclude<TierKey, 'free'>, { monthly?: number; oneTime?: number; currency: string }> = {
+const FALLBACK_PRICE_CENTS: Record<TierKey, { monthly?: number; oneTime?: number; currency: string }> = {
     pro: { monthly: 2400, currency: 'USD' },
     team: { monthly: 7900, currency: 'USD' },
-    topup_1000: { oneTime: 1000, currency: 'USD' },
+};
+
+const FALLBACK_CREDIT_PACKS: Record<BillingCreditPackProductKey, { credits: number; oneTime: number; currency: string }> = {
+    credits_1000: { credits: 1000, oneTime: 1000, currency: 'USD' },
+    credits_5000: { credits: 5000, oneTime: 4000, currency: 'USD' },
+    credits_10000: { credits: 10000, oneTime: 7000, currency: 'USD' },
 };
 
 const TIER_CONTENT: Record<TierKey, {
@@ -25,18 +30,6 @@ const TIER_CONTENT: Record<TierKey, {
     cta: string;
     featured?: boolean;
 }> = {
-    free: {
-        title: 'Free',
-        label: 'Best for trying the workflow',
-        description: 'A clean starting point for testing prompts, comparing screen directions, and getting a real feel for the product.',
-        features: [
-            '300 monthly credits',
-            'Mobile, tablet, and desktop targets',
-            'Prompt composer with references',
-            'Fast first-pass generation',
-        ],
-        cta: 'Start free',
-    },
     pro: {
         title: 'Pro',
         label: 'Best for solo builders',
@@ -62,18 +55,6 @@ const TIER_CONTENT: Record<TierKey, {
         ],
         cta: 'Choose Team',
     },
-    topup_1000: {
-        title: 'Credits',
-        label: 'Best for one-off bursts',
-        description: 'A one-time credit pack when you need extra generation room without changing your current subscription plan.',
-        features: [
-            '1,000 additional credits',
-            'One-time purchase',
-            'Works alongside paid plans',
-            'Good for launch weeks and spikes',
-        ],
-        cta: 'Buy credits',
-    },
 };
 
 function formatMoney(amountCents: number | null, currency: string | null, options?: Intl.NumberFormatOptions): string {
@@ -86,7 +67,7 @@ function formatMoney(amountCents: number | null, currency: string | null, option
     }).format(amountCents / 100);
 }
 
-function getFallbackDisplayPrice(productKey: Exclude<TierKey, 'free'>, cadence: BillingCadence): {
+function getFallbackDisplayPrice(productKey: TierKey, cadence: BillingCadence): {
     amount: string;
     cadenceLabel: string;
     note: string;
@@ -114,7 +95,7 @@ function getFallbackDisplayPrice(productKey: Exclude<TierKey, 'free'>, cadence: 
     };
 }
 
-function getDisplayPrice(productKey: Exclude<TierKey, 'free'>, price: BillingCatalogPrice | null | undefined, cadence: BillingCadence): {
+function getDisplayPrice(productKey: TierKey, price: BillingCatalogPrice | null | undefined, cadence: BillingCadence): {
     amount: string;
     cadenceLabel: string;
     note: string;
@@ -152,6 +133,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
     const [catalog, setCatalog] = useState<BillingCatalogResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [selectedCreditPackKey, setSelectedCreditPackKey] = useState<BillingCreditPackProductKey>('credits_5000');
 
     useEffect(() => {
         const controller = new AbortController();
@@ -174,14 +156,19 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
         return () => controller.abort();
     }, []);
 
+    useEffect(() => {
+        const defaultProductKey = catalog?.creditPacks.defaultProductKey;
+        if (defaultProductKey) {
+            setSelectedCreditPackKey(defaultProductKey);
+        }
+    }, [catalog?.creditPacks.defaultProductKey]);
+
     const tiers = useMemo(() => {
         const plans = catalog?.plans;
-        return (['free', 'pro', 'team', 'topup_1000'] as const).map((key) => {
+        return (['pro', 'team'] as const).map((key) => {
             const content = TIER_CONTENT[key];
-            const price = key === 'free' ? null : plans?.[key].price ?? null;
-            const display = key === 'free'
-                ? { amount: '$0', cadenceLabel: '/mo', note: 'No card required' }
-                : getDisplayPrice(key, price, cadence);
+            const price = plans?.[key].price ?? null;
+            const display = getDisplayPrice(key, price, cadence);
 
             return {
                 key,
@@ -191,7 +178,40 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
         });
     }, [cadence, catalog]);
 
-    const handleTierAction = (productKey: TierKey) => {
+    const creditPackOptions = useMemo(() => {
+        if (catalog?.creditPacks.items?.length) return catalog.creditPacks.items;
+        return (Object.keys(FALLBACK_CREDIT_PACKS) as BillingCreditPackProductKey[]).map((productKey) => ({
+            productKey,
+            label: `${FALLBACK_CREDIT_PACKS[productKey].credits.toLocaleString()} credits`,
+            credits: FALLBACK_CREDIT_PACKS[productKey].credits,
+            price: {
+                productKey,
+                priceId: null,
+                configured: false,
+                active: false,
+                currency: FALLBACK_CREDIT_PACKS[productKey].currency,
+                unitAmount: FALLBACK_CREDIT_PACKS[productKey].oneTime,
+                type: 'one_time' as const,
+                interval: null,
+                intervalCount: null,
+            },
+        }));
+    }, [catalog]);
+
+    const selectedCreditPack = useMemo(() => {
+        return creditPackOptions.find((item) => item.productKey === selectedCreditPackKey) || creditPackOptions[0];
+    }, [creditPackOptions, selectedCreditPackKey]);
+
+    const creditPackDisplay = useMemo(() => {
+        const fallback = FALLBACK_CREDIT_PACKS[selectedCreditPack?.productKey || 'credits_5000'];
+        return {
+            amount: formatMoney(selectedCreditPack?.price?.unitAmount ?? fallback.oneTime, selectedCreditPack?.price?.currency ?? fallback.currency),
+            cadenceLabel: '',
+            note: 'One-time purchase',
+        };
+    }, [selectedCreditPack]);
+
+    const handleTierAction = (productKey: BillingCatalogProductKey) => {
         onSelectPlan?.(productKey);
         if (!onSelectPlan) onGetStarted?.();
     };
@@ -249,7 +269,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                         </div>
 
                         <div className="relative mt-8 overflow-hidden rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
-                            <div className="grid gap-px bg-[var(--ui-border)] lg:grid-cols-4">
+                            <div className="grid gap-px bg-[var(--ui-border)] lg:grid-cols-3">
                                 {tiers.map((tier) => (
                                     <article
                                         key={tier.key}
@@ -292,6 +312,62 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                         </ul>
                                     </article>
                                 ))}
+                                <article className="flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6">
+                                    <div>
+                                        <p className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--ui-text)]">Credit Packs</p>
+                                        <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Best for bursts and overflow</p>
+                                    </div>
+
+                                    <div className="mt-7">
+                                        <div className="flex items-end gap-1.5">
+                                            <h4 className="text-[40px] font-semibold leading-none tracking-[-0.05em] text-[var(--ui-text)] md:text-[46px]">{creditPackDisplay.amount}</h4>
+                                        </div>
+                                        <p className="mt-2 text-[12px] text-[var(--ui-text-subtle)]">{creditPackDisplay.note}</p>
+                                        <p className="mt-4 text-[14px] leading-7 text-[var(--ui-text-muted)]">One-time credits that stack with your balance and work alongside any active subscription.</p>
+                                    </div>
+
+                                    <div className="mt-6 grid grid-cols-3 gap-2">
+                                        {creditPackOptions.map((pack) => (
+                                            <button
+                                                key={pack.productKey}
+                                                type="button"
+                                                onClick={() => setSelectedCreditPackKey(pack.productKey)}
+                                                className={`rounded-[16px] border px-3 py-3 text-left transition-colors ${
+                                                    selectedCreditPack?.productKey === pack.productKey
+                                                        ? 'border-[var(--ui-primary)] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))]'
+                                                        : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface-3)]'
+                                                }`}
+                                            >
+                                                <div className="text-[13px] font-semibold text-[var(--ui-text)]">{pack.credits.toLocaleString()}</div>
+                                                <div className="mt-1 text-[11px] text-[var(--ui-text-subtle)]">credits</div>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => handleTierAction(selectedCreditPack?.productKey || 'credits_5000')}
+                                        className="mt-6 h-11 w-full rounded-[12px] border border-[var(--ui-primary)] bg-[var(--ui-surface-2)] text-[13px] font-semibold text-[var(--ui-primary)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))]"
+                                    >
+                                        Buy credits
+                                    </button>
+
+                                    <ul className="mt-7 space-y-3">
+                                        {[
+                                            `${selectedCreditPack?.credits?.toLocaleString() || '0'} additional credits`,
+                                            'One-time purchase',
+                                            'Stacks with paid plans',
+                                            'Good for launches and spikes',
+                                        ].map((feature) => (
+                                            <li key={feature} className="flex items-start gap-3 text-[13px] leading-6 text-[var(--ui-text-muted)]">
+                                                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text)]">
+                                                    <Check size={11} />
+                                                </span>
+                                                <span>{feature}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </article>
                             </div>
                         </div>
                     </div>

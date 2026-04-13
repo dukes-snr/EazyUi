@@ -192,9 +192,9 @@ function getPublicStructuredData(path: string, pageName: string) {
         description: 'AI UI design workspace for creating product screens, web app interfaces, dashboards, and export-ready design concepts.',
         offers: {
             '@type': 'Offer',
-            price: '0',
+            price: '24',
             priceCurrency: 'USD',
-            description: 'Free plan available',
+            description: 'Paid subscriptions and one-time credit packs',
         },
     };
     const webpage = {
@@ -1006,10 +1006,11 @@ function App() {
                     const status = await apiClient.getBillingCheckoutStatus(sessionId);
                     if (status.status === 'completed') {
                         window.dispatchEvent(new CustomEvent(BILLING_UPDATED_EVENT));
+                        const isCreditPackPurchase = typeof productKey === 'string' && productKey.startsWith('credits_');
                         pushToast({
                             kind: 'success',
-                            title: productKey === 'topup_1000' ? 'Top-up applied' : 'Billing updated',
-                            message: productKey === 'topup_1000'
+                            title: isCreditPackPurchase ? 'Credits applied' : 'Billing updated',
+                            message: isCreditPackPurchase
                                 ? `Your credits were updated. Balance is now ${status.summary.balanceCredits}.`
                                 : `Your billing update is now active on the account.`,
                         });

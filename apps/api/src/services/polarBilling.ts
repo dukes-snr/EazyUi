@@ -2,7 +2,9 @@ import { Polar } from '@polar-sh/sdk';
 import { validateEvent, WebhookVerificationError } from '@polar-sh/sdk/webhooks';
 
 export type BillingProviderName = 'polar' | 'stripe' | 'none';
-export type BillingCatalogProductKey = 'pro' | 'team' | 'topup_1000';
+export type BillingSubscriptionProductKey = 'pro' | 'team';
+export type BillingCreditPackProductKey = 'credits_1000' | 'credits_5000' | 'credits_10000';
+export type BillingCatalogProductKey = BillingSubscriptionProductKey | BillingCreditPackProductKey;
 
 export type BillingCatalogPrice = {
     productKey: BillingCatalogProductKey;
@@ -18,6 +20,7 @@ export type BillingCatalogPrice = {
 };
 
 let polarClient: Polar | null = null;
+const CREDIT_PACK_PRODUCT_KEYS: BillingCreditPackProductKey[] = ['credits_1000', 'credits_5000', 'credits_10000'];
 
 function resolvePolarAccessToken(): string {
     return String(process.env.POLAR_ACCESS_TOKEN || '').trim();
@@ -51,7 +54,9 @@ export function resolveBillingProviderName(stripeConfigured: boolean): BillingPr
 export function resolvePolarProductId(productKey: BillingCatalogProductKey): string {
     if (productKey === 'pro') return String(process.env.POLAR_PRODUCT_PRO_ID || '').trim();
     if (productKey === 'team') return String(process.env.POLAR_PRODUCT_TEAM_ID || '').trim();
-    return String(process.env.POLAR_PRODUCT_TOPUP_1000_ID || '').trim();
+    if (productKey === 'credits_1000') return String(process.env.POLAR_PRODUCT_CREDITS_1000_ID || '').trim();
+    if (productKey === 'credits_5000') return String(process.env.POLAR_PRODUCT_CREDITS_5000_ID || '').trim();
+    return String(process.env.POLAR_PRODUCT_CREDITS_10000_ID || '').trim();
 }
 
 export function resolvePlanFromPolarProductId(productId: string | null | undefined): 'pro' | 'team' | null {
@@ -65,7 +70,12 @@ export function resolvePlanFromPolarProductId(productId: string | null | undefin
 export function resolveTopupCreditsForPolarProductId(productId: string | null | undefined): number {
     const normalized = String(productId || '').trim();
     if (!normalized) return 0;
-    return normalized === resolvePolarProductId('topup_1000') ? 1000 : 0;
+    for (const productKey of CREDIT_PACK_PRODUCT_KEYS) {
+        if (normalized === resolvePolarProductId(productKey)) {
+            return Number(productKey.replace('credits_', '')) || 0;
+        }
+    }
+    return 0;
 }
 
 function derivePolarCatalogPrice(
@@ -111,7 +121,9 @@ export async function getPolarPricingCatalog(): Promise<Record<BillingCatalogPro
     const productIds: Record<BillingCatalogProductKey, string> = {
         pro: resolvePolarProductId('pro'),
         team: resolvePolarProductId('team'),
-        topup_1000: resolvePolarProductId('topup_1000'),
+        credits_1000: resolvePolarProductId('credits_1000'),
+        credits_5000: resolvePolarProductId('credits_5000'),
+        credits_10000: resolvePolarProductId('credits_10000'),
     };
 
     const fallback = (productKey: BillingCatalogProductKey): BillingCatalogPrice => ({
@@ -132,7 +144,9 @@ export async function getPolarPricingCatalog(): Promise<Record<BillingCatalogPro
         return {
             pro: fallback('pro'),
             team: fallback('team'),
-            topup_1000: fallback('topup_1000'),
+            credits_1000: fallback('credits_1000'),
+            credits_5000: fallback('credits_5000'),
+            credits_10000: fallback('credits_10000'),
         };
     }
 

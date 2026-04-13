@@ -1,7 +1,9 @@
 import Stripe from 'stripe';
 
 let stripeClient: Stripe | null = null;
-export type BillingCatalogProductKey = 'pro' | 'team' | 'topup_1000';
+export type BillingSubscriptionProductKey = 'pro' | 'team';
+export type BillingCreditPackProductKey = 'credits_1000' | 'credits_5000' | 'credits_10000';
+export type BillingCatalogProductKey = BillingSubscriptionProductKey | BillingCreditPackProductKey;
 
 export type BillingCatalogPrice = {
     productKey: BillingCatalogProductKey;
@@ -41,7 +43,9 @@ export async function getStripePricingCatalog(): Promise<Record<BillingCatalogPr
     const configuredPriceIds: Record<BillingCatalogProductKey, string> = {
         pro: String(process.env.STRIPE_PRICE_PRO_MONTHLY || '').trim(),
         team: String(process.env.STRIPE_PRICE_TEAM_MONTHLY || '').trim(),
-        topup_1000: String(process.env.STRIPE_PRICE_TOPUP_1000 || '').trim(),
+        credits_1000: String(process.env.STRIPE_PRICE_CREDITS_1000 || '').trim(),
+        credits_5000: String(process.env.STRIPE_PRICE_CREDITS_5000 || '').trim(),
+        credits_10000: String(process.env.STRIPE_PRICE_CREDITS_10000 || '').trim(),
     };
 
     const fallback = (productKey: BillingCatalogProductKey): BillingCatalogPrice => ({
@@ -61,7 +65,9 @@ export async function getStripePricingCatalog(): Promise<Record<BillingCatalogPr
         return {
             pro: fallback('pro'),
             team: fallback('team'),
-            topup_1000: fallback('topup_1000'),
+            credits_1000: fallback('credits_1000'),
+            credits_5000: fallback('credits_5000'),
+            credits_10000: fallback('credits_10000'),
         };
     }
 
@@ -95,7 +101,7 @@ export async function createStripeCheckoutSession(params: {
     successUrl: string;
     cancelUrl: string;
     uid: string;
-    productKey: 'pro' | 'team' | 'topup_1000';
+    productKey: BillingCatalogProductKey;
 }): Promise<Stripe.Checkout.Session> {
     const stripe = getStripeClient();
     if (!stripe) {
@@ -114,6 +120,14 @@ export async function createStripeCheckoutSession(params: {
             productKey: params.productKey,
         },
     });
+}
+
+export function resolveStripePriceId(productKey: BillingCatalogProductKey): string {
+    if (productKey === 'pro') return String(process.env.STRIPE_PRICE_PRO_MONTHLY || '').trim();
+    if (productKey === 'team') return String(process.env.STRIPE_PRICE_TEAM_MONTHLY || '').trim();
+    if (productKey === 'credits_1000') return String(process.env.STRIPE_PRICE_CREDITS_1000 || '').trim();
+    if (productKey === 'credits_5000') return String(process.env.STRIPE_PRICE_CREDITS_5000 || '').trim();
+    return String(process.env.STRIPE_PRICE_CREDITS_10000 || '').trim();
 }
 
 export async function createStripeBillingPortalSession(params: {

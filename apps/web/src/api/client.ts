@@ -466,7 +466,7 @@ export interface BillingUsageMeta {
 
 export interface BillingSummary {
     uid: string;
-    planId: 'free' | 'pro' | 'team';
+    planId: BillingPlanId;
     planLabel: string;
     status: 'active' | 'past_due' | 'cancelled';
     periodStartAt: string;
@@ -496,7 +496,7 @@ export interface BillingPurchaseItem {
     id: string;
     purchaseKind: 'subscription' | 'topup' | 'other';
     productKey?: string;
-    planId?: 'free' | 'pro' | 'team';
+    planId?: BillingPlanId;
     amountTotal: number;
     currency: string;
     quantity: number;
@@ -521,7 +521,7 @@ export interface BillingSummaryResponse {
 }
 
 export interface BillingCatalogPrice {
-    productKey: 'pro' | 'team' | 'topup_1000';
+    productKey: BillingCatalogProductKey;
     priceId: string | null;
     configured: boolean;
     active: boolean;
@@ -532,17 +532,17 @@ export interface BillingCatalogPrice {
     intervalCount: number | null;
 }
 
+export type BillingPlanId = 'free' | 'pro' | 'team';
+export type BillingSubscriptionProductKey = 'pro' | 'team';
+export type BillingCreditPackProductKey = 'credits_1000' | 'credits_5000' | 'credits_10000';
+export type BillingCatalogProductKey = BillingSubscriptionProductKey | BillingCreditPackProductKey;
+
 export interface BillingCatalogResponse {
     provider?: {
         name: 'polar' | 'stripe' | 'none';
         configured: boolean;
     };
     plans: {
-        free: {
-            productKey: 'free';
-            label: string;
-            monthlyCredits: number;
-        };
         pro: {
             productKey: 'pro';
             label: string;
@@ -555,12 +555,17 @@ export interface BillingCatalogResponse {
             monthlyCredits: number;
             price: BillingCatalogPrice;
         };
-        topup_1000: {
-            productKey: 'topup_1000';
+    };
+    creditPacks: {
+        label: string;
+        defaultProductKey: BillingCreditPackProductKey;
+        note?: string;
+        items: Array<{
+            productKey: BillingCreditPackProductKey;
             label: string;
             credits: number;
             price: BillingCatalogPrice;
-        };
+        }>;
     };
 }
 
@@ -613,7 +618,7 @@ export interface BillingCheckoutStatusResponse {
 }
 
 export interface BillingCheckoutSessionRequest {
-    productKey: 'pro' | 'team' | 'topup_1000';
+    productKey: BillingCatalogProductKey;
     successUrl: string;
     cancelUrl: string;
 }
