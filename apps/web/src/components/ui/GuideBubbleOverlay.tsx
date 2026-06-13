@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Sparkles, X } from 'lucide-react';
 
 type GuideBubblePlacement = 'top' | 'right' | 'bottom' | 'left';
 
@@ -9,6 +9,9 @@ export type GuideBubbleStep = {
     title: string;
     body: string;
     placement?: GuideBubblePlacement;
+    label?: string;
+    tip?: string;
+    focusPadding?: number;
 };
 
 type GuideBubbleOverlayProps = {
@@ -34,24 +37,24 @@ type FocusMaskRect = {
     height: number;
 };
 
-const BUBBLE_WIDTH = 280;
+const BUBBLE_WIDTH = 332;
 const VIEWPORT_PADDING = 18;
 const TARGET_MARGIN = 22;
 const TAIL_SIZE = 16;
-const FOCUS_PADDING = 12;
+const FOCUS_PADDING = 16;
 const SMALL_TARGET_CIRCLE_MAX_SIZE = 72;
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
 }
 
-function resolveFocusMaskRect(targetRect: DOMRect): FocusMaskRect {
+function resolveFocusMaskRect(targetRect: DOMRect, focusPadding = FOCUS_PADDING): FocusMaskRect {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
-    const top = clamp(targetRect.top - FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportHeight - VIEWPORT_PADDING));
-    const left = clamp(targetRect.left - FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING));
-    const right = clamp(targetRect.right + FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING));
-    const bottom = clamp(targetRect.bottom + FOCUS_PADDING, VIEWPORT_PADDING, Math.max(VIEWPORT_PADDING, viewportHeight - VIEWPORT_PADDING));
+    const top = clamp(targetRect.top - focusPadding, 0, viewportHeight);
+    const left = clamp(targetRect.left - focusPadding, 0, viewportWidth);
+    const right = clamp(targetRect.right + focusPadding, 0, viewportWidth);
+    const bottom = clamp(targetRect.bottom + focusPadding, 0, viewportHeight);
 
     return {
         top,
@@ -67,11 +70,11 @@ function shouldUseCircularFocus(targetRect: DOMRect) {
     return Math.max(targetRect.width, targetRect.height) <= SMALL_TARGET_CIRCLE_MAX_SIZE;
 }
 
-function resolveBubbleLayout(targetRect: DOMRect, placement: GuideBubblePlacement): BubbleLayout {
+function resolveBubbleLayout(targetRect: DOMRect, placement: GuideBubblePlacement, bubbleHeight: number): BubbleLayout {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
-    const bubbleWidth = Math.min(BUBBLE_WIDTH, Math.max(280, viewportWidth - (VIEWPORT_PADDING * 2)));
-    const bubbleHeightEstimate = 212;
+    const bubbleWidth = Math.min(BUBBLE_WIDTH, Math.max(240, viewportWidth - (VIEWPORT_PADDING * 2)));
+    const bubbleHeightEstimate = bubbleHeight || 246;
 
     let top = 0;
     let left = 0;
@@ -131,6 +134,10 @@ export function GuideBubbleOverlay({
     onSkip,
 }: GuideBubbleOverlayProps) {
     const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+    const [targetMissing, setTargetMissing] = useState(false);
+    const [bubbleHeight, setBubbleHeight] = useState(246);
+    const bubbleRef = useRef<HTMLDivElement | null>(null);
+    const scrollAdjustedStepRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (!step) {
@@ -142,15 +149,30 @@ export function GuideBubbleOverlay({
             const target = document.querySelector(`[data-guide-id="${step.targetId}"]`) as HTMLElement | null;
             if (!target) {
                 setTargetRect(null);
+                setTargetMissing(true);
                 return;
             }
+            setTargetMissing(false);
             const rect = target.getBoundingClientRect();
-            if (rect.top < 88 || rect.bottom > (window.innerHeight - 88)) {
-                target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
+            if (scrollAdjustedStepRef.current !== step.id) {
+                const visibleTop = 112;
+                const visibleBottom = window.innerHeight - 112;
+                let scrollDelta = 0;
+                if (rect.top < visibleTop) scrollDelta = rect.top - visibleTop;
+                else if (rect.top > visibleBottom) scrollDelta = rect.top - visibleBottom;
+                else if (rect.height < window.innerHeight * 0.55 && rect.bottom > visibleBottom) scrollDelta = rect.bottom - visibleBottom;
+
+                scrollAdjustedStepRef.current = step.id;
+                if (Math.abs(scrollDelta) > 2) {
+                    const scrollContainer = target.closest('.overflow-y-auto') as HTMLElement | null;
+                    if (scrollContainer) scrollContainer.scrollBy({ top: scrollDelta, behavior: 'smooth' });
+                    else window.scrollBy({ top: scrollDelta, behavior: 'smooth' });
+                }
             }
             setTargetRect(rect);
         };
 
+        scrollAdjustedStepRef.current = null;
         update();
         window.addEventListener('resize', update);
         window.addEventListener('scroll', update, true);
@@ -160,14 +182,35 @@ export function GuideBubbleOverlay({
         };
     }, [step]);
 
+    useEffect(() => {
+        const bubble = bubbleRef.current;
+        if (!bubble) return;
+        const update = () => setBubbleHeight(bubble.offsetHeight);
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(bubble);
+        return () => observer.disconnect();
+    }, [step]);
+
+    useEffect(() => {
+        if (!step) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onSkip();
+            if (event.key === 'ArrowLeft' && stepIndex > 0) onPrev();
+            if (event.key === 'ArrowRight') onNext();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [onNext, onPrev, onSkip, step, stepIndex]);
+
     const layout = useMemo(() => {
         if (!step || !targetRect) return null;
-        return resolveBubbleLayout(targetRect, step.placement || 'bottom');
-    }, [step, targetRect]);
+        return resolveBubbleLayout(targetRect, step.placement || 'bottom', bubbleHeight);
+    }, [bubbleHeight, step, targetRect]);
     const focusMaskRect = useMemo(() => {
         if (!targetRect) return null;
-        return resolveFocusMaskRect(targetRect);
-    }, [targetRect]);
+        return resolveFocusMaskRect(targetRect, step?.focusPadding);
+    }, [step?.focusPadding, targetRect]);
     const useCircularFocus = useMemo(() => {
         if (!targetRect) return false;
         return shouldUseCircularFocus(targetRect);
@@ -176,125 +219,104 @@ export function GuideBubbleOverlay({
         if (!targetRect || !useCircularFocus) return null;
         const centerX = targetRect.left + (targetRect.width / 2);
         const centerY = targetRect.top + (targetRect.height / 2);
-        const radius = Math.max(targetRect.width, targetRect.height) / 2 + FOCUS_PADDING;
-        const maskImage = `radial-gradient(circle ${radius}px at ${centerX}px ${centerY}px, transparent ${Math.max(0, radius - 0.5)}px, black ${radius + 0.5}px)`;
+        const radius = Math.max(targetRect.width, targetRect.height) / 2 + (step?.focusPadding ?? FOCUS_PADDING);
+        const maskImage = `radial-gradient(circle ${radius + 24}px at ${centerX}px ${centerY}px, transparent 0%, transparent 62%, rgba(0,0,0,0.22) 76%, black 100%)`;
 
         return {
             WebkitMaskImage: maskImage,
             maskImage,
         } as const;
-    }, [targetRect, useCircularFocus]);
+    }, [step?.focusPadding, targetRect, useCircularFocus]);
+    const featheredFocusMaskStyle = useMemo(() => {
+        if (!focusMaskRect) return null;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const radius = Math.min(18, Math.max(8, Math.min(focusMaskRect.width, focusMaskRect.height) * 0.12));
+        const blur = 14;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${viewportWidth}" height="${viewportHeight}" viewBox="0 0 ${viewportWidth} ${viewportHeight}"><defs><filter id="b" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${blur}"/></filter><mask id="m" maskUnits="userSpaceOnUse"><rect width="100%" height="100%" fill="white"/><rect x="${focusMaskRect.left}" y="${focusMaskRect.top}" width="${focusMaskRect.width}" height="${focusMaskRect.height}" rx="${radius}" fill="black" filter="url(#b)"/><rect x="${focusMaskRect.left}" y="${focusMaskRect.top}" width="${focusMaskRect.width}" height="${focusMaskRect.height}" rx="${radius}" fill="black"/></mask></defs><rect width="100%" height="100%" fill="white" mask="url(#m)"/></svg>`;
+        const maskImage = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+        return { WebkitMaskImage: maskImage, maskImage } as const;
+    }, [focusMaskRect]);
 
-    if (!step || !targetRect || !layout || !focusMaskRect) return null;
+    if (!step) return null;
 
     const isLastStep = stepIndex >= stepCount - 1;
+    const tourLabel = step.label || (
+        step.targetId.startsWith('canvas-') ? 'Canvas essentials'
+            : step.targetId.startsWith('chat-') ? 'Build with AI'
+                : step.targetId.startsWith('edit-') ? 'Screen editor'
+                    : 'Workspace essentials'
+    );
+    const bubbleStyle = targetMissing || !layout
+        ? { top: '50%', left: '50%', width: Math.min(BUBBLE_WIDTH, window.innerWidth - 36), transform: 'translate(-50%, -50%)' }
+        : { top: layout.bubble.top, left: layout.bubble.left, width: layout.bubble.width };
 
     return (
-        <div className="pointer-events-none fixed inset-0 z-[160]">
-            {useCircularFocus && circularFocusMaskStyle ? (
+        <div className="pointer-events-none fixed inset-0 z-[160]" role="dialog" aria-modal="true" aria-label={tourLabel}>
+            {targetMissing || !focusMaskRect ? (
+                <div className="absolute inset-0 bg-[rgba(14,19,17,0.32)] backdrop-blur-[3px]" />
+            ) : useCircularFocus && circularFocusMaskStyle ? (
                 <div
-                    className="absolute inset-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
+                    className="absolute inset-0 bg-[rgba(14,19,17,0.3)] backdrop-blur-[3px]"
                     style={circularFocusMaskStyle}
                 />
             ) : (
-                <>
-                    <div
-                        className="absolute left-0 right-0 top-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
-                        style={{ height: focusMaskRect.top }}
-                    />
-                    <div
-                        className="absolute bottom-0 left-0 right-0 bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
-                        style={{ top: focusMaskRect.bottom }}
-                    />
-                    <div
-                        className="absolute bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
-                        style={{
-                            top: focusMaskRect.top,
-                            left: 0,
-                            width: focusMaskRect.left,
-                            height: focusMaskRect.height,
-                        }}
-                    />
-                    <div
-                        className="absolute bg-[color:color-mix(in_srgb,var(--ui-bg)_34%,rgba(6,8,12,0.32))] backdrop-blur-[10px]"
-                        style={{
-                            top: focusMaskRect.top,
-                            left: focusMaskRect.right,
-                            right: 0,
-                            height: focusMaskRect.height,
-                        }}
-                    />
-                </>
+                <div className="absolute inset-0 bg-[rgba(14,19,17,0.3)] backdrop-blur-[3px]" style={featheredFocusMaskStyle || undefined} />
             )}
+            {!targetMissing && layout && <div className="absolute h-4 w-4 rounded-[3px] border border-black/10 bg-white" style={{ top: layout.tail.top, left: layout.tail.left, transform: layout.tail.rotation }} />}
             <div
-                className="absolute h-3.5 w-3.5 rounded-[2px] border border-[var(--ui-border)] bg-[var(--ui-popover)]"
-                style={{
-                    top: layout.tail.top,
-                    left: layout.tail.left,
-                    transform: layout.tail.rotation,
-                }}
-            />
-            <div
-                className="pointer-events-auto absolute rounded-lg border border-[var(--ui-border)] bg-[var(--ui-popover)] px-3 py-2 text-sm text-[var(--ui-text)]"
-                style={{
-                    top: layout.bubble.top,
-                    left: layout.bubble.left,
-                    width: layout.bubble.width,
-                }}
+                ref={bubbleRef}
+                className="pointer-events-auto absolute overflow-hidden rounded-[20px] border border-black/10 bg-white/95 text-[#171814] shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-2xl"
+                style={bubbleStyle}
             >
-                <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ui-text-subtle)]">
-                            Workspace guide
-                        </p>
-                        <h3 className="mt-1.5 text-[16px] font-semibold leading-5 tracking-[-0.02em] text-[var(--ui-text)]">
-                            {step.title}
-                        </h3>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={onSkip}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
-                        aria-label="Close guide"
-                    >
-                        <X size={14} />
-                    </button>
+                <div className="h-1 bg-black/[0.06]">
+                    <div className="h-full bg-[#0e1311] transition-[width] duration-300" style={{ width: `${((stepIndex + 1) / stepCount) * 100}%` }} />
                 </div>
-
-                <p className="mt-2 text-[13px] leading-5 text-[var(--ui-text-muted)]">
-                    {step.body}
-                </p>
-
-                <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-[12px] font-medium text-[var(--ui-text-subtle)]">
-                        {stepIndex + 1} of {stepCount}
-                    </span>
-                    <div className="flex items-center gap-2">
+                <div className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.17em] text-[#8b867f]">
+                                <Sparkles size={11} /> {tourLabel}
+                            </p>
+                            <h3 className="mt-2 text-[18px] font-bold leading-[1.15] tracking-[-0.035em] text-[#171814]">
+                            {step.title}
+                            </h3>
+                        </div>
                         <button
                             type="button"
                             onClick={onSkip}
-                            className="inline-flex h-8 items-center justify-center rounded-md px-2 text-[12px] font-medium text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[#8b867f] transition-colors hover:bg-black/[0.05] hover:text-black"
+                            aria-label="Close guide"
                         >
-                            Skip
+                            <X size={14} />
                         </button>
-                        {stepIndex > 0 && (
+                    </div>
+
+                    <p className="mt-3 text-[13px] font-medium leading-[1.55] text-[#68645e]">{step.body}</p>
+                    {step.tip && <p className="mt-3 rounded-[10px] bg-black/[0.035] px-3 py-2 text-[11px] leading-4 text-[#77726b]">{step.tip}</p>}
+                    {targetMissing && <p className="mt-3 rounded-[10px] bg-amber-50 px-3 py-2 text-[11px] text-amber-800">This control is not visible right now. Continue to the next step or reopen the tour from Help later.</p>}
+
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-1.5" aria-label={`Step ${stepIndex + 1} of ${stepCount}`}>
+                            {Array.from({ length: stepCount }, (_, index) => (
+                                <span key={index} className={`h-1.5 rounded-full transition-all ${index === stepIndex ? 'w-5 bg-[#0e1311]' : index < stepIndex ? 'w-1.5 bg-[#8f9993]' : 'w-1.5 bg-black/10'}`} />
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {stepIndex > 0 && (
                             <button
                                 type="button"
                                 onClick={onPrev}
-                                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-popover)] px-2.5 text-[12px] font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-2)]"
+                                className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[11px] font-bold text-[#77726b] transition-colors hover:bg-black/[0.04] hover:text-black"
                             >
                                 <ChevronLeft size={14} />
                                 Back
                             </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={onNext}
-                            className="inline-flex h-8 items-center gap-1 rounded-md bg-[var(--ui-surface-2)] px-2.5 text-[12px] font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-surface-3)]"
-                        >
-                            {isLastStep ? 'Done' : 'Next'}
-                            {!isLastStep && <ChevronRight size={14} />}
-                        </button>
+                            )}
+                            <button type="button" onClick={onNext} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#0e1311] px-4 text-[11px] font-bold text-white transition-colors hover:bg-[#28342d]">
+                                {isLastStep ? <><Check size={13} /> Finish</> : <>Next <ChevronRight size={14} /></>}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

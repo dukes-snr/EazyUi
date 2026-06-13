@@ -1,4 +1,4 @@
-import { ArrowUp, Check, ChevronLeft, ChevronRight, CircleHelp, CircleStar, FolderOpen, Gem, Home, LayoutGrid, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, BookOpen, Check, ChevronLeft, ChevronRight, CircleHelp, CircleStar, FolderOpen, Gem, Home, LayoutGrid, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { apiClient, type BillingSummary, type HtmlScreen } from '../../api/client';
@@ -17,6 +17,7 @@ import {
   replaceComposerReferenceTrigger,
   type ComposerReferenceTextRange,
 } from '../../utils/composerReferences';
+import { readProjectListCache, writeProjectListCache } from '../../utils/projectListCache';
 import { ConfirmationDialog } from '../ui/ConfirmationDialog';
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
@@ -44,36 +45,43 @@ type ProjectListItem = {
 
 const LANDING_DRAFT_KEY = 'eazyui:landing-draft';
 const SIDEBAR_EXPANDED_WIDTH = 290;
-const SIDEBAR_COLLAPSED_WIDTH = 48;
+const SIDEBAR_COLLAPSED_WIDTH = 64;
 const WORKSPACE_GUIDE_ID = 'workspace-first-run';
+const PROJECT_LIST_CACHE_MAX_AGE = 1000 * 60 * 5;
+
+const projectScreensMemoryCache = new Map<string, { updatedAt: string; screens: HtmlScreen[] }>();
 
 const WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
   {
-    id: 'workspace-new-project',
-    targetId: 'workspace-nav-new-project',
-    title: 'Start a blank project',
-    body: 'Use this when you want a fresh project directly without writing a prompt first.',
-    placement: 'right',
-  },
-  {
     id: 'workspace-starter-prompt',
     targetId: 'workspace-starter-prompt',
-    title: 'Describe what you want to build',
-    body: 'Write the screen, flow, or product idea here. You can also add references and images before generating.',
+    title: 'Start with the outcome you need',
+    body: 'Describe the product, screen, or user flow in plain language. Add references, choose a device, and set the generation mode before you send it.',
+    tip: 'A focused prompt with audience, purpose, and visual direction produces stronger first results.',
     placement: 'bottom',
   },
   {
     id: 'workspace-create-submit',
     targetId: 'workspace-create-submit',
-    title: 'Generate from your prompt',
-    body: 'Press this to turn your request into a new project workspace.',
+    title: 'Create the project workspace',
+    body: 'Send your request when the brief is ready. EazyUI creates the project, generates its first screens, and opens the canvas automatically.',
+    tip: 'You can keep refining the project with follow-up prompts after generation.',
     placement: 'left',
+  },
+  {
+    id: 'workspace-new-project',
+    targetId: 'workspace-nav-new-project',
+    title: 'Or begin with a blank project',
+    body: 'Use New Project when you want to enter the canvas first and shape the brief from inside the project.',
+    focusPadding: 22,
+    placement: 'right',
   },
   {
     id: 'workspace-project-library',
     targetId: 'workspace-project-library',
-    title: 'Come back to any project here',
-    body: 'Everything you create appears in this list so you can reopen it and keep editing later.',
+    title: 'Continue where you left off',
+    body: 'Every saved project appears here. Browse its screens, move between previews, or open the project to continue designing.',
+    tip: 'Use the three-dot menu for project actions without opening the canvas.',
     placement: 'top',
   },
 ];
@@ -260,6 +268,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [activeProjectScreenIndexes, setActiveProjectScreenIndexes] = useState<Record<string, number>>({});
   const [projectScreenTransitions, setProjectScreenTransitions] = useState<Record<string, ProjectScreenTransition>>({});
   const projectScreenTransitionTimersRef = useRef<Record<string, number[]>>({});
+  const projectScreenNavigationQueueRef = useRef<Record<string, Array<-1 | 1>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const starterPromptRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
@@ -269,7 +278,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
-  const isLight = true;
+  const isLight = theme === 'light';
   const shouldReduceMotion = useReducedMotion();
   const workspaceWordmark = isLight ? eazyuiWordmarkLight : eazyuiWordmark;
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
@@ -291,20 +300,10 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           ? Smile
           : CircleStar;
   const sidebarNavItems = [
-    // {
-    //   id: 'workspace-home',
-    //   label: 'Workspace Home',
-    //   subtitle: 'Overview',
-    //   Icon: House,
-    //   active: false,
-    //   iconClassName: '',
-    //   onClick: () => onNavigate('/app'),
-    // },
     {
       id: 'projects',
-      label: 'Projects',
-      subtitle: 'Library',
-      Icon: FolderOpen,
+      label: 'All Projects',
+      Icon: LayoutGrid,
       active: true,
       iconClassName: '',
       onClick: () => onNavigate('/app/projects'),
@@ -312,21 +311,24 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     {
       id: 'new-project',
       label: 'New Project',
-      subtitle: 'Start fresh',
       Icon: Plus,
       active: false,
       iconClassName: '',
       onClick: () => onNavigate('/app/projects/new'),
     },
     {
-      id: 'refresh-projects',
-      label: 'Refresh',
-      subtitle: 'Sync list',
-      Icon: RefreshCcw,
+      id: 'templates',
+      label: 'Templates',
+      Icon: Sparkles,
       active: false,
-      onClick: () => void loadProjects(),
-      iconClassName: loading ? 'animate-spin' : '',
+      onClick: () => onNavigate('/templates'),
+      iconClassName: '',
     },
+  ] as const;
+  const sidebarResourceItems = [
+    { id: 'learn', label: 'Learn', Icon: BookOpen, onClick: () => onNavigate('/learn') },
+    { id: 'updates', label: "What's New", Icon: Zap, onClick: () => onNavigate('/changelog') },
+    { id: 'help', label: 'Help & Support', Icon: CircleHelp, onClick: () => startGuide(WORKSPACE_GUIDE_ID) },
   ] as const;
   const sidebarWidth = sidebarExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
   const sidebarLabelClassName = sidebarExpanded
@@ -334,10 +336,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     : 'pointer-events-none max-w-0 -translate-x-2 opacity-0';
   const workspaceOwnerLabel = authDisplayName === 'User' ? 'Your workspace' : `${authDisplayName}'s workspace`;
   const sidebarRecentProjects = projects.slice(0, 3);
-  const sidebarPrimaryLabel = projects[0]?.name || 'Projects';
   const avatarMenuPositionClassName = 'top-[50px] left-full ml-5';
   const avatarMenuWidthClassName = 'w-[260px]';
-  const shellBadgeClassName = 'border-black/10 bg-white/55 text-[#505050] backdrop-blur-md';
   const avatarMenuCardClassName = isLight
     ? 'border-black/10 bg-[var(--ui-surface-3)] text-slate-700'
     : 'border-white/[0.08] bg-[var(--ui-surface-3)] text-slate-200';
@@ -349,27 +349,38 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const avatarMenuStrongTextClassName = isLight ? 'text-slate-900' : 'text-slate-50';
   const avatarMenuMutedTextClassName = isLight ? 'text-slate-500' : 'text-slate-400';
   const desktopWorkspaceBgClassName = 'workspace-cream-root';
-  const desktopSidebarClassName = 'workspace-cream-sidebar border-r border-black/[0.07]';
-  const desktopSidebarToggleClassName = 'border-black/[0.08] bg-white text-[#6f6a62] shadow-sm hover:bg-[#f4f4f4] hover:text-black';
-  const desktopSidebarHoverClassName = 'hover:bg-black/[0.035]';
-  const desktopSidebarSurfaceClassName = 'bg-white/65 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset] hover:bg-white';
-  const desktopSidebarDividerClassName = 'bg-black/[0.07]';
-  const desktopSidebarInlineHoverClassName = 'hover:bg-black/[0.04] hover:text-black';
+  const desktopSidebarClassName = 'workspace-cream-sidebar';
+  const desktopSidebarToggleClassName = 'workspace-sidebar-toggle';
+  const desktopSidebarHoverClassName = 'workspace-sidebar-account';
+  const desktopSidebarDividerClassName = 'workspace-sidebar-divider';
   const projectWorkspaceSurfaceClassName = 'workspace-cream-content';
   const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
   const hasSeenWorkspaceGuide = seenGuideIds.includes(WORKSPACE_GUIDE_ID);
   const isWorkspaceGuideActive = activeGuideId === WORKSPACE_GUIDE_ID;
   const activeWorkspaceGuideStep = isWorkspaceGuideActive ? WORKSPACE_GUIDE_STEPS[guideStepIndex] || null : null;
 
-  async function loadProjects() {
-    if (!authReady || !isAuthenticated) return;
+  async function loadProjects(force = false) {
+    if (!authReady || !isAuthenticated || !authUser?.uid) return;
+    const cache = readProjectListCache<ProjectListItem>(authUser.uid);
+    const hasCachedProjects = Boolean(cache);
+    if (cache) {
+      setProjects(sortProjects(cache.projects));
+    }
+    if (!force && cache && (Date.now() - cache.cachedAt) < PROJECT_LIST_CACHE_MAX_AGE) {
+      setLoading(false);
+      return;
+    }
     try {
-      setLoading(true);
+      setLoading(!hasCachedProjects);
       setError(null);
       const res = await apiClient.listProjects();
-      setProjects(sortProjects(res.projects || []));
+      const nextProjects = sortProjects(res.projects || []);
+      setProjects(nextProjects);
+      writeProjectListCache(authUser.uid, nextProjects);
     } catch (err) {
-      setError((err as Error).message || 'Failed to load projects.');
+      if (!hasCachedProjects) {
+        setError((err as Error).message || 'Failed to load projects.');
+      }
     } finally {
       setLoading(false);
     }
@@ -465,16 +476,30 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   };
 
   useEffect(() => {
-    if (!authReady || !isAuthenticated) return;
+    if (!authReady || !isAuthenticated || !authUser?.uid) return;
     void loadProjects();
     void loadBillingSummary();
-  }, [authReady, isAuthenticated]);
+  }, [authReady, authUser?.uid, isAuthenticated]);
 
   useEffect(() => {
-    if (!authReady || !isAuthenticated || projects.length === 0) return;
+    if (!authReady || !isAuthenticated || !authUser?.uid || projects.length === 0) return;
     let cancelled = false;
 
-    const projectsToLoad = projects.filter((project) => !projectScreens[project.id]);
+    const cachedScreens: Record<string, HtmlScreen[]> = {};
+    projects.forEach((project) => {
+      const cached = projectScreensMemoryCache.get(`${authUser.uid}:${project.id}`);
+      if (!Object.prototype.hasOwnProperty.call(projectScreens, project.id) && cached?.updatedAt === project.updatedAt) {
+        cachedScreens[project.id] = cached.screens;
+      }
+    });
+    if (Object.keys(cachedScreens).length > 0) {
+      setProjectScreens((current) => ({ ...cachedScreens, ...current }));
+    }
+
+    const projectsToLoad = projects.filter((project) => {
+      if (projectScreens[project.id]) return false;
+      return !Object.prototype.hasOwnProperty.call(cachedScreens, project.id);
+    });
     if (projectsToLoad.length === 0) return;
 
     void Promise.allSettled(projectsToLoad.map(async (project) => {
@@ -489,8 +514,18 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') {
           loadedScreens[result.value.projectId] = result.value.screens;
+          const project = projectsToLoad[index];
+          projectScreensMemoryCache.set(`${authUser.uid}:${project.id}`, {
+            updatedAt: project.updatedAt,
+            screens: result.value.screens,
+          });
         } else {
           loadedScreens[projectsToLoad[index].id] = [];
+          const project = projectsToLoad[index];
+          projectScreensMemoryCache.set(`${authUser.uid}:${project.id}`, {
+            updatedAt: project.updatedAt,
+            screens: [],
+          });
         }
       });
       if (Object.keys(loadedScreens).length > 0) {
@@ -501,7 +536,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     return () => {
       cancelled = true;
     };
-  }, [authReady, isAuthenticated, projectScreens, projects]);
+  }, [authReady, authUser?.uid, isAuthenticated, projectScreens, projects]);
 
   useEffect(() => () => {
     Object.values(projectScreenTransitionTimersRef.current).flat().forEach((timer) => window.clearTimeout(timer));
@@ -653,7 +688,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     let removedProjects: ProjectListItem[] = [];
     setProjects((prev) => {
       removedProjects = prev.filter((project) => deletingSet.has(project.id));
-      return prev.filter((project) => !deletingSet.has(project.id));
+      const nextProjects = prev.filter((project) => !deletingSet.has(project.id));
+      if (authUser?.uid) writeProjectListCache(authUser.uid, nextProjects);
+      return nextProjects;
     });
 
     const failedIds: string[] = [];
@@ -674,7 +711,11 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     if (failedIds.length > 0) {
       const failedSet = new Set(failedIds);
       const restoreItems = removedProjects.filter((project) => failedSet.has(project.id));
-      setProjects((prev) => sortProjects([...prev, ...restoreItems]));
+      setProjects((prev) => {
+        const nextProjects = sortProjects([...prev, ...restoreItems]);
+        if (authUser?.uid) writeProjectListCache(authUser.uid, nextProjects);
+        return nextProjects;
+      });
       setError(
         failedIds.length === 1
           ? 'Failed to delete one project. It has been restored.'
@@ -779,212 +820,70 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   };
 
   if (!authReady) {
-    return <div className="h-screen w-screen grid place-items-center bg-white text-[#505050]">Loading workspace...</div>;
+    return <div className="h-screen w-screen grid place-items-center bg-[var(--ui-bg)] text-[var(--ui-text-muted)]">Loading workspace...</div>;
   }
 
   if (!isAuthenticated) {
-    return <div className="h-screen w-screen grid place-items-center bg-white text-rose-700">You need to be logged in.</div>;
+    return <div className="h-screen w-screen grid place-items-center bg-[var(--ui-bg)] text-[var(--color-error)]">You need to be logged in.</div>;
   }
 
   return (
     <div className={`h-screen w-screen overflow-hidden text-[var(--ui-text)] [font-family:'Schibsted_Grotesk',sans-serif] ${desktopWorkspaceBgClassName}`}>
       {isMobileViewport && isMobileSidebarOpen && (
-        <div
-          className="fixed inset-0 z-[120] bg-[color:color-mix(in_srgb,var(--workspace-backdrop)_82%,black)]/85 backdrop-blur-md lg:hidden"
-          onClick={() => setIsMobileSidebarOpen(false)}
-        >
-          <div
-            className={`flex h-full w-full max-w-[15rem] flex-col border-r ${desktopSidebarClassName}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex h-full min-h-0 flex-col px-3 py-4">
-              <div className="relative z-20">
-                <div className="flex items-start justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMobileSidebarOpen(false);
-                      onNavigate('/app/projects');
-                    }}
-                    className={`flex min-w-0 flex-1 items-center gap-3 rounded-[14px] px-1 py-1 text-left transition-colors ${desktopSidebarHoverClassName}`}
-                    title="Account"
-                  >
-                    <span className={`h-9 w-9 shrink-0 overflow-hidden rounded-[11px] border ${isLight ? 'border-black/[0.08] bg-[#ece4d8]' : 'border-white/[0.08] bg-[#24262d]'}`}>
-                      <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" />
-                    </span>
-                    <span className="min-w-0 overflow-hidden">
-                      <span className="block truncate text-[13px] font-medium text-[var(--ui-text)]">{workspaceOwnerLabel}</span>
-                      <span className="block text-[11px] text-[var(--ui-text-muted)]">1 Member</span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileSidebarOpen(false)}
-                    className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${desktopSidebarToggleClassName}`}
-                    aria-label="Close menu"
-                    title="Close menu"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileSidebarOpen(false);
-                  if (projects[0]?.id) {
-                    onOpenProject(projects[0].id);
-                    return;
-                  }
-                  onNavigate('/app/projects');
-                }}
-                className={`mt-4 flex items-center justify-between rounded-[10px] px-3 py-2.5 transition-colors ${desktopSidebarSurfaceClassName}`}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="grid h-4 w-4 place-items-center rounded-full bg-white/10 text-[8px] text-[var(--ui-text-subtle)]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  </span>
-                  <span className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)]">{sidebarPrimaryLabel}</span>
-                </span>
-                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-300">New</span>
+        <div className="fixed inset-0 z-[120] bg-black/20 backdrop-blur-[3px] lg:hidden" onClick={() => setIsMobileSidebarOpen(false)}>
+          <aside className="workspace-mobile-sidebar" onClick={(event) => event.stopPropagation()}>
+            <div className="workspace-mobile-sidebar__header">
+              <button type="button" onClick={() => onNavigate('/app/projects')} className="workspace-mobile-sidebar__account">
+                <img src={authPhotoUrl} alt={authDisplayName} />
+                <span><strong>{workspaceOwnerLabel}</strong><small>{authEmail}</small></span>
               </button>
-
-              <div className={`mt-4 h-px ${desktopSidebarDividerClassName}`} />
-
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <nav className="mt-4 flex flex-col gap-1">
-                  {sidebarNavItems.map(({ id, label, Icon, active, onClick, iconClassName }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        setIsMobileSidebarOpen(false);
-                        onClick();
-                      }}
-                      className={`group flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition-colors ${active
-                        ? `${desktopSidebarSurfaceClassName} text-[var(--ui-text)]`
-                        : `text-[var(--ui-text-muted)] ${desktopSidebarInlineHoverClassName}`}`}
-                    >
-                      <span className="grid h-4 w-4 place-items-center text-[var(--ui-text-subtle)]">
-                        <Icon size={14} className={iconClassName} />
-                      </span>
-                      <span className="truncate text-[14px] font-medium">{label}</span>
-                    </button>
-                  ))}
-                </nav>
-
-                <div className="mt-5 space-y-5 pb-4">
-                  <div>
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Favorites</p>
-                    <p className="mt-3 text-[12px] text-[var(--ui-text-subtle)]">No favorites yet</p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Recent Projects</p>
-                    <div className="mt-3 space-y-2">
-                      {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => {
-                            setIsMobileSidebarOpen(false);
-                            onOpenProject(project.id);
-                          }}
-                          className={`block w-full truncate rounded-[10px] px-2 py-1 text-left text-[13px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
-                          title={project.name}
-                        >
-                          {project.name || 'Untitled project'}
-                        </button>
-                      )) : (
-                        <p className="text-[12px] text-[var(--ui-text-subtle)]">No recent projects yet</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Workspace</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsMobileSidebarOpen(false);
-                        onNavigate('/app/projects');
-                      }}
-                      className={`mt-3 flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
-                    >
-                      <LayoutGrid size={14} className="text-[var(--ui-text-subtle)]" />
-                      <span className="text-[14px] font-medium">All Workspace</span>
-                    </button>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Private</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsMobileSidebarOpen(false);
-                        onNavigate('/app/projects');
-                      }}
-                      className={`mt-3 flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
-                    >
-                      <LayoutGrid size={14} className="text-[var(--ui-text-subtle)]" />
-                      <span className="text-[14px] font-medium">All Private</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMobileSidebarOpen(false);
-                    onNavigate('/');
-                  }}
-                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
-                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
-                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
-                  title="Home"
-                >
-                  <Home size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
-                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
-                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
-                  title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-                >
-                  {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMobileSidebarOpen(false);
-                    startGuide(WORKSPACE_GUIDE_ID);
-                  }}
-                  className={`grid h-9 w-9 place-items-center rounded-[12px] border transition-colors ${isLight
-                    ? 'border-black/[0.08] bg-black/[0.04] text-slate-500 hover:text-slate-900 hover:bg-black/[0.08]'
-                    : 'border-white/[0.08] bg-white/[0.04] text-[var(--ui-text-muted)] hover:bg-white/[0.08] hover:text-[var(--ui-text)]'}`}
-                  title="Get help"
-                >
-                  <CircleHelp size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMobileSidebarOpen(false);
-                    void handleSignOut();
-                  }}
-                  className="grid h-9 w-9 place-items-center rounded-[12px] border border-rose-400/18 bg-rose-500/10 text-rose-300 transition-colors hover:bg-rose-500/16"
-                  title="Logout"
-                >
-                  <LogOut size={16} />
-                </button>
-              </div>
+              <button type="button" onClick={() => setIsMobileSidebarOpen(false)} className="workspace-mobile-sidebar__close" aria-label="Close menu"><X size={16} /></button>
             </div>
-          </div>
+
+            <button type="button" onClick={() => { setIsMobileSidebarOpen(false); onNavigate('/app/projects/new'); }} className="workspace-sidebar-create mt-5">
+              <Plus size={15} /><span>New project</span><span className="workspace-sidebar-shortcut">N</span>
+            </button>
+
+            <div className="workspace-mobile-sidebar__scroll">
+              <p className="workspace-sidebar-section-label mt-6">Workspace</p>
+              <nav className="mt-3 flex flex-col gap-1">
+                {sidebarNavItems.map(({ id, label, Icon, active, onClick, iconClassName }) => (
+                  <button key={id} type="button" onClick={() => { setIsMobileSidebarOpen(false); onClick(); }} className={`workspace-sidebar-link ${active ? 'is-active' : ''}`}>
+                    <Icon size={15} className={iconClassName} /><span>{label}</span>
+                    {id === 'projects' && <span className="workspace-sidebar-count">{projects.length}</span>}
+                  </button>
+                ))}
+              </nav>
+
+              <p className="workspace-sidebar-section-label mt-7">Recent</p>
+              <div className="mt-3 flex flex-col gap-1">
+                {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
+                  <button key={project.id} type="button" onClick={() => { setIsMobileSidebarOpen(false); onOpenProject(project.id); }} className="workspace-sidebar-recent">
+                    <span>{(project.name || 'U').slice(0, 1).toUpperCase()}</span><span>{project.name || 'Untitled project'}</span>
+                  </button>
+                )) : <p className="workspace-sidebar-empty">No recent projects</p>}
+              </div>
+
+              <p className="workspace-sidebar-section-label mt-7">Resources</p>
+              <nav className="mt-3 flex flex-col gap-1">
+                {sidebarResourceItems.map(({ id, label, Icon, onClick }) => (
+                  <button key={id} type="button" onClick={() => { setIsMobileSidebarOpen(false); onClick(); }} className="workspace-sidebar-link">
+                    <Icon size={15} /><span>{label}</span>
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="workspace-sidebar-upgrade">
+              <div className="workspace-sidebar-upgrade__icon"><Gem size={16} /></div>
+              <div><p>Build without limits</p><span>{billingSummary?.balanceCredits ?? '...'} credits remaining</span></div>
+              <button type="button" onClick={() => onNavigate('/pricing')}>View plans</button>
+            </div>
+            <div className="workspace-sidebar-footer">
+              <button type="button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}<span>Appearance</span></button>
+              <button type="button" onClick={() => void handleSignOut()}><LogOut size={15} /><span>Sign out</span></button>
+            </div>
+          </aside>
         </div>
       )}
       <div className="workspace-shell-frame flex h-full overflow-hidden">
@@ -1001,7 +900,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           >
             {sidebarExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
           </button>
-          <div className={`flex h-full min-h-0 flex-col ${sidebarExpanded ? 'px-3 py-4' : 'items-center px-2 py-4'}`}>
+          <div className={`flex h-full min-h-0 flex-col ${sidebarExpanded ? 'px-3 py-4' : 'workspace-sidebar-rail items-center px-2 py-4'}`}>
             <div className="relative z-20" ref={avatarMenuRef}>
               <div className="flex">
                 <button
@@ -1092,7 +991,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     </button>
                     <button
                       type="button"
-                      onClick={() => void loadProjects()}
+                      onClick={() => void loadProjects(true)}
                       className={`flex w-full items-center justify-between rounded-[12px] px-2 py-3 text-left transition-colors ${avatarMenuRowClassName}`}
                     >
                       <span className="inline-flex items-center gap-3">
@@ -1134,127 +1033,92 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
               type="button"
               onClick={() => onNavigate('/app/projects/new')}
               data-guide-id="workspace-nav-new-project"
-              className={`mt-4 flex items-center justify-between transition-colors ${sidebarExpanded ? `rounded-[10px] px-3 py-2.5 ${desktopSidebarSurfaceClassName}` : 'h-11 w-11 justify-center bg-transparent'}`}
+              className={`workspace-sidebar-create mt-5 ${sidebarExpanded ? '' : 'is-collapsed'}`}
               title="Start new project"
             >
-              <span className={`flex min-w-0 items-center gap-2 ${sidebarExpanded ? '' : 'w-full justify-center'}`}>
-                <span className={`grid h-4 w-4 place-items-center text-[8px] ${sidebarExpanded ? 'rounded-full bg-white/10 text-[var(--ui-text-subtle)]' : 'mx-auto text-[var(--ui-text-muted)]'}`}>
-                  <Plus size={10} />
-                </span>
-                <span className={`truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--ui-text)] ${sidebarExpanded ? '' : 'hidden'}`}>{sidebarPrimaryLabel}</span>
-              </span>
-              {sidebarExpanded ? (
-                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">New</span>
-              ) : null}
+              <Plus size={15} />
+              {sidebarExpanded && <span>New project</span>}
+              {sidebarExpanded && <span className="workspace-sidebar-shortcut">N</span>}
             </button>
 
             <div className={`mt-4 h-px ${desktopSidebarDividerClassName} ${sidebarExpanded ? '' : 'w-8'}`} />
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <nav className={`mt-4 flex flex-col ${sidebarExpanded ? 'gap-1' : 'items-center gap-4'}`}>
+              {sidebarExpanded && <p className="workspace-sidebar-section-label mt-5">Workspace</p>}
+              <nav className={`mt-3 flex flex-col ${sidebarExpanded ? 'gap-1' : 'items-center gap-4'}`}>
                 {sidebarNavItems.map(({ id, label, Icon, active, onClick, iconClassName }) => (
                   <button
                     key={id}
                     type="button"
                     onClick={onClick}
-                    className={`group flex items-center transition-colors ${sidebarExpanded
-                      ? `gap-3 rounded-[10px] px-2 py-2 text-left ${desktopSidebarInlineHoverClassName}`
-                      : 'h-5 w-5 justify-center bg-transparent'}`}
+                    className={`workspace-sidebar-link ${active ? 'is-active' : ''} ${sidebarExpanded ? '' : 'is-collapsed'}`}
                     title={label}
                   >
-                    <span className={`grid h-4 w-4 shrink-0 place-items-center ${active ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)] group-hover:text-[var(--ui-text)]'}`}>
-                      <Icon size={14} className={iconClassName} />
-                    </span>
-                    <span className={`min-w-0 overflow-hidden text-[13px] ${active ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)]'} ${sidebarLabelClassName}`}>
-                      {label}
-                    </span>
+                    <Icon size={15} className={iconClassName} />
+                    {sidebarExpanded && <span>{label}</span>}
+                    {sidebarExpanded && id === 'projects' && <span className="workspace-sidebar-count">{projects.length}</span>}
                   </button>
                 ))}
               </nav>
 
-              {sidebarExpanded ? (
-                <>
-                  <div className="mt-6">
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Favorites</p>
-                    <p className="mt-3 text-[12px] text-[var(--ui-text-subtle)]/80">No favorites yet</p>
-                  </div>
-
-                  <div className="mt-6">
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Recent Projects</p>
-                    <div className="mt-3 flex flex-col gap-2">
-                      {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => onOpenProject(project.id)}
-                          className={`truncate rounded-[8px] px-2 py-1.5 text-left text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
-                          title={project.name || 'Untitled project'}
-                        >
-                          {project.name || 'Untitled project'}
-                        </button>
-                      )) : (
-                        <p className="text-[12px] text-[var(--ui-text-subtle)]/80">No recent projects</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Workspace</p>
+              {sidebarExpanded && <p className="workspace-sidebar-section-label mt-7">Recent</p>}
+              {sidebarExpanded && (
+                <div className="mt-3 flex flex-col gap-1">
+                  {sidebarRecentProjects.length > 0 ? sidebarRecentProjects.map((project) => (
                     <button
+                      key={project.id}
                       type="button"
-                      onClick={() => onNavigate('/app/projects')}
-                      className={`mt-3 inline-flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
+                      onClick={() => onOpenProject(project.id)}
+                      className="workspace-sidebar-recent"
+                      title={project.name || 'Untitled project'}
                     >
-                      <FolderOpen size={13} />
-                      All Workspace
+                      <span>{(project.name || 'U').slice(0, 1).toUpperCase()}</span>
+                      <span>{project.name || 'Untitled project'}</span>
                     </button>
-                  </div>
+                  )) : <p className="workspace-sidebar-empty">No recent projects</p>}
+                </div>
+              )}
 
-                  <div className="mt-5">
-                    <p className="text-[11px] font-medium text-[var(--ui-text-subtle)]">Private</p>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('/pricing')}
-                      className={`mt-3 inline-flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--ui-text-muted)] transition-colors ${desktopSidebarInlineHoverClassName}`}
-                    >
-                      <Gem size={13} />
-                      All Private
-                    </button>
-                  </div>
-                </>
-              ) : null}
+              {sidebarExpanded && <p className="workspace-sidebar-section-label mt-7">Resources</p>}
+              <nav className={`mt-3 flex flex-col ${sidebarExpanded ? 'gap-1' : 'items-center gap-4'}`}>
+                {sidebarResourceItems.map(({ id, label, Icon, onClick }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={onClick}
+                    className={`workspace-sidebar-link ${sidebarExpanded ? '' : 'is-collapsed'}`}
+                    title={label}
+                  >
+                    <Icon size={15} />
+                    {sidebarExpanded && <span>{label}</span>}
+                  </button>
+                ))}
+              </nav>
             </div>
 
-            <div className={`mt-4 ${sidebarExpanded ? 'flex items-center justify-end gap-2.5' : 'flex flex-col items-end gap-4'}`}>
-              <button
-                type="button"
-                onClick={() => onNavigate('/pricing')}
-                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
-                  ? `rounded-[12px] border border-[color:color-mix(in_srgb,var(--ui-text)_12%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-text)_7%,transparent)] text-[var(--ui-text)] ${desktopSidebarInlineHoverClassName}`
-                  : 'text-[var(--ui-text)] hover:text-[var(--ui-primary)]'}`}
-                title="Billing"
-              >
+            {sidebarExpanded ? (
+              <div className="workspace-sidebar-upgrade">
+                <div className="workspace-sidebar-upgrade__icon"><Gem size={16} /></div>
+                <div>
+                  <p>Build without limits</p>
+                  <span>{billingSummary?.balanceCredits ?? '...'} credits remaining</span>
+                </div>
+                <button type="button" onClick={() => onNavigate('/pricing')}>View plans</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => onNavigate('/pricing')} className="workspace-sidebar-link is-collapsed" title="View plans">
                 <Gem size={16} />
               </button>
-              <button
-                type="button"
-                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
-                  ? `rounded-[12px] border border-[color:color-mix(in_srgb,var(--ui-text)_12%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-text)_7%,transparent)] text-[var(--ui-text)] ${desktopSidebarInlineHoverClassName}`
-                  : 'text-[var(--ui-text)] hover:text-[var(--ui-primary)]'}`}
-                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-              >
-                {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            )}
+
+            <div className={`workspace-sidebar-footer ${sidebarExpanded ? '' : 'is-collapsed'}`}>
+              <button type="button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} title="Appearance">
+                {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+                {sidebarExpanded && <span>Appearance</span>}
               </button>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className={`grid h-9 w-9 place-items-center transition-colors ${sidebarExpanded
-                  ? 'rounded-[12px] border border-rose-400/18 bg-rose-500/10 text-rose-300 hover:bg-rose-500/16'
-                  : 'text-rose-300 hover:text-rose-200'}`}
-                title="Logout"
-              >
-                <LogOut size={16} />
+              <button type="button" onClick={() => void handleSignOut()} title="Sign out">
+                <LogOut size={15} />
+                {sidebarExpanded && <span>Sign out</span>}
               </button>
             </div>
           </div>
@@ -1262,35 +1126,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
 
         <div className="min-w-0 flex-1">
           <div className={`flex h-full flex-col overflow-hidden ${projectWorkspaceSurfaceClassName}`}>
-            <div className="px-4 py-4 md:px-7">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileSidebarOpen(true)}
-                    className="grid h-11 w-11 place-items-center rounded-2xl border border-[var(--workspace-sidebar-border)] bg-[var(--workspace-soft)] text-[var(--ui-text-muted)] lg:hidden"
-                    aria-label="Open workspace menu"
-                  >
-                    <Menu size={18} />
-                  </button>
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ui-text-subtle)] lg:hidden">Workspace</p>
-                    {/* <h1 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--ui-text)] md:text-[30px]">Projects</h1> */}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] ${shellBadgeClassName}`}>
-                    <FolderOpen size={12} />
-                    {projects.length} projects
-                  </span>
-                  <span className={`hidden items-center gap-2 rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] sm:inline-flex ${shellBadgeClassName}`}>
-                    {theme === 'light' ? <Sun size={12} /> : <Moon size={12} />}
-                    {theme} mode
-                  </span>
-                </div>
-              </div>
-            </div>
-
+            <button
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="workspace-mobile-menu-trigger fixed left-4 top-4 z-40 grid h-11 w-11 place-items-center rounded-2xl lg:hidden"
+              aria-label="Open workspace menu"
+            >
+              <Menu size={18} />
+            </button>
             <div className="flex-1 overflow-y-auto">
               <main className="relative mx-auto max-w-[1560px] px-3 py-8 md:px-5 md:py-10 xl:px-6">
                 <motion.section
@@ -1300,7 +1143,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                 >
                   <motion.p
-                    className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[#505050] shadow-[0_7px_18px_rgba(13,18,15,0.08)]"
+                    className="workspace-hero-kicker inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.48, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
@@ -1309,7 +1152,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     Build faster in one workspace
                   </motion.p>
                   <motion.p
-                    className="mt-6 font-['Fustat',sans-serif] text-[38px] font-bold leading-[0.96] tracking-[-0.055em] text-black sm:text-[48px] md:text-[64px]"
+                    className="mt-6 font-['Fustat',sans-serif] text-[38px] font-bold leading-[0.96] tracking-[-0.055em] text-[var(--ui-text)] sm:text-[48px] md:text-[64px]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 16 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.58, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
@@ -1367,7 +1210,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     <span>{billingSummary?.balanceCredits ?? '...'} credits</span>
                     <button type="button" onClick={() => onNavigate('/pricing')}>Upgrade</button>
                   </div>
-                  <span><Sparkles size={14} /> Powered by GPT-4o</span>
+                  <span><Sparkles size={14} /> Powered by EazyUI-AI</span>
                 </div>
                 <div className="workspace-landing-composer__input">
                 <div className="workspace-landing-composer__editor">
@@ -1417,8 +1260,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       }
                     }}
                     placeholder="Type question..."
-                    placeholderClassName="text-left text-black/60"
-                    className="no-focus-ring min-h-[74px] max-h-[160px] w-full overflow-y-auto border-0 bg-transparent p-0 text-left text-[16px] leading-6 text-black ring-0 focus:border-0 focus:outline-none focus:ring-0"
+                    placeholderClassName="text-left text-[var(--ui-text-muted)]"
+                    className="no-focus-ring min-h-[74px] max-h-[160px] w-full overflow-y-auto border-0 bg-transparent p-0 text-left text-[16px] leading-6 text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0"
                   />
                 </div>
                 <div className="workspace-landing-composer__footer">
@@ -1589,14 +1432,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                 </motion.section>
 
                 <motion.section
-                  data-guide-id="workspace-project-library"
                   className="mt-16 md:mt-20"
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 22 }}
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                   transition={{ duration: 0.58, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
                 >
-          <h1 className="font-['Fustat',sans-serif] text-[36px] font-bold leading-[0.96] tracking-[-0.045em] text-black md:text-[54px]">Your Projects</h1>
-          <p className="mt-3 font-['Fustat',sans-serif] text-[15px] font-medium text-[#66615a]">Open, continue, or remove your saved interface projects.</p>
+          <div data-guide-id="workspace-project-library" className="w-fit max-w-full">
+            <h1 className="font-['Fustat',sans-serif] text-[36px] font-bold leading-[0.96] tracking-[-0.045em] text-[var(--ui-text)] md:text-[54px]">Your Projects</h1>
+            <p className="mt-3 font-['Fustat',sans-serif] text-[15px] font-medium text-[var(--ui-text-muted)]">Open, continue, or remove your saved interface projects.</p>
+          </div>
 
           {error && (
             <div className="mt-5 rounded-2xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -1660,7 +1504,6 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 24, scale: 0.985 }}
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.42, delay: Math.min(index * 0.04, 0.24), ease: [0.22, 1, 0.36, 1] }}
-                  whileHover={shouldReduceMotion ? undefined : { y: -7 }}
                   onClick={() => onOpenProject(project.id)}
                 >
                   <div className="workspace-project-card__media">
@@ -1677,38 +1520,54 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         project.coverImageUrl || '',
                       ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)))[0];
                       const changeScreen = (direction: -1 | 1) => {
-                        if (projectScreenTransitions[project.id]) return;
                         if (shouldReduceMotion) {
-                          setActiveProjectScreenIndexes((current) => ({
-                            ...current,
-                            [project.id]: (activeScreenIndex + direction + screens.length) % screens.length,
-                          }));
-                          return;
-                        }
-
-                        setProjectScreenTransitions((current) => ({
-                          ...current,
-                          [project.id]: { direction, phase: 'out' },
-                        }));
-                        const swapTimer = window.setTimeout(() => {
                           setActiveProjectScreenIndexes((current) => ({
                             ...current,
                             [project.id]: ((current[project.id] || 0) + direction + screens.length) % screens.length,
                           }));
+                          return;
+                        }
+
+                        const runTransition = (nextDirection: -1 | 1) => {
                           setProjectScreenTransitions((current) => ({
                             ...current,
-                            [project.id]: { direction, phase: 'enter' },
+                            [project.id]: { direction: nextDirection, phase: 'out' },
                           }));
-                        }, 180);
-                        const finishTimer = window.setTimeout(() => {
-                          setProjectScreenTransitions((current) => {
-                            const next = { ...current };
-                            delete next[project.id];
-                            return next;
-                          });
-                          delete projectScreenTransitionTimersRef.current[project.id];
-                        }, 430);
-                        projectScreenTransitionTimersRef.current[project.id] = [swapTimer, finishTimer];
+                          const swapTimer = window.setTimeout(() => {
+                            setActiveProjectScreenIndexes((current) => ({
+                              ...current,
+                              [project.id]: ((current[project.id] || 0) + nextDirection + screens.length) % screens.length,
+                            }));
+                            setProjectScreenTransitions((current) => ({
+                              ...current,
+                              [project.id]: { direction: nextDirection, phase: 'enter' },
+                            }));
+                          }, 180);
+                          const finishTimer = window.setTimeout(() => {
+                            const queuedDirection = projectScreenNavigationQueueRef.current[project.id]?.shift();
+                            if (queuedDirection) {
+                              runTransition(queuedDirection);
+                              return;
+                            }
+                            setProjectScreenTransitions((current) => {
+                              const next = { ...current };
+                              delete next[project.id];
+                              return next;
+                            });
+                            delete projectScreenTransitionTimersRef.current[project.id];
+                            delete projectScreenNavigationQueueRef.current[project.id];
+                          }, 430);
+                          projectScreenTransitionTimersRef.current[project.id] = [swapTimer, finishTimer];
+                        };
+
+                        if (projectScreenTransitions[project.id] || projectScreenTransitionTimersRef.current[project.id]) {
+                          const queue = projectScreenNavigationQueueRef.current[project.id] || [];
+                          queue.push(direction);
+                          projectScreenNavigationQueueRef.current[project.id] = queue;
+                          return;
+                        }
+
+                        runTransition(direction);
                       };
 
                       if (!screensLoaded) {
@@ -1728,6 +1587,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                                 type="button"
                                 className="workspace-project-card__gallery-arrow is-previous"
                                 aria-label={`Show previous screen in ${project.name || 'project'}`}
+                                onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   changeScreen(-1);
@@ -1745,6 +1605,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                                 type="button"
                                 className="workspace-project-card__gallery-arrow is-next"
                                 aria-label={`Show next screen in ${project.name || 'project'}`}
+                                onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   changeScreen(1);

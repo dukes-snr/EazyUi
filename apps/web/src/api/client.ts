@@ -4,6 +4,7 @@
 
 import { auth } from '@/lib/firebase';
 import { deleteProjectFirestore, getProjectFirestore, listProjectsFirestore, saveProjectFirestore } from '@/lib/firestoreData';
+import { markProjectListCacheStale } from '@/utils/projectListCache';
 import type { EazyUiFigmaScenePayload } from '@/utils/htmlToFigmaScene';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api';
@@ -1276,7 +1277,7 @@ class ApiClient {
 
     async save(request: SaveRequest): Promise<SaveResponse> {
         const uid = this.requireAuthUid();
-        return saveProjectFirestore({
+        const response = await saveProjectFirestore({
             uid,
             projectId: request.projectId,
             designSpec: request.designSpec,
@@ -1284,6 +1285,8 @@ class ApiClient {
             chatState: request.chatState,
             mode: request.mode,
         });
+        markProjectListCacheStale(uid);
+        return response;
     }
 
     async plan(request: PlannerRequest, signal?: AbortSignal): Promise<PlannerResponse> {

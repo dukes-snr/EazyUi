@@ -889,7 +889,7 @@ export function LandingPage(props: LandingPageProps) {
                             />
                             <div className="landing-data-composer__meta">
                                 <div><span>60/450 credits</span><button type="button" onClick={() => onNavigate('/pricing')}>Upgrade</button></div>
-                                <span><Sparkles size={14} /> Powered by GPT-4o</span>
+                                <span><Sparkles size={14} /> Powered by EazyUI-AI</span>
                             </div>
                             <div className="landing-data-composer__input">
                                 <div className="landing-data-composer__editor">
