@@ -306,6 +306,7 @@ export function ChangelogPage({ onNavigate, onOpenApp }: ChangelogPageProps) {
                     data={timelineData}
                     title="Changelog from the EazyUI journey"
                     description="A simple look at what is new in EazyUI, with friendly updates on features, polish, and product improvements."
+                    scrollContainerRef={scrollContainerRef}
                 />
 
                 <section className="px-4 pt-6 md:px-6 md:pt-10">

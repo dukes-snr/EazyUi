@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Check, Linkedin, Loader2, Monitor, Moon, Sun, X, Youtube } from 'lucide-react';
 import { MarketingHeader } from './MarketingHeader';
-import appLogo from '../../assets/Ui-logo.png';
+import appLogo from '../../assets/Ui-logo.svg';
 import { apiClient, type BillingCatalogPrice, type BillingCatalogResponse, type BillingCreditPackProductKey } from '../../api/client';
 import { useUiStore } from '../../stores';
 

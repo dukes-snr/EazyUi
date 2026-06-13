@@ -1,29 +1,21 @@
 ﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion';
-import { ArrowRight, ArrowUp, CircleStar, Gem, LineSquiggle, Linkedin, Mic, Monitor, Moon, Palette, Pause, Play, Plus, RotateCcw, Smartphone, Smile, Sparkles, Square, Sun, Tablet, X, Youtube, Zap } from 'lucide-react';
-import featureSlide1 from '../../assets/Slide1.png';
-import featureSlide2 from '../../assets/Slide2.png';
-import featureSlide3 from '../../assets/Slide3.png';
-import featureSlide4 from '../../assets/Slide4.png';
-import appLogo from '../../assets/Ui-logo.png';
+import { motion, useReducedMotion } from 'framer-motion';
+import { Aperture, ArrowRight, ArrowUp, ArrowUpRight, Box, Brush, Camera, ChevronDown, Chrome, CircleStar, Code2, Figma, Framer, Gem, Layers, LineSquiggle, LogOut, Menu, Mic, Monitor, Palette, Paperclip, Pause, PenTool, Play, RotateCcw, Search, Smartphone, Smile, Sparkle, Sparkles, Square, Tablet, Type, Wand2, X, Zap } from 'lucide-react';
+import appLogo from '../../assets/Ui-logo.svg';
 import heroBackdropImage from '../../assets/hero-bg2.jpg';
-import mascotComposer from '../../assets/mascot-composer.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
-import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import { GlassPricingSection } from '../marketing/GlassPricingSection';
-import { MarketingHeader } from '../marketing/MarketingHeader';
 import { ComposerAttachmentStack, MAX_COMPOSER_ATTACHMENTS } from '../ui/ComposerAttachmentStack';
 import { CallToAction } from '../ui/cta-3';
-import { Orb } from '../ui/Orb';
 import { StaggerTestimonials, type StaggerTestimonial } from '../ui/stagger-testimonials';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
-import TextType from '../ui/TextType';
+import { LogoMark } from '../ui/LogoMark';
 import { useUiStore } from '../../stores';
 import {
     extractComposerInlineReferences,
@@ -108,12 +100,6 @@ const LANDING_SUGGESTION_TABS = [
     },
 ] as const;
 type LandingSuggestionTabKey = (typeof LANDING_SUGGESTION_TABS)[number]['key'];
-const TYPED_PLACEHOLDER_SUGGESTIONS = [
-    'Design a premium AI workspace landing page with a dark editorial hero, product storytelling, polished dashboard previews, customer proof, and a pricing section that feels ready to launch...',
-    'Create a mobile finance app with intelligent budgeting, savings goals, transaction insights, recurring bills, and a trustworthy visual language that feels modern but grounded...',
-    'Build a prototype-ready team collaboration dashboard with command search, live activity, document modules, project views, and interaction states that feel realistic enough to test...',
-    'Generate a luxury hospitality website with cinematic imagery, room highlights, wellness experiences, booking prompts, and a refined layout that feels calm, elevated, and premium...',
-];
 type PatternCard = {
     title: string;
     prompt: string;
@@ -159,31 +145,20 @@ const PATTERN_SCREEN_TEMPLATES: Omit<PatternCard, 'image'>[] = [
     },
 ];
 
-const FEATURE_SCROLL_ITEMS = [
-    {
-        number: '00',
-        title: 'Turn a rough prompt into a polished first pass',
-        description: 'Start with an idea in plain language and get back screens with hierarchy, spacing, and product structure already moving in the right direction.',
-        image: featureSlide1,
-    },
-    {
-        number: '01',
-        title: 'Guide the output with references that actually matter',
-        description: 'Attach screenshots, inline URLs, and visual inspiration so EazyUI stays closer to your product reality instead of drifting into generic layouts.',
-        image: featureSlide2,
-    },
-    {
-        number: '02',
-        title: 'Design across mobile, tablet, and desktop instantly',
-        description: 'Switch targets before generation so the density, composition, and rhythm fit the device from the beginning rather than as an afterthought.',
-        image: featureSlide3,
-    },
-    {
-        number: '03',
-        title: 'Refine faster with style control, voice, and iteration',
-        description: 'Use style presets, fast versus quality modes, and voice input to move quickly from broad exploration into sharper, premium direction.',
-        image: featureSlide4,
-    },
+const FEATURE_WORKFLOW_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_150203_44a5bd32-516a-47ce-a077-8acbf9aa8991.mp4';
+const FEATURE_SCALE_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_154543_d5b83fc1-9cea-44f3-b5e8-8f325935211a.mp4';
+const FEATURE_CONTROLS_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_153148_d7a3e1dd-e5d0-4ce6-8306-00d7522ecc44.mp4';
+
+const FEATURE_WORKFLOW_ROWS = [
+    ['01', 'Describe the idea', 'Plain language'],
+    ['02', 'Add visual context', 'Images + URLs'],
+    ['03', 'Generate every screen', 'Any device'],
+    ['04', 'Refine and export', 'HTML + Figma'],
+] as const;
+
+const FEATURE_TOOL_ROWS = [
+    [Figma, Framer, Palette, PenTool, Layers, Type, Aperture, Chrome],
+    [Camera, Brush, Box, Wand2, Code2, Monitor, Smartphone, Sparkles],
 ] as const;
 
 const LANDING_TESTIMONIALS: StaggerTestimonial[] = [
@@ -236,71 +211,90 @@ const LANDING_TESTIMONIALS: StaggerTestimonial[] = [
         imgSrc: 'https://i.pravatar.cc/150?img=52',
     },
 ];
-type LandingFooterLinkItem = {
-    label: string;
-    path?: string;
-    href?: string;
-};
-
-type LandingFooterColumn = {
-    title: string;
-    items: LandingFooterLinkItem[];
-};
-
-const LANDING_FOOTER_COLUMNS: LandingFooterColumn[] = [
-    {
-        title: 'Product',
-        items: [
-            { label: 'Create', path: '/app' },
-            { label: 'Templates', path: '/templates' },
-            { label: 'Components', path: '/blog' },
-            { label: 'Assets', path: '/blog' },
-            { label: 'Pricing', path: '/pricing' },
-            { label: 'Changelog', path: '/changelog' },
-        ],
-    },
-    {
-        title: 'Resources',
-        items: [
-            { label: 'Introduction', path: '/blog' },
-            { label: 'How to Prompt', path: '/blog' },
-            { label: 'How to Edit', path: '/blog' },
-            { label: 'Sell Templates', path: '/templates' },
-            { label: 'Affiliates', path: '/contact' },
-            { label: 'FAQ', path: '/blog' },
-        ],
-    },
-    {
-        title: 'What We Use',
-        items: [
-            { label: 'Mobbin', href: 'https://mobbin.com' },
-            { label: 'Screen Studio', href: 'https://www.screen.studio' },
-            { label: 'Courses', path: '/blog' },
-            { label: 'UI Kit', path: '/templates' },
-            { label: 'Video Editor', href: 'https://www.adobe.com/products/premiere.html' },
-            { label: 'Mockups', path: '/templates' },
-        ],
-    },
-    {
-        title: 'Connect',
-        items: [
-            { label: 'Privacy', path: '/blog' },
-            { label: 'Terms', path: '/blog' },
-            { label: 'Support', path: '/contact' },
-            { label: 'Report Issue', path: '/contact' },
-            { label: 'LinkedIn', href: 'https://linkedin.com' },
-            { label: 'X', href: 'https://x.com' },
-        ],
-    },
-] as const;
-
-const LANDING_FOOTER_SOCIALS = [
-    { label: 'X', href: 'https://x.com', icon: X },
-    { label: 'YouTube', href: 'https://youtube.com', icon: Youtube },
-    { label: 'LinkedIn', href: 'https://linkedin.com', icon: Linkedin },
+const LANDING_FOOTER_COLUMNS = [
+    [
+        { label: 'Create', path: '/app' },
+        { label: 'Templates', path: '/templates' },
+        { label: 'Pricing', path: '/pricing' },
+        { label: 'What’s New', path: '/changelog' },
+        { label: 'Export to Figma', path: '/blog' },
+    ],
+    [
+        { label: 'Learn', path: '/learn' },
+        { label: 'Blog', path: '/blog' },
+        { label: 'How to Prompt', path: '/blog' },
+        { label: 'Contact Us', path: '/contact' },
+    ],
+    [
+        { label: 'LinkedIn', href: 'https://linkedin.com' },
+        { label: 'Follow Us on X', href: 'https://x.com' },
+        { label: 'YouTube', href: 'https://youtube.com' },
+    ],
 ] as const;
 
 const DEMO_VIDEO_EMBED_BASE_URL = 'https://www.youtube.com/embed/euv60ydI54c?enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
+const HERO_VIDEO_URL = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260319_015952_e1deeb12-8fb7-4071-a42a-60779fc64ab6.mp4';
+
+function VideoBackground() {
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
+
+    const cancelFade = () => {
+        if (animationFrameRef.current !== null) {
+            window.cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    };
+
+    const fadeTo = (targetOpacity: number, duration = 250) => {
+        const video = videoRef.current;
+        if (!video) return;
+        cancelFade();
+        const startOpacity = Number.parseFloat(video.style.opacity || '0');
+        const startedAt = performance.now();
+        const animate = (now: number) => {
+            const progress = Math.min(1, (now - startedAt) / duration);
+            video.style.opacity = String(startOpacity + ((targetOpacity - startOpacity) * progress));
+            if (progress < 1) animationFrameRef.current = window.requestAnimationFrame(animate);
+            else animationFrameRef.current = null;
+        };
+        animationFrameRef.current = window.requestAnimationFrame(animate);
+    };
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        const handlePlaying = () => fadeTo(1);
+        const handleEnded = () => {
+            video.currentTime = 0;
+            void video.play().catch(() => undefined);
+        };
+
+        video.addEventListener('playing', handlePlaying);
+        video.addEventListener('ended', handleEnded);
+        void video.play().catch(() => undefined);
+        return () => {
+            cancelFade();
+            video.removeEventListener('playing', handlePlaying);
+            video.removeEventListener('ended', handleEnded);
+        };
+    }, []);
+
+    return (
+        <div className="landing-video-background" aria-hidden="true">
+            <video
+                ref={videoRef}
+                className="landing-video-background__media"
+                src={HERO_VIDEO_URL}
+                muted
+                playsInline
+                preload="auto"
+            />
+            <div className="landing-video-background__veil" />
+        </div>
+    );
+}
 
 type HeroBackgroundMode = 'animated' | 'image';
 
@@ -318,72 +312,102 @@ const HERO_BACKGROUND_CONFIG: {
     imagePosition: 'center center',
 };
 
-function FeatureScrollIntro({ progress }: { progress: MotionValue<number> }) {
-    const opacity = useTransform(progress, [0.05, 0.18, 0.34], [0.2, 1, 1]);
-    const x = useTransform(progress, [0.05, 0.22], [64, 0]);
-    const y = useTransform(progress, [0.05, 0.22], [28, 0]);
-
+function FeatureLabel({ children }: { children: string }) {
     return (
-        <motion.article className="landing-feature-scroll-intro" style={{ opacity, x, y }}>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-primary)]">What EazyUI unlocks</p>
-            <h3 className="mt-4 text-[36px] md:text-[58px] leading-[0.98] tracking-[-0.05em] font-semibold text-[var(--ui-text)]">
-                From first prompt
-                <br />
-                to product-ready UI.
-            </h3>
-            <p className="mt-5 max-w-[34rem] text-[15px] md:text-[18px] leading-8 text-[var(--ui-text-muted)]">
-                Scroll through the core capabilities and see how EazyUI turns rough ideas into sharper interface direction, faster refinement, and more confident decisions.
-            </p>
-        </motion.article>
+        <div className="landing-feature-mosaic__label">
+            <Sparkle size={12} strokeWidth={1.5} />
+            <span>{children}</span>
+            <Sparkle size={12} strokeWidth={1.5} />
+        </div>
     );
 }
 
-function FeatureScrollCard({
-    item,
-    index,
-    progress,
-}: {
-    item: (typeof FEATURE_SCROLL_ITEMS)[number];
-    index: number;
-    progress: MotionValue<number>;
-}) {
-    const enterStart = 0.2 + (index * 0.1);
-    const enterEnd = enterStart + 0.14;
-    const settleEnd = enterEnd + 0.1;
-    const y = useTransform(progress, [0, enterStart, enterEnd, settleEnd, 1], [110, 110, 0, 0, -12]);
-    const opacity = useTransform(progress, [0, enterStart, enterEnd], [0.16, 0.16, 1]);
-    const scale = useTransform(progress, [0, enterStart, enterEnd], [0.9, 0.9, 1]);
-    const rotateX = useTransform(progress, [0, enterStart, enterEnd], [10, 10, 0]);
+function FeatureVideo({ src }: { src: string }) {
+    return <video className="landing-feature-mosaic__video" src={src} autoPlay loop muted playsInline preload="metadata" aria-hidden="true" />;
+}
 
+function FeatureMosaic({ onCreate, onContact }: { onCreate: () => void; onContact: () => void }) {
     return (
-        <motion.article
-            className="landing-feature-scroll-card"
-            style={{
-                y,
-                opacity,
-                scale,
-                rotateX,
-                transformPerspective: 1400,
-            }}
-        >
-            <p className="text-[18px] tracking-[-0.04em] font-semibold text-[var(--ui-primary)]">[{item.number}]</p>
-            <h4 className="mt-4 text-[24px] md:text-[34px] leading-[1.05] tracking-[-0.04em] font-semibold text-[var(--ui-text)]">
-                {item.title}
-            </h4>
-            <div className="landing-feature-scroll-preview mt-5">
-                <img src={item.image} alt={`${item.title} preview`} className="landing-feature-scroll-image" />
+        <section className="landing-feature-mosaic">
+            <div className="landing-feature-mosaic__header">
+                <div>
+                    <h2>Everything you need to move from idea to interface.</h2>
+                    <p>Prompt in plain language, guide the direction with real references, generate across devices, and refine the result inside one focused AI design workspace.</p>
+                </div>
+                <button type="button" className="liquid-glass landing-feature-mosaic__header-cta" onClick={onCreate}>
+                    Start creating today <ArrowUpRight size={16} strokeWidth={1.5} />
+                </button>
             </div>
-            <p className="mt-5 text-[14px] md:text-[15px] leading-8 text-[var(--ui-text-muted)]">
-                {item.description}
-            </p>
-        </motion.article>
+
+            <div className="landing-feature-mosaic__grid">
+                <article className="landing-feature-mosaic__card landing-feature-mosaic__workflow">
+                    <FeatureVideo src={FEATURE_WORKFLOW_VIDEO} />
+                    <div className="landing-feature-mosaic__shade" />
+                    <FeatureLabel>From prompt to product</FeatureLabel>
+                    <div className="landing-feature-mosaic__timeline">
+                        {FEATURE_WORKFLOW_ROWS.map(([number, title, detail]) => (
+                            <div key={number} className="landing-feature-mosaic__timeline-row">
+                                <span>{number}</span>
+                                <Sparkle size={12} strokeWidth={1.5} />
+                                <strong>{title}</strong>
+                                <span>{detail}</span>
+                            </div>
+                        ))}
+                    </div>
+                </article>
+
+                <div className="landing-feature-mosaic__stack landing-feature-mosaic__stack-middle">
+                    <article className="landing-feature-mosaic__card landing-feature-mosaic__voice noise-overlay">
+                        <FeatureLabel>Customer voice</FeatureLabel>
+                        <blockquote>“EazyUI gives us stronger first drafts, so our reviews start at refinement instead of trying to rescue weak structure.”</blockquote>
+                        <p><strong>David Chen</strong><span>Senior Designer · Northstar</span></p>
+                    </article>
+                    <article className="landing-feature-mosaic__card landing-feature-mosaic__scale">
+                        <FeatureVideo src={FEATURE_SCALE_VIDEO} />
+                        <div className="landing-feature-mosaic__shade" />
+                        <strong>140K+</strong>
+                        <span>creators designing with EazyUI</span>
+                    </article>
+                </div>
+
+                <div className="landing-feature-mosaic__stack landing-feature-mosaic__stack-right">
+                    <article className="landing-feature-mosaic__card landing-feature-mosaic__controls">
+                        <FeatureVideo src={FEATURE_CONTROLS_VIDEO} />
+                        <div className="landing-feature-mosaic__shade" />
+                        <FeatureLabel>Design controls</FeatureLabel>
+                        <div className="landing-feature-mosaic__marquees">
+                            {FEATURE_TOOL_ROWS.map((row, rowIndex) => (
+                                <div key={rowIndex} className="landing-feature-mosaic__marquee-mask">
+                                    <div className={rowIndex === 0 ? 'animate-feature-marquee-left' : 'animate-feature-marquee-right'}>
+                                        {[...row, ...row].map((Icon, iconIndex) => (
+                                            <span key={`${rowIndex}-${iconIndex}`} className="liquid-glass landing-feature-mosaic__tool">
+                                                <Icon size={22} strokeWidth={1.5} />
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </article>
+                    <article className="landing-feature-mosaic__card landing-feature-mosaic__contact noise-overlay">
+                        <FeatureLabel>Build with us</FeatureLabel>
+                        <button type="button" onClick={onContact} aria-label="Contact EazyUI">
+                            <ArrowUpRight size={18} strokeWidth={1.5} />
+                        </button>
+                        <div>
+                            <strong>Talk to the team</strong>
+                            <span>Support, partnerships, and product questions</span>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
     );
 }
 
 export function LandingPage(props: LandingPageProps) {
-    const { onStart, onNavigate } = props;
+    const { onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy } = props;
     const theme = useUiStore((state) => state.theme);
-    const toggleTheme = useUiStore((state) => state.toggleTheme);
     const heroBackgroundMode = HERO_BACKGROUND_CONFIG.mode;
     const useDarkHeroForeground = heroBackgroundMode === 'animated' || heroBackgroundMode === 'image';
     const heroWordmark = useDarkHeroForeground
@@ -399,14 +423,13 @@ export function LandingPage(props: LandingPageProps) {
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [modelProfile, setModelProfile] = useState<DesignModelProfile>('quality');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
-    const [isPromptFocused, setIsPromptFocused] = useState(false);
+    const [isHeroNavOpen, setIsHeroNavOpen] = useState(false);
+    const [, setIsPromptFocused] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
     const [isDemoHovered, setIsDemoHovered] = useState(false);
     const [isDemoPlaying, setIsDemoPlaying] = useState(false);
-    const [featureShowcaseOffset, setFeatureShowcaseOffset] = useState(0);
-    const [featureShowcaseScrollSpan, setFeatureShowcaseScrollSpan] = useState(2200);
     const [referenceMenuMode, setReferenceMenuMode] = useState<'root' | 'url'>('root');
     const [referenceRootQuery, setReferenceRootQuery] = useState('');
     const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
@@ -419,9 +442,6 @@ export function LandingPage(props: LandingPageProps) {
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const demoVideoRef = useRef<HTMLIFrameElement | null>(null);
     const demoScreensSectionRef = useRef<HTMLElement | null>(null);
-    const featureShowcaseSectionRef = useRef<HTMLElement | null>(null);
-    const featureShowcaseViewportRef = useRef<HTMLDivElement | null>(null);
-    const featureShowcaseTrackRef = useRef<HTMLDivElement | null>(null);
     const styleMenuRef = useRef<HTMLDivElement | null>(null);
     const promptTextareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const referenceMenuRef = useRef<HTMLDivElement | null>(null);
@@ -432,48 +452,10 @@ export function LandingPage(props: LandingPageProps) {
     const audioChunksRef = useRef<Blob[]>([]);
     const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
     const shouldReduceMotion = useReducedMotion();
-    const { scrollY, scrollYProgress } = useScroll({ container: scrollContainerRef });
     const demoVideoEmbedUrl = useMemo(() => {
         if (typeof window === 'undefined') return DEMO_VIDEO_EMBED_BASE_URL;
         return `${DEMO_VIDEO_EMBED_BASE_URL}&origin=${encodeURIComponent(window.location.origin)}`;
     }, []);
-    const { scrollYProgress: featureSectionProgressRaw } = useScroll({
-        container: scrollContainerRef,
-        target: featureShowcaseSectionRef,
-        offset: ['start 0.88', 'end 0.16'],
-    });
-    const easedScrollY = useSpring(scrollY, shouldReduceMotion ? {
-        stiffness: 900,
-        damping: 120,
-        mass: 1,
-    } : {
-        stiffness: 120,
-        damping: 26,
-        mass: 0.34,
-    });
-    const easedScrollProgress = useSpring(scrollYProgress, shouldReduceMotion ? {
-        stiffness: 900,
-        damping: 120,
-        mass: 1,
-    } : {
-        stiffness: 110,
-        damping: 24,
-        mass: 0.3,
-    });
-    const featureSectionProgress = useSpring(featureSectionProgressRaw, shouldReduceMotion ? {
-        stiffness: 900,
-        damping: 120,
-        mass: 1,
-    } : {
-        stiffness: 120,
-        damping: 22,
-        mass: 0.34,
-    });
-    const backgroundY = useTransform(easedScrollY, [0, 1400], [0, -112]);
-    const backgroundScale = useTransform(easedScrollProgress, [0, 1], [1, 1.085]);
-    const heroY = useTransform(easedScrollY, [0, 420], [0, -58]);
-    const heroOpacity = useTransform(easedScrollY, [0, 300], [1, 0.66]);
-
     const rootReferenceOptions = useMemo(
         () => getFilteredComposerReferenceRootOptions(referenceRootQuery, false),
         [referenceRootQuery]
@@ -509,9 +491,7 @@ export function LandingPage(props: LandingPageProps) {
         referenceTriggerRangeRef.current = null;
     };
 
-    const closeAddMenu = () => {
-        setIsAddMenuOpen(false);
-    };
+    const closeAddMenu = () => setIsAddMenuOpen(false);
 
     const syncReferenceTrigger = (value: string, cursor: number) => {
         const match = findComposerReferenceTrigger(value, cursor);
@@ -724,106 +704,18 @@ export function LandingPage(props: LandingPageProps) {
             if (addMenuRef.current?.contains(event.target as Node)) return;
             closeAddMenu();
         };
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') closeAddMenu();
-        };
         document.addEventListener('pointerdown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
-        };
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [isAddMenuOpen]);
 
     useEffect(() => {
         if (!showStyleMenu) return;
-
         const handlePointerDown = (event: MouseEvent) => {
-            if (!styleMenuRef.current) return;
-            if (!styleMenuRef.current.contains(event.target as Node)) {
-                setShowStyleMenu(false);
-            }
+            if (!styleMenuRef.current?.contains(event.target as Node)) setShowStyleMenu(false);
         };
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setShowStyleMenu(false);
-        };
-
         document.addEventListener('pointerdown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
-        return () => {
-            document.removeEventListener('pointerdown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
-        };
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [showStyleMenu]);
-
-    useEffect(() => {
-        const scrollContainer = scrollContainerRef.current;
-        if (!scrollContainer) return;
-
-        let animationFrame = 0;
-
-        const updateScrollState = () => {
-            animationFrame = 0;
-
-            const section = featureShowcaseSectionRef.current;
-            const viewport = featureShowcaseViewportRef.current;
-            const track = featureShowcaseTrackRef.current;
-
-            if (!section || !viewport || !track) {
-                setFeatureShowcaseOffset((current) => (current === 0 ? current : 0));
-                return;
-            }
-
-            const viewportHeight = scrollContainer.clientHeight;
-            const sectionRect = section.getBoundingClientRect();
-            const containerRect = scrollContainer.getBoundingClientRect();
-            const sectionTopInViewport = sectionRect.top - containerRect.top;
-            const scrollableDistance = Math.max(sectionRect.height - viewportHeight, 1);
-            const progress = Math.min(Math.max((-sectionTopInViewport) / scrollableDistance, 0), 1);
-            const maxOffset = Math.max(track.scrollWidth - viewport.clientWidth, 0);
-            const snapOffsets = Array.from(track.children)
-                .map((child) => {
-                    const element = child as HTMLElement;
-                    const centeredOffset = element.offsetLeft + (element.offsetWidth / 2) - (viewport.clientWidth / 2);
-                    return Math.min(Math.max(centeredOffset, 0), maxOffset);
-                });
-            const snapCount = Math.max(snapOffsets.length, 1);
-            const snapIndex = snapCount === 1 ? 0 : Math.min(
-                Math.round(progress * (snapCount - 1)),
-                snapCount - 1,
-            );
-            const nextOffset = snapOffsets[snapIndex] ?? 0;
-            const nextScrollSpan = Math.max(viewportHeight * (snapCount + 0.6), viewportHeight * 2.4);
-
-            setFeatureShowcaseOffset((current) => (Math.abs(current - nextOffset) < 1 ? current : nextOffset));
-            setFeatureShowcaseScrollSpan((current) => (Math.abs(current - nextScrollSpan) < 2 ? current : nextScrollSpan));
-        };
-
-        const handleScroll = () => {
-            if (animationFrame) return;
-            animationFrame = window.requestAnimationFrame(updateScrollState);
-        };
-
-        const handleResize = () => {
-            if (animationFrame) {
-                window.cancelAnimationFrame(animationFrame);
-            }
-            animationFrame = window.requestAnimationFrame(updateScrollState);
-        };
-
-        updateScrollState();
-        scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            scrollContainer.removeEventListener('scroll', handleScroll);
-            window.removeEventListener('resize', handleResize);
-            if (animationFrame) {
-                window.cancelAnimationFrame(animationFrame);
-            }
-        };
-    }, []);
 
     useEffect(() => {
         const iframe = demoVideoRef.current;
@@ -886,14 +778,15 @@ export function LandingPage(props: LandingPageProps) {
         });
     }, []);
     const marqueeCards = useMemo(() => [...patternCards, ...patternCards], [patternCards]);
-    const hasPromptText = prompt.trim().length > 0;
-    const showSendAction = hasPromptText;
-    const actionIsStop = isRecording;
-    const actionDisabled = isTranscribing && !isRecording;
-    const landingOrbActivity: OrbActivityState = (isRecording || isTranscribing || showSendAction) ? 'talking' : 'idle';
-    const { agentState: landingOrbState, colors: landingOrbColors } = useOrbVisuals(landingOrbActivity);
-    const landingOrbInput = isRecording ? 0.9 : isTranscribing ? 0.58 : showSendAction ? 0.45 : 0.2;
-    const landingOrbOutput = (showSendAction || isRecording || isTranscribing) ? 0.5 : 0.2;
+    const StyleIcon = stylePreset === 'minimal'
+        ? LineSquiggle
+        : stylePreset === 'vibrant'
+            ? Palette
+            : stylePreset === 'luxury'
+                ? Gem
+                : stylePreset === 'playful'
+                    ? Smile
+                    : CircleStar;
     const postDemoVideoCommand = (func: string, args: unknown[] = []) => {
         demoVideoRef.current?.contentWindow?.postMessage(JSON.stringify({
             event: 'command',
@@ -915,126 +808,91 @@ export function LandingPage(props: LandingPageProps) {
         postDemoVideoCommand('seekTo', [0, true]);
         postDemoVideoCommand('playVideo');
     };
-    const StyleIcon = stylePreset === 'minimal'
-        ? LineSquiggle
-        : stylePreset === 'vibrant'
-            ? Palette
-            : stylePreset === 'luxury'
-                ? Gem
-                : stylePreset === 'playful'
-                    ? Smile
-                    : CircleStar;
-    const styleButtonTone = stylePreset === 'minimal'
-        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[var(--ui-surface-1)]'
-        : stylePreset === 'vibrant'
-            ? 'bg-[var(--ui-surface-1)] text-emerald-300 ring-emerald-300/35 hover:bg-[var(--ui-surface-1)]'
-            : stylePreset === 'luxury'
-                ? 'bg-[var(--ui-surface-1)] text-amber-300 ring-amber-300/35 hover:bg-[var(--ui-surface-1)]'
-                : stylePreset === 'playful'
-                    ? 'bg-[var(--ui-surface-1)] text-fuchsia-300 ring-fuchsia-300/35 hover:bg-[var(--ui-surface-1)]'
-                    : 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[var(--ui-surface-1)]';
-
     return (
         <div
             ref={scrollContainerRef}
             className="landing-scroll-shell h-screen w-full overflow-y-auto bg-[var(--ui-surface-1)] text-[var(--ui-text)] relative"
         >
-            <div className="landing-background-stack pointer-events-none absolute inset-x-0 top-0">
-                <motion.div
-                    className={`landing-hero-backdrop absolute inset-0 ${heroBackgroundMode === 'image' ? 'is-image' : 'is-animated'}`}
-                    style={{
-                        y: shouldReduceMotion ? 0 : backgroundY,
-                        scale: shouldReduceMotion ? 1 : backgroundScale,
-                    }}
-                >
-                    {heroBackgroundMode === 'image' ? (
-                        <div className="landing-hero-image-shell">
-                            <img
-                                src={HERO_BACKGROUND_CONFIG.imageSrc}
-                                alt={HERO_BACKGROUND_CONFIG.imageAlt}
-                                className="landing-hero-image"
-                                style={{ objectPosition: HERO_BACKGROUND_CONFIG.imagePosition }}
-                            />
-                        </div>
-                    ) : (
-                        <div className="landing-hero-animated-scene" aria-hidden="true">
-                            <div className="landing-hero-animated-fade" />
-                        </div>
-                    )}
-                </motion.div>
-            </div>
-
-            <MarketingHeader
-                onNavigate={onNavigate}
-                onOpenApp={() => onNavigate('/app')}
-                scrollContainerRef={scrollContainerRef}
-                topStageDark={useDarkHeroForeground}
-            />
-
-            <main className="relative z-10 px-0 pt-8 md:pt-12 pb-0">
+            <main className="relative z-10 px-0 pb-0">
                 {/*Hero section*/}
-                <motion.section
-                    className={`landing-hero-section relative w-full overflow-hidden ${useDarkHeroForeground ? 'landing-top-stage-dark' : ''}`}
-                    style={{
-                        y: shouldReduceMotion ? 0 : heroY,
-                        opacity: shouldReduceMotion ? 1 : heroOpacity,
-                    }}
-                >
-                    <div className="landing-hero-section-inner relative z-10 mx-auto -mt-15 flex w-full max-w-[980px] flex-col items-center justify-center px-2 text-center">
-                        <h1 className="text-[42px] md:text-[58px] leading-[1.05] font-semibold tracking-[-0.02em] text-[var(--ui-text)]">
-                            Design better UI with{' '}
-                            <span className="relative inline-flex align-baseline">
-                                <span className="sr-only">EazyUI</span>
-                                <img
-                                    src={heroWordmark}
-                                    alt=""
-                                    aria-hidden="true"
-                                    className="relative top-[8px] md:top-[30px] -left-[10px] h-[1.94em] w-auto object-contain"
-                                />
-                            </span>
-                        </h1>
-                        <p className="mt-2 mb-12 text-[20px] md:text-[30px] text-[var(--ui-text-muted)]">Generate production-ready screens, flows, and interfaces from a single prompt.</p>
+                <section className="landing-data-hero">
+                    <VideoBackground />
+                    <nav className="landing-data-nav" aria-label="Primary navigation">
+                        <button type="button" className="landing-data-logo" onClick={() => onNavigate('/')}>
+                            <img src={appLogo} alt="" />
+                            <span>EazyUI</span>
+                        </button>
+                        <div className={`landing-data-nav__links ${isHeroNavOpen ? 'is-open' : ''}`}>
+                            <button type="button" onClick={() => { setIsHeroNavOpen(false); onNavigate('/templates'); }}>Templates</button>
+                            <button type="button" onClick={() => { setIsHeroNavOpen(false); demoScreensSectionRef.current?.scrollIntoView({ behavior: 'smooth' }); }}>
+                                Features <ChevronDown size={14} />
+                            </button>
+                            <button type="button" onClick={() => { setIsHeroNavOpen(false); onNavigate('/pricing'); }}>Pricing</button>
+                            <button type="button" onClick={() => { setIsHeroNavOpen(false); onNavigate('/blog'); }}>Learn</button>
+                            <button type="button" onClick={() => { setIsHeroNavOpen(false); onNavigate('/changelog'); }}>What's New</button>
+                        </div>
+                        <div className="landing-data-nav__actions">
+                            {userProfile ? (
+                                <>
+                                    {!userProfile.emailVerified && (
+                                        <button
+                                            type="button"
+                                            className="landing-data-nav__verify"
+                                            onClick={onSendVerification}
+                                            disabled={verificationBusy}
+                                        >
+                                            {verificationBusy ? 'Sending...' : 'Verify email'}
+                                        </button>
+                                    )}
+                                    <button type="button" className="landing-data-nav__profile" onClick={() => onNavigate('/app')}>
+                                        <img src={userProfile.photoUrl || appLogo} alt="" />
+                                        <span>{userProfile.name}</span>
+                                    </button>
+                                    <button type="button" className="landing-data-nav__icon" onClick={onSignOut} aria-label="Sign out">
+                                        <LogOut size={15} />
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <button type="button" className="landing-data-nav__signup" onClick={() => onNavigate('/login')}>Sign Up</button>
+                                    <button type="button" className="landing-data-nav__login" onClick={() => onNavigate('/login')}>Log In</button>
+                                </>
+                            )}
+                            <button
+                                type="button"
+                                className="landing-data-nav__menu"
+                                onClick={() => setIsHeroNavOpen((open) => !open)}
+                                aria-label={isHeroNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                                aria-expanded={isHeroNavOpen}
+                            >
+                                {isHeroNavOpen ? <X size={16} /> : <Menu size={16} />}
+                            </button>
+                        </div>
+                    </nav>
 
-                        <div className="relative mx-auto mt-7 w-full max-w-[780px] overflow-visible">
+                    <div className="landing-data-hero__content">
+                        <div className="landing-data-badge">
+                            <span><CircleStar size={14} /> EazyUI</span>
+                            <strong>From idea to interface</strong>
+                        </div>
+                        <div className="landing-data-heading">
+                            <h1>UI Generation Made Easy</h1>
+                            <p>Describe your product, add references, and generate polished screens and responsive interfaces in seconds.</p>
+                        </div>
+
+                        <div className="landing-data-composer">
                             <ComposerAttachmentStack
                                 images={images}
                                 onRemove={(index) => setImages((prev) => prev.filter((_, idx) => idx !== index))}
+                                className="landing-data-attachment-stack"
+                                size="compact"
                             />
-                            <div className="relative z-10 rounded-[22px] border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[var(--ui-surface-1)] p-3 text-left md:p-4">
-                                <img
-                                    src={mascotComposer}
-                                    alt=""
-                                    aria-hidden="true"
-                                    className="pointer-events-none absolute right-1 top-[-6.5rem] z-10 w-[4.7rem] select-none sm:right-3 sm:top-[-8.2rem] sm:w-[5.8rem] md:right-5 md:top-[-8.4rem] md:w-[6rem]"
-                                />
-                                <div className="relative">
-                                    {!prompt.trim() && !isPromptFocused && (
-                                        <div className="pointer-events-none absolute left-12 top-1 right-2 text-[16px] text-[var(--ui-text-subtle)] text-left">
-                                            <TextType
-                                                text={TYPED_PLACEHOLDER_SUGGESTIONS}
-                                                className="text-[16px] text-[var(--ui-text-subtle)] text-left"
-                                                typingSpeed={62}
-                                                deletingSpeed={38}
-                                                pauseDuration={2200}
-                                                showCursor
-                                                cursorCharacter="_"
-                                                cursorClassName="text-[var(--ui-text-subtle)]"
-                                                loop
-                                            />
-                                        </div>
-                                    )}
-                                    <div className="flex items-start gap-2 px-1">
-                                        <div className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_24%,var(--ui-border))] bg-[var(--ui-surface-1)] p-[2px]">
-                                            <Orb
-                                                className="h-full w-full"
-                                                colors={landingOrbColors}
-                                                seed={9101}
-                                                agentState={landingOrbState}
-                                                volumeMode="manual"
-                                                manualInput={landingOrbInput}
-                                                manualOutput={landingOrbOutput}
-                                            />
-                                        </div>
+                            <div className="landing-data-composer__meta">
+                                <div><span>60/450 credits</span><button type="button" onClick={() => onNavigate('/pricing')}>Upgrade</button></div>
+                                <span><Sparkles size={14} /> Powered by GPT-4o</span>
+                            </div>
+                            <div className="landing-data-composer__input">
+                                <div className="landing-data-composer__editor">
                                         <ComposerInlineReferenceInput
                                             ref={promptTextareaRef}
                                             value={prompt}
@@ -1079,14 +937,16 @@ export function LandingPage(props: LandingPageProps) {
                                                     submit();
                                                 }
                                             }}
-                                            placeholder=""
-                                            placeholderClassName="px-2 py-1 text-left"
-                                            className="no-focus-ring w-full min-h-[102px] max-h-[230px] overflow-y-auto border-0 bg-transparent px-2 py-1 text-[16px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:ring-0"
+                                            placeholder="Type question..."
+                                            placeholderClassName="text-left text-black/60"
+                                            className="no-focus-ring min-h-[74px] max-h-[96px] w-full overflow-y-auto border-0 bg-transparent p-0 text-left text-[16px] leading-6 text-black ring-0 focus:border-0 focus:ring-0"
                                         />
-                                    </div>
+                                    <button type="button" className="landing-data-composer__submit" onClick={submit} disabled={!prompt.trim()} aria-label="Submit prompt">
+                                        <ArrowUp size={17} />
+                                    </button>
                                 </div>
-                                <div className="flex items-center justify-between border-t border-[var(--ui-border)] pt-2">
-                                    <div className="flex items-center gap-2.5">
+                                <div className="landing-data-composer__footer">
+                                    <div className="landing-data-composer__tools">
                                         <input
                                             ref={fileInputRef}
                                             type="file"
@@ -1095,149 +955,93 @@ export function LandingPage(props: LandingPageProps) {
                                             className="hidden"
                                             onChange={handleFileSelect}
                                         />
-                                        <div className="relative">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setIsReferenceMenuOpen(false);
-                                                    if (isAddMenuOpen) {
-                                                        closeAddMenu();
-                                                        return;
-                                                    }
-                                                    setIsAddMenuOpen(true);
-                                                }}
-                                                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
-                                                title="Add to prompt"
-                                            >
-                                                <Plus size={18} />
-                                            </button>
-                                            {isAddMenuOpen && (
-                                                <ComposerAddMenu
-                                                    menuRef={addMenuRef}
-                                                    onAddFiles={() => {
-                                                        closeAddMenu();
-                                                        fileInputRef.current?.click();
-                                                    }}
-                                                    onAddUrl={() => {
-                                                        closeAddMenu();
-                                                        openUrlReferenceInput('append');
-                                                    }}
-                                                />
-                                            )}
-                                        </div>
-                                {/* <button
-                                    type="button"
-                                    className="h-8 rounded-md px-2.5 bg-transparent text-gray-200 hover:bg-white/8 transition-colors flex items-center justify-center gap-1.5"
-                                >
-                                    <Figma size={13} />
-                                    <span className="text-[12px]">Import</span>
-                                </button> */}
-                                <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
-                                    {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
+                                    <div className="relative">
                                         <button
-                                            key={p}
                                             type="button"
-                                            onClick={() => setPlatform(p)}
-                                            className={`p-1.5 rounded-full transition-all ${platform === p
-                                                ? 'bg-[var(--ui-primary)] text-[var(--ui-text)] shadow-sm'
-                                                : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
-                                                }`}
-                                            title={`Generate for ${p}`}
+                                            onClick={() => {
+                                                setIsReferenceMenuOpen(false);
+                                                setIsAddMenuOpen((open) => !open);
+                                            }}
                                         >
-                                            {p === 'mobile' && <Smartphone size={15} />}
-                                            {p === 'tablet' && <Tablet size={15} />}
-                                            {p === 'desktop' && <Monitor size={15} />}
+                                            <Paperclip size={14} /> Attach
                                         </button>
-                                    ))}
-                                </div>
-
-
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                                <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
+                                        {isAddMenuOpen && (
+                                            <ComposerAddMenu
+                                                menuRef={addMenuRef}
+                                                onAddFiles={() => {
+                                                    closeAddMenu();
+                                                    fileInputRef.current?.click();
+                                                }}
+                                                onAddUrl={() => {
+                                                    closeAddMenu();
+                                                    openUrlReferenceInput('append');
+                                                }}
+                                            />
+                                        )}
+                                    </div>
                                     <button
                                         type="button"
-                                        onClick={() => setModelProfile('fast')}
-                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                                            ? 'bg-[var(--ui-surface-1)] text-amber-400 ring-1 ring-amber-400/40'
-                                            : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-1)]'
-                                            }`}
-                                        title="Fast model"
+                                        onClick={() => void handleMicToggle()}
+                                        className={isRecording ? 'is-active' : ''}
+                                        disabled={isTranscribing}
+                                        title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing voice' : 'Record voice prompt'}
                                     >
-                                        <Zap size={12} />
+                                        <Mic size={14} /> {isRecording ? 'Stop' : isTranscribing ? 'Working' : 'Voice'}
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelProfile('quality')}
-                                        className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                                            ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
-                                            : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)]'
-                                            }`}
-                                        title="Quality model"
-                                    >
-                                        <Sparkles size={12} />
+                                    <button type="button" onClick={() => setActiveSuggestionTab((current) => current ? null : 'suggested')}>
+                                        <Search size={14} /> Prompts
                                     </button>
-                                </div>
-                                <div ref={styleMenuRef} className="relative hidden sm:flex items-center">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowStyleMenu(v => !v)}
-                                        className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
-                                        title="Select style preset"
-                                    >
-                                        <StyleIcon size={14} />
-                                    </button>
-                                    {showStyleMenu && (
-                                        <div className="absolute bottom-12 right-0 z-50 w-40 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-2 shadow-2xl">
-                                            {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                                    </div>
+                                    <div className="landing-data-composer__settings">
+                                        <div className="landing-data-control-group" aria-label="Target device">
+                                            {(['mobile', 'tablet', 'desktop'] as const).map((target) => (
                                                 <button
-                                                    key={preset}
+                                                    key={target}
                                                     type="button"
-                                                    onClick={() => {
-                                                        setStylePreset(preset);
-                                                        setShowStyleMenu(false);
-                                                    }}
-                                                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-colors ${stylePreset === preset
-                                                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)]'
-                                                        : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
-                                                        }`}
+                                                    className={platform === target ? 'is-selected' : ''}
+                                                    onClick={() => setPlatform(target)}
+                                                    title={`Generate for ${target}`}
                                                 >
-                                                    {preset}
+                                                    {target === 'mobile' ? <Smartphone size={13} /> : target === 'tablet' ? <Tablet size={13} /> : <Monitor size={13} />}
                                                 </button>
                                             ))}
                                         </div>
-                                    )}
-                                </div>   
-
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (isRecording) {
-                                            handleMicToggle();
-                                            return;
-                                        }
-                                        if (showSendAction) {
-                                            submit();
-                                            return;
-                                        }
-                                        handleMicToggle();
-                                    }}
-                                    disabled={actionDisabled}
-                                    className={`h-9 w-9 rounded-full text-[12px] font-semibold transition-colors flex items-center justify-center ${isRecording
-                                        ? 'bg-rose-500/20 text-rose-200 ring-1 ring-rose-300/25'
-                                        : showSendAction
-                                            ? 'bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)] shadow-lg shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_30%,transparent)]'
-                                            : 'bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text)] hover:bg-[var(--ui-surface-1)] ring-1 ring-[var(--ui-border)]'
-                                        } ${actionDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                    title={isRecording ? 'Stop recording' : showSendAction ? 'Send prompt' : isTranscribing ? 'Transcribing...' : 'Record voice'}
-                                >
-                                    {actionIsStop ? <Square size={13} className="fill-current" /> : showSendAction ? <ArrowUp size={15} /> : <Mic size={14} />}
-                                </button>
+                                        <div className="landing-data-control-group" aria-label="Model profile">
+                                            <button type="button" className={modelProfile === 'fast' ? 'is-selected' : ''} onClick={() => setModelProfile('fast')} title="Fast model">
+                                                <Zap size={13} />
+                                            </button>
+                                            <button type="button" className={modelProfile === 'quality' ? 'is-selected' : ''} onClick={() => setModelProfile('quality')} title="Quality model">
+                                                <Sparkles size={13} />
+                                            </button>
+                                        </div>
+                                        <div ref={styleMenuRef} className="landing-data-style-control">
+                                            <button type="button" onClick={() => setShowStyleMenu((open) => !open)} title={`Style: ${stylePreset}`}>
+                                                <StyleIcon size={13} />
+                                            </button>
+                                            {showStyleMenu && (
+                                                <div className="landing-data-style-menu">
+                                                    {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                                                        <button
+                                                            key={preset}
+                                                            type="button"
+                                                            className={stylePreset === preset ? 'is-selected' : ''}
+                                                            onClick={() => {
+                                                                setStylePreset(preset);
+                                                                setShowStyleMenu(false);
+                                                            }}
+                                                        >
+                                                            {preset}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <span>{prompt.length.toLocaleString()}/3,000</span>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
 
-                        {isReferenceMenuOpen && (
+                            {isReferenceMenuOpen && (
                             <ComposerReferenceMenu
                                 activeIndex={referenceActiveIndex}
                                 menuMode={referenceMenuMode}
@@ -1256,43 +1060,27 @@ export function LandingPage(props: LandingPageProps) {
                                 onIncludeScrapedImagesChange={setReferenceIncludeScrapedImages}
                                 onUrlDraftChange={setReferenceUrlDraft}
                             />
-                        )}
-                    </div>
-                    </div>
-
-                    <div className="relative z-10 mx-auto  w-full max-w-[780px] px-2 sm:px-0">
-                        <div className="rounded-[28px] p-3 text-left">
-                            <div className="flex flex-wrap justify-center gap-2">
-                                {LANDING_SUGGESTION_TABS.map((tab) => {
-                                    const TabIcon = tab.icon;
-                                    const isActive = activeSuggestionTab === tab.key;
-                                    return (
-                                        <button
-                                            key={tab.key}
-                                            type="button"
-                                            onClick={() => {
-                                                setActiveSuggestionTab((current) => {
-                                                    const next = current === tab.key ? null : tab.key;
-                                                    if (next) {
-                                                        setActiveSuggestionPrompt(tab.prompts[1] || tab.prompts[0]);
-                                                    }
-                                                    return next;
-                                                });
-                                            }}
-                                            className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[13px] font-medium transition-all ${isActive
-                                                ? 'border border-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-2))] text-[var(--ui-primary)]'
-                                                : 'border border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-muted)] hover:border-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-border))] hover:text-[var(--ui-text)]'
-                                                }`}
-                                        >
-                                            <TabIcon size={14} />
-                                            <span>{tab.label}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
+                            )}
                             {activeLandingSuggestionTab ? (
-                            <div className="mt-3 space-y-1.5">
+                            <div className="landing-data-prompts">
+                                <div className="landing-data-prompts__tabs">
+                                    {LANDING_SUGGESTION_TABS.map((tab) => {
+                                        const TabIcon = tab.icon;
+                                        return (
+                                            <button
+                                                key={tab.key}
+                                                type="button"
+                                                className={activeSuggestionTab === tab.key ? 'is-active' : ''}
+                                                onClick={() => {
+                                                    setActiveSuggestionTab(tab.key);
+                                                    setActiveSuggestionPrompt(tab.prompts[1] || tab.prompts[0]);
+                                                }}
+                                            >
+                                                <TabIcon size={12} /> {tab.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                                 {activeLandingSuggestionTab.prompts.map((suggestion, index) => {
                                     const isFeatured = activeSuggestionPrompt === suggestion || (!activeSuggestionPrompt && index === 1);
                                     return (
@@ -1300,27 +1088,10 @@ export function LandingPage(props: LandingPageProps) {
                                             key={suggestion}
                                             type="button"
                                             onClick={() => applyLandingSuggestion(suggestion)}
-                                            className={`group flex w-full items-center gap-3 rounded-[18px] border px-4 py-3 text-left transition-all ${isFeatured
-                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_10%,var(--ui-surface-2))]'
-                                                : 'border-transparent bg-transparent hover:border-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-border))] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_5%,var(--ui-surface-2))]'
-                                                }`}
+                                            className={isFeatured ? 'is-featured' : ''}
                                             title={suggestion}
                                         >
-                                            <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${isFeatured
-                                                ? 'border-[color:color-mix(in_srgb,var(--ui-primary)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]'
-                                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'
-                                                }`}>
-                                                {index === 0 ? <CircleStar size={13} /> : index === 1 ? <Sparkles size={13} /> : <Square size={12} />}
-                                            </span>
-                                            <span className={`min-w-0 flex-1 text-[14px] leading-6 ${isFeatured ? 'text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] group-hover:text-[var(--ui-text)]'}`}>
-                                                {suggestion}
-                                            </span>
-                                            <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isFeatured
-                                                ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_14%,transparent)] text-[var(--ui-primary)]'
-                                                : 'text-[var(--ui-text-subtle)] group-hover:text-[var(--ui-primary)]'
-                                                }`}>
-                                                <ArrowRight size={15} />
-                                            </span>
+                                            <Sparkles size={13} /><span>{suggestion}</span><ArrowRight size={14} />
                                         </button>
                                     );
                                 })}
@@ -1328,8 +1099,7 @@ export function LandingPage(props: LandingPageProps) {
                             ) : null}
                         </div>
                     </div>
-                    </div>
-                </motion.section>
+                </section>
 
                 {/* <section className="mx-auto mt-10 max-w-[980px] text-center">
                     <p className="text-[11px] uppercase tracking-[0.11em] text-gray-500">Built for teams shipping high-quality interfaces with AI</p>
@@ -1345,12 +1115,17 @@ export function LandingPage(props: LandingPageProps) {
                 {/*Screens demo section*/}
                 <motion.section
                     ref={demoScreensSectionRef}
-                    className={`landing-page-section landing-screens-overlap-section relative z-20 w-full max-w-none${activeLandingSuggestionTab ? ' is-expanded' : ''}`}
+                    className={`landing-page-section landing-screens-overlap-section landing-hero-followup relative z-20 w-full max-w-none${activeLandingSuggestionTab ? ' is-expanded' : ''}`}
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 36, scale: 0.985 }}
                     whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                     viewport={{ once: true, amount: 0.2 }}
                     transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
                 >
+                    <div className="landing-hero-followup__intro">
+                        <span>Prompt. Generate. Refine.</span>
+                        <h2>Go from a rough idea to product-ready UI.</h2>
+                        <p>Start with a prompt or visual reference, then explore screens built for real product workflows.</p>
+                    </div>
                     <div className="landing-page-section-full relative overflow-hidden px-0">
                         <div
                             className="infinite-scroll-track flex w-max gap-4"
@@ -1376,10 +1151,10 @@ export function LandingPage(props: LandingPageProps) {
                 </motion.section>
 
                 {/*Video demo section*/}
-                <section className="landing-surface-band landing-surface-band-2 landing-page-section ">
-                    <div className="w-full min-w-none px-0 md:px-[15%]">
+                <section className="landing-surface-band landing-surface-band-2 landing-page-section landing-demo-section">
+                    <div className="landing-demo-section__inner">
                     <motion.div
-                        className="flex flex-col gap-4 px-4 text-center md:px-0"
+                        className="landing-section-heading flex flex-col gap-4 px-4 text-center md:px-0"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                         viewport={{ once: true, amount: 0.3 }}
@@ -1417,7 +1192,7 @@ export function LandingPage(props: LandingPageProps) {
                         <button
                             type="button"
                             onClick={() => onNavigate('/app')}
-                            className="inline-flex items-center gap-2 rounded-full border border-[var(--ui-primary)] bg-[var(--ui-primary)] px-5 py-3 text-[13px] font-semibold text-white shadow-[0_16px_40px_color-mix(in_srgb,var(--ui-primary)_28%,transparent)] transition-all hover:bg-[var(--ui-primary-hover)]"
+                            className="landing-ink-button"
                         >
                             <Sparkles size={16} />
                             Explore EazyUI
@@ -1483,37 +1258,21 @@ export function LandingPage(props: LandingPageProps) {
                     </div>
                 </section> */}
 
-                {/*Horizontal scroll section*/}
-                <section
-                    ref={featureShowcaseSectionRef}
-                    className="landing-surface-band landing-surface-band-1 landing-page-section landing-feature-pin-section"
-                    style={{ height: `${featureShowcaseScrollSpan}px` }}
+                {/*Features section*/}
+                <motion.div
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 50 }}
+                    whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.12 }}
+                    transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
                 >
-                    <div className="landing-feature-pin-inner">
-                        <div className="landing-feature-layout landing-page-section-inner landing-page-section-inner-full h-full">
-                            <div ref={featureShowcaseViewportRef} className="landing-feature-scroll-viewport">
-                                <div
-                                    ref={featureShowcaseTrackRef}
-                                    className="landing-feature-scroll-track"
-                                    style={{ transform: `translate3d(-${featureShowcaseOffset}px, 0, 0)` }}
-                                >
-                                    <FeatureScrollIntro progress={featureSectionProgress} />
-                                    {FEATURE_SCROLL_ITEMS.map((item, index) => (
-                                        <FeatureScrollCard
-                                            key={item.number}
-                                            item={item}
-                                            index={index}
-                                            progress={featureSectionProgress}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                    <FeatureMosaic
+                        onCreate={() => onNavigate('/app')}
+                        onContact={() => onNavigate('/contact')}
+                    />
+                </motion.div>
 
                 {/*pricing section*/}
-                <section className="landing-surface-band landing-surface-band-2 landing-page-section">
+                <section className="landing-surface-band landing-surface-band-2 landing-page-section landing-pricing-section">
                     <GlassPricingSection
                         className=""
                         onGetStarted={() => setPrompt('Design a premium SaaS pricing page with calm typography, elegant comparisons, and a clear featured plan')}
@@ -1524,7 +1283,7 @@ export function LandingPage(props: LandingPageProps) {
                 <section className="landing-surface-band landing-surface-band-1 landing-page-section landing-testimonial-section">
                     <div className="landing-page-section-inner landing-page-section-inner-full">
                         <motion.div
-                            className="text-center"
+                            className="landing-section-heading text-center"
                             initial={shouldReduceMotion ? false : { opacity: 0, y: 40 }}
                             whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                             viewport={{ once: true, amount: 0.35 }}
@@ -1554,7 +1313,7 @@ export function LandingPage(props: LandingPageProps) {
                 </section>
 
                 {/*cta section*/}
-                <section className="landing-surface-band landing-surface-band-1 landing-page-section pt-6 md:pt-10">
+                <section className="landing-surface-band landing-surface-band-1 landing-page-section landing-cta-section pt-6 md:pt-10">
                     <motion.div
                         className="px-4 md:px-6"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 44 }}
@@ -1570,106 +1329,53 @@ export function LandingPage(props: LandingPageProps) {
                 </section>
 
                 {/*footer section*/}
-                <footer className="landing-footer">
+                <footer className="site-footer">
+                    <div className="footer-dots" aria-hidden="true">
+                        <div className="footer-dots__line" />
+                    </div>
                     <motion.div
-                        className="landing-footer-shell"
+                        className="site-footer__inner"
                         initial={shouldReduceMotion ? false : { opacity: 0, y: 56 }}
                         whileInView={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                         viewport={{ once: true, amount: 0.2 }}
                         transition={{ duration: 0.88, ease: [0.22, 1, 0.36, 1] }}
                     >
-                        <div className="landing-footer-panel">
+                        <div className="site-footer__top">
+                            <h2>Ideas become polished product interfaces faster with EazyUI.</h2>
+                            {LANDING_FOOTER_COLUMNS.map((column, columnIndex) => (
+                                <nav
+                                    key={columnIndex}
+                                    className="site-footer__nav"
+                                    aria-label={columnIndex === 0 ? 'Footer navigation' : columnIndex === 1 ? 'Company links' : 'Social links'}
+                                >
+                                    {column.map((item) => (
+                                        'href' in item ? (
+                                            <a key={item.label} href={item.href} target="_blank" rel="noreferrer">{item.label}</a>
+                                        ) : (
+                                            <button key={item.label} type="button" onClick={() => onNavigate(item.path)}>{item.label}</button>
+                                        )
+                                    ))}
+                                </nav>
+                            ))}
+                        </div>
+
+                        <div className="site-footer__brand-row">
+                            <button type="button" className="site-footer__brand" onClick={() => onNavigate('/')} aria-label="EazyUI home">
+                                <LogoMark className="site-footer__mark" />
+                                <span>EazyUI</span>
+                            </button>
+                        </div>
+
+                        <div className="site-footer__legal">
+                            <p>© 2026 EazyUI. All rights reserved.</p>
+                            <button type="button" onClick={() => onNavigate('/blog')}>Privacy Policy</button>
+                            <button type="button" onClick={() => onNavigate('/blog')}>Terms of Use</button>
                             <button
                                 type="button"
-                                className="landing-footer-scrolltop"
                                 onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: shouldReduceMotion ? 'auto' : 'smooth' })}
-                                aria-label="Scroll to top"
                             >
-                                <ArrowUp size={14} />
+                                Back to top
                             </button>
-
-                            <div className="landing-footer-main-grid">
-                                <div className="landing-footer-brand-column">
-                                    <div className="landing-footer-brand-mark" aria-hidden="true">
-                                        <img src={appLogo} alt="" className="landing-footer-brand-logo" />
-                                    </div>
-                                    <p className="landing-footer-brand-copy">
-                                        AI UI design workspace for creating screens, flows, and interface concepts in seconds. Export to HTML and Figma. Trusted by 140,000+ users worldwide.
-                                    </p>
-                                </div>
-
-                                <div className="landing-footer-links-grid">
-                                    {LANDING_FOOTER_COLUMNS.map((column) => (
-                                        <div key={column.title} className="landing-footer-column">
-                                            <p className="landing-footer-column-title">{column.title}</p>
-                                            <div className="landing-footer-column-links">
-                                                {column.items.map((item) => (
-                                                    item.href ? (
-                                                        <a
-                                                            key={item.label}
-                                                            href={item.href}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="landing-footer-link"
-                                                        >
-                                                            {item.label}
-                                                        </a>
-                                                    ) : (
-                                                        <button
-                                                            key={item.label}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                if (item.path) onNavigate(item.path);
-                                                            }}
-                                                            className="landing-footer-link"
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    )
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="landing-footer-divider" />
-
-                            <div className="landing-footer-meta-row">
-                                <div className="landing-footer-meta-left">
-                                    <p className="landing-footer-copyright">
-                                        © 2026 EazyUI. All rights reserved.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={toggleTheme}
-                                        className="landing-footer-theme-pill"
-                                        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-                                        title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
-                                    >
-                                        <Monitor size={13} />
-                                        {theme === 'light' ? <Moon size={12} /> : <Sun size={12} />}
-                                    </button>
-                                </div>
-
-                                <div className="landing-footer-social-row">
-                                    {LANDING_FOOTER_SOCIALS.map((item) => {
-                                        const Icon = item.icon;
-                                        return (
-                                            <a
-                                                key={item.label}
-                                                href={item.href}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="landing-footer-social-icon"
-                                                aria-label={item.label}
-                                            >
-                                                <Icon size={15} />
-                                            </a>
-                                        );
-                                    })}
-                                </div>
-                            </div>
                         </div>
                     </motion.div>
                 </footer>

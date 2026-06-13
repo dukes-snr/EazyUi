@@ -217,9 +217,9 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
     };
 
     return (
-        <section className={`relative ${className}`}>
+        <section className={`landing-glass-pricing relative ${className}`}>
             <div className="landing-page-section-inner landing-page-section-inner-full">
-                <div className="overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                <div className="landing-glass-pricing__shell overflow-hidden rounded-[28px] border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
                     <div className="relative px-5 py-8 md:px-8 md:py-10 lg:px-10">
                         <div className="pointer-events-none absolute inset-0 opacity-70">
                             <div className="absolute inset-y-0 left-1/4 hidden w-px bg-[var(--ui-border)] md:block" />
@@ -227,7 +227,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                             <div className="absolute inset-y-0 right-1/4 hidden w-px bg-[var(--ui-border)] md:block" />
                         </div>
 
-                        <div className="relative mx-auto max-w-[760px] text-center">
+                        <div className="landing-section-heading relative mx-auto max-w-[760px] text-center">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--ui-text-subtle)]">Pricing</p>
                             <h3 className="mt-3 text-[34px] font-semibold leading-[1.02] tracking-[-0.05em] text-[var(--ui-text)] md:text-[56px]">
                                 Clean pricing for
@@ -238,7 +238,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                 Paid plan amounts come from the active billing provider when available. Annual totals are calculated from the current monthly billing price.
                             </p>
 
-                            <div className="mt-7 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1">
+                            <div className="landing-pricing-toggle mt-7 inline-flex rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-1">
                                 {(['monthly', 'annual'] as const).map((option) => (
                                     <button
                                         key={option}
@@ -268,12 +268,12 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                             </div>
                         </div>
 
-                        <div className="relative mt-8 overflow-hidden rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
+                        <div className="landing-pricing-grid-shell relative mt-8 overflow-hidden rounded-[24px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]">
                             <div className="grid gap-px bg-[var(--ui-border)] lg:grid-cols-3">
                                 {tiers.map((tier) => (
                                     <article
                                         key={tier.key}
-                                        className={`flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6 ${tier.featured ? 'bg-[var(--ui-surface-2)]' : ''}`}
+                                        className={`landing-pricing-tier flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6 ${tier.featured ? 'is-featured bg-[var(--ui-surface-2)]' : ''}`}
                                     >
                                         <div>
                                             <p className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--ui-text)]">{tier.title}</p>
@@ -312,7 +312,7 @@ export function GlassPricingSection({ className = '', onGetStarted, onSelectPlan
                                         </ul>
                                     </article>
                                 ))}
-                                <article className="flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6">
+                                <article className="landing-pricing-tier flex min-h-[34rem] flex-col bg-[var(--ui-surface-1)] p-5 md:p-6">
                                     <div>
                                         <p className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--ui-text)]">Credit Packs</p>
                                         <p className="mt-2 text-[12px] uppercase tracking-[0.14em] text-[var(--ui-text-subtle)]">Best for bursts and overflow</p>

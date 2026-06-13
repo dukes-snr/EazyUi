@@ -1,14 +1,13 @@
-import { ArrowUp, ChevronLeft, ChevronRight, CircleHelp, CircleStar, FolderOpen, Gem, Home, LayoutGrid, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
+import { ArrowUp, Check, ChevronLeft, ChevronRight, CircleHelp, CircleStar, FolderOpen, Gem, Home, LayoutGrid, LineSquiggle, Loader2, LogOut, Menu, Monitor, Moon, MoreHorizontal, Palette, Plus, RefreshCcw, Smile, Smartphone, Sparkles, Sun, Tablet, Trash2, X, Zap } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { apiClient, type BillingSummary } from '../../api/client';
+import { apiClient, type BillingSummary, type HtmlScreen } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
 import type { User } from 'firebase/auth';
 import { observeAuthState, signOutCurrentUser } from '../../lib/auth';
 import { useOnboardingStore, useUiStore } from '../../stores';
-import { useOrbVisuals, type OrbActivityState } from '../../utils/orbVisuals';
 import {
   extractComposerInlineReferences,
   findComposerReferenceTrigger,
@@ -24,7 +23,7 @@ import { ComposerAddMenu } from '../ui/ComposerAddMenu';
 import { ComposerInlineReferenceInput, type ComposerInlineReferenceInputHandle } from '../ui/ComposerInlineReferenceInput';
 import { ComposerReferenceMenu } from '../ui/ComposerReferenceMenu';
 import { GuideBubbleOverlay, type GuideBubbleStep } from '../ui/GuideBubbleOverlay';
-import { Orb } from '../ui/Orb';
+import { ReadonlyDeviceNode } from '../canvas/DeviceNode';
 
 type ProjectWorkspacePageProps = {
   authReady: boolean;
@@ -91,6 +90,129 @@ function sortProjects(items: ProjectListItem[]) {
   return [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
+type ProjectIconPalette = {
+  background: string;
+  foreground: '#000000' | '#ffffff';
+};
+
+function projectFallbackColor(projectId: string): ProjectIconPalette {
+  let hash = 0;
+  for (let index = 0; index < projectId.length; index += 1) {
+    hash = ((hash << 5) - hash) + projectId.charCodeAt(index);
+    hash |= 0;
+  }
+  return {
+    background: `hsl(${Math.abs(hash) % 360} 58% 46%)`,
+    foreground: '#ffffff',
+  };
+}
+
+function readableForeground(red: number, green: number, blue: number): ProjectIconPalette['foreground'] {
+  const luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255;
+  return luminance > 0.62 ? '#000000' : '#ffffff';
+}
+
+function sampleImageColor(image: HTMLImageElement): ProjectIconPalette | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, 8, 8);
+    const pixels = context.getImageData(0, 0, 8, 8).data;
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    let count = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 3] < 128) continue;
+      const max = Math.max(pixels[index], pixels[index + 1], pixels[index + 2]);
+      const min = Math.min(pixels[index], pixels[index + 1], pixels[index + 2]);
+      if (max > 245 && min > 235) continue;
+      red += pixels[index];
+      green += pixels[index + 1];
+      blue += pixels[index + 2];
+      count += 1;
+    }
+    if (!count) return null;
+    const averageRed = Math.round(red / count);
+    const averageGreen = Math.round(green / count);
+    const averageBlue = Math.round(blue / count);
+    return {
+      background: `rgb(${averageRed} ${averageGreen} ${averageBlue})`,
+      foreground: readableForeground(averageRed, averageGreen, averageBlue),
+    };
+  } catch {
+    return null;
+  }
+}
+
+type ProjectScreenTransition = {
+  direction: -1 | 1;
+  phase: 'out' | 'enter';
+};
+
+function LiveProjectScreenPreview({
+  screen,
+  transition,
+}: {
+  screen: HtmlScreen;
+  transition?: ProjectScreenTransition;
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const screenWidth = Math.max(Number(screen.width) || 402, 1);
+  const screenHeight = Math.max(Number(screen.height) || 874, 1);
+  const deviceWidth = screenWidth;
+  const deviceHeight = screenHeight;
+  const transitionClassName = transition
+    ? `is-${transition.phase}-${transition.direction === 1 ? 'next' : 'previous'}`
+    : '';
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const updateScale = () => {
+      const availableWidth = viewport.clientWidth;
+      const availableHeight = viewport.clientHeight;
+      const scale = Math.min(availableWidth / deviceWidth, availableHeight / deviceHeight, 1);
+      viewport.style.setProperty('--project-preview-scale', String(scale));
+      viewport.style.setProperty('--project-preview-width', `${deviceWidth * scale}px`);
+      viewport.style.setProperty('--project-preview-height', `${deviceHeight * scale}px`);
+    };
+
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [deviceHeight, deviceWidth]);
+
+  return (
+    <div ref={viewportRef} className="workspace-project-card__live-viewport">
+      <div className={`workspace-project-card__live-device ${transitionClassName}`}>
+        <ReadonlyDeviceNode
+          screenId={screen.screenId}
+          html={screen.html}
+          width={screenWidth}
+          height={screenHeight}
+          displayMode="clean"
+        />
+      </div>
+    </div>
+  );
+}
+
+function LoadingProjectScreenPreview() {
+  return (
+    <div className="workspace-project-card__live-viewport" aria-label="Loading project screens" role="status">
+      <div className="workspace-project-card__live-device workspace-project-card__loading-device">
+        <ReadonlyDeviceNode loading displayMode="clean" />
+      </div>
+    </div>
+  );
+}
+
 export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, onOpenProject }: ProjectWorkspacePageProps) {
   const requestConfirmation = useUiStore((state) => state.requestConfirmation);
   const theme = useUiStore((state) => state.theme);
@@ -132,6 +254,12 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const [referenceEditingUrl, setReferenceEditingUrl] = useState<string | null>(null);
   const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+  const [projectIconColors, setProjectIconColors] = useState<Record<string, ProjectIconPalette>>({});
+  const [projectScreens, setProjectScreens] = useState<Record<string, HtmlScreen[]>>({});
+  const [activeProjectScreenIndexes, setActiveProjectScreenIndexes] = useState<Record<string, number>>({});
+  const [projectScreenTransitions, setProjectScreenTransitions] = useState<Record<string, ProjectScreenTransition>>({});
+  const projectScreenTransitionTimersRef = useRef<Record<string, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const starterPromptRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
   const avatarMenuRef = useRef<HTMLDivElement | null>(null);
@@ -141,7 +269,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceTriggerRangeRef = useRef<ComposerReferenceTextRange | null>(null);
 
-  const isLight = theme === 'light';
+  const isLight = true;
   const shouldReduceMotion = useReducedMotion();
   const workspaceWordmark = isLight ? eazyuiWordmarkLight : eazyuiWordmark;
   const authDisplayName = authUser?.displayName || authUser?.email?.split('@')[0] || 'User';
@@ -153,14 +281,6 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const selectedIdSet = new Set(selectedProjectIds);
   const hasSelectedProjects = selectedProjectIds.length > 0;
   const allSelected = projects.length > 0 && projects.every((project) => selectedIdSet.has(project.id));
-  const workspaceOrbActivity: OrbActivityState = creatingFromPrompt
-    ? 'thinking'
-    : starterPrompt.trim().length > 0
-      ? 'talking'
-      : 'idle';
-  const { agentState: workspaceOrbState, colors: workspaceOrbColors } = useOrbVisuals(workspaceOrbActivity);
-  const workspaceOrbInput = creatingFromPrompt ? 0.55 : 0.18;
-  const workspaceOrbOutput = creatingFromPrompt ? 0.88 : starterPrompt.trim().length > 0 ? 0.44 : 0.2;
   const StyleIcon = stylePreset === 'minimal'
     ? LineSquiggle
     : stylePreset === 'vibrant'
@@ -170,15 +290,6 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
         : stylePreset === 'playful'
           ? Smile
           : CircleStar;
-  const styleButtonTone = stylePreset === 'minimal'
-    ? 'bg-[color:color-mix(in_srgb,var(--ui-primary)_12%,var(--ui-surface-4))] text-[var(--ui-text)] ring-[color:color-mix(in_srgb,var(--ui-primary)_30%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,var(--ui-surface-4))]'
-    : stylePreset === 'vibrant'
-      ? 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/35 hover:bg-emerald-400/20'
-      : stylePreset === 'luxury'
-        ? 'bg-amber-400/15 text-amber-200 ring-amber-300/35 hover:bg-amber-400/20'
-        : stylePreset === 'playful'
-          ? 'bg-fuchsia-400/15 text-fuchsia-200 ring-fuchsia-300/35 hover:bg-fuchsia-400/20'
-        : 'bg-[color:color-mix(in_srgb,var(--ui-primary)_16%,transparent)] text-[color:color-mix(in_srgb,var(--ui-primary)_62%,white)] ring-[color:color-mix(in_srgb,var(--ui-primary)_38%,transparent)] hover:bg-[color:color-mix(in_srgb,var(--ui-primary)_22%,transparent)]';
   const sidebarNavItems = [
     // {
     //   id: 'workspace-home',
@@ -226,9 +337,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const sidebarPrimaryLabel = projects[0]?.name || 'Projects';
   const avatarMenuPositionClassName = 'top-[50px] left-full ml-5';
   const avatarMenuWidthClassName = 'w-[260px]';
-  const shellBadgeClassName = isLight
-    ? 'border-slate-300/70 bg-white/85 text-slate-700'
-    : 'border-white/10 bg-white/[0.04] text-slate-300';
+  const shellBadgeClassName = 'border-black/10 bg-white/55 text-[#505050] backdrop-blur-md';
   const avatarMenuCardClassName = isLight
     ? 'border-black/10 bg-[var(--ui-surface-3)] text-slate-700'
     : 'border-white/[0.08] bg-[var(--ui-surface-3)] text-slate-200';
@@ -239,20 +348,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   const avatarMenuMutedIconClassName = isLight ? 'text-slate-400' : 'text-slate-500';
   const avatarMenuStrongTextClassName = isLight ? 'text-slate-900' : 'text-slate-50';
   const avatarMenuMutedTextClassName = isLight ? 'text-slate-500' : 'text-slate-400';
-  const desktopWorkspaceBgClassName = 'bg-[var(--color-bg)]';
-  const desktopSidebarClassName = isLight ? 'border-r border-black/[0.08] bg-[var(--color-bg)]' : 'border-r border-white/[0.06] bg-[var(--color-bg)]';
-  const desktopSidebarToggleClassName = isLight
-    ? 'border-black/[0.08] bg-[#ebe4d8] text-slate-500 hover:text-slate-900'
-    : 'border-white/[0.08] bg-[#1f2024] text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]';
-  const desktopSidebarHoverClassName = isLight ? 'hover:bg-black/[0.04]' : 'hover:bg-white/[0.03]';
-  const desktopSidebarSurfaceClassName = isLight ? 'bg-black/[0.05] hover:bg-black/[0.08]' : 'bg-white/[0.06] hover:bg-white/[0.09]';
-  const desktopSidebarDividerClassName = isLight ? 'bg-black/[0.08]' : 'bg-white/[0.06]';
-  const desktopSidebarInlineHoverClassName = isLight ? 'hover:bg-black/[0.04] hover:text-slate-900' : 'hover:bg-white/[0.04] hover:text-[var(--ui-text)]';
-  const projectWorkspaceSurfaceClassName = 'bg-[var(--color-bg)]';
-  const projectPreviewShellClassName = isLight ? 'bg-[#ebe4d8]' : 'bg-[var(--workspace-soft-strong)]';
-  const projectPreviewFrameClassName = isLight ? 'border-black/10 bg-[#ddd6ca]' : 'border-white/15 bg-[#080A12]';
-  const projectPreviewInsetClassName = isLight ? 'bg-[#faf7f1]' : 'bg-[#121623]';
-  const accentButtonClassName = 'border-[var(--ui-primary)] bg-[var(--ui-primary)] text-white shadow-[0_14px_34px_color-mix(in_srgb,var(--ui-primary)_26%,transparent)] hover:bg-[var(--ui-primary-hover)]';
+  const desktopWorkspaceBgClassName = 'workspace-cream-root';
+  const desktopSidebarClassName = 'workspace-cream-sidebar border-r border-black/[0.07]';
+  const desktopSidebarToggleClassName = 'border-black/[0.08] bg-white text-[#6f6a62] shadow-sm hover:bg-[#f4f4f4] hover:text-black';
+  const desktopSidebarHoverClassName = 'hover:bg-black/[0.035]';
+  const desktopSidebarSurfaceClassName = 'bg-white/65 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset] hover:bg-white';
+  const desktopSidebarDividerClassName = 'bg-black/[0.07]';
+  const desktopSidebarInlineHoverClassName = 'hover:bg-black/[0.04] hover:text-black';
+  const projectWorkspaceSurfaceClassName = 'workspace-cream-content';
   const rootReferenceOptions = getFilteredComposerReferenceRootOptions(referenceRootQuery, false);
   const hasSeenWorkspaceGuide = seenGuideIds.includes(WORKSPACE_GUIDE_ID);
   const isWorkspaceGuideActive = activeGuideId === WORKSPACE_GUIDE_ID;
@@ -368,6 +471,43 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   }, [authReady, isAuthenticated]);
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated || projects.length === 0) return;
+    let cancelled = false;
+
+    const projectsToLoad = projects.filter((project) => !projectScreens[project.id]);
+    if (projectsToLoad.length === 0) return;
+
+    void Promise.allSettled(projectsToLoad.map(async (project) => {
+      const response = await apiClient.getProject(project.id);
+      return {
+        projectId: project.id,
+        screens: (response.designSpec?.screens || []).filter((screen) => Boolean(screen?.html)),
+      };
+    })).then((results) => {
+      if (cancelled) return;
+      const loadedScreens: Record<string, HtmlScreen[]> = {};
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          loadedScreens[result.value.projectId] = result.value.screens;
+        } else {
+          loadedScreens[projectsToLoad[index].id] = [];
+        }
+      });
+      if (Object.keys(loadedScreens).length > 0) {
+        setProjectScreens((current) => ({ ...current, ...loadedScreens }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, isAuthenticated, projectScreens, projects]);
+
+  useEffect(() => () => {
+    Object.values(projectScreenTransitionTimersRef.current).flat().forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const syncViewport = () => {
@@ -403,6 +543,17 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isMobileSidebarOpen]);
+
+  useEffect(() => {
+    if (!openProjectMenuId) return;
+    const closeMenu = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-project-options]')) return;
+      setOpenProjectMenuId(null);
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    return () => document.removeEventListener('pointerdown', closeMenu);
+  }, [openProjectMenuId]);
 
   useEffect(() => {
     const unsub = observeAuthState((user) => setAuthUser(user));
@@ -628,15 +779,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
   };
 
   if (!authReady) {
-    return <div className="h-screen w-screen grid place-items-center bg-[#06070B] text-gray-300">Loading workspace...</div>;
+    return <div className="h-screen w-screen grid place-items-center bg-white text-[#505050]">Loading workspace...</div>;
   }
 
   if (!isAuthenticated) {
-    return <div className="h-screen w-screen grid place-items-center bg-[#06070B] text-rose-200">You need to be logged in.</div>;
+    return <div className="h-screen w-screen grid place-items-center bg-white text-rose-700">You need to be logged in.</div>;
   }
 
   return (
-    <div className={`h-screen w-screen overflow-hidden text-[var(--ui-text)] ${desktopWorkspaceBgClassName}`}>
+    <div className={`h-screen w-screen overflow-hidden text-[var(--ui-text)] [font-family:'Schibsted_Grotesk',sans-serif] ${desktopWorkspaceBgClassName}`}>
       {isMobileViewport && isMobileSidebarOpen && (
         <div
           className="fixed inset-0 z-[120] bg-[color:color-mix(in_srgb,var(--workspace-backdrop)_82%,black)]/85 backdrop-blur-md lg:hidden"
@@ -1141,7 +1292,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              <main className="relative mx-auto max-w-[1200px] px-4 py-8 md:px-7 md:py-10">
+              <main className="relative mx-auto max-w-[1560px] px-3 py-8 md:px-5 md:py-10 xl:px-6">
                 <motion.section
                   className="mx-auto max-w-[920px] text-center"
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 18 }}
@@ -1149,7 +1300,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                 >
                   <motion.p
-                    className="inline-flex items-center gap-2 rounded-full border border-[var(--workspace-content-border)] bg-[var(--workspace-soft)] px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[var(--ui-primary)]"
+                    className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[#505050] shadow-[0_7px_18px_rgba(13,18,15,0.08)]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.48, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
@@ -1158,7 +1309,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     Build faster in one workspace
                   </motion.p>
                   <motion.p
-                    className="mt-5 text-[32px] font-semibold leading-none tracking-[-0.04em] text-[var(--ui-text)] sm:text-[38px] md:text-[58px]"
+                    className="mt-6 font-['Fustat',sans-serif] text-[38px] font-bold leading-[0.96] tracking-[-0.055em] text-black sm:text-[48px] md:text-[64px]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 16 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.58, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
@@ -1175,7 +1326,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     Projects
                   </motion.p>
                   <motion.p
-                    className="mt-3 text-[15px] leading-7 text-[var(--ui-text-muted)]"
+                    className="mt-4 font-['Fustat',sans-serif] text-[17px] font-medium leading-7 tracking-[-0.02em] text-[#505050]"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 14 }}
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={{ duration: 0.52, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
@@ -1184,7 +1335,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   </motion.p>
 
                   <motion.form
-                    className="mt-8"
+                    className="mt-10"
                     onSubmit={(event) => {
                       event.preventDefault();
                       handleCreateFromPrompt();
@@ -1193,14 +1344,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.62, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
                   >
-            <div className="relative isolate mx-auto w-full overflow-visible">
+            <div className="relative isolate mx-auto w-full max-w-[728px] overflow-visible">
               <ComposerAttachmentStack
                 images={starterImages}
                 onRemove={(index) => setStarterImages((prev) => prev.filter((_, i) => i !== index))}
+                className="workspace-landing-composer__attachments"
               />
               <div
                 data-guide-id="workspace-starter-prompt"
-                className="relative z-10 rounded-[24px] border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--workspace-content-border))] bg-[var(--ui-surface-3)] p-2.5 text-left sm:p-3 md:rounded-[28px] md:p-4"
+                className="workspace-landing-composer"
               >
                 <input
                   ref={fileInputRef}
@@ -1210,18 +1362,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                <div className="flex items-start gap-2 px-1">
-                  <div className="mt-0.5 hidden h-9 w-9 shrink-0 rounded-full border border-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] bg-[color:color-mix(in_srgb,var(--ui-primary)_8%,var(--ui-surface-3))] p-[2px] sm:block">
-                    <Orb
-                      className="h-full w-full"
-                      colors={workspaceOrbColors}
-                      seed={7307}
-                      agentState={workspaceOrbState}
-                      volumeMode="manual"
-                      manualInput={workspaceOrbInput}
-                      manualOutput={workspaceOrbOutput}
-                    />
+                <div className="workspace-landing-composer__meta">
+                  <div>
+                    <span>{billingSummary?.balanceCredits ?? '...'} credits</span>
+                    <button type="button" onClick={() => onNavigate('/pricing')}>Upgrade</button>
                   </div>
+                  <span><Sparkles size={14} /> Powered by GPT-4o</span>
+                </div>
+                <div className="workspace-landing-composer__input">
+                <div className="workspace-landing-composer__editor">
                   <ComposerInlineReferenceInput
                     ref={starterPromptRef}
                     value={starterPrompt}
@@ -1267,13 +1416,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         handleCreateFromPrompt();
                       }
                     }}
-                    placeholder="What do you want to create?"
-                    placeholderClassName="px-2 py-1 text-left"
-                    className="no-focus-ring w-full min-h-[88px] max-h-[240px] overflow-y-auto border-0 bg-transparent px-1 py-1 text-[15px] leading-normal text-left text-[var(--ui-text)] ring-0 focus:border-0 focus:outline-none focus:ring-0 sm:px-2 sm:text-[16px]"
+                    placeholder="Type question..."
+                    placeholderClassName="text-left text-black/60"
+                    className="no-focus-ring min-h-[74px] max-h-[160px] w-full overflow-y-auto border-0 bg-transparent p-0 text-left text-[16px] leading-6 text-black ring-0 focus:border-0 focus:outline-none focus:ring-0"
                   />
                 </div>
-                <div className="flex items-center justify-between gap-3 border-t border-[var(--ui-border)] pt-2">
-                <div className="flex items-center gap-2.5">
+                <div className="workspace-landing-composer__footer">
+                <div className="workspace-landing-composer__tools">
                   <div className="relative">
                     <motion.button
                       type="button"
@@ -1285,12 +1434,13 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                         }
                         setIsAddMenuOpen(true);
                       }}
-                      className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ui-surface-1)] text-[var(--ui-text-muted)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_18%,var(--ui-border))] transition-all hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
+                      className="workspace-landing-composer__tool"
                       title="Add to prompt"
                       whileHover={shouldReduceMotion ? undefined : { y: -1 }}
                       whileTap={shouldReduceMotion ? undefined : { scale: 0.97 }}
                     >
-                      <Plus size={18} />
+                      <Plus size={14} />
+                      <span>Add</span>
                     </motion.button>
                     {isAddMenuOpen && (
                       <ComposerAddMenu
@@ -1306,15 +1456,15 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                       />
                     )}
                   </div>
-                  <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
+                  <div className="workspace-landing-composer__segmented">
                     {(['mobile', 'tablet', 'desktop'] as const).map((p) => (
                       <button
                         key={p}
                         type="button"
                         onClick={() => setDeviceType(p)}
-                        className={`p-1.5 rounded-full transition-all ${deviceType === p
-                          ? 'bg-[var(--ui-primary)] text-[var(--ui-text)] shadow-sm'
-                          : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-1)]'
+                        className={`workspace-landing-composer__segment ${deviceType === p
+                          ? 'is-active'
+                          : ''
                           }`}
                         title={`Generate for ${p}`}
                       >
@@ -1325,14 +1475,14 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center rounded-full bg-[var(--ui-surface-1)] p-1 ring-1 ring-[var(--ui-border)]">
+                <div className="workspace-landing-composer__settings">
+                  <div className="workspace-landing-composer__segmented">
                     <button
                       type="button"
                       onClick={() => setModelProfile('fast')}
-                      className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'fast'
-                        ? 'bg-[var(--ui-surface-1)] text-amber-400 ring-1 ring-amber-400/40'
-                        : 'text-amber-400 hover:text-amber-200 hover:bg-[var(--ui-surface-1)]'
+                      className={`workspace-landing-composer__segment ${modelProfile === 'fast'
+                        ? 'is-active'
+                        : ''
                         }`}
                       title="Fast mode"
                     >
@@ -1341,9 +1491,9 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     <button
                       type="button"
                       onClick={() => setModelProfile('quality')}
-                      className={`h-8 w-8 rounded-full text-[11px] font-semibold transition-all inline-flex items-center justify-center ${modelProfile === 'quality'
-                        ? 'bg-[var(--ui-surface-1)] text-[var(--ui-primary)] ring-1 ring-[color:color-mix(in_srgb,var(--ui-primary)_42%,transparent)]'
-                        : 'text-[color:color-mix(in_srgb,var(--ui-primary)_70%,white)] hover:text-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)]'
+                      className={`workspace-landing-composer__segment ${modelProfile === 'quality'
+                        ? 'is-active'
+                        : ''
                         }`}
                       title="Quality mode"
                     >
@@ -1354,7 +1504,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     <button
                       type="button"
                       onClick={() => setShowStyleMenu((open) => !open)}
-                      className={`h-9 w-9 rounded-full ring-1 transition-all inline-flex items-center justify-center ${styleButtonTone}`}
+                      className="workspace-landing-composer__tool workspace-landing-composer__style"
                       title="Select style preset"
                     >
                       <StyleIcon size={14} />
@@ -1403,7 +1553,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     type="submit"
                     disabled={!starterPrompt.trim() || creatingFromPrompt}
                     data-guide-id="workspace-create-submit"
-                    className={`h-10 w-10 shrink-0 rounded-full border flex items-center justify-center transition-all disabled:opacity-40 ${accentButtonClassName}`}
+                    className="workspace-landing-composer__submit"
                     title="Create project from request"
                     whileHover={shouldReduceMotion ? undefined : { y: -1, scale: 1.02 }}
                     whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
@@ -1411,6 +1561,7 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                     {creatingFromPrompt ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={15} />}
                   </motion.button>
                 </div>
+              </div>
               </div>
               {isReferenceMenuOpen && (
                 <ComposerReferenceMenu
@@ -1444,8 +1595,8 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0 }}
                   transition={{ duration: 0.58, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
                 >
-          <h1 className="text-[34px] md:text-[52px] leading-[0.96] font-semibold tracking-[-0.03em]">Your Projects</h1>
-          <p className="mt-3 text-sm text-[var(--ui-text-muted)]">Open, continue, or remove projects saved in Firestore/Storage.</p>
+          <h1 className="font-['Fustat',sans-serif] text-[36px] font-bold leading-[0.96] tracking-[-0.045em] text-black md:text-[54px]">Your Projects</h1>
+          <p className="mt-3 font-['Fustat',sans-serif] text-[15px] font-medium text-[#66615a]">Open, continue, or remove your saved interface projects.</p>
 
           {error && (
             <div className="mt-5 rounded-2xl border border-rose-300/35 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -1501,98 +1652,187 @@ export function ProjectWorkspacePage({ authReady, isAuthenticated, onNavigate, o
           )}
 
           {!loading && projects.length > 0 && (
-            <section className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-3">
+            <section className="workspace-project-gallery mt-7">
               {projects.map((project, index) => (
                 <motion.article
                   key={project.id}
-                  className={`relative rounded-[22px] border p-3 shadow-[0_16px_32px_rgba(0,0,0,0.06)] sm:rounded-[24px] sm:p-4 ${selectedIdSet.has(project.id) ? 'border-[var(--ui-primary)] bg-[var(--ui-surface-3)]' : 'border-[var(--workspace-content-border)] bg-[var(--workspace-soft)]'}`}
+                  className={`workspace-project-card group relative ${selectedIdSet.has(project.id) ? 'is-selected' : ''}`}
                   initial={shouldReduceMotion ? false : { opacity: 0, y: 24, scale: 0.985 }}
                   animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.42, delay: Math.min(index * 0.04, 0.24), ease: [0.22, 1, 0.36, 1] }}
-                  whileHover={shouldReduceMotion ? undefined : { y: -4 }}
+                  whileHover={shouldReduceMotion ? undefined : { y: -7 }}
+                  onClick={() => onOpenProject(project.id)}
                 >
-                  <div className="absolute left-3 top-3 z-10">
-                    <input
-                      type="checkbox"
-                      checked={selectedIdSet.has(project.id)}
-                      onChange={() => toggleProjectSelection(project.id)}
-                      disabled={deletingIdSet.has(project.id)}
-                      className="ui-check"
-                      aria-label={`Select ${project.name || 'project'}`}
-                    />
-                  </div>
-                  <div className="mb-3">
+                  <div className="workspace-project-card__media">
                     {(() => {
-                      const frameImages = Array.from(new Set([
+                      const screens = projectScreens[project.id] || [];
+                      const activeScreenIndex = Math.min(
+                        activeProjectScreenIndexes[project.id] || 0,
+                        Math.max(screens.length - 1, 0),
+                      );
+                      const activeScreen = screens[activeScreenIndex];
+                      const screensLoaded = Object.prototype.hasOwnProperty.call(projectScreens, project.id);
+                      const screenImage = Array.from(new Set([
                         ...(project.coverImageUrls || []).filter(Boolean),
                         project.coverImageUrl || '',
-                      ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0))).slice(0, 2);
-                      if (frameImages.length === 0) {
+                      ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)))[0];
+                      const changeScreen = (direction: -1 | 1) => {
+                        if (projectScreenTransitions[project.id]) return;
+                        if (shouldReduceMotion) {
+                          setActiveProjectScreenIndexes((current) => ({
+                            ...current,
+                            [project.id]: (activeScreenIndex + direction + screens.length) % screens.length,
+                          }));
+                          return;
+                        }
+
+                        setProjectScreenTransitions((current) => ({
+                          ...current,
+                          [project.id]: { direction, phase: 'out' },
+                        }));
+                        const swapTimer = window.setTimeout(() => {
+                          setActiveProjectScreenIndexes((current) => ({
+                            ...current,
+                            [project.id]: ((current[project.id] || 0) + direction + screens.length) % screens.length,
+                          }));
+                          setProjectScreenTransitions((current) => ({
+                            ...current,
+                            [project.id]: { direction, phase: 'enter' },
+                          }));
+                        }, 180);
+                        const finishTimer = window.setTimeout(() => {
+                          setProjectScreenTransitions((current) => {
+                            const next = { ...current };
+                            delete next[project.id];
+                            return next;
+                          });
+                          delete projectScreenTransitionTimersRef.current[project.id];
+                        }, 430);
+                        projectScreenTransitionTimersRef.current[project.id] = [swapTimer, finishTimer];
+                      };
+
+                      if (!screensLoaded) {
+                        return <LoadingProjectScreenPreview />;
+                      }
+
+                      if (activeScreen) {
+                        const indicatorCount = Math.min(screens.length, 5);
+                        const activeIndicator = screens.length <= 5
+                          ? activeScreenIndex
+                          : Math.round((activeScreenIndex / Math.max(screens.length - 1, 1)) * 4);
+
                         return (
-                          <div className="grid h-[130px] place-items-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[11px] text-[var(--ui-text-subtle)]">
-                            Preview will appear after save
+                          <>
+                            {screens.length > 1 && (
+                              <button
+                                type="button"
+                                className="workspace-project-card__gallery-arrow is-previous"
+                                aria-label={`Show previous screen in ${project.name || 'project'}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  changeScreen(-1);
+                                }}
+                              >
+                                <ChevronLeft size={20} strokeWidth={1.8} />
+                              </button>
+                            )}
+                            <LiveProjectScreenPreview
+                              screen={activeScreen}
+                              transition={projectScreenTransitions[project.id]}
+                            />
+                            {screens.length > 1 && (
+                              <button
+                                type="button"
+                                className="workspace-project-card__gallery-arrow is-next"
+                                aria-label={`Show next screen in ${project.name || 'project'}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  changeScreen(1);
+                                }}
+                              >
+                                <ChevronRight size={20} strokeWidth={1.8} />
+                              </button>
+                            )}
+                            {screens.length > 1 && (
+                              <div className="workspace-project-card__gallery-dots" aria-label={`${activeScreenIndex + 1} of ${screens.length} screens`}>
+                                {Array.from({ length: indicatorCount }, (_, dotIndex) => (
+                                  <span
+                                    key={`${project.id}-indicator-${dotIndex}`}
+                                    className={dotIndex === activeIndicator ? 'is-active' : ''}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+                      if (!screenImage) {
+                        return (
+                          <div className="workspace-project-card__empty">
+                            {projectScreens[project.id] ? 'Preview will appear after save' : 'Loading screens...'}
                           </div>
                         );
                       }
                       return (
-                        <div className={`relative flex h-[210px] items-center justify-center gap-2 overflow-hidden rounded-[18px] px-2 py-3 sm:h-[260px] sm:gap-3 sm:rounded-[20px] sm:px-3 sm:py-4 ${projectPreviewShellClassName}`}>
-                          {frameImages.map((imageUrl, index) => (
-                            <div
-                              key={`${project.id}-preview-${index}`}
-                              className={`relative overflow-hidden rounded-[18px] border shadow-[0_16px_30px_rgba(0,0,0,0.5)] ${projectPreviewFrameClassName} ${frameImages.length > 1
-                                ? index === 0
-                                  ? 'h-[170px] w-[82px] -rotate-3 sm:h-[220px] sm:w-[108px]'
-                                  : 'h-[170px] w-[82px] rotate-3 sm:h-[220px] sm:w-[108px]'
-                                : 'h-[182px] w-[92px] sm:h-[230px] sm:w-[116px]'
-                                }`}
-                            >
-                              <div className={`absolute inset-[3px] overflow-hidden rounded-[15px] ${projectPreviewInsetClassName}`}>
-                                <img
-                                  src={imageUrl}
-                                  alt={`${project.name} preview ${index + 1}`}
-                                  className="h-full w-full object-contain"
-                                  loading="lazy"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                        <img
+                          src={screenImage}
+                          alt={`${project.name || 'Project'} preview`}
+                          className="workspace-project-card__screen"
+                          loading="lazy"
+                          onLoad={(event) => {
+                            const sampledColor = sampleImageColor(event.currentTarget);
+                            if (!sampledColor) return;
+                            setProjectIconColors((current) => (
+                              current[project.id]?.background === sampledColor.background
+                                && current[project.id]?.foreground === sampledColor.foreground
+                            )
+                              ? current
+                              : { ...current, [project.id]: sampledColor });
+                          }}
+                        />
                       );
                     })()}
                   </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-[16px] font-semibold text-[var(--ui-text)]">{project.name || 'Untitled project'}</p>
-                      <p className="mt-1 truncate text-[11px] text-[var(--ui-text-subtle)]">{project.id}</p>
-                    </div>
-                    <span className={`text-[10px] uppercase tracking-[0.08em] ${project.hasSnapshot ? 'text-emerald-300' : 'text-amber-300'}`}>
-                      {project.hasSnapshot ? 'Backed up' : 'Meta only'}
+                  <div className="workspace-project-card__details">
+                    <span
+                      className="workspace-project-card__mark"
+                      style={{
+                        backgroundColor: (projectIconColors[project.id] || projectFallbackColor(project.id)).background,
+                        color: (projectIconColors[project.id] || projectFallbackColor(project.id)).foreground,
+                      }}
+                    >
+                      {(project.name || 'E').slice(0, 1).toUpperCase()}
                     </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between text-[11px] text-[var(--ui-text-muted)]">
-                    <span>Updated {formatDate(project.updatedAt)}</span>
-                    <span>{project.screenCount ?? 0} screens</span>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onOpenProject(project.id)}
-                      disabled={deletingIdSet.has(project.id)}
-                      className="h-9 rounded-full border border-[var(--ui-border-light)] px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--ui-text-muted)] hover:border-[var(--ui-border-light)] hover:text-[var(--ui-text)] disabled:opacity-50"
-                    >
-                      <span className="inline-flex items-center gap-1.5"><FolderOpen size={12} /> Open</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete([project.id])}
-                      disabled={deletingIdSet.has(project.id) || deleteProgress !== null}
-                      className="h-9 rounded-full border border-rose-300/35 bg-rose-500/10 px-3 text-[11px] uppercase tracking-[0.08em] text-[var(--color-error)] hover:bg-rose-500/20 disabled:opacity-50"
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {deletingIdSet.has(project.id) ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                        {deletingIdSet.has(project.id) ? 'Deleting' : 'Delete'}
-                      </span>
-                    </button>
+                    <div className="min-w-0">
+                      <p>{project.name || 'Untitled project'}</p>
+                      <span>{project.screenCount ?? 0} screens · Updated {formatDate(project.updatedAt)}</span>
+                    </div>
+                    <div className="workspace-project-card__options" data-project-options>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenProjectMenuId((current) => current === project.id ? null : project.id);
+                        }}
+                        aria-label={`Options for ${project.name || 'project'}`}
+                        aria-expanded={openProjectMenuId === project.id}
+                      >
+                        <MoreHorizontal size={18} />
+                      </button>
+                      {openProjectMenuId === project.id && (
+                        <div className="workspace-project-card__menu">
+                          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenProjectMenuId(null); onOpenProject(project.id); }}>
+                            <FolderOpen size={14} /> Open project
+                          </button>
+                          <button type="button" onClick={(event) => { event.stopPropagation(); toggleProjectSelection(project.id); }}>
+                            <Check size={14} /> {selectedIdSet.has(project.id) ? 'Deselect' : 'Select'}
+                          </button>
+                          <button className="is-danger" type="button" onClick={(event) => { event.stopPropagation(); setOpenProjectMenuId(null); void handleDelete([project.id]); }}>
+                            <Trash2 size={14} /> Delete project
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </motion.article>
               ))}

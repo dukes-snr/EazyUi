@@ -1397,6 +1397,170 @@ function injectEditorScript(html: string, screenId: string) {
     return `${html}\n${script}`;
 }
 
+type ReadonlyDeviceNodeProps = {
+    html?: string;
+    screenId?: string;
+    width?: number;
+    height?: number;
+    loading?: boolean;
+    className?: string;
+    displayMode?: 'framed' | 'clean';
+};
+
+export const ReadonlyDeviceNode = memo(({
+    html = '',
+    screenId = 'loading',
+    width = 402,
+    height = 874,
+    loading = false,
+    className = '',
+    displayMode = 'framed',
+}: ReadonlyDeviceNodeProps) => {
+    const isDesktop = width >= 1024;
+    const isTablet = width >= 600 && width < 1024;
+    const borderWidth = isDesktop ? 1 : isTablet ? 12 : 8;
+    const isFramedDisplay = displayMode === 'framed';
+    const showBrowserHeader = isFramedDisplay && isDesktop;
+    const shellWidth = isFramedDisplay ? width + (isDesktop ? 0 : borderWidth * 2) : width;
+    const shellHeight = isFramedDisplay ? height + (isDesktop ? 40 : borderWidth * 2) : height;
+    const shellRadius = isFramedDisplay ? (isDesktop ? '16px' : '44px') : (isDesktop ? '18px' : '20px');
+    const screenRadius = isFramedDisplay ? (isDesktop ? '12px' : 'calc(var(--custom-radius) - 6px)') : shellRadius;
+    const contentClipRadius = isFramedDisplay && isDesktop ? '0 0 12px 12px' : screenRadius;
+    const screenInset = isFramedDisplay ? borderWidth : 0;
+    const contentOffsetTop = showBrowserHeader ? 40 : 0;
+    const statusBarStyle = {
+        paddingTop: 16,
+        paddingBottom: 8,
+        paddingX: 24,
+        fontSize: 14,
+        fontWeight: 500,
+        iconSize: 18,
+        iconGap: 6,
+    } as const;
+    const srcDoc = useMemo(() => {
+        if (!html) return '';
+        const normalizedThemeHtml = normalizePreviewColorScheme(html);
+        const noScrollbarHtml = injectScrollbarHide(normalizedThemeHtml);
+        const paddedHtml = shouldInjectBodyTopPadding(noScrollbarHtml)
+            ? injectBodyTopPadding(noScrollbarHtml, 30)
+            : noScrollbarHtml;
+        const headerPaddedHtml = injectHeaderTopPadding(paddedHtml, 30);
+        if (isDesktop) return headerPaddedHtml;
+        return injectStatusBarOverlay(headerPaddedHtml, {
+            insetPx: statusBarStyle.paddingTop + statusBarStyle.paddingBottom + statusBarStyle.fontSize,
+            textColor: extractTokenColor(html, 'text') || '#111111',
+            paddingTop: statusBarStyle.paddingTop,
+            paddingBottom: statusBarStyle.paddingBottom,
+            paddingX: statusBarStyle.paddingX,
+            iconGap: statusBarStyle.iconGap,
+            iconSize: statusBarStyle.iconSize,
+            fontSize: statusBarStyle.fontSize,
+            fontWeight: statusBarStyle.fontWeight,
+        });
+    }, [html, isDesktop]);
+
+    return (
+        <div className={`device-node-container relative ${className}`}>
+            <div
+                className={isFramedDisplay ? 'iphone-frame' : ''}
+                style={{
+                    width: shellWidth,
+                    height: shellHeight,
+                    ['--custom-radius' as any]: shellRadius,
+                    ['--device-bezel-width' as any]: `${borderWidth}px`,
+                    ...(!isFramedDisplay ? {
+                        borderRadius: shellRadius,
+                        border: '1px solid var(--ui-border)',
+                        background: 'color-mix(in srgb, var(--ui-surface-2) 92%, transparent)',
+                        boxShadow: '0 24px 54px rgba(0, 0, 0, 0.22)',
+                        overflow: 'hidden',
+                    } : {}),
+                }}
+            >
+                {isFramedDisplay && !isDesktop && (
+                    <div className="iphone-buttons">
+                        <div className="iphone-button iphone-button-silent" />
+                        <div className="iphone-button iphone-button-vol-up" />
+                        <div className="iphone-button iphone-button-vol-down" />
+                        <div className="iphone-button iphone-button-power" />
+                    </div>
+                )}
+                {isFramedDisplay && <div className="iphone-bezel" />}
+                <div
+                    className="iphone-screen"
+                    style={{
+                        top: screenInset,
+                        bottom: screenInset,
+                        left: screenInset,
+                        right: screenInset,
+                        borderRadius: screenRadius,
+                        clipPath: `inset(0 round ${screenRadius})`,
+                        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                    }}
+                >
+                    {isDesktop && showBrowserHeader && (
+                        <div
+                            className="absolute top-0 left-0 z-10 flex h-10 w-full items-center gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4"
+                            style={{ borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}
+                        >
+                            <div className="flex gap-1.5">
+                                <div className="h-2.5 w-2.5 rounded-full bg-red-500/80" />
+                                <div className="h-2.5 w-2.5 rounded-full bg-amber-500/80" />
+                                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500/80" />
+                            </div>
+                            <div className="mx-4 flex h-6 flex-1 items-center justify-center rounded bg-[var(--ui-surface-3)] text-[9px] font-medium text-[var(--ui-text-subtle)]">
+                                eazyui.dev/preview/{screenId}
+                            </div>
+                        </div>
+                    )}
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: contentOffsetTop,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            overflow: 'hidden',
+                            borderRadius: contentClipRadius,
+                            clipPath: `inset(0 round ${contentClipRadius})`,
+                            WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                        }}
+                    >
+                        {loading ? (
+                            <Grainient
+                                className="h-full w-full"
+                                color1="#f4f4f0"
+                                color2="#9faaa3"
+                                color3="#151815"
+                                timeSpeed={0.65}
+                                warpStrength={1.8}
+                                grainAmount={0.08}
+                            />
+                        ) : (
+                            <iframe
+                                srcDoc={srcDoc}
+                                title="Project screen preview"
+                                data-screen-id={screenId}
+                                style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    border: 'none',
+                                    display: 'block',
+                                    overflow: 'hidden',
+                                    borderRadius: contentClipRadius,
+                                    clipPath: `inset(0 round ${contentClipRadius})`,
+                                    pointerEvents: 'none',
+                                }}
+                                sandbox="allow-scripts allow-same-origin"
+                            />
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
 // Custom Node for displaying the HTML screen with responsive frames
 export const DeviceNode = memo(({ data, selected }: NodeProps) => {
     const updateScreen = useDesignStore((state) => state.updateScreen);

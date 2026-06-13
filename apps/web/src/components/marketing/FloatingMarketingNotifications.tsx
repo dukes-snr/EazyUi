@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Monitor, Palette, Sparkles, Timer, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import appLogo from '../../assets/Ui-logo.png';
+import appLogo from '../../assets/Ui-logo.svg';
 import { useUiStore } from '../../stores';
 
 type FloatingMarketingNotificationsProps = {

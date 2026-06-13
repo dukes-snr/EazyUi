@@ -11,7 +11,6 @@ import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { LandingPage } from './components/landing/LandingPage';
 import { BlogDetailPage } from './components/marketing/BlogDetailPage';
 import { BlogPage } from './components/marketing/BlogPage';
-import { FloatingMarketingNotifications } from './components/marketing/FloatingMarketingNotifications';
 import { PricingPage } from './components/marketing/PricingPage';
 import { ProjectWorkspacePage } from './components/marketing/ProjectWorkspacePage';
 import { TemplatesPage } from './components/marketing/TemplatesPage';
@@ -35,7 +34,7 @@ import { getBlogPostBySlug } from './content/blogPosts';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from './stores';
 import { resetProjectHistorySnapshot } from './utils/projectHistory';
-import logo from './assets/Ui-logo.png';
+import logo from './assets/Ui-logo.svg';
 
 import './styles/App.css';
 
@@ -742,12 +741,7 @@ function App() {
         return new URLSearchParams(window.location.search).get('prompt')?.trim() || '';
     }, [isCanvasRoute]);
 
-    const renderPublicPage = (page: ReactNode) => (
-        <>
-            {page}
-            <FloatingMarketingNotifications onNavigate={(path) => navigate(path)} />
-        </>
-    );
+    const renderPublicPage = (page: ReactNode) => page;
 
     useEffect(() => {
         if (!isCanvasRoute) return;

@@ -34,7 +34,7 @@ function TestimonialCard({
             type="button"
             onClick={() => handleMove(position)}
             className={cn(
-                'absolute left-1/2 top-1/2 cursor-pointer overflow-hidden border-2 p-7 text-left transition-all duration-500 ease-in-out sm:p-8',
+                'landing-stagger-card absolute left-1/2 top-1/2 cursor-pointer overflow-hidden border-2 p-7 text-left transition-all duration-500 ease-in-out sm:p-8',
                 isCenter
                     ? 'z-20 border-[var(--ui-primary)] bg-[var(--ui-primary)] text-white'
                     : 'z-0 border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-[var(--ui-text)] hover:border-[color:color-mix(in_srgb,var(--ui-primary)_50%,var(--ui-border))]',
@@ -145,7 +145,7 @@ export function StaggerTestimonials({ testimonials, className }: StaggerTestimon
 
     return (
         <div
-            className={cn('relative w-full overflow-hidden rounded-[32px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]', className)}
+            className={cn('landing-stagger-shell relative w-full overflow-hidden rounded-[32px] border border-[var(--ui-border)] bg-[var(--ui-surface-2)]', className)}
             style={{ height: cardSize + (cardSize <= 320 ? 290 : 250) }}
         >
             {testimonialsList.map((testimonial, index) => {

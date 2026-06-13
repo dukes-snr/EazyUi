@@ -14,7 +14,7 @@ export function CallToAction({ className, onContactSales, onGetStarted }: CallTo
     return (
         <div
             className={cn(
-                'relative mx-auto flex w-full max-w-5xl flex-col justify-between gap-y-6 border-y border-[var(--ui-border)]',
+                'landing-final-cta relative mx-auto flex w-full max-w-5xl flex-col justify-between gap-y-6 border-y border-[var(--ui-border)]',
                 'bg-[radial-gradient(35%_80%_at_25%_0%,color-mix(in_srgb,var(--ui-text)_8%,transparent),transparent)] px-4 py-8 md:px-8 md:py-10',
                 className,
             )}
@@ -53,13 +53,13 @@ export function CallToAction({ className, onContactSales, onGetStarted }: CallTo
                 <Button
                     variant="outline"
                     onClick={onContactSales}
-                    className="border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-white hover:border-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
+                    className="landing-final-cta__secondary border-[var(--ui-border)] bg-[var(--ui-surface-1)] text-white hover:border-[var(--ui-primary)] hover:bg-[var(--ui-surface-1)] hover:text-[var(--ui-primary)]"
                 >
                     Contact Sales
                 </Button>
                 <Button
                     onClick={onGetStarted}
-                    className="bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]"
+                    className="landing-final-cta__primary bg-[var(--ui-primary)] text-white hover:bg-[var(--ui-primary-hover)]"
                 >
                     Get Started <ArrowRightIcon className="ml-1 h-4 w-4" />
                 </Button>
