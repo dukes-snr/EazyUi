@@ -2,9 +2,10 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { Aperture, ArrowRight, ArrowUp, ArrowUpRight, Box, Brush, Camera, ChevronDown, Chrome, CircleStar, Code2, Figma, Framer, Gem, Layers, LineSquiggle, LogOut, Menu, Mic, Monitor, Palette, Paperclip, Pause, PenTool, Play, RotateCcw, Search, Smartphone, Smile, Sparkle, Sparkles, Square, Tablet, Type, Wand2, X, Zap } from 'lucide-react';
 import appLogo from '../../assets/Ui-logo.svg';
-import heroBackdropImage from '../../assets/hero-bg2.jpg';
+import heroBackdropImage from '../../assets/herobg.png';
 import eazyuiWordmark from '../../assets/eazyui-text-edit.png';
 import eazyuiWordmarkLight from '../../assets/eazyui-text-edit-light.png';
+import featureWorkflowVideo from '../../assets/videos/showcase-scene.mp4';
 import { apiClient } from '../../api/client';
 import type { DesignModelProfile } from '../../constants/designModels';
 import { SHOWCASE_SCREEN_IMAGES } from '../../utils/showcaseImages';
@@ -145,9 +146,15 @@ const PATTERN_SCREEN_TEMPLATES: Omit<PatternCard, 'image'>[] = [
     },
 ];
 
-const FEATURE_WORKFLOW_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_150203_44a5bd32-516a-47ce-a077-8acbf9aa8991.mp4';
+const FEATURE_WORKFLOW_VIDEO = featureWorkflowVideo;
 const FEATURE_SCALE_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_154543_d5b83fc1-9cea-44f3-b5e8-8f325935211a.mp4';
 const FEATURE_CONTROLS_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260507_153148_d7a3e1dd-e5d0-4ce6-8306-00d7522ecc44.mp4';
+const FEATURE_CREATOR_AVATARS = [
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=96&h=96&q=80',
+    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=96&h=96&q=80',
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=96&h=96&q=80',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=96&h=96&q=80',
+] as const;
 
 const FEATURE_WORKFLOW_ROWS = [
     ['01', 'Describe the idea', 'Plain language'],
@@ -233,9 +240,24 @@ const LANDING_FOOTER_COLUMNS = [
 ] as const;
 
 const DEMO_VIDEO_EMBED_BASE_URL = 'https://www.youtube.com/embed/euv60ydI54c?enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
-const HERO_VIDEO_URL = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260319_015952_e1deeb12-8fb7-4071-a42a-60779fc64ab6.mp4';
+type HeroBackgroundMode = 'video' | 'image';
 
-function VideoBackground() {
+// Change only `mode` to switch the landing hero background.
+const HERO_BACKGROUND_CONFIG: {
+    mode: HeroBackgroundMode;
+    videoUrl: string;
+    imageSrc: string;
+    imageAlt: string;
+    imagePosition: string;
+} = {
+    mode: 'image',
+    videoUrl: 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260319_015952_e1deeb12-8fb7-4071-a42a-60779fc64ab6.mp4',
+    imageSrc: heroBackdropImage,
+    imageAlt: 'EazyUI interface design workspace illustration',
+    imagePosition: 'center center',
+};
+
+function HeroBackground() {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const animationFrameRef = useRef<number | null>(null);
 
@@ -262,6 +284,7 @@ function VideoBackground() {
     };
 
     useEffect(() => {
+        if (HERO_BACKGROUND_CONFIG.mode !== 'video') return;
         const video = videoRef.current;
         if (!video) return;
 
@@ -283,34 +306,27 @@ function VideoBackground() {
 
     return (
         <div className="landing-video-background" aria-hidden="true">
-            <video
-                ref={videoRef}
-                className="landing-video-background__media"
-                src={HERO_VIDEO_URL}
-                muted
-                playsInline
-                preload="auto"
-            />
+            {HERO_BACKGROUND_CONFIG.mode === 'video' ? (
+                <video
+                    ref={videoRef}
+                    className="landing-video-background__media"
+                    src={HERO_BACKGROUND_CONFIG.videoUrl}
+                    muted
+                    playsInline
+                    preload="auto"
+                />
+            ) : (
+                <img
+                    className="landing-video-background__media landing-video-background__media--image"
+                    src={HERO_BACKGROUND_CONFIG.imageSrc}
+                    alt={HERO_BACKGROUND_CONFIG.imageAlt}
+                    style={{ objectPosition: HERO_BACKGROUND_CONFIG.imagePosition }}
+                />
+            )}
             <div className="landing-video-background__veil" />
         </div>
     );
 }
-
-type HeroBackgroundMode = 'animated' | 'image';
-
-// Switch `mode` between 'animated' and 'image'.
-// To use another image, replace `imageSrc` with a different imported asset.
-const HERO_BACKGROUND_CONFIG: {
-    mode: HeroBackgroundMode;
-    imageSrc: string;
-    imageAlt: string;
-    imagePosition: string;
-} = {
-    mode: 'animated',
-    imageSrc: heroBackdropImage,
-    imageAlt: 'Abstract hero background',
-    imagePosition: 'center center',
-};
 
 function FeatureLabel({ children }: { children: string }) {
     return (
@@ -365,8 +381,22 @@ function FeatureMosaic({ onCreate, onContact }: { onCreate: () => void; onContac
                     <article className="landing-feature-mosaic__card landing-feature-mosaic__scale">
                         <FeatureVideo src={FEATURE_SCALE_VIDEO} />
                         <div className="landing-feature-mosaic__shade" />
-                        <strong>140K+</strong>
-                        <span>creators designing with EazyUI</span>
+                        <div className="landing-feature-mosaic__scale-content">
+                            <strong>50K+</strong>
+                            <span>creators designing with EazyUI</span>
+                            <div className="landing-feature-mosaic__avatars" aria-label="EazyUI creator community">
+                                {FEATURE_CREATOR_AVATARS.map((avatar, index) => (
+                                    <img
+                                        key={avatar}
+                                        src={avatar}
+                                        alt=""
+                                        loading="lazy"
+                                        style={{ zIndex: FEATURE_CREATOR_AVATARS.length - index }}
+                                    />
+                                ))}
+                                <div aria-hidden="true">+50K</div>
+                            </div>
+                        </div>
                     </article>
                 </div>
 
@@ -409,7 +439,7 @@ export function LandingPage(props: LandingPageProps) {
     const { onStart, onNavigate, userProfile, onSignOut, onSendVerification, verificationBusy } = props;
     const theme = useUiStore((state) => state.theme);
     const heroBackgroundMode = HERO_BACKGROUND_CONFIG.mode;
-    const useDarkHeroForeground = heroBackgroundMode === 'animated' || heroBackgroundMode === 'image';
+    const useDarkHeroForeground = heroBackgroundMode === 'video' || heroBackgroundMode === 'image';
     const heroWordmark = useDarkHeroForeground
         ? eazyuiWordmark
         : theme === 'light'
@@ -816,7 +846,7 @@ export function LandingPage(props: LandingPageProps) {
             <main className="relative z-10 px-0 pb-0">
                 {/*Hero section*/}
                 <section className="landing-data-hero">
-                    <VideoBackground />
+                    <HeroBackground />
                     <nav className="landing-data-nav" aria-label="Primary navigation">
                         <button type="button" className="landing-data-logo" onClick={() => onNavigate('/')}>
                             <img src={appLogo} alt="" />

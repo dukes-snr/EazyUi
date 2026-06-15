@@ -3074,7 +3074,8 @@ type ChatPanelProps = {
 
 type ChatDisplayMode = 'expanded' | 'collapsed' | 'popped';
 type OpenChatDisplayMode = Exclude<ChatDisplayMode, 'collapsed'>;
-type ChatLauncherInteraction = 'idle' | 'hovered' | 'pressed';
+
+const CANVAS_CHAT_LAYOUT_CHANGE_EVENT = 'eazyui:canvas-chat-layout-change';
 
 type ComposerAttachmentMeta = {
     origin: 'saved' | 'upload';
@@ -3082,56 +3083,6 @@ type ComposerAttachmentMeta = {
     scope?: AssetScope;
     assetRef?: AssetReference;
 };
-
-const CHAT_LAUNCHER_GRID = [
-    [0, 0, 1, 1, 1, 1, 0, 0],
-    [0, 1, 1, 1, 1, 1, 1, 0],
-    [1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 1, 1, 1, 1, 0, 1],
-    [1, 1, 0, 1, 1, 0, 1, 1],
-    [1, 1, 1, 0, 0, 1, 1, 1],
-    [0, 1, 1, 1, 1, 1, 1, 0],
-    [0, 0, 1, 1, 1, 1, 0, 0],
-] as const;
-
-const CHAT_LAUNCHER_ACCENTS = new Set([
-    '1-3',
-    '1-4',
-    '2-2',
-    '2-5',
-    '3-1',
-    '3-6',
-    '4-3',
-    '4-4',
-]);
-
-const CHAT_LAUNCHER_HOVER_ACCENTS = new Set([
-    '1-5',
-    '2-5',
-    '2-6',
-    '3-5',
-    '3-6',
-    '3-7',
-    '4-5',
-    '4-6',
-    '4-7',
-    '5-0',
-    '5-1',
-    '6-1',
-]);
-
-const CHAT_LAUNCHER_PRESSED_ACCENTS = new Set([
-    '1-4',
-    '2-4',
-    '2-5',
-    '3-4',
-    '3-5',
-    '4-0',
-    '4-1',
-    '5-0',
-    '5-1',
-    '6-1',
-]);
 
 const CANVAS_WORKSPACE_GUIDE_ID = 'canvas-workspace-first-run';
 const CHAT_PANEL_GUIDE_ID = 'chat-panel-first-run';
@@ -3181,71 +3132,6 @@ const CHAT_PANEL_GUIDE_STEPS: GuideBubbleStep[] = [
     },
 ];
 
-function ChatLauncherGlyph({ interaction }: { interaction: ChatLauncherInteraction }) {
-    const pixelSize = 2.8421052631578947;
-    const pixelStep = 4.7368421052631575;
-    const accentSet = interaction === 'pressed'
-        ? CHAT_LAUNCHER_PRESSED_ACCENTS
-        : interaction === 'hovered'
-            ? CHAT_LAUNCHER_HOVER_ACCENTS
-            : CHAT_LAUNCHER_ACCENTS;
-    const svgTransform = interaction === 'pressed'
-        ? 'scale(0.94) rotate(-3deg)'
-        : interaction === 'hovered'
-            ? 'scale(1.05) rotate(2deg)'
-            : 'scale(1) rotate(0deg)';
-
-    return (
-        <svg
-            width="36"
-            height="36"
-            viewBox="0 0 36 36"
-            overflow="visible"
-            className="relative shrink-0 transition-transform duration-200 ease-out"
-            aria-hidden="true"
-            style={{ transform: svgTransform, touchAction: 'none' }}
-        >
-            <g style={{ pointerEvents: 'none' }}>
-                {CHAT_LAUNCHER_GRID.flatMap((row, rowIndex) => row.map((cell, colIndex) => (
-                    <rect
-                        key={`base-${rowIndex}-${colIndex}`}
-                        x={colIndex * pixelStep}
-                        y={rowIndex * pixelStep}
-                        width={pixelSize}
-                        height={pixelSize}
-                        rx={1}
-                        opacity={cell ? 1 : 0}
-                        style={{
-                            fill: 'color-mix(in srgb, var(--ui-text-muted) 68%, transparent)',
-                            transition: 'opacity 180ms cubic-bezier(0.4, 0, 0.2, 1), fill 180ms cubic-bezier(0.4, 0, 0.2, 1)',
-                        }}
-                    />
-                )))}
-            </g>
-            <g style={{ pointerEvents: 'none', filter: 'drop-shadow(0 0 4px color-mix(in srgb, var(--ui-primary) 42%, transparent))' }}>
-                {CHAT_LAUNCHER_GRID.flatMap((row, rowIndex) => row.map((cell, colIndex) => {
-                    const isAccent = accentSet.has(`${rowIndex}-${colIndex}`);
-                    return (
-                        <rect
-                            key={`accent-${rowIndex}-${colIndex}`}
-                            x={colIndex * pixelStep}
-                            y={rowIndex * pixelStep}
-                            width={pixelSize}
-                            height={pixelSize}
-                            rx={1}
-                            opacity={cell && isAccent ? 1 : 0}
-                            style={{
-                                fill: 'var(--ui-primary)',
-                                transition: 'opacity 180ms cubic-bezier(0.4, 0, 0.2, 1), fill 180ms cubic-bezier(0.4, 0, 0.2, 1)',
-                            }}
-                        />
-                    );
-                }))}
-            </g>
-        </svg>
-    );
-}
-
 function dedupeAssetReferences(assetRefs: AssetReference[]): AssetReference[] {
     const seen = new Set<string>();
     return assetRefs.filter((assetRef) => {
@@ -3269,16 +3155,25 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const PLAN_MODE_STORAGE_KEY = 'eazyui:plan-mode';
     const CHAT_DISPLAY_MODE_STORAGE_KEY = 'eazyui:chat-display-mode';
     const CHAT_LAST_OPEN_MODE_STORAGE_KEY = 'eazyui:chat-last-open-mode';
+    const CANVAS_FIRST_CHAT_LAYOUT_KEY = 'eazyui:canvas-first-chat-layout-v1';
     const [prompt, setPrompt] = useState('');
     const [images, setImages] = useState<string[]>([]);
     const [composerAttachmentMeta, setComposerAttachmentMeta] = useState<ComposerAttachmentMeta[]>([]);
-    const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>('expanded');
+    const [chatDisplayMode, setChatDisplayMode] = useState<ChatDisplayMode>(() => {
+        if (typeof window === 'undefined') return 'popped';
+        const stored = window.localStorage.getItem(CHAT_DISPLAY_MODE_STORAGE_KEY);
+        const hasCanvasFirstLayout = window.localStorage.getItem(CANVAS_FIRST_CHAT_LAYOUT_KEY) === '1';
+        if (!hasCanvasFirstLayout) return stored === 'collapsed' ? 'collapsed' : 'popped';
+        return stored === 'expanded' || stored === 'collapsed' || stored === 'popped' ? stored : 'popped';
+    });
+    const chatDisplayModeRef = useRef<ChatDisplayMode>(chatDisplayMode);
     const [planMode, setPlanMode] = useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
         return window.localStorage.getItem('eazyui:plan-mode') === '1';
     });
     const [stylePreset, setStylePreset] = useState<'modern' | 'minimal' | 'vibrant' | 'luxury' | 'playful'>('modern');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
+    const [compactOptionsMenu, setCompactOptionsMenu] = useState<'model' | 'platform' | 'style' | null>(null);
     const [modelTemperature, setModelTemperature] = useState(() => apiClient.getComposerTemperature());
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -3310,14 +3205,15 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const [openPaletteDropdown, setOpenPaletteDropdown] = useState(false);
     const [openFontDropdown, setOpenFontDropdown] = useState<'display' | 'body' | null>(null);
     const [openRadiusDropdown, setOpenRadiusDropdown] = useState<keyof ProjectDesignSystem['radius'] | null>(null);
-    const [launcherInteraction, setLauncherInteraction] = useState<ChatLauncherInteraction>('idle');
     const [, setClockTick] = useState(0);
     const [authFirstName, setAuthFirstName] = useState('there');
     const autoCollapsedRef = useRef(false);
-    const autoCollapsedRestoreModeRef = useRef<OpenChatDisplayMode>('expanded');
+    const autoCollapsedRestoreModeRef = useRef<OpenChatDisplayMode>('popped');
     const lastOpenChatModeRef = useRef<OpenChatDisplayMode>((() => {
-        if (typeof window === 'undefined') return 'expanded';
+        if (typeof window === 'undefined') return 'popped';
+        const hasCanvasFirstLayout = window.localStorage.getItem(CANVAS_FIRST_CHAT_LAYOUT_KEY) === '1';
         const stored = window.localStorage.getItem(CHAT_LAST_OPEN_MODE_STORAGE_KEY);
+        if (!hasCanvasFirstLayout) return 'popped';
         return stored === 'popped' ? 'popped' : 'expanded';
     })());
     const copyResetTimersRef = useRef<Record<string, number>>({});
@@ -3334,8 +3230,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const compactFileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<ComposerInlineReferenceInputHandle | null>(null);
     const styleMenuRef = useRef<HTMLDivElement>(null);
+    const compactOptionsMenuRef = useRef<HTMLDivElement>(null);
     const mentionMenuRef = useRef<HTMLDivElement>(null);
     const mentionSearchInputRef = useRef<HTMLInputElement>(null);
     const referenceUrlInputRef = useRef<HTMLInputElement>(null);
@@ -3371,6 +3269,12 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
     const activeChatGuideStep = isChatGuideActive ? CHAT_PANEL_GUIDE_STEPS[guideStepIndex] || null : null;
 
     const setChatMode = useCallback((nextMode: ChatDisplayMode) => {
+        const previousMode = chatDisplayModeRef.current;
+        if (previousMode === nextMode) return;
+        chatDisplayModeRef.current = nextMode;
+        window.dispatchEvent(new CustomEvent(CANVAS_CHAT_LAYOUT_CHANGE_EVENT, {
+            detail: { previousMode, nextMode },
+        }));
         setChatDisplayMode(nextMode);
         if (nextMode !== 'collapsed') {
             lastOpenChatModeRef.current = nextMode;
@@ -3400,9 +3304,10 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
+        window.localStorage.setItem(CANVAS_FIRST_CHAT_LAYOUT_KEY, '1');
         window.localStorage.setItem(CHAT_DISPLAY_MODE_STORAGE_KEY, chatDisplayMode);
         window.localStorage.setItem(CHAT_LAST_OPEN_MODE_STORAGE_KEY, lastOpenChatModeRef.current);
-    }, [CHAT_DISPLAY_MODE_STORAGE_KEY, CHAT_LAST_OPEN_MODE_STORAGE_KEY, chatDisplayMode]);
+    }, [CANVAS_FIRST_CHAT_LAYOUT_KEY, CHAT_DISPLAY_MODE_STORAGE_KEY, CHAT_LAST_OPEN_MODE_STORAGE_KEY, chatDisplayMode]);
 
     useEffect(() => {
         if (isEditMode || isCollapsed || !hasSeenCanvasGuide || hasSeenChatGuide || activeGuideId) return;
@@ -4450,6 +4355,23 @@ export function ChatPanel({ initialRequest }: ChatPanelProps) {
             document.removeEventListener('keydown', handleKeyDown);
         };
     }, [showStyleMenu]);
+
+    useEffect(() => {
+        if (!compactOptionsMenu) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            if (compactOptionsMenuRef.current?.contains(event.target as Node)) return;
+            setCompactOptionsMenu(null);
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setCompactOptionsMenu(null);
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [compactOptionsMenu]);
 
     useEffect(() => {
         apiClient.setComposerTemperature(modelTemperature);
@@ -7474,25 +7396,25 @@ Return a polished, consistent screen without introducing a new navigation patter
     const launcherModeLabel = lastOpenChatModeRef.current === 'popped' ? 'Pop out' : 'Expand';
     const shellWidthClass = isCollapsed || isPoppedOut ? 'w-0' : 'w-[var(--chat-width)]';
     const collapsedOpenMode = lastOpenChatModeRef.current;
-    const chatShellClassName = 'fixed z-[98] flex flex-col overflow-hidden bg-[color:color-mix(in_srgb,var(--ui-surface-1)_96%,#181818)] backdrop-blur-2xl will-change-[transform,opacity,width,height,border-radius,right,bottom,top] transition-[transform,opacity,width,height,border-radius,right,bottom,top,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
+    const chatShellClassName = 'fixed z-[98] flex flex-col overflow-hidden bg-[color:color-mix(in_srgb,var(--ui-surface-1)_94%,#181818)] backdrop-blur-2xl will-change-[transform,opacity] transition-[transform,opacity,box-shadow,border-radius] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]';
     const expandedChatHeight = 'calc(100vh - 16px)';
-    const poppedChatHeight = 'min(52vh, 520px)';
+    const poppedChatHeight = 'calc(100vh - 24px)';
     const chatShellStyle = isCollapsed
         ? collapsedOpenMode === 'popped'
             ? {
-                right: '16px',
-                bottom: '8px',
+                right: '12px',
+                bottom: '12px',
                 top: 'auto',
-                width: 'min(var(--chat-width), calc(100vw - 2rem))',
-                maxWidth: 'calc(100vw - 2rem)',
+                width: 'min(420px, calc(100vw - 1.5rem))',
+                maxWidth: 'calc(100vw - 1.5rem)',
                 height: poppedChatHeight,
-                borderRadius: '26px',
+                borderRadius: '24px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
                 borderWidth: '1px',
                 boxShadow: '0 12px 40px rgba(0,0,0,0.14)',
                 opacity: 0,
-                transform: 'translateY(20px) scale(0.97)',
+                transform: 'translateX(18px) scale(0.985)',
                 pointerEvents: 'none' as const,
             }
             : {
@@ -7512,17 +7434,17 @@ Return a polished, consistent screen without introducing a new navigation patter
             }
         : isPoppedOut
             ? {
-                right: '16px',
-                bottom: '8px',
+                right: '12px',
+                bottom: '12px',
                 top: 'auto',
-                width: 'min(var(--chat-width), calc(100vw - 2rem))',
-                maxWidth: 'calc(100vw - 2rem)',
+                width: 'min(420px, calc(100vw - 1.5rem))',
+                maxWidth: 'calc(100vw - 1.5rem)',
                 height: poppedChatHeight,
-                borderRadius: '26px',
+                borderRadius: '24px',
                 borderStyle: 'solid',
                 borderColor: 'var(--ui-border-card)',
                 borderWidth: '1px',
-                boxShadow: '0 32px 90px rgba(0,0,0,0.42)',
+                boxShadow: '0 24px 72px rgba(0,0,0,0.28)',
                 opacity: 1,
                 transform: 'translateY(0) scale(1)',
                 pointerEvents: 'auto' as const,
@@ -7546,60 +7468,233 @@ Return a polished, consistent screen without introducing a new navigation patter
     return (
         <>
             <div
-                className={`group relative flex h-full shrink-0 flex-col overflow-visible bg-transparent font-sans text-[var(--ui-text)] transition-all duration-300 ease-in-out ${shellWidthClass}`}
+                className={`group relative flex h-full shrink-0 flex-col overflow-visible bg-transparent font-sans text-[var(--ui-text)] transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${shellWidthClass}`}
             >
-                {!isEditMode && isCollapsed && (
+                {!isEditMode && (
                     <div
                         data-testid="chat-launcher-container"
-                        className="fixed bottom-2 right-2 z-[102] flex w-12 items-center overflow-hidden opacity-100 transition-[width,opacity] duration-200 ease-out"
+                        data-state={isCollapsed ? 'open' : 'closed'}
+                        className="compact-canvas-composer-dock fixed bottom-3 left-1/2 z-[102] w-[min(760px,calc(100vw-2rem))] overflow-visible"
                     >
+                        <ComposerAttachmentStack
+                            images={images}
+                            onRemove={removeImage}
+                            badges={composerAttachmentMeta.map((attachment) => ({
+                                label: attachment.origin === 'saved' ? 'Saved' : 'Upload',
+                                tone: attachment.origin === 'saved' ? 'saved' : 'upload',
+                            }))}
+                        />
+                        {isMentionOpen && (
+                            <ComposerReferenceMenu
+                                activeIndex={mentionActiveIndex}
+                                menuMode={referenceMenuMode}
+                                menuRef={mentionMenuRef}
+                                includeScrapedImages={referenceIncludeScrapedImages}
+                                onCancel={closeMentionMenu}
+                                onIncludeScrapedImagesChange={setReferenceIncludeScrapedImages}
+                                onRootOptionHover={setMentionActiveIndex}
+                                onScreenHover={setMentionActiveIndex}
+                                onScreenQueryChange={setMentionQuery}
+                                onSelectRootOption={(key) => {
+                                    if (key === 'url') openUrlReferenceInput();
+                                    if (key === 'screen') openScreenReferenceInput();
+                                }}
+                                onSelectScreen={selectMentionScreen}
+                                onSubmitUrl={submitUrlReference}
+                                rootOptions={rootReferenceOptions}
+                                screenOptions={filteredMentionScreens}
+                                screenQuery={referenceMenuMode === 'screen' ? mentionQuery : ''}
+                                searchInputRef={mentionSearchInputRef}
+                                urlDraft={referenceUrlDraft}
+                                urlInputRef={referenceUrlInputRef}
+                                onUrlDraftChange={setReferenceUrlDraft}
+                            />
+                        )}
                         <div
-                            aria-hidden="false"
-                            className="flex w-12 items-center overflow-hidden opacity-100 transition-[width,opacity] duration-200 ease-out"
+                            ref={compactOptionsMenuRef}
+                            className="relative flex min-h-14 items-center gap-1.5 rounded-full border px-2.5 py-2 pl-3 shadow-[0_18px_56px_rgba(0,0,0,0.18)] backdrop-blur-2xl transition-[border-color,background-color,box-shadow] duration-200"
+                            style={{
+                                borderColor: 'color-mix(in srgb, var(--ui-primary) 16%, var(--ui-border-card))',
+                                backgroundColor: 'color-mix(in srgb, var(--ui-surface-1) 82%, transparent)',
+                            }}
                         >
+                            {compactOptionsMenu && (
+                                <div className="absolute bottom-full right-2 z-[110] mb-3 w-56 rounded-[20px] border border-[var(--ui-border)] bg-[color:color-mix(in_srgb,var(--ui-popover)_92%,transparent)] p-2 shadow-[0_20px_56px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+                                    {compactOptionsMenu === 'model' && (
+                                        <div className="space-y-1">
+                                            {([
+                                                { value: 'fast' as const, label: 'Fast', description: 'Generate quickly' },
+                                                { value: 'quality' as const, label: 'Pro', description: 'Higher quality output' },
+                                            ]).map((option) => (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setModelProfile(option.value);
+                                                        setCompactOptionsMenu(null);
+                                                    }}
+                                                    className={`flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left transition-colors ${modelProfile === option.value ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                                >
+                                                    <span>
+                                                        <span className="block text-[12px] font-semibold">{option.label}</span>
+                                                        <span className="mt-0.5 block text-[10px] text-[var(--ui-text-subtle)]">{option.description}</span>
+                                                    </span>
+                                                    {modelProfile === option.value && <Check size={14} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {compactOptionsMenu === 'platform' && (
+                                        <div className="space-y-1">
+                                            {(['mobile', 'tablet', 'desktop'] as const).map((platform) => (
+                                                <button
+                                                    key={platform}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setPlatform(platform);
+                                                        setCompactOptionsMenu(null);
+                                                    }}
+                                                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-[12px] font-semibold capitalize transition-colors ${selectedPlatform === platform ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                                >
+                                                    {platform === 'mobile' && <Smartphone size={15} />}
+                                                    {platform === 'tablet' && <Tablet size={15} />}
+                                                    {platform === 'desktop' && <Monitor size={15} />}
+                                                    <span className="flex-1 text-left">{platform}</span>
+                                                    {selectedPlatform === platform && <Check size={14} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {compactOptionsMenu === 'style' && (
+                                        <div className="space-y-1">
+                                            {(['modern', 'minimal', 'vibrant', 'luxury', 'playful'] as const).map((preset) => (
+                                                <button
+                                                    key={preset}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setStylePreset(preset);
+                                                        setCompactOptionsMenu(null);
+                                                    }}
+                                                    className={`flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-[12px] font-semibold capitalize transition-colors ${stylePreset === preset ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                                >
+                                                    <span>{preset}</span>
+                                                    {stylePreset === preset && <Check size={14} />}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             <button
                                 type="button"
-                                onClick={openLastChatMode}
-                                onPointerEnter={() => setLauncherInteraction('hovered')}
-                                onPointerLeave={() => setLauncherInteraction('idle')}
-                                onPointerDown={() => setLauncherInteraction('pressed')}
-                                onPointerUp={() => setLauncherInteraction('hovered')}
-                                onPointerCancel={() => setLauncherInteraction('idle')}
-                                onBlur={() => setLauncherInteraction('idle')}
-                                aria-label={`Open ${launcherModeLabel.toLowerCase()} chat`}
-                                aria-expanded="false"
-                                aria-haspopup="dialog"
-                                className="pointer-events-auto relative box-border flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[var(--ui-text)] transition-transform duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ui-surface-1)]"
-                                title={`Open chat in ${launcherModeLabel.toLowerCase()} view`}
-                                style={{
-                                    transform: launcherInteraction === 'pressed'
-                                        ? 'scale(0.94)'
-                                        : launcherInteraction === 'hovered'
-                                            ? 'scale(1.04)'
-                                            : 'scale(1)',
-                                }}
+                                onClick={() => compactFileInputRef.current?.click()}
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)] active:bg-[var(--ui-surface-4)]"
+                                title="Attach images"
                             >
-                                <div className="relative flex h-12 w-12 items-center justify-center">
-                                    <div
-                                        className="pointer-events-none absolute inset-0 rounded-full border backdrop-blur-[0.25rem] transition-[background-color,border-color,transform] duration-200 ease-out"
-                                        style={{
-                                            borderColor: launcherInteraction === 'pressed'
-                                                ? 'color-mix(in srgb, var(--ui-primary) 58%, var(--ui-border-card))'
-                                                : launcherInteraction === 'hovered'
-                                                    ? 'color-mix(in srgb, var(--ui-primary) 46%, var(--ui-border-card))'
-                                                    : 'color-mix(in srgb, var(--ui-primary) 36%, var(--ui-border-card))',
-                                            backgroundColor: launcherInteraction === 'pressed'
-                                                ? 'color-mix(in srgb, var(--ui-surface-1) 84%, transparent)'
-                                                : launcherInteraction === 'hovered'
-                                                    ? 'color-mix(in srgb, var(--ui-surface-1) 74%, transparent)'
-                                                    : 'color-mix(in srgb, var(--ui-surface-1) 72%, transparent)',
-                                        }}
-                                    />
-                                    <ChatLauncherGlyph interaction={launcherInteraction} />
-                                </div>
+                                <Paperclip size={15} />
+                            </button>
+
+                            <ComposerInlineReferenceInput
+                                value={prompt}
+                                onChange={handlePromptChange}
+                                onSelectionChange={syncMentionState}
+                                onReferenceClick={handleReferenceTokenClick}
+                                onKeyDown={handleKeyDown}
+                                placeholder="Ask anything"
+                                placeholderClassName="py-1 text-[var(--ui-text-subtle)]"
+                                disabled={isGenerating}
+                                allowScreen
+                                screens={availableMentionScreens}
+                                className="no-focus-ring min-h-[32px] max-h-[112px] min-w-0 flex-1 overflow-y-auto bg-transparent py-1 text-[14px] leading-relaxed text-[var(--ui-text)] outline-none"
+                            />
+
+                            <div className="hidden items-center gap-0.5 sm:flex">
+                                <button
+                                    type="button"
+                                    onClick={() => setCompactOptionsMenu((current) => current === 'model' ? null : 'model')}
+                                    className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold transition-colors ${compactOptionsMenu === 'model' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                    title="Choose generation model"
+                                >
+                                    <Sparkles size={14} />
+                                    <span>{modelProfile === 'quality' ? 'Pro' : 'Fast'}</span>
+                                    <ChevronDown size={12} />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setCompactOptionsMenu((current) => current === 'platform' ? null : 'platform')}
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${compactOptionsMenu === 'platform' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] hover:text-[var(--ui-text)]'}`}
+                                    title="Choose generation platform"
+                                >
+                                    {selectedPlatform === 'mobile' && <Smartphone size={15} />}
+                                    {selectedPlatform === 'tablet' && <Tablet size={15} />}
+                                    {selectedPlatform === 'desktop' && <Monitor size={15} />}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setCompactOptionsMenu((current) => current === 'style' ? null : 'style')}
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${compactOptionsMenu === 'style' ? 'bg-[var(--ui-surface-3)] text-[var(--ui-text)]' : styleButtonTone}`}
+                                    title="Choose style preset"
+                                >
+                                    <StyleIcon size={14} />
+                                </button>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (requestInFlight) {
+                                        handleStop();
+                                        return;
+                                    }
+                                    if (showSendAction) {
+                                        handleSubmit();
+                                        return;
+                                    }
+                                    handleMicToggle();
+                                }}
+                                disabled={actionDisabled}
+                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150 active:scale-[0.97] ${requestInFlight
+                                    ? 'bg-[var(--ui-text)] text-[var(--ui-surface-1)]'
+                                    : isRecording
+                                        ? 'bg-rose-500/20 text-rose-500'
+                                        : showSendAction
+                                            ? 'bg-[var(--ui-text)] text-[var(--ui-surface-1)] hover:opacity-90'
+                                            : 'bg-[var(--ui-surface-3)] text-[var(--ui-text)] hover:bg-[var(--ui-surface-4)]'
+                                    }`}
+                                title={requestInFlight ? 'Stop generation' : showSendAction ? 'Send prompt' : isRecording ? 'Stop recording' : 'Record voice'}
+                            >
+                                {isAwaitingAssistantDecision ? (
+                                    <Loader2 size={15} className="animate-spin" />
+                                ) : actionIsStop ? (
+                                    <Square size={14} className="fill-current" />
+                                ) : showSendAction ? (
+                                    <ArrowUp size={17} />
+                                ) : (
+                                    <Mic size={15} />
+                                )}
                             </button>
                         </div>
+                        <input
+                            ref={compactFileInputRef}
+                            type="file"
+                            onChange={handleFileSelect}
+                            className="hidden"
+                            accept="image/*"
+                            multiple
+                        />
                     </div>
+                )}
+                {!isEditMode && (
+                    <button
+                        type="button"
+                        data-state={isCollapsed ? 'open' : 'closed'}
+                        onClick={openLastChatMode}
+                        className="canvas-chat-history-trigger fixed bottom-5 right-5 z-[102] inline-flex h-11 w-11 items-center justify-center rounded-full border text-[var(--ui-text)]"
+                        title={`Open generation workspace in ${launcherModeLabel.toLowerCase()} view`}
+                        aria-label="Open chat history"
+                    >
+                        <PanelRightOpen size={16} />
+                    </button>
                 )}
 
                 <div className={chatShellClassName} style={chatShellStyle}>
@@ -8828,7 +8923,7 @@ Return a polished, consistent screen without introducing a new navigation patter
                                         />
                                     </div>
                                 </div>
-                                {isMentionOpen && (
+                                {isMentionOpen && !isCollapsed && (
                                     <ComposerReferenceMenu
                                         activeIndex={mentionActiveIndex}
                                         menuMode={referenceMenuMode}

@@ -322,18 +322,31 @@ RULES:
 
     return (
         <div className="edit-ai-composer-shell" data-guide-id="edit-ai-composer">
-            <div className="edit-ai-composer">
-                <div className="edit-ai-context-row">
-                    {selectionLabel ? (
-                        <div className="edit-ai-selected-chip" title={selectionLabel}>
-                            <Sparkles size={13} />
-                            <span>{selectionLabel}</span>
-                        </div>
-                    ) : (
-                        <div className="edit-ai-selected-empty">Select an element to run AI edit.</div>
-                    )}
-                </div>
+            <div className="edit-ai-context-row">
+                {selectionLabel ? (
+                    <div className="edit-ai-selected-chip" title={selectionLabel}>
+                        <Sparkles size={13} />
+                        <span>{selectionLabel}</span>
+                    </div>
+                ) : (
+                    <div className="edit-ai-selected-empty">Select an element to run AI edit.</div>
+                )}
+            </div>
 
+            {(busy || error || description) && (
+                <div className="edit-ai-feedback-row">
+                    {busy && (
+                        <span className="edit-ai-feedback loading">
+                            <Loader2 size={12} className="animate-spin" />
+                            Applying AI edit...
+                        </span>
+                    )}
+                    {!busy && error && <span className="edit-ai-feedback error">{error}</span>}
+                    {!busy && !error && description && <span className="edit-ai-feedback success">{description}</span>}
+                </div>
+            )}
+
+            <div className="edit-ai-composer">
                 <div className="edit-ai-input-row">
                     <div className="edit-ai-input-core">
                         <div className="edit-ai-orb-wrap">
@@ -473,18 +486,6 @@ RULES:
                     )}
                 </div>
 
-                {(busy || error || description) && (
-                    <div className="edit-ai-feedback-row">
-                        {busy && (
-                            <span className="edit-ai-feedback loading">
-                                <Loader2 size={12} className="animate-spin" />
-                                Applying AI edit...
-                            </span>
-                        )}
-                        {!busy && error && <span className="edit-ai-feedback error">{error}</span>}
-                        {!busy && !error && description && <span className="edit-ai-feedback success">{description}</span>}
-                    </div>
-                )}
             </div>
         </div>
     );

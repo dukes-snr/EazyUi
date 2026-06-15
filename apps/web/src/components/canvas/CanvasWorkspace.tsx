@@ -40,6 +40,14 @@ const nodeTypes = {
 };
 
 const CANVAS_WORKSPACE_GUIDE_ID = 'canvas-workspace-first-run';
+const CANVAS_CHAT_LAYOUT_CHANGE_EVENT = 'eazyui:canvas-chat-layout-change';
+
+type CanvasChatDisplayMode = 'expanded' | 'collapsed' | 'popped';
+
+type CanvasChatLayoutChangeDetail = {
+    previousMode: CanvasChatDisplayMode;
+    nextMode: CanvasChatDisplayMode;
+};
 
 const CANVAS_WORKSPACE_GUIDE_STEPS: GuideBubbleStep[] = [
     {
@@ -150,7 +158,7 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const prevGuideStep = useOnboardingStore((state) => state.prevStep);
     const finishGuide = useOnboardingStore((state) => state.finishGuide);
     const skipGuide = useOnboardingStore((state) => state.skipGuide);
-    const { setCenter, fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
+    const { setCenter, fitView, setViewport, getViewport, zoomIn, zoomOut } = useReactFlow();
     const viewport = useViewport();
     const canvasScrollWheelMode = ((doc.editorPrefs as EditorPrefs & { canvasScrollWheelMode?: 'zoom' | 'pan' }).canvasScrollWheelMode || 'zoom');
     const isEditWorkspace = mode === 'edit-workspace';
@@ -161,6 +169,8 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const editWorkspaceFocusedScreenRef = useRef<string | null>(null);
     const copiedScreensRef = useRef<CopiedScreenPayload[]>([]);
     const pasteCountRef = useRef(0);
+    const chatLayoutRecenterTimerRef = useRef<number | null>(null);
+    const chatLayoutFocalPointRef = useRef<{ x: number; y: number; zoom: number } | null>(null);
 
     const handleManualSave = useCallback(async () => {
         if (!spec || isHydrating || isSaving) return;
@@ -219,6 +229,75 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
             height: Math.max(320, el?.clientHeight || window.innerHeight),
         };
     }, []);
+
+    useEffect(() => {
+        const getUsableCanvasCenter = (mode: CanvasChatDisplayMode, canvas: HTMLElement) => {
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            if (mode !== 'popped') {
+                return { x: width / 2, y: height / 2 };
+            }
+
+            const rootStyles = window.getComputedStyle(document.documentElement);
+            const configuredChatWidth = Number.parseFloat(rootStyles.getPropertyValue('--chat-width')) || 420;
+            const panelWidth = Math.min(configuredChatWidth, Math.max(0, window.innerWidth - 24));
+            const availableWidth = Math.max(120, width - panelWidth - 24);
+            return { x: availableWidth / 2, y: height / 2 };
+        };
+
+        const handleChatLayoutChange = (event: Event) => {
+            const detail = (event as CustomEvent<CanvasChatLayoutChangeDetail>).detail;
+            if (!detail?.previousMode || !detail?.nextMode || detail.previousMode === detail.nextMode) return;
+
+            const canvas = document.querySelector('.canvas-workspace .react-flow') as HTMLElement | null;
+            if (!canvas) return;
+
+            if (chatLayoutRecenterTimerRef.current !== null) {
+                window.clearTimeout(chatLayoutRecenterTimerRef.current);
+            }
+
+            const currentViewport = getViewport();
+            const previousCenter = getUsableCanvasCenter(detail.previousMode, canvas);
+            const focalPoint = chatLayoutFocalPointRef.current || {
+                x: (previousCenter.x - currentViewport.x) / currentViewport.zoom,
+                y: (previousCenter.y - currentViewport.y) / currentViewport.zoom,
+                zoom: currentViewport.zoom,
+            };
+            chatLayoutFocalPointRef.current = focalPoint;
+            const layoutDelay = detail.previousMode === 'expanded' || detail.nextMode === 'expanded' ? 210 : 0;
+
+            chatLayoutRecenterTimerRef.current = window.setTimeout(() => {
+                const resizedCanvas = document.querySelector('.canvas-workspace .react-flow') as HTMLElement | null;
+                if (!resizedCanvas) {
+                    chatLayoutRecenterTimerRef.current = null;
+                    chatLayoutFocalPointRef.current = null;
+                    return;
+                }
+
+                const nextCenter = getUsableCanvasCenter(detail.nextMode, resizedCanvas);
+                setViewport({
+                    x: nextCenter.x - focalPoint.x * focalPoint.zoom,
+                    y: nextCenter.y - focalPoint.y * focalPoint.zoom,
+                    zoom: focalPoint.zoom,
+                }, {
+                    duration: 180,
+                    ease: easeInOutCubic,
+                    interpolate: 'smooth',
+                });
+                chatLayoutRecenterTimerRef.current = null;
+                chatLayoutFocalPointRef.current = null;
+            }, layoutDelay);
+        };
+
+        window.addEventListener(CANVAS_CHAT_LAYOUT_CHANGE_EVENT, handleChatLayoutChange);
+        return () => {
+            window.removeEventListener(CANVAS_CHAT_LAYOUT_CHANGE_EVENT, handleChatLayoutChange);
+            if (chatLayoutRecenterTimerRef.current !== null) {
+                window.clearTimeout(chatLayoutRecenterTimerRef.current);
+            }
+            chatLayoutFocalPointRef.current = null;
+        };
+    }, [getViewport, setViewport]);
 
     const focusNodesTopAligned = useCallback((
         targetNodes: Node[],
@@ -918,11 +997,29 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
     const gridGap = useMemo(() => {
         const zoom = viewport.zoom || 1;
         if (zoom <= 0.3) return 120;
-        if (zoom <= 0.5) return 96;
-        if (zoom <= 0.75) return 72;
-        if (zoom <= 1.15) return 48;
-        if (zoom <= 1.6) return 32;
-        return 24;
+        if (zoom <= 0.5) return 64;
+        if (zoom <= 0.75) return 48;
+        if (zoom <= 1.15) return 32;
+        if (zoom <= 1.6) return 24;
+        return 18;
+    }, [viewport.zoom]);
+    const dotSize = useMemo(() => {
+        const zoom = viewport.zoom || 1;
+        if (zoom <= 0.3) return 2.8;
+        if (zoom <= 0.5) return 2.4;
+        if (zoom <= 0.75) return 2.05;
+        if (zoom <= 1.15) return 1.75;
+        if (zoom <= 1.6) return 1.45;
+        return 1.2;
+    }, [viewport.zoom]);
+    const dotOpacity = useMemo(() => {
+        const zoom = viewport.zoom || 1;
+        if (zoom <= 0.3) return 92;
+        if (zoom <= 0.5) return 86;
+        if (zoom <= 0.75) return 78;
+        if (zoom <= 1.15) return 68;
+        if (zoom <= 1.6) return 58;
+        return 50;
     }, [viewport.zoom]);
 
     useEffect(() => {
@@ -1004,10 +1101,10 @@ function CanvasWorkspaceContent({ mode = 'default' }: { mode?: 'default' | 'edit
                     proOptions={{ hideAttribution: true }}
                 >
                     <Background
-                        variant={BackgroundVariant.Lines}
+                        variant={BackgroundVariant.Dots}
                         gap={gridGap}
-                        size={1}
-                        color="color-mix(in srgb, var(--ui-canvas-dot) 34%, transparent)"
+                        size={dotSize}
+                        color={`color-mix(in srgb, var(--ui-canvas-dot) ${dotOpacity}%, transparent)`}
                     />
                     <Controls
                         className="canvas-controls-hidden hidden" // Hide default controls
