@@ -1496,7 +1496,8 @@ function resolvePreferredModel(
   if (purpose === 'planner') {
     return modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile';
   }
-  return modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'gemini-3-pro-preview';
+  // Previous quality model: gemini-3-pro-preview
+  return modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'moonshotai/kimi-k2.6';
 }
 
 function coerceString(value: unknown, fallback = ''): string {

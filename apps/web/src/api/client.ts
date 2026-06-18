@@ -941,9 +941,19 @@ class ApiClient {
         }
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({ message: 'Request failed' }));
+            const responseText = await response.text().catch(() => '');
+            let error: { message?: string; error?: string; code?: string; paywallCode?: string; details?: Record<string, unknown> } = {};
+            try {
+                error = responseText ? JSON.parse(responseText) : {};
+            } catch {
+                error = {};
+            }
             throw new ApiRequestError({
-                message: error.message || `HTTP ${response.status}`,
+                message: error.message
+                    || error.error
+                    || (response.status >= 500 && API_BASE === '/api'
+                        ? 'Local API request failed. Confirm the API terminal is running on http://localhost:3001.'
+                        : `HTTP ${response.status}`),
                 status: response.status,
                 code: typeof error.code === 'string' ? error.code : undefined,
                 paywallCode: typeof error.paywallCode === 'string' ? error.paywallCode : undefined,

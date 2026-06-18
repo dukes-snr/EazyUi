@@ -2,12 +2,14 @@ import posthog from 'posthog-js';
 
 const POSTHOG_KEY = (import.meta.env.VITE_POSTHOG_KEY as string | undefined)?.trim();
 const POSTHOG_HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined)?.trim() || 'https://us.i.posthog.com';
+const POSTHOG_ENABLED = (import.meta.env.VITE_POSTHOG_ENABLED as string | undefined)?.trim();
 
 let initialized = false;
 let lastTrackedUrl = '';
 
 function getClient() {
     if (!POSTHOG_KEY || typeof window === 'undefined') return null;
+    if (import.meta.env.DEV && POSTHOG_ENABLED !== '1') return null;
     if (!initialized) {
         posthog.init(POSTHOG_KEY, {
             api_host: POSTHOG_HOST,

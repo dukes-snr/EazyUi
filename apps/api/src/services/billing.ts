@@ -132,6 +132,29 @@ export type BillingReservation = {
     reused?: boolean;
 };
 
+function useLocalDevBilling(): boolean {
+    return process.env.NODE_ENV !== 'production'
+        && process.env.LOCAL_DEV_NO_DATABASE === '1';
+}
+
+function buildLocalDevBillingSummary(uid: string): BillingSummary {
+    const now = new Date();
+    return {
+        uid,
+        planId: 'pro',
+        planLabel: 'Pro (Local)',
+        status: 'active',
+        periodStartAt: now.toISOString(),
+        periodEndAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        monthlyCreditsRemaining: 1_000_000,
+        rolloverCredits: 0,
+        topupCreditsRemaining: 0,
+        balanceCredits: 1_000_000,
+        lowCredits: false,
+        suggestedTopupCredits: 1000,
+    };
+}
+
 export type BillingEstimateInput = {
     operation: BillingOperation;
     modelProfile?: CreditModelProfile;
@@ -1015,6 +1038,18 @@ export async function reserveCredits(input: {
     projectId?: string;
     metadata?: Record<string, unknown>;
 }): Promise<BillingReservation> {
+    if (useLocalDevBilling()) {
+        return {
+            reservationId: `local_${uuidv4()}`,
+            requestId: input.requestId,
+            operation: input.operation,
+            reservedCredits: clampNonNegative(input.reservedCredits),
+            balanceAfterReserve: 1_000_000,
+            expiresAt: new Date(Date.now() + RESERVATION_TTL_MS).toISOString(),
+            status: 'open',
+            reused: false,
+        };
+    }
     return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
@@ -1134,6 +1169,13 @@ export async function settleReservation(input: {
     finalCredits?: number;
     metadata?: Record<string, unknown>;
 }): Promise<{ finalChargedCredits: number; summary: BillingSummary; status: BillingReservationRow['status'] }> {
+    if (useLocalDevBilling()) {
+        return {
+            finalChargedCredits: input.outcome === 'failed' ? 0 : clampNonNegative(input.finalCredits || 0),
+            summary: buildLocalDevBillingSummary(input.uid),
+            status: input.outcome === 'failed' ? 'released' : 'settled',
+        };
+    }
     return withTransaction(async (client) => {
         const now = new Date();
         const nowAt = now.toISOString();
@@ -1587,9 +1629,11 @@ export async function getBillingPurchase(uid: string, purchaseId: string): Promi
 }
 
 export async function buildBillingSummaryForApi(uid: string): Promise<BillingSummary> {
+    if (useLocalDevBilling()) return buildLocalDevBillingSummary(uid);
     return getBillingSummary(uid);
 }
 
 export async function listBillingLedgerForApi(uid: string, limit = 40): Promise<BillingLedgerItem[]> {
+    if (useLocalDevBilling()) return [];
     return listBillingLedger(uid, limit);
 }

@@ -108,12 +108,17 @@ function loadEnv() {
 
 loadEnv();
 
+const localDevNoDatabase = process.env.NODE_ENV !== 'production'
+    && process.env.LOCAL_DEV_NO_DATABASE === '1';
+
 const fastify = Fastify({
     logger: true,
     bodyLimit: parseInt(process.env.API_BODY_LIMIT || `${25 * 1024 * 1024}`, 10),
 });
 
-const persistenceReadyPromise = ensurePersistenceSchema();
+const persistenceReadyPromise = localDevNoDatabase
+    ? Promise.resolve()
+    : ensurePersistenceSchema();
 
 fastify.addHook('onReady', async () => {
     await persistenceReadyPromise;
@@ -453,6 +458,7 @@ function upsertServerActivity(id: string, patch: Partial<ServerActivityItem>) {
 }
 
 async function persistServerActivity(id: string): Promise<void> {
+    if (localDevNoDatabase) return;
     const item = serverActivityById.get(id);
     if (!item) return;
     try {

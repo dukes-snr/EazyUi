@@ -37,6 +37,7 @@ if (envPath) {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const envModel = (process.env.GEMINI_MODEL || '').trim();
 const modelName = normalizeGeminiTextModel(envModel || getDefaultGeminiTextModel());
+const NVIDIA_TEXT_FALLBACK_MODEL = 'gemini-2.5-pro';
 const model = genAI.getGenerativeModel({
     model: modelName,
 });
@@ -2357,6 +2358,14 @@ ${designSystemGuidance}
                     throw new Error('Fast model returned invalid structured output. Please retry.');
                 }
             } catch (error) {
+                if (isNvidiaModel(preferredModel)) {
+                    console.warn('[Gemini] NVIDIA generate failed; falling back to Gemini', {
+                        preferredModel,
+                        fallbackModel: NVIDIA_TEXT_FALLBACK_MODEL,
+                        error: (error as Error).message,
+                    });
+                    return generateDesignOnce(await buildParts(promptText), NVIDIA_TEXT_FALLBACK_MODEL, generationConfig);
+                }
                 if (isQuotaOrRateLimitError(error)) {
                     throw new Error('Fast model is rate-limited right now. Please wait a few seconds and retry.');
                 }
@@ -2750,6 +2759,33 @@ ${designSystemGuidance}`.trim();
                 usage: summarizeTokenUsage(usageEntries),
             };
         } catch (error) {
+            if (isNvidiaModel(preferredModel)) {
+                console.warn('[Gemini] NVIDIA edit failed; falling back to Gemini', {
+                    preferredModel,
+                    fallbackModel: NVIDIA_TEXT_FALLBACK_MODEL,
+                    error: (error as Error).message,
+                });
+                const fallbackModel = getGenerativeModel(NVIDIA_TEXT_FALLBACK_MODEL);
+                const fallbackResult = await fallbackModel.model.generateContent({
+                    contents: [{ role: 'user', parts }],
+                    generationConfig: {
+                        ...GENERATION_CONFIG,
+                        temperature: modelTemperature,
+                    },
+                });
+                const parsed = parseEditResponse(fallbackResult.response.text());
+                usageEntries.push(parseGeminiUsageFromResponse(fallbackResult.response, NVIDIA_TEXT_FALLBACK_MODEL));
+                console.info('[Gemini] editDesign:complete-nvidia-fallback', {
+                    screenId: options.screenId,
+                    modelUsed: NVIDIA_TEXT_FALLBACK_MODEL,
+                    htmlChars: parsed.html.length,
+                    descriptionPreview: String(parsed.description || '').slice(0, 180),
+                });
+                return {
+                    ...parsed,
+                    usage: summarizeTokenUsage(usageEntries),
+                };
+            }
             if (isQuotaOrRateLimitError(error)) {
                 throw new Error('Fast model is rate-limited right now. Please wait a few seconds and retry.');
             }

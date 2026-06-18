@@ -5658,6 +5658,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             const shouldUseNonStreamingPath = Boolean(preferredModel && !String(preferredModel).toLowerCase().startsWith('gemini-'));
 
             if (shouldUseNonStreamingPath) {
+                console.info('[UI] generate: using non-stream provider path', { preferredModel });
                 const generatedIds: string[] = [];
                 const regen = await apiClient.generate({
                     prompt: generationPromptFromPlanner,

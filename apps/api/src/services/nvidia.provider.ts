@@ -6,8 +6,10 @@ import OpenAI from 'openai';
 import type { TokenUsageEntry } from './tokenUsage.js';
 
 export const NVIDIA_MODELS = {
-    'moonshotai/kimi-k2.5': { name: 'Kimi K2.5', contextWindow: 262144 },
-    'qwen/qwen2.5-coder-32b-instruct': { name: 'Qwen 2.5 Coder 32B Instruct', contextWindow: 32768 },
+    'moonshotai/kimi-k2.6': { name: 'Kimi K2.6', contextWindow: 262144, maxOutputTokens: 16384 },
+    'minimaxai/minimax-m3': { name: 'MiniMax M3', contextWindow: 204800, maxOutputTokens: 8192 },
+    'moonshotai/kimi-k2.5': { name: 'Kimi K2.5', contextWindow: 262144, maxOutputTokens: 8192 },
+    'qwen/qwen2.5-coder-32b-instruct': { name: 'Qwen 2.5 Coder 32B Instruct', contextWindow: 32768, maxOutputTokens: 8192 },
 } as const;
 
 export type NvidiaModelId = keyof typeof NVIDIA_MODELS;
@@ -31,6 +33,14 @@ export function getLastNvidiaChatDebug() {
 export function isNvidiaModel(model?: string): model is NvidiaModelId {
     if (!model) return false;
     return model in NVIDIA_MODELS;
+}
+
+function supportsOpenAiJsonResponseFormat(model: string): boolean {
+    return model !== 'minimaxai/minimax-m3';
+}
+
+function resolveMaxOutputTokens(model: string): number {
+    return NVIDIA_MODELS[model as NvidiaModelId]?.maxOutputTokens || 8192;
 }
 
 function requireNvidiaKey() {
@@ -129,8 +139,9 @@ export async function nvidiaChatCompletion(input: {
     thinking?: boolean;
 }): Promise<{ text: string; modelUsed: string; finishReason?: string; usage?: TokenUsageEntry }> {
     const apiKey = requireNvidiaKey();
-    const model = isNvidiaModel(input.model) ? input.model : (process.env.NVIDIA_MODEL || 'moonshotai/kimi-k2.5');
-    const baseMaxTokens = input.maxTokens ?? 4096;
+    const model = isNvidiaModel(input.model) ? input.model : (process.env.NVIDIA_MODEL || 'moonshotai/kimi-k2.6');
+    const maxOutputTokens = resolveMaxOutputTokens(model);
+    const baseMaxTokens = Math.min(input.maxTokens ?? maxOutputTokens, maxOutputTokens);
     const client = createNvidiaClient(apiKey);
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -142,13 +153,20 @@ export async function nvidiaChatCompletion(input: {
                     { role: 'system' as const, content: input.systemPrompt || 'You are a helpful assistant.' },
                     { role: 'user' as const, content: input.prompt },
                 ],
-            max_tokens: typeof input.maxCompletionTokens === 'number' ? input.maxCompletionTokens : baseMaxTokens,
-            temperature: input.temperature ?? 0.7,
+            max_tokens: Math.min(
+                typeof input.maxCompletionTokens === 'number' ? input.maxCompletionTokens : baseMaxTokens,
+                maxOutputTokens
+            ),
+            temperature: input.temperature ?? 1,
             top_p: input.topP ?? 1,
             stream: false,
             ...(input.stop !== undefined ? { stop: input.stop } : {}),
-            ...(input.responseFormat === 'json_object' ? { response_format: { type: 'json_object' as const } } : {}),
-            chat_template_kwargs: { thinking: input.thinking ?? true },
+            ...(input.responseFormat === 'json_object' && supportsOpenAiJsonResponseFormat(model)
+                ? { response_format: { type: 'json_object' as const } }
+                : {}),
+            ...(model === 'moonshotai/kimi-k2.5' || model === 'moonshotai/kimi-k2.6'
+                ? { chat_template_kwargs: { thinking: input.thinking ?? true } }
+                : {}),
         };
 
         try {
