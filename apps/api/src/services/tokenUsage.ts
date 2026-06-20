@@ -1,4 +1,7 @@
-export type TokenUsageProvider = 'groq' | 'nvidia' | 'gemini' | 'unknown';
+export type TokenUsageProvider =
+    | 'gemini' | 'openai' | 'xai' | 'groq' | 'nvidia' | 'openrouter'
+    | 'together' | 'mistral' | 'anthropic' | 'cloudflare' | 'bedrock'
+    | 'custom' | 'unknown';
 
 export type TokenUsageEntry = {
     provider: TokenUsageProvider;

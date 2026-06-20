@@ -16,6 +16,14 @@ import { ensurePersistenceSchema } from './services/postgres.js';
 import { GROQ_MODELS, getLastGroqChatDebug, groqWhisperTranscription } from './services/groq.provider.js';
 import { NVIDIA_MODELS, getLastNvidiaChatDebug } from './services/nvidia.provider.js';
 import { getDefaultGeminiTextModel, normalizeGeminiTextModel } from './services/modelConfig.js';
+import { publicAiCatalog, type AiProviderId } from './config/aiModels.js';
+import {
+    deleteProviderCredential,
+    getUserAiSettings,
+    prepareUserAiRequest,
+    saveProviderCredential,
+    saveUserModelProfiles,
+} from './services/aiProviderSettings.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
@@ -3701,13 +3709,14 @@ fastify.post<{
             webContextApplied,
             promptPreview: previewText(prompt),
         }, 'generate: start');
+        const effectivePreferredModel = await prepareUserAiRequest(user.uid, preferredModel);
         const generated = await generateDesign({
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
             images: finalImages,
             assetRefs: mergedAssetRefs,
-            preferredModel,
+            preferredModel: effectivePreferredModel,
             temperature,
             projectDesignSystem,
         });
@@ -3896,13 +3905,14 @@ fastify.post<{
             webContextApplied,
             promptPreview: previewText(prompt),
         }, 'design-system: start');
+        const effectivePreferredModel = await prepareUserAiRequest(user.uid, preferredModel);
         const generated = await generateProjectDesignSystem({
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
             images: finalImages,
             assetRefs: mergedAssetRefs,
-            preferredModel,
+            preferredModel: effectivePreferredModel,
             temperature,
             projectDesignSystem,
         });
@@ -4105,13 +4115,14 @@ fastify.post<{
             webContextApplied,
             instructionPreview: previewText(instruction),
         }, 'edit: start');
+        const effectivePreferredModel = await prepareUserAiRequest(user.uid, preferredModel);
         const edited = await editDesign({
             instruction: instructionWithReferenceContext,
             html,
             screenId,
             images,
             assetRefs: mergedAssetRefs,
-            preferredModel,
+            preferredModel: effectivePreferredModel,
             temperature,
             projectDesignSystem,
             consistencyProfile,
@@ -4656,7 +4667,8 @@ fastify.post<{
             promptPreview: previewText(prompt),
             instructionPreview: previewText(instruction),
         }, 'generate-image: start');
-        const result = await generateImageAsset({ prompt, instruction, preferredModel });
+        const effectivePreferredModel = await prepareUserAiRequest(user.uid, preferredModel || 'gemini:image');
+        const result = await generateImageAsset({ prompt, instruction, preferredModel: effectivePreferredModel });
         const estimateCharge = estimateCredits({
             operation: 'generate_image',
             modelProfile: toCreditModelProfile(preferredModel),
@@ -4851,11 +4863,72 @@ fastify.post<{
 
 fastify.get('/api/models', async () => {
     return {
-        groq: Object.keys(GROQ_MODELS),
-        nvidia: Object.keys(NVIDIA_MODELS),
+        ...publicAiCatalog(),
         planner: getPlannerModels(),
         defaultTextModel: normalizeGeminiTextModel(process.env.GEMINI_MODEL || getDefaultGeminiTextModel()),
     };
+});
+
+fastify.get('/api/ai-settings', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/ai-settings');
+    if (!user) return;
+    return { catalog: publicAiCatalog(), settings: await getUserAiSettings(user.uid) };
+});
+
+fastify.put<{
+    Body: {
+        profiles?: {
+            fast?: { provider?: AiProviderId; model?: string };
+            quality?: { provider?: AiProviderId; model?: string };
+        };
+    };
+}>('/api/ai-settings/profiles', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/ai-settings/profiles');
+    if (!user) return;
+    const fast = request.body?.profiles?.fast;
+    const quality = request.body?.profiles?.quality;
+    if (!fast?.provider || !fast.model?.trim() || !quality?.provider || !quality.model?.trim()) {
+        return reply.status(400).send({ error: 'Both Fast and Pro provider/model selections are required.' });
+    }
+    try {
+        await saveUserModelProfiles(user.uid, {
+            fast: { provider: fast.provider, model: fast.model.trim() },
+            quality: { provider: quality.provider, model: quality.model.trim() },
+        });
+        return { settings: await getUserAiSettings(user.uid) };
+    } catch (error) {
+        return reply.status(400).send({ error: (error as Error).message });
+    }
+});
+
+fastify.put<{
+    Params: { provider: AiProviderId };
+    Body: { apiKey?: string; accountId?: string; region?: string; baseUrl?: string };
+}>('/api/ai-settings/providers/:provider', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/ai-settings/providers/:provider');
+    if (!user) return;
+    try {
+        await saveProviderCredential(user.uid, request.params.provider, {
+            apiKey: String(request.body?.apiKey || ''),
+            accountId: request.body?.accountId,
+            region: request.body?.region,
+            baseUrl: request.body?.baseUrl,
+        });
+        return { settings: await getUserAiSettings(user.uid) };
+    } catch (error) {
+        return reply.status(400).send({ error: (error as Error).message });
+    }
+});
+
+fastify.delete<{ Params: { provider: AiProviderId } }>('/api/ai-settings/providers/:provider', async (request, reply) => {
+    const user = await requireAuthenticatedUser(request, reply, '/api/ai-settings/providers/:provider');
+    if (!user) return;
+    try {
+        await deleteProviderCredential(user.uid, request.params.provider);
+        return { settings: await getUserAiSettings(user.uid) };
+    } catch (error) {
+        return reply.status(400).send({ error: (error as Error).message });
+    }
 });
 
 fastify.post<{
@@ -5415,13 +5488,14 @@ fastify.post<{
             webContextApplied,
             promptPreview: previewText(prompt),
         }, 'generate-stream: start');
+        const effectivePreferredModel = await prepareUserAiRequest(user.uid, preferredModel);
         const { stream, usagePromise } = generateDesignStreamWithUsage({
             prompt: promptWithReferenceContext,
             stylePreset,
             platform,
             images: finalImages,
             assetRefs: mergedAssetRefs,
-            preferredModel,
+            preferredModel: effectivePreferredModel,
             temperature,
             projectDesignSystem,
         });
@@ -5617,6 +5691,7 @@ fastify.post<{
             hasProjectDesignSystem: Boolean(projectDesignSystem),
             promptPreview: previewText(prompt),
         }, 'complete-screen: start');
+        await prepareUserAiRequest(user.uid, 'gemini:' + normalizeGeminiTextModel(process.env.GEMINI_MODEL || getDefaultGeminiTextModel()));
         const completed = await completePartialScreen({
             screenName,
             partialHtml,

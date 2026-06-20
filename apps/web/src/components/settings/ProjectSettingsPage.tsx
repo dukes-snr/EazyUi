@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, BarChart3, Check, Copy, CreditCard, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, RefreshCw, Settings, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronRight, Code2, Copy, CreditCard, Cpu, Download, FolderOpen, KeyRound, Link2, Loader2, LogOut, Mail, Moon, Plug, RefreshCw, Settings, SlidersHorizontal, Sun, Trash2, User as UserIcon, UserCircle2, WalletCards, X } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { apiClient, subscribeToBillingUpdates, type BillingCatalogProductKey, type BillingCatalogResponse, type BillingCreditPackProductKey, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
+import { apiClient, subscribeToBillingUpdates, type AiProviderId, type AiSettingsResponse, type BillingCatalogProductKey, type BillingCatalogResponse, type BillingCreditPackProductKey, type BillingLedgerItem, type BillingPurchaseItem, type BillingSummary, type McpApiKeyItem } from '../../api/client';
 import { observeAuthState, sendCurrentUserVerificationEmail, signOutCurrentUser } from '../../lib/auth';
 import { useCanvasStore, useChatStore, useDesignStore, useEditStore, useProjectStore, useUiStore } from '../../stores';
 import { resetProjectHistorySnapshot } from '../../utils/projectHistory';
@@ -11,6 +11,7 @@ import {
 } from '../../utils/billingUsage';
 
 type SettingsTab = 'profile' | 'settings' | 'billing' | 'usage';
+type SettingsSection = 'general' | 'ai' | 'integrations' | 'developer' | 'account';
 type DeviceDisplayMode = 'framed' | 'clean';
 type CanvasScrollWheelMode = 'zoom' | 'pan';
 
@@ -24,6 +25,14 @@ const SUBSCRIPTION_NAV: Array<{ key: SettingsTab; label: string; icon: typeof Cr
     { key: 'usage', label: 'Usage', icon: BarChart3 },
 ] as const;
 
+const SETTINGS_SECTIONS: Array<{ key: SettingsSection; label: string; description: string; icon: typeof Settings }> = [
+    { key: 'general', label: 'General', description: 'Appearance and canvas behavior', icon: SlidersHorizontal },
+    { key: 'ai', label: 'AI Providers', description: 'Models and personal API keys', icon: Cpu },
+    { key: 'integrations', label: 'Integrations', description: 'Connected products and services', icon: Plug },
+    { key: 'developer', label: 'Developer', description: 'MCP access and agent keys', icon: Code2 },
+    { key: 'account', label: 'Account', description: 'Identity and account actions', icon: UserIcon },
+];
+
 function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
     if (!user) return null;
     if (user.photoURL) return user.photoURL;
@@ -35,6 +44,10 @@ function resolveUserPhotoUrl(user: FirebaseUser | null): string | null {
 
 function normalizeTab(value: string | undefined): SettingsTab {
     return value === 'profile' || value === 'settings' || value === 'billing' || value === 'usage' ? value : 'profile';
+}
+
+function normalizeSettingsSection(value: string | null | undefined): SettingsSection {
+    return value === 'ai' || value === 'integrations' || value === 'developer' || value === 'account' ? value : 'general';
 }
 
 export function ProjectSettingsPage({
@@ -55,6 +68,8 @@ export function ProjectSettingsPage({
 
     const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
     const [settingsTab, setSettingsTab] = useState<SettingsTab>(normalizeTab(initialTab));
+    const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => normalizeSettingsSection(new URLSearchParams(window.location.search).get('section')));
+    const [expandedProvider, setExpandedProvider] = useState<AiProviderId | null>(null);
     const [verificationBusy, setVerificationBusy] = useState(false);
     const [onDemandUsage, setOnDemandUsage] = useState(false);
     const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
@@ -73,6 +88,11 @@ export function ProjectSettingsPage({
     const [mcpRevokingId, setMcpRevokingId] = useState<string | null>(null);
     const [mcpKeyLabel, setMcpKeyLabel] = useState('AI IDE');
     const [latestMcpApiKey, setLatestMcpApiKey] = useState<string>('');
+    const [aiSettings, setAiSettings] = useState<AiSettingsResponse | null>(null);
+    const [aiSettingsLoading, setAiSettingsLoading] = useState(false);
+    const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
+    const [aiBusy, setAiBusy] = useState<string | null>(null);
+    const [aiCredentialDrafts, setAiCredentialDrafts] = useState<Partial<Record<AiProviderId, { apiKey: string; accountId?: string; region?: string; baseUrl?: string }>>>({});
     const [usageDaysFilter, setUsageDaysFilter] = useState<1 | 7 | 30 | 90>(7);
     const [hoveredActivity, setHoveredActivity] = useState<{ key: string; count: number } | null>(null);
     const [activityTooltip, setActivityTooltip] = useState<{ label: string; left: number; top: number } | null>(null);
@@ -93,9 +113,12 @@ export function ProjectSettingsPage({
     }, []);
 
     useEffect(() => {
-        const query = settingsTab === 'profile' ? '' : `?tab=${encodeURIComponent(settingsTab)}`;
+        const params = new URLSearchParams();
+        if (settingsTab !== 'profile') params.set('tab', settingsTab);
+        if (settingsTab === 'settings' && settingsSection !== 'general') params.set('section', settingsSection);
+        const query = params.size > 0 ? `?${params.toString()}` : '';
         window.history.replaceState({}, '', `/app/projects/${encodeURIComponent(projectId)}/settings${query}`);
-    }, [projectId, settingsTab]);
+    }, [projectId, settingsTab, settingsSection]);
 
     const refreshBillingData = async () => {
         try {
@@ -129,10 +152,76 @@ export function ProjectSettingsPage({
         }
     };
 
+    const refreshAiSettings = async () => {
+        try {
+            setAiSettingsLoading(true);
+            setAiSettingsError(null);
+            setAiSettings(await apiClient.getAiSettings());
+        } catch (error) {
+            const message = (error as Error).message || 'Unable to load model providers.';
+            setAiSettingsError(message);
+            pushToast({ kind: 'error', title: 'AI settings unavailable', message });
+        } finally {
+            setAiSettingsLoading(false);
+        }
+    };
+
     useEffect(() => {
         void refreshBillingData();
         void refreshMcpApiKeys();
     }, []);
+
+    useEffect(() => {
+        if (!authUser) return;
+        void refreshAiSettings();
+    }, [authUser?.uid]);
+
+    const saveAiProfiles = async () => {
+        if (!aiSettings) return;
+        try {
+            setAiBusy('profiles');
+            const response = await apiClient.saveAiProfiles(aiSettings.settings.profiles);
+            setAiSettings({ ...aiSettings, settings: response.settings });
+            pushToast({ kind: 'success', title: 'Model routing saved', message: 'Fast and Pro now use the selected models.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Model routing failed', message: (error as Error).message });
+        } finally {
+            setAiBusy(null);
+        }
+    };
+
+    const saveAiProvider = async (provider: AiProviderId) => {
+        const draft = aiCredentialDrafts[provider];
+        if (!draft?.apiKey?.trim()) {
+            pushToast({ kind: 'error', title: 'API key required', message: 'Paste a provider API key before saving.' });
+            return;
+        }
+        try {
+            setAiBusy(provider);
+            const response = await apiClient.saveAiProviderKey(provider, draft);
+            if (aiSettings) setAiSettings({ ...aiSettings, settings: response.settings });
+            setAiCredentialDrafts((current) => ({ ...current, [provider]: { apiKey: '' } }));
+            pushToast({ kind: 'success', title: 'Provider connected', message: 'The key was encrypted and stored server-side.' });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Provider connection failed', message: (error as Error).message });
+        } finally {
+            setAiBusy(null);
+        }
+    };
+
+    const removeAiProvider = async (provider: AiProviderId) => {
+        const confirmed = await requestConfirmation({ title: 'Remove this provider key?', message: 'Future requests will fall back to the server key, if one exists.', confirmLabel: 'Remove key', cancelLabel: 'Cancel', tone: 'danger' });
+        if (!confirmed) return;
+        try {
+            setAiBusy(provider);
+            const response = await apiClient.deleteAiProviderKey(provider);
+            if (aiSettings) setAiSettings({ ...aiSettings, settings: response.settings });
+        } catch (error) {
+            pushToast({ kind: 'error', title: 'Remove failed', message: (error as Error).message });
+        } finally {
+            setAiBusy(null);
+        }
+    };
 
     useEffect(() => {
         if (!authUser) return;
@@ -563,7 +652,7 @@ export function ProjectSettingsPage({
                 </div>
             )}
             <div className="flex h-full">
-                <aside className="w-[250px] border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4">
+                <aside className="w-[228px] shrink-0 border-r border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-4 max-md:w-[196px]">
                     <button type="button" onClick={() => onNavigate(`/app/projects/${encodeURIComponent(projectId)}/canvas`)} className="mb-4 inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] px-3 text-sm hover:bg-[var(--ui-surface-3)]"><ArrowLeft size={14} />Back to Canvas</button>
                     <div className="mb-5 flex items-center gap-3 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-3">
                         <div className="h-10 w-10 overflow-hidden rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-3)]">{authPhotoUrl ? <img src={authPhotoUrl} alt={authDisplayName} className="h-full w-full object-cover" /> : <div className="inline-flex h-full w-full items-center justify-center"><UserCircle2 size={16} /></div>}</div>
@@ -582,12 +671,33 @@ export function ProjectSettingsPage({
                     </div>
                 </aside>
 
-                <main className="flex-1 overflow-y-auto bg-[var(--ui-surface-1)] p-6">
+                <main className="min-w-0 flex-1 overflow-y-auto bg-[var(--ui-surface-1)] p-6 max-sm:p-4">
                     <div className={`mx-auto w-full ${settingsTab === 'profile' ? 'max-w-[980px]' : 'max-w-[980px]'}`}>
                         <div className="mb-6 flex items-start justify-between gap-4">
-                            <div><h1 className="text-4xl font-semibold tracking-tight">{tabTitle}</h1><p className="mt-1 text-sm text-[var(--ui-text-subtle)]">{tabSubtitle}</p></div>
+                            <div><h1 className="text-3xl font-semibold tracking-tight">{tabTitle}</h1><p className="mt-1 text-sm text-[var(--ui-text-subtle)]">{tabSubtitle}</p></div>
                             <button type="button" onClick={() => void handleSignOut()} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-sm hover:bg-[var(--ui-surface-3)]"><LogOut size={14} />Log out</button>
                         </div>
+
+                        {settingsTab === 'settings' && (
+                            <div className="mb-7 border-b border-[var(--ui-border)]">
+                                <div className="flex min-w-max gap-1 overflow-x-auto" role="tablist" aria-label="Settings sections">
+                                    {SETTINGS_SECTIONS.map(({ key, label, icon: Icon }) => (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={settingsSection === key}
+                                            onClick={() => setSettingsSection(key)}
+                                            className={`relative inline-flex h-11 items-center gap-2 px-3 text-sm transition-colors ${settingsSection === key ? 'font-semibold text-[var(--ui-text)]' : 'text-[var(--ui-text-subtle)] hover:text-[var(--ui-text)]'}`}
+                                        >
+                                            <Icon size={14} />
+                                            {label}
+                                            {settingsSection === key && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--ui-primary)]" />}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {settingsTab === 'profile' && (
                             <div className="space-y-5">
@@ -714,6 +824,11 @@ export function ProjectSettingsPage({
 
                         {settingsTab === 'settings' && (
                             <div className="space-y-5">
+                                <div className="mb-1">
+                                    <h2 className="text-xl font-semibold tracking-tight">{SETTINGS_SECTIONS.find((item) => item.key === settingsSection)?.label}</h2>
+                                    <p className="mt-1 text-sm text-[var(--ui-text-subtle)]">{SETTINGS_SECTIONS.find((item) => item.key === settingsSection)?.description}</p>
+                                </div>
+                                {settingsSection === 'general' && <>
                                 <SectionCard title="User Info">
                                     <Row label="Name" value={authDisplayName} />
                                     <Row label="Email" value={authUser?.email || 'No email'} />
@@ -799,7 +914,133 @@ export function ProjectSettingsPage({
                                     </p>
                                 </SectionCard>
 
-                                <SectionCard title="MCP API Keys">
+                                </>}
+
+                                {settingsSection === 'ai' && <SectionCard title="AI Models & Bring Your Own Key">
+                                    <div className="mb-4 flex items-start justify-between gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-4">
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--ui-text)]">Provider vault</p>
+                                            <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--ui-text-subtle)]">
+                                                Your keys are encrypted on the API server and are never returned to this browser. A personal key overrides the workspace key only for your requests.
+                                            </p>
+                                        </div>
+                                        <button type="button" onClick={() => void refreshAiSettings()} disabled={aiSettingsLoading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--ui-border)] px-2.5 text-xs text-[var(--ui-text-muted)] hover:bg-[var(--ui-surface-3)] disabled:opacity-50">
+                                            <RefreshCw size={12} className={aiSettingsLoading ? 'animate-spin' : ''} /> Refresh
+                                        </button>
+                                    </div>
+
+                                    {aiSettings && (
+                                        <>
+                                            <div className="mb-3 flex items-end justify-between gap-4">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-[var(--ui-text)]">Generation routing</p>
+                                                    <p className="mt-1 text-xs text-[var(--ui-text-subtle)]">Choose the models behind the Fast and Pro controls.</p>
+                                                </div>
+                                            </div>
+                                            <div className="mb-4 grid gap-3 lg:grid-cols-2">
+                                                {(['fast', 'quality'] as const).map((profile) => {
+                                                    const selection = aiSettings.settings.profiles[profile];
+                                                    const suggestions = aiSettings.catalog.models.filter((model) => model.provider === selection.provider && model.status !== 'disabled');
+                                                    return (
+                                                        <div key={profile} className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)] p-4">
+                                                            <div className="mb-3 flex items-center justify-between">
+                                                                <div>
+                                                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ui-text)]">{profile === 'fast' ? 'Fast' : 'Pro'}</p>
+                                                                    <p className="mt-1 text-[11px] text-[var(--ui-text-subtle)]">{profile === 'fast' ? 'Low-latency generation' : 'Best available design quality'}</p>
+                                                                </div>
+                                                                <span className={`h-2 w-2 rounded-full ${profile === 'fast' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                                                            </div>
+                                                            <div className="grid gap-2 sm:grid-cols-[0.8fr_1.2fr]">
+                                                                <select value={selection.provider} onChange={(event) => setAiSettings({ ...aiSettings, settings: { ...aiSettings.settings, profiles: { ...aiSettings.settings.profiles, [profile]: { provider: event.target.value as AiProviderId, model: aiSettings.catalog.models.find((model) => model.provider === event.target.value && model.profiles.includes(profile) && model.status !== 'disabled')?.id || '' } } } })} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 text-xs text-[var(--ui-text)] outline-none focus:border-[var(--ui-focus-border)]">
+                                                                    {aiSettings.catalog.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                                                                </select>
+                                                                <input list={`ai-models-${profile}`} value={selection.model} onChange={(event) => setAiSettings({ ...aiSettings, settings: { ...aiSettings.settings, profiles: { ...aiSettings.settings.profiles, [profile]: { ...selection, model: event.target.value } } } })} placeholder="Provider model ID" className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-2.5 font-mono text-xs text-[var(--ui-text)] outline-none focus:border-[var(--ui-focus-border)]" />
+                                                                <datalist id={`ai-models-${profile}`}>{suggestions.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="mb-5 flex justify-end">
+                                                <button type="button" onClick={() => void saveAiProfiles()} disabled={aiBusy !== null} className="inline-flex h-9 items-center gap-2 rounded-md bg-[var(--ui-primary)] px-4 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                                                    {aiBusy === 'profiles' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save model routing
+                                                </button>
+                                            </div>
+
+                                            <div className="mb-3 border-t border-[var(--ui-border)] pt-5">
+                                                <p className="text-sm font-semibold text-[var(--ui-text)]">Provider credentials</p>
+                                                <p className="mt-1 text-xs text-[var(--ui-text-subtle)]">Expand a provider only when you need to connect or replace its key.</p>
+                                            </div>
+                                            <div className="overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-1)]">
+                                                {aiSettings.catalog.providers.filter((provider) => provider.id !== 'custom' || provider.extraFields?.includes('baseUrl')).map((provider) => {
+                                                    const connection = aiSettings.settings.providers.find((item) => item.provider === provider.id);
+                                                    const draft = aiCredentialDrafts[provider.id] || { apiKey: '' };
+                                                    const isExpanded = expandedProvider === provider.id;
+                                                    const providerModels = aiSettings.catalog.models.filter((model) => model.provider === provider.id && model.status !== 'disabled');
+                                                    return (
+                                                        <div key={provider.id} className="border-t border-[var(--ui-border)] first:border-t-0">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setExpandedProvider(isExpanded ? null : provider.id)}
+                                                                aria-expanded={isExpanded}
+                                                                className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--ui-surface-2)]"
+                                                            >
+                                                                <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border ${connection?.configured ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400' : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-text-subtle)]'}`}>
+                                                                    <KeyRound size={15} />
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className="truncate text-sm font-semibold text-[var(--ui-text)]">{provider.name}</p>
+                                                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${connection?.configured ? 'bg-emerald-500/15 text-emerald-400' : 'bg-[var(--ui-surface-3)] text-[var(--ui-text-subtle)]'}`}>{connection?.configured ? connection.source : 'not connected'}</span>
+                                                                    </div>
+                                                                    <p className="mt-0.5 truncate text-[11px] text-[var(--ui-text-subtle)]">{providerModels.length > 0 ? `${providerModels.length} selectable ${providerModels.length === 1 ? 'model' : 'models'}` : 'Custom model IDs supported'} · {provider.freeAccess.replace('-', ' ')}</p>
+                                                                </div>
+                                                                {connection?.maskedKey && <span className="hidden font-mono text-[11px] text-[var(--ui-text-subtle)] sm:block">{connection.maskedKey}</span>}
+                                                                {isExpanded ? <ChevronDown size={15} className="text-[var(--ui-text-subtle)]" /> : <ChevronRight size={15} className="text-[var(--ui-text-subtle)]" />}
+                                                            </button>
+
+                                                            {isExpanded && <div className="border-t border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-4 sm:pl-16">
+                                                                <div className="mb-3 flex flex-wrap items-center gap-3 text-[11px]">
+                                                                    {provider.keyUrl && <a href={provider.keyUrl} target="_blank" rel="noreferrer" className="font-semibold text-[var(--ui-primary)] hover:underline">Get an API key</a>}
+                                                                    {provider.docsUrl && <a href={provider.docsUrl} target="_blank" rel="noreferrer" className="text-[var(--ui-text-muted)] hover:text-[var(--ui-text)]">Provider documentation</a>}
+                                                                    {connection?.updatedAt && <span className="text-[var(--ui-text-subtle)]">Updated {new Date(connection.updatedAt).toLocaleDateString()}</span>}
+                                                                </div>
+                                                                <div className="grid max-w-2xl gap-2">
+                                                                <input type="password" autoComplete="off" value={draft.apiKey} onChange={(event) => setAiCredentialDrafts((current) => ({ ...current, [provider.id]: { ...draft, apiKey: event.target.value } }))} placeholder={connection?.configured ? 'Paste a replacement key' : 'Paste API key'} className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs outline-none focus:border-[var(--ui-focus-border)]" />
+                                                                {provider.extraFields?.includes('accountId') && <input value={draft.accountId || ''} onChange={(event) => setAiCredentialDrafts((current) => ({ ...current, [provider.id]: { ...draft, accountId: event.target.value } }))} placeholder="Cloudflare account ID" className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs outline-none focus:border-[var(--ui-focus-border)]" />}
+                                                                {provider.extraFields?.includes('region') && <input value={draft.region || connection?.region || 'us-east-1'} onChange={(event) => setAiCredentialDrafts((current) => ({ ...current, [provider.id]: { ...draft, region: event.target.value } }))} placeholder="AWS region (for example us-east-1)" className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs outline-none focus:border-[var(--ui-focus-border)]" />}
+                                                                {provider.extraFields?.includes('baseUrl') && <input value={draft.baseUrl || ''} onChange={(event) => setAiCredentialDrafts((current) => ({ ...current, [provider.id]: { ...draft, baseUrl: event.target.value } }))} placeholder="https://provider.example/v1" className="h-9 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 font-mono text-xs outline-none focus:border-[var(--ui-focus-border)]" />}
+                                                                </div>
+                                                                <div className="mt-3 flex max-w-2xl justify-end gap-2">
+                                                                {connection?.source === 'user' && <button type="button" onClick={() => void removeAiProvider(provider.id)} disabled={aiBusy !== null} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-500/30 px-2.5 text-xs text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>}
+                                                                <button type="button" onClick={() => void saveAiProvider(provider.id)} disabled={aiBusy !== null || !draft.apiKey.trim()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 text-xs font-semibold text-[var(--ui-text)] hover:bg-[var(--ui-surface-3)] disabled:opacity-50">{aiBusy === provider.id ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} {connection?.configured ? 'Replace key' : 'Connect'}</button>
+                                                                </div>
+                                                            </div>}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    )}
+                                    {aiSettingsLoading && !aiSettings && <div className="flex items-center justify-center gap-2 py-10 text-sm text-[var(--ui-text-subtle)]"><Loader2 size={15} className="animate-spin" /> Loading provider catalog…</div>}
+                                    {aiSettingsError && !aiSettings && (
+                                        <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4">
+                                            <div className="flex items-start gap-3">
+                                                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-rose-400" />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-semibold text-rose-300">Provider settings could not load</p>
+                                                    <p className="mt-1 break-words text-xs leading-5 text-[var(--ui-text-subtle)]">{aiSettingsError}</p>
+                                                    <p className="mt-2 text-xs text-[var(--ui-text-subtle)]">Confirm the API server is running and includes the `/api/ai-settings` routes.</p>
+                                                </div>
+                                                <button type="button" onClick={() => void refreshAiSettings()} disabled={aiSettingsLoading} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-rose-500/30 px-2.5 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50">
+                                                    <RefreshCw size={12} className={aiSettingsLoading ? 'animate-spin' : ''} /> Retry
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </SectionCard>}
+
+                                {settingsSection === 'developer' && <SectionCard title="MCP API Keys">
                                     <p className="mb-3 text-sm text-[var(--ui-text-subtle)]">
                                         Create API keys for AI IDE MCP access. Keep keys secret. Revoking a key cuts access immediately.
                                     </p>
@@ -919,9 +1160,9 @@ export function ProjectSettingsPage({
   }
 }`}</pre>
                                     </div>
-                                </SectionCard>
+                                </SectionCard>}
 
-                                <SectionCard title="Integrations">
+                                {settingsSection === 'integrations' && <SectionCard title="Integrations">
                                     <Row
                                         label="Vercel"
                                         value={(
@@ -940,9 +1181,9 @@ export function ProjectSettingsPage({
                                             </button>
                                         )}
                                     />
-                                </SectionCard>
+                                </SectionCard>}
 
-                                <SectionCard title="Account">
+                                {settingsSection === 'account' && <SectionCard title="Account">
                                     <Row
                                         label="Verify email"
                                         value={(
@@ -970,7 +1211,7 @@ export function ProjectSettingsPage({
                                             </button>
                                         )}
                                     />
-                                </SectionCard>
+                                </SectionCard>}
                             </div>
                         )}
 

@@ -1,4 +1,5 @@
 import type { TokenUsageEntry } from './tokenUsage.js';
+import { getRuntimeProviderCredential } from './aiProviderSettings.js';
 
 // ============================================================================
 // Groq Provider - OpenAI-compatible endpoints (chat + whisper transcription)
@@ -56,7 +57,7 @@ export function isGroqModel(model?: string): model is GroqModelId {
 }
 
 function requireGroqKey() {
-    const apiKey = (process.env.GROQ_API_KEY || '').trim();
+    const apiKey = getRuntimeProviderCredential('groq')?.apiKey || '';
     if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
     return apiKey;
 }

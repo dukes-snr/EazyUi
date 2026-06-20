@@ -7,8 +7,8 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
-import { groqChatCompletion, isGroqModel } from './groq.provider.js';
-import { isNvidiaModel, nvidiaChatCompletion } from './nvidia.provider.js';
+import { aiChatCompletion, isExternalTextModel, parseAiModelRef } from './aiChat.provider.js';
+import { getRuntimeProviderCredential } from './aiProviderSettings.js';
 import {
     getDefaultGeminiImageModel,
     getDefaultGeminiTextModel,
@@ -34,18 +34,19 @@ if (envPath) {
 }
 
 // Initialize the Gemini API
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const envModel = (process.env.GEMINI_MODEL || '').trim();
 const modelName = normalizeGeminiTextModel(envModel || getDefaultGeminiTextModel());
 const NVIDIA_TEXT_FALLBACK_MODEL = 'gemini-2.5-pro';
-const model = genAI.getGenerativeModel({
-    model: modelName,
-});
 console.info(`[Gemini] Using model: ${modelName} (env: ${envModel || 'unset'})`);
 
 function getGenerativeModel(preferredModel?: string) {
-    const requested = (preferredModel || '').trim();
+    const raw = (preferredModel || '').trim();
+    const ref = parseAiModelRef(raw);
+    const requested = ref?.provider === 'gemini' ? ref.model : raw;
     const resolved = requested.length > 0 ? normalizeGeminiTextModel(requested) : modelName;
+    const apiKey = getRuntimeProviderCredential('gemini')?.apiKey || '';
+    if (!apiKey) throw new Error('Gemini API key is not configured.');
+    const genAI = new GoogleGenerativeAI(apiKey);
     return {
         name: resolved,
         model: genAI.getGenerativeModel({ model: resolved }),
@@ -74,6 +75,11 @@ console.info(`[Gemini] Image fallback model: ${IMAGE_FALLBACK_MODEL} (env: ${ima
 function resolvePreferredModel(preferredModel?: string): string | undefined {
     const requested = (preferredModel || '').trim();
     if (!requested) return undefined;
+    const ref = parseAiModelRef(requested);
+    if (ref) {
+        if (ref.provider !== 'gemini') return undefined;
+        return ref.model === 'image' ? IMAGE_PRIMARY_MODEL : ref.model;
+    }
     if (requested === 'image') return IMAGE_PRIMARY_MODEL;
     return requested;
 }
@@ -1132,7 +1138,7 @@ Return concise JSON only with fields:
 }`;
 
     try {
-        const result = await model.generateContent({
+        const result = await getGenerativeModel(modelName).model.generateContent({
             contents: [{
                 role: 'user',
                 parts: [{ text: analysisPrompt }, ...imageParts],
@@ -2127,29 +2133,15 @@ Choose typography that fits the brand personality instead of defaulting to the s
         let raw: unknown = null;
         const usageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
-        if (isNvidiaModel(preferredModel)) {
-            const completion = await nvidiaChatCompletion({
-                model: preferredModel,
+        if (isExternalTextModel(preferredModel)) {
+            const completion = await aiChatCompletion({
+                model: preferredModel!,
                 systemPrompt,
                 prompt: userPrompt,
                 maxCompletionTokens: 1900,
                 temperature: modelTemperature,
                 topP: 0.85,
                 responseFormat: 'json_object',
-                thinking: false,
-            });
-            usageEntries.push(completion.usage);
-            raw = parseJsonSafe(cleanJsonResponse(completion.text));
-        } else if (isGroqModel(preferredModel)) {
-            const completion = await groqChatCompletion({
-                model: preferredModel,
-                systemPrompt,
-                prompt: userPrompt,
-                maxCompletionTokens: 1900,
-                temperature: modelTemperature,
-                topP: 0.85,
-                responseFormat: 'json_object',
-                reasoningEffort: 'low',
             });
             usageEntries.push(completion.usage);
             raw = parseJsonSafe(cleanJsonResponse(completion.text));
@@ -2158,7 +2150,7 @@ Choose typography that fits the brand personality instead of defaulting to the s
             const primaryGeminiModelName = preferredGeminiModel || modelName;
             const imageParts = await resolveImageParts(referenceImages);
             const runGeminiDesignSystemAttempt = async (activeModelName: string, retry = false): Promise<unknown> => {
-                const designSystemModel = activeModelName === modelName ? model : getGenerativeModel(activeModelName).model;
+                const designSystemModel = getGenerativeModel(activeModelName).model;
                 const result = await designSystemModel.generateContent({
                     contents: [{
                         role: 'user',
@@ -2302,38 +2294,27 @@ ${designSystemGuidance}
         });
     };
 
-    const isFastTextProviderModel = isGroqModel(preferredModel) || isNvidiaModel(preferredModel);
+    const isFastTextProviderModel = isExternalTextModel(preferredModel);
 
     const resolvedPreferredModel = resolvePreferredModel(preferredModel);
 
     const generateOnce = async (promptText: string): Promise<ParsedDesign & { usage?: TokenUsageSummary }> => {
         if (isFastTextProviderModel) {
+            const providerRef = parseAiModelRef(preferredModel);
             try {
-                const isNvidia = isNvidiaModel(preferredModel);
-                const maxCompletionTokens = isNvidia ? 3400 : 2200;
+                const isNvidia = providerRef?.provider === 'nvidia';
+                const maxCompletionTokens = isNvidia ? 3400 : 3000;
                 const fastUsageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
-                const runFast = async (promptPrefix: string) => (isNvidia
-                    ? await nvidiaChatCompletion({
-                        model: preferredModel,
+                const runFast = async (promptPrefix: string) => await aiChatCompletion({
+                        model: preferredModel!,
                         systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
                         prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
                         maxCompletionTokens,
                         temperature: modelTemperature,
                         topP: referenceImages.length > 0 ? 0.85 : 0.9,
                         responseFormat: 'json_object',
-                        thinking: false,
-                    })
-                    : await groqChatCompletion({
-                        model: preferredModel,
-                        systemPrompt: 'You are a world-class UI designer. Return one valid JSON object only and no reasoning.',
-                        prompt: `${promptPrefix}\n${FAST_UNSPLASH_IMAGE_RULES}\n\n${promptText}`,
-                        maxCompletionTokens,
-                        temperature: modelTemperature,
-                        topP: referenceImages.length > 0 ? 0.85 : 0.9,
-                        reasoningEffort: 'low',
-                        responseFormat: 'json_object',
-                    }));
+                    });
 
                 let completion = await runFast(FAST_GENERATE_HTML_PROMPT);
                 fastUsageEntries.push(completion.usage);
@@ -2358,7 +2339,7 @@ ${designSystemGuidance}
                     throw new Error('Fast model returned invalid structured output. Please retry.');
                 }
             } catch (error) {
-                if (isNvidiaModel(preferredModel)) {
+                if (providerRef?.provider === 'nvidia') {
                     console.warn('[Gemini] NVIDIA generate failed; falling back to Gemini', {
                         preferredModel,
                         fallbackModel: NVIDIA_TEXT_FALLBACK_MODEL,
@@ -2477,11 +2458,11 @@ ${designSystemGuidance}`;
             const parts: any[] = [{ text: GENERATE_STREAM_PROMPT + '\n\n' + userPrompt }];
             parts.push(...await resolveImageParts(referenceImages));
 
-            const preferredGeminiModel = (!isGroqModel(preferredModel) && !isNvidiaModel(preferredModel))
+            const preferredGeminiModel = !isExternalTextModel(preferredModel)
                 ? resolvePreferredModel(preferredModel)
                 : undefined;
             const streamModelName = preferredGeminiModel || modelName;
-            const streamModel = preferredGeminiModel ? getGenerativeModel(preferredGeminiModel).model : model;
+            const streamModel = getGenerativeModel(streamModelName).model;
 
             const result = await streamModel.generateContentStream({
                 contents: [{ role: 'user', parts }],
@@ -2725,19 +2706,10 @@ ${designSystemGuidance}`.trim();
         return { html: normalized, description };
     };
 
-    if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
+    if (isExternalTextModel(preferredModel)) {
         try {
-            const completion = isNvidiaModel(preferredModel)
-                ? await nvidiaChatCompletion({
-                    model: preferredModel,
-                    systemPrompt: 'You are an expert UI designer that edits HTML.',
-                    prompt: fastUserPrompt,
-                    maxTokens: 1800,
-                    temperature: modelTemperature,
-                    thinking: false,
-                })
-                : await groqChatCompletion({
-                    model: preferredModel,
+            const completion = await aiChatCompletion({
+                    model: preferredModel!,
                     systemPrompt: 'You are an expert UI designer that edits HTML.',
                     prompt: fastUserPrompt,
                     maxTokens: 1800,
@@ -2759,7 +2731,7 @@ ${designSystemGuidance}`.trim();
                 usage: summarizeTokenUsage(usageEntries),
             };
         } catch (error) {
-            if (isNvidiaModel(preferredModel)) {
+            if (parseAiModelRef(preferredModel)?.provider === 'nvidia') {
                 console.warn('[Gemini] NVIDIA edit failed; falling back to Gemini', {
                     preferredModel,
                     fallbackModel: NVIDIA_TEXT_FALLBACK_MODEL,
@@ -2907,7 +2879,7 @@ ${designSystemGuidance}`.trim();
             const parts: any[] = [{ text: streamPrompt }];
             parts.push(...await resolveImageParts(referenceImages));
 
-            if (isGroqModel(preferredModel) || isNvidiaModel(preferredModel)) {
+            if (isExternalTextModel(preferredModel)) {
                 const edited = await editDesign(options);
                 if (edited.usage?.entries?.length) {
                     usageEntries.push(...edited.usage.entries);
@@ -2983,7 +2955,7 @@ Partial HTML:
 ${partialHtml}
 `;
 
-    const result = await model.generateContent({
+    const result = await getGenerativeModel(modelName).model.generateContent({
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         generationConfig: {
             ...GENERATION_CONFIG,
@@ -3341,7 +3313,7 @@ async function generateDesignOnce(
     const fallbackModelName = resolveGeminiTextFallbackModel(activeModelName);
 
     const runAttempt = async (candidateModelName: string) => {
-        const activeModel = candidateModelName === modelName ? model : getGenerativeModel(candidateModelName).model;
+        const activeModel = getGenerativeModel(candidateModelName).model;
         const result = await activeModel.generateContent({
             contents: [{ role: 'user', parts }],
             generationConfig,

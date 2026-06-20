@@ -581,6 +581,48 @@ export interface McpApiKeyItem {
     revokedAt?: string;
 }
 
+export type AiProviderId = 'gemini' | 'openai' | 'xai' | 'groq' | 'nvidia' | 'openrouter' | 'together' | 'mistral' | 'anthropic' | 'cloudflare' | 'bedrock' | 'custom';
+
+export interface AiProviderCatalogItem {
+    id: AiProviderId;
+    name: string;
+    protocol: 'gemini' | 'openai' | 'anthropic' | 'cloudflare';
+    keyUrl: string;
+    docsUrl: string;
+    freeAccess: 'free-tier' | 'trial' | 'paid' | 'varies';
+    extraFields?: Array<'accountId' | 'region' | 'baseUrl'>;
+}
+
+export interface AiModelCatalogItem {
+    id: string;
+    provider: AiProviderId;
+    name: string;
+    status: 'active' | 'available' | 'disabled';
+    profiles: Array<'fast' | 'quality'>;
+    notes?: string;
+}
+
+export interface AiSettingsResponse {
+    catalog: {
+        providers: AiProviderCatalogItem[];
+        models: AiModelCatalogItem[];
+        defaults: Record<'fast' | 'quality', { provider: AiProviderId; model: string }>;
+    };
+    settings: {
+        profiles: Record<'fast' | 'quality', { provider: AiProviderId; model: string }>;
+        providers: Array<{
+            provider: AiProviderId;
+            configured: boolean;
+            source: 'user' | 'server' | 'none';
+            maskedKey?: string;
+            accountId?: string;
+            region?: string;
+            baseUrl?: string;
+            updatedAt?: string;
+        }>;
+    };
+}
+
 export interface McpApiKeyCreateResponse {
     key: McpApiKeyItem & {
         apiKey: string;
@@ -1423,6 +1465,28 @@ class ApiClient {
             method: 'POST',
             body: JSON.stringify({ returnUrl }),
             signal,
+        });
+    }
+
+    async getAiSettings(signal?: AbortSignal): Promise<AiSettingsResponse> {
+        return this.request<AiSettingsResponse>('/ai-settings', { method: 'GET', signal });
+    }
+
+    async saveAiProfiles(profiles: AiSettingsResponse['settings']['profiles'], signal?: AbortSignal): Promise<{ settings: AiSettingsResponse['settings'] }> {
+        return this.request<{ settings: AiSettingsResponse['settings'] }>('/ai-settings/profiles', {
+            method: 'PUT', body: JSON.stringify({ profiles }), signal,
+        });
+    }
+
+    async saveAiProviderKey(provider: AiProviderId, credentials: { apiKey: string; accountId?: string; region?: string; baseUrl?: string }, signal?: AbortSignal): Promise<{ settings: AiSettingsResponse['settings'] }> {
+        return this.request<{ settings: AiSettingsResponse['settings'] }>(`/ai-settings/providers/${encodeURIComponent(provider)}`, {
+            method: 'PUT', body: JSON.stringify(credentials), signal,
+        });
+    }
+
+    async deleteAiProviderKey(provider: AiProviderId, signal?: AbortSignal): Promise<{ settings: AiSettingsResponse['settings'] }> {
+        return this.request<{ settings: AiSettingsResponse['settings'] }>(`/ai-settings/providers/${encodeURIComponent(provider)}`, {
+            method: 'DELETE', signal,
         });
     }
 

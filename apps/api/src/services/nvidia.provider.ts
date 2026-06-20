@@ -4,6 +4,7 @@
 
 import OpenAI from 'openai';
 import type { TokenUsageEntry } from './tokenUsage.js';
+import { getRuntimeProviderCredential } from './aiProviderSettings.js';
 
 export const NVIDIA_MODELS = {
     'moonshotai/kimi-k2.6': { name: 'Kimi K2.6', contextWindow: 262144, maxOutputTokens: 16384 },
@@ -44,7 +45,7 @@ function resolveMaxOutputTokens(model: string): number {
 }
 
 function requireNvidiaKey() {
-    const apiKey = (process.env.NVIDIA_API_KEY || '').trim();
+    const apiKey = getRuntimeProviderCredential('nvidia')?.apiKey || '';
     if (!apiKey) throw new Error('NVIDIA_API_KEY is not configured');
     return apiKey;
 }

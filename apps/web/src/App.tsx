@@ -20,6 +20,7 @@ import { ProjectSettingsPage } from './components/settings/ProjectSettingsPage';
 import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { ToastViewport } from './components/ui/ToastViewport';
 import { PluginAuthBridgePage } from './components/plugin/PluginAuthBridgePage';
+import { DebugResponsePage } from './components/debug/DebugResponsePage';
 import DemoOne from './components/ui/demo';
 import type { DesignModelProfile } from './constants/designModels';
 import { apiClient } from './api/client';
@@ -34,6 +35,7 @@ import { getBlogPostBySlug } from './content/blogPosts';
 
 import { useDesignStore, useCanvasStore, useChatStore, useEditStore, useUiStore, useProjectStore, useProjectMemoryStore } from './stores';
 import { resetProjectHistorySnapshot } from './utils/projectHistory';
+import { consumeDebugInjectPayload } from './utils/debugResponse';
 import logo from './assets/Ui-logo.svg';
 
 import './styles/App.css';
@@ -54,7 +56,8 @@ type RouteInfo =
     | { kind: 'app-projects' }
     | { kind: 'app-project-new' }
     | { kind: 'app-project-settings'; projectId: string; tab?: string }
-    | { kind: 'app-project-canvas'; projectId: string; screenId?: string };
+    | { kind: 'app-project-canvas'; projectId: string; screenId?: string }
+    | { kind: 'debug' };
 
 function resolveUserPhotoUrl(user: User | null): string | null {
     if (!user) return null;
@@ -128,6 +131,7 @@ function getRouteFromPath(): RouteInfo {
     if (path === '/app') return { kind: 'app-home' };
     if (path === '/app/projects') return { kind: 'app-projects' };
     if (path === '/app/projects/new') return { kind: 'app-project-new' };
+    if (path === '/app/debug') return { kind: 'debug' };
 
     if (segments[0] === 'app' && segments[1] === 'projects' && segments[2]) {
         const projectId = decodeURIComponent(segments[2]);
@@ -411,6 +415,14 @@ function getSeoConfigForRoute(route: RouteInfo): SeoConfig {
                 title: 'Canvas Workspace | EazyUI',
                 description: 'Edit and arrange UI screens in the EazyUI canvas workspace.',
                 path: `/app/projects/${encodeURIComponent(route.projectId)}/canvas${route.screenId ? `/${encodeURIComponent(route.screenId)}` : ''}`,
+                robots: 'noindex,nofollow',
+                jsonLd: [],
+            };
+        case 'debug':
+            return {
+                title: 'Debug Response | EazyUI',
+                description: 'Manually inject AI responses for testing.',
+                path: '/app/debug',
                 robots: 'noindex,nofollow',
                 jsonLd: [],
             };
@@ -889,6 +901,40 @@ function App() {
         }
     }, [authReady, authUser, activeProjectIdFromRoute, projectId, setProjectId]);
 
+    // Debug response injection: when a fresh project is hydrated and a
+    // debug payload is waiting in sessionStorage, consume it and write
+    // the parsed design spec + canvas boards into the stores.
+    useEffect(() => {
+        if (!projectId) return;
+        if (hydratedProjectIdRef.current !== projectId) return;
+        const payload = consumeDebugInjectPayload();
+        if (!payload) return;
+        const spec = payload.designSpec;
+        if (!spec || !Array.isArray(spec.screens) || spec.screens.length === 0) return;
+        unstable_batchedUpdates(() => {
+            useDesignStore.getState().setSpec(spec, { history: 'skip' });
+            // Build canvas boards for each injected screen.
+            const doc = useCanvasStore.getState().doc;
+            const boards = spec.screens.map((screen, index) => ({
+                boardId: `board-${screen.screenId}`,
+                screenId: screen.screenId,
+                x: 100 + index * (screen.width + 80),
+                y: 100,
+                width: screen.width,
+                height: screen.height,
+                deviceFrame: 'none' as const,
+                locked: false,
+                visible: true,
+            }));
+            useCanvasStore.getState().setBoards([...doc.boards, ...boards]);
+        });
+        resetProjectHistorySnapshot(spec, useCanvasStore.getState().doc);
+        // Focus the first injected screen.
+        useCanvasStore.getState().setFocusNodeIds(
+            spec.screens.map((s) => s.screenId),
+        );
+    }, [projectId]);
+
     useEffect(() => {
         if (!authReady) return;
         const requiresAuth = route.kind.startsWith('app-');
@@ -1127,6 +1173,9 @@ function App() {
         }
         if (route.kind === 'contact') {
             return renderPublicPage(<ContactPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
+        }
+        if (route.kind === 'debug') {
+            return <DebugResponsePage onNavigate={(path, search = '') => navigate(path, search)} />;
         }
         return renderPublicPage(<BlogPage onNavigate={(path) => navigate(path)} onOpenApp={() => navigate('/app')} />);
     }

@@ -235,6 +235,28 @@ export async function ensurePersistenceSchema(): Promise<void> {
                 CREATE INDEX IF NOT EXISTS idx_api_request_activity_route_started_at
                 ON api_request_activity(route, started_at DESC);
             `);
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS user_ai_provider_keys (
+                    uid TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    encrypted_credentials TEXT NOT NULL,
+                    key_hint TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (uid, provider)
+                );
+            `);
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS user_ai_model_settings (
+                    uid TEXT PRIMARY KEY,
+                    fast_provider TEXT NOT NULL,
+                    fast_model TEXT NOT NULL,
+                    quality_provider TEXT NOT NULL,
+                    quality_model TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            `);
         })().catch((error) => {
             schemaReadyPromise = null;
             throw error;

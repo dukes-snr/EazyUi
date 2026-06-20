@@ -4,6 +4,7 @@
 // ============================================================================
 
 import type { TokenUsageEntry } from './tokenUsage.js';
+import { getRuntimeProviderCredential } from './aiProviderSettings.js';
 
 export const CLOUDFLARE_MODELS = {
     '@cf/meta/llama-3-8b-instruct': { name: 'Llama 3 8B Instruct', contextWindow: 8192, maxOutputTokens: 4096 },
@@ -44,8 +45,9 @@ export function isCloudflareModel(model?: string): model is CloudflareModelId {
 }
 
 function requireCloudflareConfig() {
-    const accountId = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
-    const apiToken = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
+    const credential = getRuntimeProviderCredential('cloudflare');
+    const accountId = credential?.accountId || '';
+    const apiToken = credential?.apiKey || '';
     if (!accountId) throw new Error('CLOUDFLARE_ACCOUNT_ID is not configured');
     if (!apiToken) throw new Error('CLOUDFLARE_API_TOKEN is not configured');
     return { accountId, apiToken };

@@ -1,10 +1,9 @@
 export type DesignModelProfile = 'fast' | 'quality';
 
-export const FAST_TEXT_MODEL_ID = 'gemini-2.5-flash';
-// Previous Pro model. Keep for quick restoration when it becomes available again.
-// export const QUALITY_TEXT_MODEL_ID = 'gemini-3-pro-preview';
-export const QUALITY_TEXT_MODEL_ID = (import.meta.env.VITE_QUALITY_TEXT_MODEL_ID as string | undefined)?.trim()
-    || 'moonshotai/kimi-k2.6';
+// The server resolves these profile aliases through the central catalog and the
+// signed-in user's model settings. No provider-specific model IDs belong here.
+export const FAST_TEXT_MODEL_ID = 'profile:fast';
+export const QUALITY_TEXT_MODEL_ID = 'profile:quality';
 
 export function getPreferredTextModel(profile: DesignModelProfile): string | undefined {
     if (profile === 'fast') return FAST_TEXT_MODEL_ID;
