@@ -1434,6 +1434,29 @@ export function EditPanel() {
         applyPatch({ op: 'set_text', uid: selected.uid, text: cleaned });
     };
 
+    const authorizeDirectAiAction = async (
+        message: string,
+        expectedAction: 'edit' | 'generate_image',
+    ) => {
+        const screenNames = (spec?.screens || []).map((screen) => screen.name);
+        const authorization = await apiClient.oversee({
+            message,
+            projectExists: screenNames.length > 0,
+            screenNames,
+            selectedScreenNames: activeScreen?.name ? [activeScreen.name] : [],
+            attachmentCount: 0,
+            referenceUrlCount: 0,
+        });
+        if (authorization.decision.action !== expectedAction || !authorization.actionTicket) {
+            throw new Error(
+                authorization.decision.clarificationQuestion
+                || authorization.decision.assistantResponse
+                || 'This AI action was not authorized. Make the requested action more explicit.',
+            );
+        }
+        apiClient.setActionTicket(authorization.actionTicket);
+    };
+
     const applyAiEditToSelection = async () => {
         if (!screenId || !selected || !activeScreen) return;
         const snapshot = selected;
@@ -1484,6 +1507,7 @@ RULES:
 `.trim();
 
             if (isImageGenerationMode) {
+                await authorizeDirectAiAction(`Generate an image for the ${activeScreen.name} screen: ${prompt}`, 'generate_image');
                 const imageResult = await apiClient.generateImage({
                     prompt,
                     preferredModel: 'image',
@@ -1497,6 +1521,7 @@ RULES:
                     setAiDescription(imageResult.description.trim());
                 }
             } else {
+                await authorizeDirectAiAction(`Edit the ${activeScreen.name} screen component: ${prompt}`, 'edit');
                 const response = await apiClient.edit({
                     instruction: scopedInstruction,
                     html: htmlSource,
@@ -1529,6 +1554,7 @@ RULES:
                 setAiError((error as Error).message || 'Failed to apply AI edit.');
             }
         } finally {
+            apiClient.clearActionTicket();
             aiAbortRef.current = null;
             setIsApplyingAi(false);
         }
@@ -1543,6 +1569,7 @@ RULES:
         const controller = new AbortController();
         aiAbortRef.current = controller;
         try {
+            await authorizeDirectAiAction(`Generate an image for the ${activeScreen.name} screen: ${prompt}`, 'generate_image');
             const imageResult = await apiClient.generateImage({
                 prompt,
                 preferredModel: 'image',
@@ -1571,6 +1598,7 @@ RULES:
                 setImagesTabError((error as Error).message || 'Image generation failed.');
             }
         } finally {
+            apiClient.clearActionTicket();
             aiAbortRef.current = null;
             setImageGenLoadingUid(null);
         }

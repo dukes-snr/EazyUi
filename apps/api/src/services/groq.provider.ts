@@ -9,14 +9,25 @@ const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
 export const GROQ_MODELS = {
-    'moonshotai/kimi-k2-instruct-0905': { name: 'Kimi K2 Instruct 0905', contextWindow: 131072 },
-    'openai/gpt-oss-120b': { name: 'GPT OSS 120B', contextWindow: 131072 },
-    'llama-3.1-8b-instant': { name: 'Llama 3.1 8B Instant', contextWindow: 131072 },
-    'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B Versatile', contextWindow: 131072 },
-    'meta-llama/llama-4-scout-17b-16e-instruct': { name: 'Llama 4 Scout 17B', contextWindow: 131072 },
-    'meta-llama/llama-4-maverick-17b-128e-instruct': { name: 'Llama 4 Maverick 17B', contextWindow: 131072 },
-    'qwen/qwen3-32b': { name: 'Qwen 3 32B', contextWindow: 131072 },
-    'moonshotai/kimi-k2-instruct': { name: 'Kimi K2 Instruct', contextWindow: 131072 },
+    'openai/gpt-oss-120b': { name: 'GPT OSS 120B', lifecycle: 'production', contextWindow: 131072, maxOutputTokens: 65536 },
+    'openai/gpt-oss-20b': { name: 'GPT OSS 20B', lifecycle: 'production', contextWindow: 131072, maxOutputTokens: 65536 },
+    'llama-3.1-8b-instant': { name: 'Llama 3.1 8B Instant', lifecycle: 'production', contextWindow: 131072, maxOutputTokens: 131072 },
+    'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B Versatile', lifecycle: 'production', contextWindow: 131072, maxOutputTokens: 32768 },
+    'meta-llama/llama-4-scout-17b-16e-instruct': { name: 'Llama 4 Scout 17B', lifecycle: 'preview', contextWindow: 131072, maxOutputTokens: 8192 },
+    'qwen/qwen3-32b': { name: 'Qwen 3 32B', lifecycle: 'preview', contextWindow: 131072, maxOutputTokens: 40960 },
+    'qwen/qwen3.6-27b': { name: 'Qwen 3.6 27B', lifecycle: 'preview', contextWindow: 131072, maxOutputTokens: 32768 },
+} as const;
+
+export const GROQ_NON_HTML_MODELS = {
+    'groq/compound': { kind: 'agentic-system', reason: 'Tool-using system with an 8K completion limit; not deterministic HTML generation.' },
+    'groq/compound-mini': { kind: 'agentic-system', reason: 'Tool-using system with an 8K completion limit; not deterministic HTML generation.' },
+    'whisper-large-v3': { kind: 'audio-transcription', reason: 'Audio transcription only.' },
+    'whisper-large-v3-turbo': { kind: 'audio-transcription', reason: 'Audio transcription only.' },
+    'canopylabs/orpheus-arabic-saudi': { kind: 'text-to-speech', reason: 'Speech generation only.' },
+    'canopylabs/orpheus-v1-english': { kind: 'text-to-speech', reason: 'Speech generation only.' },
+    'meta-llama/llama-prompt-guard-2-22m': { kind: 'safety', reason: 'Prompt classification only.' },
+    'meta-llama/llama-prompt-guard-2-86m': { kind: 'safety', reason: 'Prompt classification only.' },
+    'openai/gpt-oss-safeguard-20b': { kind: 'safety', reason: 'Safety policy model, not a design generator.' },
 } as const;
 
 export type GroqModelId = keyof typeof GROQ_MODELS;
@@ -163,7 +174,7 @@ export async function groqChatCompletion(input: {
     stop?: string[] | null;
 }): Promise<{ text: string; modelUsed: string; finishReason?: string; usage?: TokenUsageEntry }> {
     const apiKey = requireGroqKey();
-    const model = isGroqModel(input.model) ? input.model : (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
+    const model = isGroqModel(input.model) ? input.model : (process.env.GROQ_MODEL || 'openai/gpt-oss-120b');
     const baseMaxTokens = input.maxTokens ?? 4096;
 
     for (let attempt = 0; attempt < 2; attempt++) {

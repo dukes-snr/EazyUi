@@ -37,6 +37,10 @@ if (envPath) {
 const envModel = (process.env.GEMINI_MODEL || '').trim();
 const modelName = normalizeGeminiTextModel(envModel || getDefaultGeminiTextModel());
 const NVIDIA_TEXT_FALLBACK_MODEL = 'gemini-2.5-pro';
+const configuredExternalFallback = String(process.env.AI_TEXT_FALLBACK_MODEL || '').trim();
+const EXTERNAL_TEXT_FALLBACK_MODEL = configuredExternalFallback
+    ? normalizeGeminiTextModel(configuredExternalFallback)
+    : '';
 console.info(`[Gemini] Using model: ${modelName} (env: ${envModel || 'unset'})`);
 
 function getGenerativeModel(preferredModel?: string) {
@@ -2303,7 +2307,13 @@ ${designSystemGuidance}
             const providerRef = parseAiModelRef(preferredModel);
             try {
                 const isNvidia = providerRef?.provider === 'nvidia';
-                const maxCompletionTokens = isNvidia ? 3400 : 3000;
+                const isGroq = providerRef?.provider === 'groq';
+                const configuredGroqMax = Number(process.env.GROQ_GENERATION_MAX_COMPLETION_TOKENS || 2400);
+                const maxCompletionTokens = isNvidia
+                    ? 3400
+                    : isGroq
+                        ? Math.max(1200, Math.min(3000, Number.isFinite(configuredGroqMax) ? Math.floor(configuredGroqMax) : 2400))
+                        : 3000;
                 const fastUsageEntries: Array<TokenUsageEntry | null | undefined> = [];
 
                 const runFast = async (promptPrefix: string) => await aiChatCompletion({
@@ -2314,6 +2324,7 @@ ${designSystemGuidance}
                         temperature: modelTemperature,
                         topP: referenceImages.length > 0 ? 0.85 : 0.9,
                         responseFormat: 'json_object',
+                        ...(isGroq ? { reasoningEffort: 'low' as const } : {}),
                     });
 
                 let completion = await runFast(FAST_GENERATE_HTML_PROMPT);
@@ -2339,16 +2350,27 @@ ${designSystemGuidance}
                     throw new Error('Fast model returned invalid structured output. Please retry.');
                 }
             } catch (error) {
-                if (providerRef?.provider === 'nvidia') {
-                    console.warn('[Gemini] NVIDIA generate failed; falling back to Gemini', {
+                const rateLimited = isQuotaOrRateLimitError(error);
+                const fallbackModel = providerRef?.provider === 'nvidia'
+                    ? NVIDIA_TEXT_FALLBACK_MODEL
+                    : EXTERNAL_TEXT_FALLBACK_MODEL;
+                if (fallbackModel && (providerRef?.provider === 'nvidia' || rateLimited)) {
+                    console.warn('[Gemini] External text generation failed; falling back to Gemini', {
+                        provider: providerRef?.provider || 'external',
                         preferredModel,
-                        fallbackModel: NVIDIA_TEXT_FALLBACK_MODEL,
+                        fallbackModel,
+                        rateLimited,
                         error: (error as Error).message,
                     });
-                    return generateDesignOnce(await buildParts(promptText), NVIDIA_TEXT_FALLBACK_MODEL, generationConfig);
-                }
-                if (isQuotaOrRateLimitError(error)) {
-                    throw new Error('Fast model is rate-limited right now. Please wait a few seconds and retry.');
+                    try {
+                        return await generateDesignOnce(await buildParts(promptText), fallbackModel, generationConfig);
+                    } catch (fallbackError) {
+                        if (rateLimited) {
+                            const providerName = String(providerRef?.provider || 'External provider').toUpperCase();
+                            throw new Error(`${providerName} is rate-limited and the Gemini fallback also failed: ${(fallbackError as Error).message}`);
+                        }
+                        throw fallbackError;
+                    }
                 }
                 throw error;
             }

@@ -5132,6 +5132,33 @@ Return a polished, consistent screen without introducing a new navigation patter
         const hasScreens = Boolean(spec?.screens?.length);
 
         try {
+            const authorization = await apiClient.oversee({
+                message: requestPrompt,
+                projectExists: Boolean(spec?.screens?.length),
+                screenNames: (spec?.screens || []).map((screen) => screen.name),
+                selectedScreenNames: referenceScreens.map((screen) => screen.name),
+                attachmentCount: imagesToSend.length,
+                referenceUrlCount: referenceUrls.length,
+                platform: selectedPlatform,
+                stylePreset,
+                requestedMode: 'plan',
+            });
+            captureBillingTokens(authorization.billing);
+            if (authorization.decision.action !== 'plan' || !authorization.actionTicket) {
+                updateMessage(assistantMsgId, {
+                    content: authorization.decision.clarificationQuestion
+                        || authorization.decision.assistantResponse
+                        || '[p]Tell me which product flow you want planned.</p>',
+                    status: 'complete',
+                    meta: {
+                        ...(useChatStore.getState().messages.find((m) => m.id === assistantMsgId)?.meta || {}),
+                        thinkingMs: Date.now() - startTime,
+                        typedComplete: true,
+                    },
+                });
+                return;
+            }
+            apiClient.setActionTicket(authorization.actionTicket);
             const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, imagesToSend);
             const route = await apiClient.plan(withProjectPlannerContext({
                 phase: 'route',
@@ -5285,6 +5312,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             });
             notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
         } finally {
+            apiClient.clearActionTicket();
             setGenerating(false);
             clearLoadingToast(generationLoadingToastRef);
         }
@@ -5307,7 +5335,8 @@ Return a polished, consistent screen without introducing a new navigation patter
         skipDesignSystemStep?: boolean,
         incomingReferencePreviewMode?: 'screen' | 'palette',
         incomingReferenceUrls?: string[],
-        incomingReferenceImageUrls?: string[]
+        incomingReferenceImageUrls?: string[],
+        incomingMaximumScreens?: number
     ) => {
         const resolvedComposerReferences = extractComposerInlineReferences(incomingPrompt ?? prompt, {
             allowScreen: true,
@@ -5362,7 +5391,9 @@ Return a polished, consistent screen without introducing a new navigation patter
         const initialModelProfileToUse = incomingModelProfile || modelProfile;
         const requestedScreenCount = incomingTargetScreens && incomingTargetScreens.length > 0
             ? incomingTargetScreens.length
-            : undefined;
+            : incomingMaximumScreens && incomingMaximumScreens > 0
+                ? Math.min(4, Math.floor(incomingMaximumScreens))
+                : undefined;
         const resolvedModelProfile = await maybeSwitchToFastForLowCredits({
             operation: 'generate_stream',
             currentModelProfile: initialModelProfileToUse,
@@ -5436,8 +5467,30 @@ Return a polished, consistent screen without introducing a new navigation patter
         let plannerReferenceImages: string[] = [];
         let activeProjectDesignSystem: ProjectDesignSystem | undefined = useDesignStore.getState().spec?.designSystem;
         let firstRequestProjectNameLocked = false;
+        let ownsGenerationTicket = false;
 
         try {
+            if (!apiClient.hasActionTicket()) {
+                const authorization = await apiClient.oversee({
+                    message: `Create ${requestedScreenCount || 1} UI screen${(requestedScreenCount || 1) === 1 ? '' : 's'}: ${requestPrompt}`,
+                    projectExists: existingScreenNames.length > 0,
+                    screenNames: existingScreenNames,
+                    selectedScreenNames: referenceScreens.map((screen) => screen.name),
+                    attachmentCount: imagesToSend.length,
+                    referenceUrlCount: referenceUrls.length,
+                    platform: platformToUse,
+                    stylePreset: styleToUse,
+                });
+                if (authorization.decision.action !== 'generate' || !authorization.actionTicket) {
+                    throw new Error(
+                        authorization.decision.clarificationQuestion
+                        || authorization.decision.assistantResponse
+                        || 'Screen generation was not authorized.',
+                    );
+                }
+                apiClient.setActionTicket(authorization.actionTicket);
+                ownsGenerationTicket = true;
+            }
             console.info('[UI] generate: start (stream)', {
                 prompt: requestPrompt,
                 stylePreset: styleToUse,
@@ -6199,6 +6252,7 @@ Return a polished, consistent screen without introducing a new navigation patter
             notifyError(friendly.title, friendly.summary, tokenUsageTotal > 0 ? tokenUsageTotal : null);
             console.error('[UI] generate: error', error);
         } finally {
+            if (ownsGenerationTicket) apiClient.clearActionTicket();
             setAbortController(null);
             setGenerating(false);
             clearLoadingToast(generationLoadingToastRef);
@@ -6570,14 +6624,6 @@ Return a polished, consistent screen without introducing a new navigation patter
         }
     };
 
-    const looksLikeDesignSystemPrompt = (value: string): boolean => {
-        const text = value.trim().toLowerCase();
-        if (!text) return false;
-        const mentionsDesign = /(design\s*system|token|palette|color|typography|font|radius|corner|theme|dark mode|light mode)/i.test(text);
-        const mentionsChange = /(update|change|adjust|tweak|make|set|switch|revamp|refine|improve|replace)/i.test(text);
-        return mentionsDesign && mentionsChange;
-    };
-
     const handlePromptDrivenDesignSystemUpdate = async (params: {
         userMessageId: string;
         requestPrompt: string;
@@ -6813,64 +6859,104 @@ Return a polished, consistent screen without introducing a new navigation patter
             }
         }
 
-        if (looksLikeDesignSystemPrompt(requestPrompt)) {
-            const handledAsDesignSystem = await handlePromptDrivenDesignSystemUpdate({
-                userMessageId: userMsgId,
-                requestPrompt,
-                attachedImages,
-                attachedAssetRefs,
-                referenceMeta,
-                referenceUrls,
-            });
-            if (handledAsDesignSystem) return;
-        }
-
-        const executeFallbackRoute = async () => {
-            const editLike = forceReferencedScreenEdit || /(edit|update|rework|revise|refine|fix|adjust|change|regenerate|polish|finish|complete|continue|tighten)/i.test(requestPrompt);
-            const fallbackTarget = generationReferenceScreens[0] || null;
-            if (editLike && fallbackTarget) {
-                await handleEditForScreen(fallbackTarget, requestPrompt, attachedImages, attachedAssetRefs, userMsgId, generationReferenceScreens, undefined, referenceUrls);
-                return;
-            }
-            await handleGenerate(
-                requestPrompt,
-                attachedImages,
-                attachedAssetRefs,
-                selectedPlatform,
-                stylePreset,
-                modelProfile,
-                undefined,
-                requestPrompt,
-                undefined,
-                undefined,
-                userMsgId,
-                generationReferenceScreens,
-                false,
-                undefined,
-                routedReferencePreviewMode,
-                referenceUrls
+        const executeSafeFallbackRoute = async () => {
+            setIsAwaitingAssistantDecision(false);
+            const assistantMsgId = addMessage(
+                'assistant',
+                '[h2]What would you like me to do?[/h2]\n[p]I could not safely determine whether you want an answer, a new screen, or an edit. Please state the action and, for edits, name the target screen.</p>'
             );
+            updateMessage(assistantMsgId, {
+                status: 'complete',
+                meta: {
+                    ...(useChatStore.getState().messages.find((message) => message.id === assistantMsgId)?.meta || {}),
+                    parentUserId: userMsgId,
+                    typedComplete: true,
+                },
+            });
+            setActiveBranchForUser(userMsgId, assistantMsgId);
         };
 
         try {
-            const plannerReferenceImages = await buildPlannerVisionInputs(referenceScreens, attachedImages);
-            const routeResponse = await apiClient.plan(withProjectPlannerContext({
-                phase: 'route',
-                appPrompt: routingPrompt,
+            const currentScreens = useDesignStore.getState().spec?.screens || [];
+            const recentMessages = useChatStore.getState().messages
+                .slice(-6)
+                .filter((message) => message.id !== userMsgId && (message.role === 'user' || message.role === 'assistant'))
+                .map((message) => ({
+                    role: message.role as 'user' | 'assistant',
+                    content: message.content.slice(0, 1200),
+                }));
+            const overseer = await apiClient.oversee({
+                message: routingPrompt,
+                projectExists: currentScreens.length > 0,
+                screenNames: currentScreens.map((screen) => screen.name),
+                selectedScreenNames: generationReferenceScreens.map((screen) => screen.name),
+                attachmentCount: attachedImages.length,
+                referenceUrlCount: referenceUrls.length,
                 platform: selectedPlatform,
                 stylePreset,
-                screensGenerated: (useDesignStore.getState().spec?.screens || []).map((screen) => ({ name: screen.name })),
-                referenceImages: plannerReferenceImages,
-                referenceUrls,
-                preferredModel: modelProfile === 'fast' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-            }, routeReferenceScreens));
-            if (routeResponse.phase !== 'route') {
-                throw new Error('Planner route phase mismatch');
+                recentMessages,
+            });
+            apiClient.setActionTicket(overseer.actionTicket);
+
+            const decision = overseer.decision;
+            const effectiveAction = decision.action;
+            const mutationRequested = effectiveAction === 'generate'
+                || effectiveAction === 'edit'
+                || effectiveAction === 'update_system'
+                || effectiveAction === 'generate_image';
+
+            if (mutationRequested && decision.confirmationRequired) {
+                const accepted = await requestConfirmation({
+                    title: 'Confirm this change',
+                    message: decision.reason || 'This request can modify multiple parts of your project and use generation credits.',
+                    confirmLabel: 'Continue',
+                    cancelLabel: 'Cancel',
+                });
+                if (!accepted) {
+                    const assistantMsgId = addMessage('assistant', '[h2]Canceled[/h2]\n[p]No project changes were made.</p>');
+                    updateMessage(assistantMsgId, {
+                        status: 'complete',
+                        meta: { parentUserId: userMsgId, typedComplete: true },
+                    });
+                    setActiveBranchForUser(userMsgId, assistantMsgId);
+                    return;
+                }
             }
-            const route = routeResponse;
-            const effectiveRouteIntent = forceReferencedScreenEdit && route.intent !== 'chat_assist'
+
+            if (effectiveAction === 'update_system') {
+                const handledAsDesignSystem = await handlePromptDrivenDesignSystemUpdate({
+                    userMessageId: userMsgId,
+                    requestPrompt,
+                    attachedImages,
+                    attachedAssetRefs,
+                    referenceMeta,
+                    referenceUrls,
+                });
+                if (handledAsDesignSystem) return;
+                throw new Error('Design-system request could not be applied');
+            }
+
+            const effectiveIntent: PlannerRouteResponse['intent'] = effectiveAction === 'edit'
                 ? 'edit_existing_screen'
-                : route.intent;
+                : effectiveAction === 'generate'
+                    ? (currentScreens.length > 0 ? 'add_screen' : 'new_app')
+                    : 'chat_assist';
+            const route: PlannerRouteResponse = {
+                phase: 'route',
+                intent: effectiveIntent,
+                action: effectiveAction === 'edit' ? 'edit' : effectiveAction === 'generate' ? 'generate' : 'assist',
+                confidence: decision.confidence,
+                reason: decision.reason,
+                targetScreenName: decision.targets.screenNames[0],
+                targetScreenNames: decision.targets.screenNames,
+                matchedExistingScreenName: decision.targets.screenNames[0],
+                matchedExistingScreenNames: decision.targets.screenNames,
+                generateTheseNow: decision.targets.screenNames.slice(0, decision.resources.maximumScreens || 1),
+                editInstruction: effectiveAction === 'edit' ? requestPrompt : undefined,
+                assistantResponse: decision.clarificationQuestion || decision.assistantResponse,
+                billing: overseer.billing,
+            };
+            const effectiveRouteIntent = route.intent;
             const routeTokenUsage = getBillingTotalTokens((route as any)?.billing);
 
             updateMessage(userMsgId, {
@@ -6923,9 +7009,7 @@ Return a polished, consistent screen without introducing a new navigation patter
 
             if (effectiveRouteIntent === 'edit_existing_screen' || route.action === 'edit') {
                 const allScreens = useDesignStore.getState().spec?.screens || [];
-                const targets = forceReferencedScreenEdit && referenceScreens.length > 0
-                    ? referenceScreens
-                    : resolveRoutedScreens(route, allScreens, generationReferenceScreens);
+                const targets = resolveRoutedScreens(route, allScreens, generationReferenceScreens);
                 if (targets.length === 0) {
                     setIsAwaitingAssistantDecision(false);
                     const assistantMsgId = addMessage(
@@ -7094,8 +7178,8 @@ Return a polished, consistent screen without introducing a new navigation patter
                 return;
             }
 
-            const targetedScreens = effectiveRouteIntent === 'add_screen'
-                ? route.generateTheseNow.filter(Boolean).slice(0, 3)
+            const targetedScreens = effectiveRouteIntent === 'add_screen' || effectiveRouteIntent === 'new_app'
+                ? route.generateTheseNow.filter(Boolean).slice(0, decision.resources.maximumScreens || 1)
                 : undefined;
             await handleGenerate(
                 requestPrompt,
@@ -7113,12 +7197,15 @@ Return a polished, consistent screen without introducing a new navigation patter
                 false,
                 undefined,
                 routedReferencePreviewMode,
-                referenceUrls
+                referenceUrls,
+                undefined,
+                decision.resources.maximumScreens
             );
         } catch (routeError) {
-            console.warn('[UI] route planner failed; using deterministic fallback', routeError);
-            await executeFallbackRoute();
+            console.warn('[UI] overseer failed; using safe clarification fallback', routeError);
+            await executeSafeFallbackRoute();
         } finally {
+            apiClient.clearActionTicket();
             setIsAwaitingAssistantDecision(false);
         }
     };

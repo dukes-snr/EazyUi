@@ -688,6 +688,49 @@ export interface SaveResponse {
 
 export type PlannerPhase = 'discovery' | 'plan' | 'postgen' | 'route';
 
+export type OverseerIntent = 'casual_chat' | 'product_question' | 'design_advice' | 'plan_screens' | 'inspect_project' | 'generate_screens' | 'edit_screens' | 'update_design_system' | 'generate_image' | 'clarify' | 'unsupported';
+export type OverseerAction = 'respond' | 'clarify' | 'inspect' | 'plan' | 'generate' | 'edit' | 'update_system' | 'generate_image' | 'reject';
+
+export interface OverseerDecision {
+    intent: OverseerIntent;
+    action: OverseerAction;
+    confidence: number;
+    reason: string;
+    assistantResponse?: string;
+    clarificationQuestion?: string;
+    targets: { screenNames: string[] };
+    resources: {
+        needsScreenHtml: boolean;
+        needsImages: boolean;
+        needsWebContext: boolean;
+        needsDesignPlanner: boolean;
+        maximumScreens: number;
+    };
+    confirmationRequired: boolean;
+}
+
+export interface OverseerRequest {
+    message: string;
+    projectExists: boolean;
+    screenNames: string[];
+    selectedScreenNames?: string[];
+    attachmentCount?: number;
+    referenceUrlCount?: number;
+    platform?: 'mobile' | 'tablet' | 'desktop';
+    stylePreset?: string;
+    recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    requestedMode?: 'auto' | 'plan';
+}
+
+export interface OverseerResponse {
+    mode: 'active' | 'shadow';
+    decision: OverseerDecision;
+    actionTicket?: string;
+    modelUsed: string;
+    source: 'deterministic' | 'model' | 'safe-fallback';
+    billing?: BillingUsageMeta;
+}
+
 export interface PlannerQuestion {
     id: string;
     q: string;
@@ -895,6 +938,19 @@ function toStreamFetchError(error: unknown): ApiRequestError | DOMException {
 }
 
 class ApiClient {
+    private actionTicket: string | null = null;
+
+    setActionTicket(ticket?: string | null): void {
+        this.actionTicket = String(ticket || '').trim() || null;
+    }
+
+    clearActionTicket(): void {
+        this.actionTicket = null;
+    }
+
+    hasActionTicket(): boolean {
+        return Boolean(this.actionTicket);
+    }
     private composerTemperature: number | null = null;
 
     private loadComposerTemperature(): number | null {
@@ -964,6 +1020,10 @@ class ApiClient {
         }
         if (requireAuth) {
             headers.set('Authorization', await this.getAuthHeaderValue());
+        }
+        if (!headers.has('X-EazyUI-Source')) headers.set('X-EazyUI-Source', 'web');
+        if (this.actionTicket && !headers.has('X-EazyUI-Action-Ticket')) {
+            headers.set('X-EazyUI-Action-Ticket', this.actionTicket);
         }
         let response: Response;
         try {
@@ -1046,6 +1106,8 @@ class ApiClient {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': authHeader,
+                    'X-EazyUI-Source': 'web',
+                    ...(this.actionTicket ? { 'X-EazyUI-Action-Ticket': this.actionTicket } : {}),
                 },
                 body: JSON.stringify(payload),
                 signal,
@@ -1166,6 +1228,8 @@ class ApiClient {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': authHeader,
+                    'X-EazyUI-Source': 'web',
+                    ...(this.actionTicket ? { 'X-EazyUI-Action-Ticket': this.actionTicket } : {}),
                 },
                 body: JSON.stringify(payload),
                 signal,
@@ -1350,6 +1414,14 @@ class ApiClient {
         });
         notifyBillingUpdated((response as any)?.billing);
         return response;
+    }
+
+    async oversee(request: OverseerRequest, signal?: AbortSignal): Promise<OverseerResponse> {
+        return this.request<OverseerResponse>('/assistant/oversee', {
+            method: 'POST',
+            body: JSON.stringify(request),
+            signal,
+        });
     }
 
     async renderScreenImage(request: RenderScreenImageRequest, signal?: AbortSignal): Promise<RenderScreenImageResponse> {

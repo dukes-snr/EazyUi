@@ -1841,6 +1841,23 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
         });
 
         try {
+            const authorization = await apiClient.oversee({
+                message: `Generate replacement images for ${sourceScreens.map((screen) => screen.name).join(', ')} screen placeholders`,
+                projectExists: true,
+                screenNames: (currentSpec?.screens || []).map((screen) => screen.name),
+                selectedScreenNames: sourceScreens.map((screen) => screen.name),
+                attachmentCount: 0,
+                referenceUrlCount: 0,
+                platform: selectedPlatform,
+            });
+            if (authorization.decision.action !== 'generate_image' || !authorization.actionTicket) {
+                throw new Error(
+                    authorization.decision.clarificationQuestion
+                    || authorization.decision.assistantResponse
+                    || 'Image generation was not authorized.',
+                );
+            }
+            apiClient.setActionTicket(authorization.actionTicket);
             const response = await apiClient.synthesizeScreenImages({
                 appPrompt: currentSpec?.name || String(data.label || 'Generated UI'),
                 platform: selectedPlatform,
@@ -1883,6 +1900,7 @@ export const DeviceNode = memo(({ data, selected }: NodeProps) => {
                 message: (error as Error).message || 'Unable to generate images for selected screens.',
             });
         } finally {
+            apiClient.clearActionTicket();
             removeToast(loadingToastId);
             setIsGeneratingImages(false);
         }

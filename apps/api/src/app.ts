@@ -21,10 +21,12 @@ import {
     deleteProviderCredential,
     getUserAiSettings,
     prepareUserAiRequest,
+    runWithUserAiContext,
     saveProviderCredential,
     saveUserModelProfiles,
 } from './services/aiProviderSettings.js';
 import { getPlannerModels, runDesignPlannerWithUsage, type PlannerPhase } from './services/designPlanner.js';
+import { issueActionTicket, overseeTurn, verifyActionTicket, type ActionTicketScope } from './services/overseer.js';
 import { buildFirecrawlReferenceContext, type FirecrawlLogEvent } from './services/firecrawl.js';
 import { getFirebaseStorageBucket, verifyAuthHeader, type AuthUserContext } from './services/firebaseAuth.js';
 import { consumePluginAuthSession, writePluginAuthSession } from './services/pluginAuthSessions.js';
@@ -831,6 +833,62 @@ async function requireAuthenticatedUser(
             code: 'AUTH_REQUIRED',
         });
         return null;
+    }
+}
+
+function overseerTicketMode(): 'off' | 'shadow' | 'required' {
+    const value = String(process.env.OVERSEER_TICKET_MODE || 'shadow').trim().toLowerCase();
+    return value === 'required' || value === 'off' ? value : 'shadow';
+}
+
+function enforceOverseerActionTicket(
+    request: { headers: Record<string, unknown>; id: string },
+    reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+    uid: string,
+    scope: ActionTicketScope,
+    requestedScreenCount?: number,
+): boolean {
+    const mode = overseerTicketMode();
+    if (mode === 'off') return true;
+    const source = resolveHeaderString(request.headers, 'x-eazyui-source') || 'web';
+    const internalUser = resolveInternalApiUser(request.headers);
+    if ((source === 'mcp' || source === 'internal' || source === 'plugin') && internalUser?.uid === uid) return true;
+    const ticket = resolveHeaderString(request.headers, 'x-eazyui-action-ticket');
+    try {
+        if (!ticket) throw new Error('Missing overseer action ticket.');
+        const payload = verifyActionTicket(ticket, uid, scope);
+        const normalizedScreenCount = Math.max(0, Math.floor(Number(requestedScreenCount || 0)));
+        if (normalizedScreenCount > 0 && normalizedScreenCount > payload.maximumScreens) {
+            throw new Error(`Overseer authorized at most ${payload.maximumScreens} screen(s), but ${normalizedScreenCount} were requested.`);
+        }
+        upsertServerActivity(request.id, {
+            metadata: {
+                overseerDecisionId: payload.decisionId,
+                overseerIntent: payload.intent,
+                overseerAction: payload.action,
+                overseerScope: scope,
+                overseerTicketMode: mode,
+            },
+        });
+        return true;
+    } catch (error) {
+        fastify.log.warn({ traceId: request.id, scope, mode, source, err: error }, 'overseer action ticket rejected');
+        if (mode === 'shadow') {
+            upsertServerActivity(request.id, {
+                metadata: {
+                    overseerTicketMode: mode,
+                    overseerScope: scope,
+                    overseerTicketWarning: (error as Error).message,
+                },
+            });
+            return true;
+        }
+        reply.status(409).send({
+            error: 'Action requires overseer authorization',
+            message: (error as Error).message,
+            code: 'OVERSEER_AUTH_REQUIRED',
+        });
+        return false;
     }
 }
 
@@ -3629,6 +3687,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'generate', expectedScreenCount)) return;
     const {
         explicitAssetRefs,
         projectBrandAssetRefs,
@@ -3825,6 +3884,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/design-system');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'design_system')) return;
     const {
         explicitAssetRefs,
         projectBrandAssetRefs,
@@ -4043,6 +4103,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'edit')) return;
     const {
         explicitAssetRefs,
         projectBrandAssetRefs,
@@ -4244,6 +4305,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/edit-stream');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'edit_stream')) return;
     const {
         explicitAssetRefs,
         projectBrandAssetRefs,
@@ -4486,6 +4548,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/synthesize-screen-images');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'synthesize_screen_images')) return;
     const floorEstimate = estimateCredits({
         operation: 'synthesize_screen_images',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -4626,6 +4689,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-image');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'generate_image')) return;
     const floorEstimate = estimateCredits({
         operation: 'generate_image',
         modelProfile: toCreditModelProfile(preferredModel),
@@ -4933,6 +4997,99 @@ fastify.delete<{ Params: { provider: AiProviderId } }>('/api/ai-settings/provide
 
 fastify.post<{
     Body: {
+        message?: string;
+        projectExists?: boolean;
+        screenNames?: string[];
+        selectedScreenNames?: string[];
+        attachmentCount?: number;
+        referenceUrlCount?: number;
+        platform?: 'mobile' | 'tablet' | 'desktop';
+        stylePreset?: string;
+        recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        requestedMode?: 'auto' | 'plan';
+    };
+}>('/api/assistant/oversee', async (request, reply) => {
+    const startedAt = Date.now();
+    const traceId = request.id;
+    const user = await requireAuthenticatedUser(request, reply, '/api/assistant/oversee');
+    if (!user) return;
+    const message = String(request.body?.message || '').trim();
+    if (!message) return reply.status(400).send({ error: 'message is required' });
+    if (message.length > 8_000) return reply.status(400).send({ error: 'message exceeds 8,000 characters' });
+    const modeValue = String(process.env.OVERSEER_MODE || 'active').trim().toLowerCase();
+    const mode: 'active' | 'shadow' | 'off' = modeValue === 'shadow' || modeValue === 'off' ? modeValue : 'active';
+    if (mode === 'off') {
+        return reply.status(503).send({ error: 'Overseer is disabled', code: 'OVERSEER_DISABLED', mode });
+    }
+
+    try {
+        const input = {
+            message,
+            projectExists: Boolean(request.body?.projectExists),
+            screenNames: (request.body?.screenNames || []).map((name) => String(name || '').trim()).filter(Boolean).slice(0, 60),
+            selectedScreenNames: (request.body?.selectedScreenNames || []).map((name) => String(name || '').trim()).filter(Boolean).slice(0, 20),
+            attachmentCount: Math.max(0, Math.min(20, Math.floor(Number(request.body?.attachmentCount || 0)))),
+            referenceUrlCount: Math.max(0, Math.min(20, Math.floor(Number(request.body?.referenceUrlCount || 0)))),
+            platform: request.body?.platform,
+            stylePreset: String(request.body?.stylePreset || '').slice(0, 80),
+            recentMessages: (request.body?.recentMessages || []).slice(-6).map((item) => ({
+                role: item.role,
+                content: String(item.content || '').slice(0, 500),
+            })),
+            requestedMode: request.body?.requestedMode === 'plan' ? 'plan' as const : 'auto' as const,
+        };
+        const result = await runWithUserAiContext(user.uid, () => overseeTurn(input));
+        const actionTicket = issueActionTicket(user.uid, message, result.decision);
+        fastify.log.info({
+            traceId,
+            route: '/api/assistant/oversee',
+            uid: user.uid,
+            mode,
+            intent: result.decision.intent,
+            action: result.decision.action,
+            confidence: result.decision.confidence,
+            decisionReason: result.decision.reason,
+            confirmationRequired: result.decision.confirmationRequired,
+            resources: result.decision.resources,
+            targetCount: result.decision.targets.screenNames.length,
+            source: result.source,
+            modelUsed: result.modelUsed,
+            tokensUsed: result.usage?.totalTokens || 0,
+            durationMs: Date.now() - startedAt,
+        }, 'overseer: decision');
+        upsertServerActivity(traceId, {
+            operation: 'oversee',
+            preferredModel: result.modelUsed,
+            requestPreview: previewText(message, 180),
+            tokensUsed: result.usage?.totalTokens || 0,
+            metadata: {
+                overseerMode: mode,
+                overseerIntent: result.decision.intent,
+                overseerAction: result.decision.action,
+                overseerConfidence: result.decision.confidence,
+                overseerSource: result.source,
+                resourcePlan: result.decision.resources,
+            },
+        });
+        return {
+            mode,
+            decision: result.decision,
+            actionTicket,
+            modelUsed: result.modelUsed,
+            source: result.source,
+            billing: {
+                creditsCharged: 0,
+                usage: result.usage,
+            },
+        };
+    } catch (error) {
+        fastify.log.error({ traceId, route: '/api/assistant/oversee', err: error }, 'overseer: failed');
+        return reply.status(500).send({ error: 'Overseer failed', message: (error as Error).message, code: 'OVERSEER_FAILED' });
+    }
+});
+
+fastify.post<{
+    Body: {
         phase?: PlannerPhase;
         appPrompt: string;
         platform?: 'mobile' | 'tablet' | 'desktop';
@@ -4977,6 +5134,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/plan');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'plan')) return;
     const plannerOperation: BillingOperation = phase === 'route' ? 'plan_route' : 'plan_assist';
     const rawPlannerEstimate = estimateCredits({
         operation: plannerOperation,
@@ -5372,6 +5530,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/generate-stream');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'generate_stream', expectedScreenCount)) return;
     const {
         explicitAssetRefs,
         projectBrandAssetRefs,
@@ -5645,6 +5804,7 @@ fastify.post<{
 
     const user = await requireAuthenticatedUser(request, reply, '/api/complete-screen');
     if (!user) return;
+    if (!enforceOverseerActionTicket(request, reply, user.uid, 'complete_screen')) return;
     const floorEstimate = estimateCredits({
         operation: 'complete_screen',
         modelProfile: toCreditModelProfile(preferredModel),

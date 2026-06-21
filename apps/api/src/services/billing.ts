@@ -325,14 +325,13 @@ const TOKEN_PRICING_CATALOG_USD_PER_1M: Record<string, TokenPricingRate> = {
     'gemini-1.5-flash': { inputUsdPer1M: 0.35, outputUsdPer1M: 0.53 },
     'llama-3.1-8b-instant': { inputUsdPer1M: 0.05, outputUsdPer1M: 0.08 },
     'llama-3.3-70b-versatile': { inputUsdPer1M: 0.59, outputUsdPer1M: 0.79 },
-    'meta-llama/llama-4-scout-17b-16e-instruct': { inputUsdPer1M: 0.45, outputUsdPer1M: 0.75 },
-    'meta-llama/llama-4-maverick-17b-128e-instruct': { inputUsdPer1M: 0.45, outputUsdPer1M: 0.75 },
-    'moonshotai/kimi-k2-instruct': { inputUsdPer1M: 0.6, outputUsdPer1M: 2.5 },
-    'moonshotai/kimi-k2-instruct-0905': { inputUsdPer1M: 0.6, outputUsdPer1M: 2.5 },
+    'meta-llama/llama-4-scout-17b-16e-instruct': { inputUsdPer1M: 0.11, outputUsdPer1M: 0.34 },
     'moonshotai/kimi-k2.5': { inputUsdPer1M: 1.0, outputUsdPer1M: 3.0 },
-    'qwen/qwen3-32b': { inputUsdPer1M: 0.3, outputUsdPer1M: 0.6 },
+    'qwen/qwen3-32b': { inputUsdPer1M: 0.29, outputUsdPer1M: 0.59 },
+    'qwen/qwen3.6-27b': { inputUsdPer1M: 0.6, outputUsdPer1M: 3.0 },
     'qwen/qwen2.5-coder-32b-instruct': { inputUsdPer1M: 0.3, outputUsdPer1M: 0.6 },
-    'openai/gpt-oss-120b': { inputUsdPer1M: 0.8, outputUsdPer1M: 1.2 },
+    'openai/gpt-oss-120b': { inputUsdPer1M: 0.15, outputUsdPer1M: 0.6 },
+    'openai/gpt-oss-20b': { inputUsdPer1M: 0.075, outputUsdPer1M: 0.3 },
 };
 
 const LOW_CREDIT_THRESHOLD = 40;

@@ -28,6 +28,18 @@ The default routing is Fast → Gemini 2.5 Flash and Pro → NVIDIA Kimi K2.6. A
 
 “Free API key” does not mean unlimited generation. Free tiers change, have low rate limits, and may exclude high-quality/image models. The safest no-cost starting points for development are generally Gemini, Groq, OpenRouter free models, and Cloudflare Workers AI; verify the current quota on each linked official page before making product promises.
 
+### Groq routing for HTML generation
+
+For EazyUI's JSON-wrapped full-page HTML workflow:
+
+- **Fast:** `openai/gpt-oss-20b` — approximately 1,000 tokens/second, 65,536 maximum completion tokens, and substantially better output headroom than Groq's 8K preview/system options.
+- **Pro:** `openai/gpt-oss-120b` — the strongest production Groq option for reasoning, code, structured output, and long HTML responses.
+- **Quality fallback:** `llama-3.3-70b-versatile` — slower and more expensive than GPT OSS 120B, but a useful behavioral fallback.
+- **Lowest-cost fallback:** `llama-3.1-8b-instant` — suitable for routing, summaries, and simple single-screen drafts rather than complex design generation.
+- **Reference-image routing only:** `meta-llama/llama-4-scout-17b-16e-instruct` — multimodal and fast, but preview status plus an 8,192-token completion limit make it unsuitable as the primary HTML generator.
+
+Groq Compound systems are excluded from Fast/Pro routing because their tool use is unnecessary for deterministic HTML and their completion limit is 8,192 tokens. Whisper, Orpheus, Prompt Guard, and Safeguard models remain documented in the catalog but are marked unavailable for HTML generation because they are audio or safety-specific.
+
 ## Security and storage
 
 User credentials are encrypted with AES-256-GCM in `user_ai_provider_keys`. The API returns only a masked hint. Set `AI_KEYS_ENCRYPTION_KEY` to a stable secret in every deployed API environment; rotate it only with a credential migration plan.

@@ -131,9 +131,9 @@ export type ImagePromptPlannerInput = {
 
 function pickPlannerModel(phase: PlannerPhase, preferredModel?: string): GroqModelId {
     if (isGroqModel(preferredModel)) return preferredModel;
-    if (phase === 'route') return 'meta-llama/llama-4-maverick-17b-128e-instruct';
-    if (phase === 'discovery') return 'llama-3.1-8b-instant';
-    return 'llama-3.3-70b-versatile';
+    if (phase === 'route') return 'meta-llama/llama-4-scout-17b-16e-instruct';
+    if (phase === 'discovery') return 'openai/gpt-oss-20b';
+    return 'openai/gpt-oss-120b';
 }
 
 function extractFirstJsonObject(text: string): string | null {
@@ -595,7 +595,7 @@ ${input.appPrompt}
 Known screen names:
 ${(input.screensGenerated || []).map((s, i) => `${i + 1}. ${s.name}`).join('\n') || 'none'}`;
 
-    const multimodalCapable = model === 'meta-llama/llama-4-maverick-17b-128e-instruct' && referenceImages.length > 0;
+    const multimodalCapable = model === 'meta-llama/llama-4-scout-17b-16e-instruct' && referenceImages.length > 0;
     const assistTemperature = resolvePlannerTemperature(input.temperature, 1);
     const completion = await groqChatCompletion(multimodalCapable ? {
         model,
@@ -634,7 +634,7 @@ export async function runDesignPlannerWithUsage(input: PlannerInput): Promise<Pl
     const hasReferenceImages = (input.referenceImages || []).filter(Boolean).length > 0;
     const forcedRouteVisionModel: GroqModelId | null =
         input.phase === 'route' && hasReferenceImages
-            ? 'meta-llama/llama-4-maverick-17b-128e-instruct'
+            ? 'meta-llama/llama-4-scout-17b-16e-instruct'
             : null;
     const primaryModel = forcedRouteVisionModel || pickPlannerModel(input.phase, input.preferredModel);
     const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
@@ -670,16 +670,16 @@ export async function runDesignPlannerWithUsage(input: PlannerInput): Promise<Pl
                     phase: input.phase,
                     model,
                     attempt: attempt + 1,
-                    supportsVisionRoute: input.phase === 'route' && model === 'meta-llama/llama-4-maverick-17b-128e-instruct',
+                    supportsVisionRoute: input.phase === 'route' && model === 'meta-llama/llama-4-scout-17b-16e-instruct',
                 });
                 const referenceImages = (input.referenceImages || []).filter(Boolean).slice(0, 3);
                 const canUseVisionRoute =
                     input.phase === 'route'
-                    && model === 'meta-llama/llama-4-maverick-17b-128e-instruct'
+                    && model === 'meta-llama/llama-4-scout-17b-16e-instruct'
                     && referenceImages.length > 0;
 
                 if (canUseVisionRoute) {
-                    // Use Groq multimodal shape for route/critique tasks on Maverick.
+                    // Use Groq multimodal shape for route/critique tasks on Scout.
                     completion = await groqChatCompletion({
                         model,
                         prompt: '',
@@ -893,7 +893,9 @@ export async function runDesignPlanner(input: PlannerInput): Promise<PlannerResp
 
 export function getPlannerModels() {
     const candidates = [
-        'meta-llama/llama-4-maverick-17b-128e-instruct',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'openai/gpt-oss-20b',
+        'openai/gpt-oss-120b',
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
         'qwen/qwen3-32b',
@@ -965,7 +967,7 @@ export async function planImagePromptsWithUsage(input: ImagePromptPlannerInput):
         return { prompts: new Map() };
     }
 
-    const primaryModel = (isGroqModel(input.preferredModel) ? input.preferredModel : 'llama-3.3-70b-versatile') as GroqModelId;
+    const primaryModel = (isGroqModel(input.preferredModel) ? input.preferredModel : 'openai/gpt-oss-120b') as GroqModelId;
     const fallbackModel: GroqModelId = primaryModel === 'llama-3.3-70b-versatile'
         ? 'llama-3.1-8b-instant'
         : 'llama-3.3-70b-versatile';
